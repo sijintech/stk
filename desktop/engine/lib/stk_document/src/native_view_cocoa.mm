@@ -1,6 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "stk/document/native_view.hh"
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+#  include "stk/document/test_media_probe.hh"
+#endif
 
 #import <AppKit/AppKit.h>
 #import <WebKit/WebKit.h>
@@ -22,6 +25,7 @@ struct State {
   __strong NSView *focus_after = nil;
   FocusExitHandler focus_exit;
   uint64_t focus_generation = 0;
+  uint64_t media_generation = 0;
   std::string requested_url;
   bool closed = false;
   bool policy_ready = false;
@@ -29,6 +33,9 @@ struct State {
   bool visible = false;
   bool has_bounds = false;
 };
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+static std::vector<std::weak_ptr<State>> test_states;
+#endif
 
 static NSString *string(std::string_view value)
 {
@@ -301,8 +308,11 @@ static bool current(const std::shared_ptr<State> &state,
   // ResourceSession never opens a path or contacts a server; only admitted immutable bytes are
   // copied here. No task is queued onto another thread. WebKit may reenter stop during callbacks.
   const auto method = utf8(task.request.HTTPMethod);
-  const auto response = state->resources->read(utf8(task.request.URL.absoluteString), method);
-  if (response.status != 200) {
+  NSString *range_header = [task.request valueForHTTPHeaderField:@"Range"];
+  const auto range = utf8(range_header);
+  const auto response = state->resources->read(utf8(task.request.URL.absoluteString), method,
+      range_header && range.empty() ? std::string_view{"invalid-range"} : std::string_view{range});
+  if (response.status != 200 && response.status != 206) {
     blocked(state);
   }
   NSMutableDictionary *headers = [@{
@@ -311,13 +321,11 @@ static bool current(const std::shared_ptr<State> &state,
     @"Cache-Control" : @"no-store",
     @"X-Content-Type-Options" : @"nosniff",
     @"Referrer-Policy" : @"no-referrer",
-    @"Permissions-Policy" : @"camera=(), microphone=(), geolocation=(), fullscreen=()"
+    @"Permissions-Policy" : @"camera=(), microphone=(), geolocation=(), fullscreen=()",
+    @"Content-Length" : [NSString stringWithFormat:@"%llu", (unsigned long long)response.content_length]
   } mutableCopy];
-  // HEAD intentionally returns no body; zero bytes is not the entity's Content-Length.
-  if (method != "HEAD") {
-    headers[@"Content-Length"] = [NSString stringWithFormat:@"%llu",
-                                                          (unsigned long long)response.bytes.size()];
-  }
+  if (response.accept_ranges) { headers[@"Accept-Ranges"] = @"bytes"; }
+  if (!response.content_range.empty()) { headers[@"Content-Range"] = string(response.content_range); }
   NSHTTPURLResponse *reply = [[NSHTTPURLResponse alloc] initWithURL:task.request.URL
                                                       statusCode:response.status
                                                      HTTPVersion:@"HTTP/1.1"
@@ -534,6 +542,7 @@ static void shutdown(const std::shared_ptr<State> &state, NativeViewStatus statu
   state->closed = true;
   state->focus_exit = {};
   ++state->focus_generation;
+  ++state->media_generation;
   ++state->result.navigation_generation;
   state->result.status = status;
   state->result.message = message;
@@ -578,7 +587,7 @@ class CocoaDocumentView final : public NativeDocumentView {
       return false;
     }
     const auto url = state->resources->url(asset_path, false);
-    if (url.empty()) {
+    if (url.empty() || !state->resources->allows_navigation(url)) {
       error = "The document is not in the current preview resource manifest.";
       return false;
     }
@@ -614,6 +623,35 @@ class CocoaDocumentView final : public NativeDocumentView {
       state->visible = visible;
       cocoa::sync_visibility(state);
     }
+  }
+
+  bool pause_media(std::string &error) override
+  {
+    const auto state = state_;
+    error.clear();
+    if (![NSThread isMainThread] || !cocoa::live(state) || !state->view) {
+      error = "The native document view is closed or unavailable";
+      return false;
+    }
+    const auto generation = ++state->media_generation;
+    const auto navigation = state->result.navigation_generation;
+    const std::weak_ptr<cocoa::State> weak = state;
+    __weak WKWebView *expected_view = state->view;
+    // Public macOS 12+ API; project JavaScript remains disabled. Pausing never resumes media.
+    [state->view pauseAllMediaPlaybackWithCompletionHandler:^{
+      auto current = weak.lock();
+      if (!cocoa::live(current) || current->media_generation != generation ||
+          current->result.navigation_generation != navigation || current->view != expected_view) { return; }
+      [current->view requestMediaPlaybackStateWithCompletionHandler:^(WKMediaPlaybackState playback) {
+        auto completed = weak.lock();
+        if (!cocoa::live(completed) || completed->media_generation != generation ||
+            completed->result.navigation_generation != navigation || completed->view != expected_view) { return; }
+        if (playback == WKMediaPlaybackStatePlaying) {
+          cocoa::shutdown(completed, NativeViewStatus::Failed, "Could not pause document media playback");
+        }
+      }];
+    }];
+    return true;
   }
 
   void focus() override
@@ -691,6 +729,9 @@ std::unique_ptr<NativeDocumentView> create_native_document_view(
   }
   auto state = std::make_shared<cocoa::State>();
   state->resources = std::move(resources);
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+  cocoa::test_states.push_back(state);
+#endif
   state->parent = window;
   state->result.message = "Preparing the offline resource policy.";
   NSBundle *webkit = [NSBundle bundleForClass:[WKWebView class]];
@@ -763,5 +804,83 @@ std::unique_ptr<NativeDocumentView> create_native_document_view(
                        }];
   return std::make_unique<CocoaDocumentView>(std::move(state));
 }
+
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+namespace test {
+namespace {
+std::shared_ptr<cocoa::State> find_view(wm::NativeWindowHandle parent, std::string_view session_id,
+                                      std::string &error)
+{
+  error.clear();
+  if (![NSThread isMainThread] || parent.kind != wm::NativeWindowKind::Cocoa || !parent.value ||
+      session_id.size() != 36) {
+    error = "Media test probe requires the exact Cocoa UI window and session"; return {};
+  }
+  NSWindow *window = (__bridge NSWindow *)parent.value;
+  if (![NSApp.windows containsObject:window]) {
+    error = "Media test probe window does not belong to this application"; return {};
+  }
+  std::erase_if(cocoa::test_states, [](const auto &weak) { return weak.expired(); });
+  std::shared_ptr<cocoa::State> found;
+  for (const auto &weak : cocoa::test_states) {
+    const auto state = weak.lock();
+    if (!cocoa::live(state) || state->parent != window || state->resources->identity().session_id != session_id) {
+      continue;
+    }
+    if (found) { error = "Media test probe matched more than one live view"; return {}; }
+    found = state;
+  }
+  if (!found) { error = "Media test probe session is no longer attached to this window"; }
+  return found;
+}
+}
+
+std::shared_ptr<ResourceSession> resource_session(wm::NativeWindowHandle parent,
+                                                std::string_view session_id, std::string &error)
+{
+  const auto state = find_view(parent, session_id, error);
+  return state ? state->resources : nullptr;
+}
+
+bool probe_media(wm::NativeWindowHandle parent, std::string_view session_id,
+                 MediaProbeCallback callback, std::string &error)
+{
+  const auto state = find_view(parent, session_id, error);
+  if (!state || !callback || !state->view || state->result.status != NativeViewStatus::Ready) {
+    if (error.empty()) { error = "Media test probe requires a ready native document and callback"; }
+    return false;
+  }
+  const auto navigation = state->result.navigation_generation;
+  const auto session = state->resources;
+  const std::weak_ptr<cocoa::State> weak = state;
+  __weak WKWebView *expected_view = state->view;
+  NSString *script = [NSString stringWithUTF8String:kMediaProbeScript];
+  [state->view evaluateJavaScript:script completionHandler:^(id value, NSError *failure) {
+    MediaProbeResult result;
+    const auto current = weak.lock();
+    if (!cocoa::live(current) || current->result.status != NativeViewStatus::Ready ||
+        current->resources != session || !session->active() ||
+        current->result.navigation_generation != navigation || current->view != expected_view) {
+      result.error = "Media test probe source changed before its reply";
+    }
+    else if (failure || ![value isKindOfClass:NSDictionary.class]) {
+      result.error = "Read-only media test probe failed";
+    }
+    else {
+      NSError *encoding_error = nil;
+      NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:&encoding_error];
+      if (encoding_error || !data || data.length > 4096) { result.error = "Invalid media test probe response"; }
+      else {
+        result.media.navigation_generation = navigation;
+        result.ok = parse_media_snapshot(std::string_view(static_cast<const char *>(data.bytes), data.length),
+                                         result.media, result.error);
+      }
+    }
+    callback(std::move(result));
+  }];
+  return true;
+}
+}  // namespace test
+#endif
 
 }  // namespace stk::document_preview

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <utility>
 
 namespace stk::document_preview {
@@ -120,8 +121,8 @@ std::string_view supported_mime(std::string_view mime)
   if (mime == "text/plain" || mime == "text/plain; charset=utf-8") {
     return "text/plain; charset=utf-8";
   }
-  constexpr std::array<std::string_view, 5> binary = {
-      "image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"};
+  constexpr std::array<std::string_view, 6> binary = {
+      "image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "video/mp4"};
   const auto found = std::find(binary.begin(), binary.end(), mime);
   return found == binary.end() ? std::string_view{} : *found;
 }
@@ -235,23 +236,68 @@ bool resolve_url(std::string_view url, const PreviewIdentity &identity, std::str
   return valid_asset_path(asset_path);
 }
 
-std::string content_policy(const PreviewIdentity &identity)
+std::string content_policy(const PreviewIdentity &identity,
+                           const std::map<std::string, ResourceAsset, std::less<>> &assets)
 {
   const std::string prefix = identity_prefix(identity, true);
   const std::string sources = std::string(kScheme) + prefix + " " + std::string(kHttpsScheme) + prefix;
+  std::string media;
+  for (const auto &[path, asset] : assets) {
+    if (asset.mime != "video/mp4") { continue; }
+    if (!media.empty()) { media += ' '; }
+    const auto encoded = encode(path, true);
+    media += std::string(kScheme) + prefix + encoded + " " + std::string(kHttpsScheme) + prefix + encoded;
+  }
+  if (media.empty()) { media = "'none'"; }
   return "default-src 'none'; script-src 'none'; script-src-attr 'none'; connect-src 'none'; "
          "frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; "
-         "base-uri 'none'; frame-ancestors 'none'; font-src 'none'; media-src 'none'; "
+         "base-uri 'none'; frame-ancestors 'none'; font-src 'none'; media-src " + media + "; "
          "style-src 'unsafe-inline' " +
          sources + "; img-src " + sources + ";";
 }
 
-ResourceResponse response(int status, const PreviewIdentity &identity)
+ResourceResponse response(int status, const std::string &policy)
 {
   ResourceResponse result;
   result.status = status;
-  result.content_security_policy = content_policy(identity);
+  result.content_security_policy = policy;
   return result;
+}
+
+bool byte_range(std::string_view value, size_t size, size_t &first, size_t &last)
+{
+  // A bounded single range avoids multipart responses and arithmetic overflow. Headers are
+  // never copied into a response; all response metadata is generated from validated numbers.
+  constexpr std::string_view unit = "bytes=";
+  if (!size || value.size() > 128 || value.size() < unit.size() ||
+      !std::equal(unit.begin(), unit.end(), value.begin(), [](char expected, char received) {
+        return received == expected ||
+               (received >= 'A' && received <= 'Z' && received - 'A' + 'a' == expected);
+      })) { return false; }
+  value.remove_prefix(6);
+  const auto dash = value.find('-');
+  if (dash == std::string_view::npos || value.find('-', dash + 1) != std::string_view::npos) { return false; }
+  const auto number = [](std::string_view text, size_t &result) {
+    if (text.empty() || text.find_first_not_of("0123456789") != std::string_view::npos) { return false; }
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), result);
+    return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size();
+  };
+  const auto start = value.substr(0, dash), finish = value.substr(dash + 1);
+  if (start.empty()) {
+    size_t suffix = 0;
+    if (!number(finish, suffix) || !suffix) { return false; }
+    first = suffix >= size ? 0 : size - suffix;
+    last = size - 1;
+    return true;
+  }
+  if (!number(start, first) || first >= size) { return false; }
+  last = size - 1;
+  if (!finish.empty()) {
+    size_t requested_last = 0;
+    if (!number(finish, requested_last) || requested_last < first) { return false; }
+    last = std::min(requested_last, last);
+  }
+  return true;
 }
 
 }  // namespace
@@ -280,7 +326,7 @@ std::shared_ptr<ResourceSession> ResourceSession::create(PreviewIdentity identit
     }
     const std::string_view mime = supported_mime(asset.mime);
     if (mime.empty()) {
-      error = "Preview asset MIME type is not supported by this static-content prototype.";
+      error = "Preview asset MIME type is not supported by this confined resource session.";
       return {};
     }
     if (asset.bytes.size() > kMaxAssetBytes || asset.bytes.size() > kMaxTotalBytes - total) {
@@ -302,6 +348,7 @@ std::shared_ptr<ResourceSession> ResourceSession::create(PreviewIdentity identit
       return {};
     }
   }
+  session->content_security_policy_ = content_policy(session->identity_, session->assets_);
   return session;
 }
 
@@ -315,35 +362,56 @@ std::string ResourceSession::url(std::string_view asset_path, bool https) const
   return active() ? result : std::string{};
 }
 
-ResourceResponse ResourceSession::read(std::string_view url, std::string_view method) const
+ResourceResponse ResourceSession::read(std::string_view url,
+                                       std::string_view method,
+                                       std::string_view range) const
 {
   if (!active()) {
-    return response(410, identity_);
+    return response(410, content_security_policy_);
   }
   if (method != "GET" && method != "HEAD") {
-    return response(405, identity_);
+    return response(405, content_security_policy_);
   }
   std::string path;
   if (!resolve_url(url, identity_, path)) {
-    return response(403, identity_);
+    return response(403, content_security_policy_);
   }
   const auto asset = assets_.find(path);
   if (asset == assets_.end()) {
-    return response(404, identity_);
+    return response(404, content_security_policy_);
   }
-  ResourceResponse result = response(200, identity_);
+  ResourceResponse result = response(200, content_security_policy_);
   result.mime = asset->second.mime;
+  result.accept_ranges = true;
+  result.content_length = asset->second.bytes.size();
   if (method == "GET") {
-    result.bytes = asset->second.bytes;
+    if (range.empty()) { result.bytes = asset->second.bytes; }
+    else {
+      size_t first = 0, last = 0;
+      const auto size = asset->second.bytes.size();
+      if (!byte_range(range, size, first, last)) {
+        result.status = 416;
+        result.content_length = 0;
+        result.content_range = "bytes */" + std::to_string(size);
+      }
+      else {
+        result.status = 206;
+        result.content_length = last - first + 1;
+        result.content_range = "bytes " + std::to_string(first) + "-" + std::to_string(last) +
+                               "/" + std::to_string(size);
+        result.bytes.assign(asset->second.bytes.begin() + first, asset->second.bytes.begin() + last + 1);
+      }
+    }
   }
-  return active() ? result : response(410, identity_);
+  return active() ? result : response(410, content_security_policy_);
 }
 
 bool ResourceSession::allows_navigation(std::string_view url) const
 {
   std::string path;
-  return active() && resolve_url(url, identity_, path) && assets_.find(path) != assets_.end() &&
-         active();
+  if (!active() || !resolve_url(url, identity_, path)) { return false; }
+  const auto asset = assets_.find(path);
+  return asset != assets_.end() && asset->second.mime != "video/mp4" && active();
 }
 
 void ResourceSession::close()

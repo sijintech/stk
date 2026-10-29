@@ -209,6 +209,9 @@ TEST(DocumentResources, HeadHasMetadataWithoutBytesAndMethodsAreExplicit)
   EXPECT_EQ(head.status, 200);
   EXPECT_EQ(head.mime, get.mime);
   EXPECT_EQ(head.content_security_policy, get.content_security_policy);
+  EXPECT_EQ(head.content_length, get.bytes.size());
+  EXPECT_EQ(get.content_length, get.bytes.size());
+  EXPECT_TRUE(head.accept_ranges);
   EXPECT_TRUE(head.bytes.empty());
   EXPECT_FALSE(get.bytes.empty());
   for (const auto method : {"POST", "PUT", "DELETE", "OPTIONS", "TRACE", "get", "", "GET "}) {
@@ -287,14 +290,15 @@ TEST(DocumentResources, ManifestRejectsUnsafeDuplicateAndOversizedVirtualPaths)
 TEST(DocumentResources, OnlySupportedMimeTypesAndUtf8TextAreAdmitted)
 {
   for (const auto mime : {"text/html", "text/html; charset=utf-8", "text/plain", "text/css",
-                          "image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"}) {
+                          "image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "video/mp4"}) {
     auto asset = text_asset("asset");
     asset.mime = mime;
     EXPECT_TRUE(session({asset})) << mime;
   }
   for (const auto mime : {"", "text/javascript", "application/javascript", "image/svg+xml",
                           "application/xml", "text/html; charset=utf-16", "TEXT/HTML",
-                          "application/octet-stream", "text/html\r\nX-Test: 1"}) {
+                          "application/octet-stream", "text/html\r\nX-Test: 1", "video/webm",
+                          "video/mp4; codecs=avc1.42E01E", "video/MP4"}) {
     auto asset = text_asset("asset");
     asset.mime = mime;
     std::string error;
@@ -377,6 +381,133 @@ TEST(DocumentResources, ResponsesOwnBytesAndCloseInvalidatesEveryExistingUrl)
       EXPECT_TRUE(result.bytes.empty());
     }
   }
+}
+
+TEST(DocumentResources, SingleRangesReturnExactBytesAndEntityMetadataOnBothOrigins)
+{
+  const std::vector<uint8_t> bytes = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  auto resources = session({text_asset("index.html"), {"clip.mp4", "video/mp4", bytes}});
+  ASSERT_TRUE(resources);
+  struct Example {
+    const char *range;
+    std::vector<uint8_t> body;
+    const char *content_range;
+  };
+  const std::vector<Example> examples = {
+      {"bytes=0-0", {0}, "bytes 0-0/10"},
+      {"bytes=3-6", {3, 4, 5, 6}, "bytes 3-6/10"},
+      {"ByTeS=1-2", {1, 2}, "bytes 1-2/10"},
+      {"bytes=7-", {7, 8, 9}, "bytes 7-9/10"},
+      {"bytes=-3", {7, 8, 9}, "bytes 7-9/10"},
+      {"bytes=-20", bytes, "bytes 0-9/10"},
+      {"bytes=8-999", {8, 9}, "bytes 8-9/10"},
+  };
+  for (const bool https : {false, true}) {
+    const auto url = resources->url("clip.mp4", https);
+    const auto whole = resources->read(url);
+    EXPECT_EQ(whole.status, 200);
+    EXPECT_EQ(whole.content_length, bytes.size());
+    EXPECT_TRUE(whole.content_range.empty());
+    EXPECT_TRUE(whole.accept_ranges);
+    EXPECT_EQ(whole.bytes, bytes);
+    for (const auto &example : examples) {
+      SCOPED_TRACE(example.range);
+      const auto result = resources->read(url, "GET", example.range);
+      EXPECT_EQ(result.status, 206);
+      EXPECT_EQ(result.mime, "video/mp4");
+      EXPECT_EQ(result.bytes, example.body);
+      EXPECT_EQ(result.content_length, example.body.size());
+      EXPECT_EQ(result.content_range, example.content_range);
+      EXPECT_TRUE(result.accept_ranges);
+    }
+  }
+}
+
+TEST(DocumentResources, RangeValidationRejectsMultipleMalformedOverflowAndUnsatisfiableRequests)
+{
+  auto resources = session({{"clip.mp4", "video/mp4", {0, 1, 2}}, {"empty.mp4", "video/mp4", {}}});
+  ASSERT_TRUE(resources);
+  const std::vector<std::string> rejected = {
+      "bytes=3-", "bytes=9-10", "bytes=2-1", "bytes=-0", "bytes=-", "bytes=",
+      "bytes=0-1,2-2", "bytes=0-1,", "bytes=0--1", "bytes=+0-1", "bytes=0-+1",
+      "items=0-1", "bytes =0-1", "bytes= 0-1", "bytes=0-1 ",
+      "bytes=0-184467440737095516160", "bytes=184467440737095516160-",
+      "bytes=-184467440737095516160", "bytes=0-1\r\nX-Test: injected", std::string(129, '9')};
+  for (const bool https : {false, true}) {
+    const auto url = resources->url("clip.mp4", https);
+    for (const auto &range : rejected) {
+      SCOPED_TRACE(range);
+      const auto result = resources->read(url, "GET", range);
+      EXPECT_EQ(result.status, 416);
+      EXPECT_EQ(result.content_range, "bytes */3");
+      EXPECT_EQ(result.content_length, 0);
+      EXPECT_TRUE(result.bytes.empty());
+      EXPECT_TRUE(result.accept_ranges);
+    }
+    const auto empty = resources->read(resources->url("empty.mp4", https), "GET", "bytes=0-");
+    EXPECT_EQ(empty.status, 416);
+    EXPECT_EQ(empty.content_range, "bytes */0");
+  }
+}
+
+TEST(DocumentResources, HeadIgnoresRangeAndClosureWinsBeforeRangeOrMethodParsing)
+{
+  auto resources = session({{"clip.mp4", "video/mp4", {0, 1, 2}}});
+  ASSERT_TRUE(resources);
+  for (const bool https : {false, true}) {
+    const auto url = resources->url("clip.mp4", https);
+    for (const auto range : {"bytes=1-2", "bytes=9-", "bytes=0-1,2-2"}) {
+      const auto head = resources->read(url, "HEAD", range);
+      EXPECT_EQ(head.status, 200);
+      EXPECT_EQ(head.content_length, 3);
+      EXPECT_TRUE(head.content_range.empty());
+      EXPECT_TRUE(head.bytes.empty());
+      EXPECT_TRUE(head.accept_ranges);
+    }
+  }
+  const auto url = resources->url("clip.mp4");
+  resources->close();
+  for (const auto method : {"GET", "HEAD", "POST"}) {
+    const auto closed = resources->read(url, method, "bytes=0-1,2-2");
+    EXPECT_EQ(closed.status, 410);
+    EXPECT_EQ(closed.content_length, 0);
+    EXPECT_TRUE(closed.content_range.empty());
+    EXPECT_TRUE(closed.bytes.empty());
+    EXPECT_FALSE(closed.accept_ranges);
+  }
+}
+
+TEST(DocumentResources, MediaPolicyAdmitsOnlyListedVideoUrlsAndNeverVideoTopLevelNavigation)
+{
+  auto resources = session({text_asset("index.html"), {"clips/报告 #100%.mp4", "video/mp4", {0, 1}},
+                            {"poster.png", "image/png", {0x89, 'P', 'N', 'G'}}});
+  ASSERT_TRUE(resources);
+  std::string expected = "media-src";
+  for (const bool https : {false, true}) {
+    const auto url = resources->url("clips/报告 #100%.mp4", https);
+    expected += " " + url;
+    EXPECT_FALSE(resources->allows_navigation(url));
+    EXPECT_FALSE(resources->allows_navigation(url + "#play"));
+    EXPECT_EQ(resources->read(url).status, 200);
+    auto foreign = identity();
+    foreign.session_id[0] = 'a';
+    const auto other = session({{"clips/报告 #100%.mp4", "video/mp4", {3}}}, foreign);
+    ASSERT_TRUE(other);
+    EXPECT_EQ(resources->read(other->url("clips/报告 #100%.mp4", https), "GET", "bytes=0-").status, 403);
+  }
+  expected += ";";
+  const auto policy = resources->read(resources->url("index.html")).content_security_policy;
+  EXPECT_NE(policy.find(expected), std::string::npos);
+  EXPECT_NE(policy.find("script-src 'none';"), std::string::npos);
+  EXPECT_NE(policy.find("connect-src 'none';"), std::string::npos);
+  EXPECT_EQ(policy.find("media-src 'none'"), std::string::npos);
+  EXPECT_EQ(policy.find("media-src " + asset_base(*resources) + " "), std::string::npos);
+  EXPECT_EQ(policy.find("data:"), std::string::npos);
+  EXPECT_EQ(policy.find("blob:"), std::string::npos);
+  const auto static_only = session();
+  ASSERT_TRUE(static_only);
+  EXPECT_NE(static_only->read(static_only->url("index.html")).content_security_policy.find("media-src 'none';"),
+            std::string::npos);
 }
 
 }  // namespace

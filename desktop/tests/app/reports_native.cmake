@@ -16,6 +16,15 @@ else()
 endif()
 add_executable(stk-reports-native-window reports_native_window.cc ${_reports_capture} ${_reports_scroll}
   "${_reports_spike}/evidence_pixels.cc" "${_reports_spike}/fixture.cc")
+if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_TEST_PROBES)
+  if(APPLE)
+    target_sources(stk-reports-native-window PRIVATE reports_native_input_cocoa.mm)
+  elseif(WIN32)
+    target_sources(stk-reports-native-window PRIVATE reports_native_input_win32.cc)
+  else()
+    target_sources(stk-reports-native-window PRIVATE reports_native_input_unsupported.cc)
+  endif()
+endif()
 target_link_libraries(stk-reports-native-window PRIVATE stk_app stk_document_native)
 get_filename_component(_reports_repo "${CMAKE_SOURCE_DIR}/.." ABSOLUTE)
 target_compile_definitions(stk-reports-native-window PRIVATE STK_REPO_ROOT="${_reports_repo}")
@@ -36,18 +45,23 @@ elseif(WIN32)
   set(_reports_native_backend opengl)
 endif()
 if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW AND (APPLE OR WIN32))
-  foreach(_source markdown html pdf)
+  set(_reports_sources markdown html pdf)
+  if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_TEST_PROBES)
+    list(APPEND _reports_sources video html-video)
+  endif()
+  foreach(_source IN LISTS _reports_sources)
     add_test(NAME reports_native_${_source}_${_reports_native_backend} COMMAND "${STK_BRIDGE_TEST_PYTHON}"
       "${CMAKE_SOURCE_DIR}/tests/check_native_evidence.py"
       --success-marker "PASS: production ReportsEditor native evidence" --timeout 570 --
       $<TARGET_FILE:stk-reports-native-window>
       --python "${STK_BRIDGE_TEST_PYTHON}" --gpu-backend ${_reports_native_backend} --source ${_source}
+      --media-fixture "${_reports_spike}/fixtures/frozen-preview.mp4"
       --evidence-dir "${CMAKE_CURRENT_BINARY_DIR}/reports-native-${_source}")
     set_tests_properties(reports_native_${_source}_${_reports_native_backend} PROPERTIES
       LABELS "project;gpu;window;document_preview" TIMEOUT 600
       RESOURCE_LOCK native_window
       FAIL_REGULAR_EXPRESSION "FAIL:|Error: Not freed memory|leaked")
     file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/reports-native-${_source}-$<CONFIG>.txt"
-      CONTENT "\"${STK_BRIDGE_TEST_PYTHON}\" \"${CMAKE_SOURCE_DIR}/tests/check_native_evidence.py\" --success-marker \"PASS: production ReportsEditor native evidence\" --timeout 570 -- \"$<TARGET_FILE:stk-reports-native-window>\" --python \"${STK_BRIDGE_TEST_PYTHON}\" --gpu-backend ${_reports_native_backend} --source ${_source} --evidence-dir \"${CMAKE_CURRENT_BINARY_DIR}/reports-native-${_source}\"\n")
+      CONTENT "\"${STK_BRIDGE_TEST_PYTHON}\" \"${CMAKE_SOURCE_DIR}/tests/check_native_evidence.py\" --success-marker \"PASS: production ReportsEditor native evidence\" --timeout 570 -- \"$<TARGET_FILE:stk-reports-native-window>\" --python \"${STK_BRIDGE_TEST_PYTHON}\" --gpu-backend ${_reports_native_backend} --source ${_source} --media-fixture \"${_reports_spike}/fixtures/frozen-preview.mp4\" --evidence-dir \"${CMAKE_CURRENT_BINARY_DIR}/reports-native-${_source}\"\n")
   endforeach()
 endif()

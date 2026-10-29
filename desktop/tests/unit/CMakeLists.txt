@@ -163,3 +163,15 @@ if(TARGET stk_document_resources)
     PROPERTIES LABELS "unit;document_preview" ENVIRONMENT "STK_TOKEN_PLAN_API_KEY="
     ENVIRONMENT_MODIFICATION "STK_TOKEN_PLAN_MODEL=unset:")
 endif()
+
+# Linux exercises the fixed parser and an explicit Unsupported adapter. Only the
+# Mac/Windows own-window jobs prove decoding, local user input and media playback.
+if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_TEST_PROBES AND TARGET stk_document_native)
+  add_executable(stk-document-media-probe-tests
+    "${STK_DESKTOP_DIR}/engine/lib/stk_document/tests/test_media_probe_test.cc")
+  target_link_libraries(stk-document-media-probe-tests PRIVATE stk_document_native GTest::gtest_main)
+  stk_target_warnings(stk-document-media-probe-tests)
+  gtest_discover_tests(stk-document-media-probe-tests DISCOVERY_TIMEOUT 60 DISCOVERY_MODE PRE_TEST
+    PROPERTIES LABELS "unit;document_preview;media_probe" ENVIRONMENT "STK_TOKEN_PLAN_API_KEY="
+    ENVIRONMENT_MODIFICATION "STK_TOKEN_PLAN_MODEL=unset:")
+endif()

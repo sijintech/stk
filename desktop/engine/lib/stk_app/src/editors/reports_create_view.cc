@@ -57,7 +57,7 @@ std::string mime(const std::string &name)
       {".css", "text/css; charset=utf-8"}, {".txt", "text/plain; charset=utf-8"},
       {".tex", "text/plain; charset=utf-8"}, {".log", "text/plain; charset=utf-8"},
       {".png", "image/png"}, {".jpg", "image/jpeg"}, {".jpeg", "image/jpeg"},
-      {".gif", "image/gif"}, {".webp", "image/webp"}, {".pdf", "application/pdf"}};
+      {".gif", "image/gif"}, {".webp", "image/webp"}, {".pdf", "application/pdf"}, {".mp4", "video/mp4"}};
   const auto found = types.find(extension);
   return found == types.end() ? std::string() : found->second;
 }
@@ -499,7 +499,8 @@ class ReportsCreateView::Impl {
   bool eligible(const Json &entry) const
   {
     const auto type = io::get_string(entry, "mime");
-    return !type.empty() && (!inputs() || type.starts_with("image/")) && io::get_int(entry, "size", -1) <= asset_limit;
+    return !type.empty() && (!inputs() || type.starts_with("image/") || type == "video/mp4") &&
+        io::get_int(entry, "size", -1) <= asset_limit;
   }
   Json proposed_manifest() const
   {

@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /** Production ReportsEditor -> real bridge -> production native Host -> OS client capture.
- * Synthetic fixtures only. Mouse actions use Screen's normal event routing; they are not OS
- * hardware input. No direct browser/Host construction, renderer injection or offscreen proof. */
+ * Synthetic fixtures only. App controls use normal Screen routing. The opt-in media tests
+ * also deliver bounded local user events to this window's native child, never global hardware
+ * input. Fixed read-only probes supplement independent OS pixels; no direct Host construction,
+ * renderer injection or offscreen proof is accepted. */
 #include "stk/app/bridge_status.hh"
 #include "stk/app/editor_area.hh"
 #include "stk/app/project_state.hh"
@@ -19,6 +21,10 @@
 #include "../../spike/document_preview/evidence_pixels.hh"
 #include "../../spike/document_preview/fixture.hh"
 #include "reports_native_scroll.hh"
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+#  include "stk/document/test_media_probe.hh"
+#  include "reports_native_input.hh"
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -27,6 +33,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -36,6 +43,7 @@ using io::Json;
 namespace fs = std::filesystem;
 namespace {
 constexpr const char *kReport = "a1111111-1111-4111-8111-111111111111";
+constexpr const char *kMediaSha256 = "a54fb5baf8ca34545a8e31ea46c8801347db722cc9c876279186ab8c94f860d1";
 using Clock = std::chrono::steady_clock;
 void require(bool ok, const std::string &message) { if (!ok) { throw std::runtime_error(message); } }
 void write(const fs::path &path, const std::string &text)
@@ -44,7 +52,21 @@ void write(const fs::path &path, const std::string &text)
   out.write(text.data(), std::streamsize(text.size()));
   require(out.good(), "Cannot write public fixture/evidence: " + core::path_to_utf8(path));
 }
-struct Options { std::string python, backend, source = "markdown"; fs::path output; };
+struct Options { std::string python, backend, source = "markdown"; fs::path output, media_fixture; };
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+using Media = document_preview::test::MediaSnapshot;
+Json media_json(const Media &media)
+{
+  return {{"paused", media.paused}, {"ended", media.ended}, {"seeking", media.seeking},
+      {"current_time", media.current_time}, {"duration_known", media.duration_known},
+      {"duration", media.duration}, {"ready_state", media.ready_state},
+      {"network_state", media.network_state}, {"error_code", media.error_code},
+      {"video_size", {media.video_width, media.video_height}},
+      {"video_rect_css", {media.rect_x, media.rect_y, media.rect_width, media.rect_height}},
+      {"viewport_size_css", {media.viewport_width, media.viewport_height}},
+      {"navigation_generation", media.navigation_generation}};
+}
+#endif
 
 void log_last_observation(const Json &result) noexcept
 {
@@ -318,8 +340,178 @@ class Exercise {
     result_["layout_mouse_drags"] = layout_drags; result_["pointer_moves"] = pointer_moves;
     write(directory_ / "result.json", result_.dump(2));
   }
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+  Media media(const std::string &session)
+  {
+    auto reply = std::make_shared<std::optional<document_preview::test::MediaProbeResult>>();
+    std::string error;
+    require(document_preview::test::probe_media(window_.native_window_handle(), session,
+        [reply](auto result) { *reply = std::move(result); }, error), error);
+    wait([&] { return reply->has_value(); }, "Fixed native media observation", 10);
+    require(reply->value().ok, reply->value().error);
+    const auto observed = reply->value().media;
+    require(observed.error_code == 0, "System media decoder reported an error");
+    return observed;
+  }
+  Media media_until(const std::string &session, const std::function<bool(const Media &)> &predicate,
+                    const std::string &reason, double seconds = 10)
+  {
+    Media observed;
+    wait([&] { observed = media(session); return predicate(observed); }, reason, seconds);
+    return observed;
+  }
+  Media observe_input(const std::string &session, const std::function<bool(const Media &)> &predicate,
+                       double seconds = 0.60)
+  {
+    const auto start = Clock::now();
+    Media observed;
+    wait([&] {
+      observed = media(session);
+      return predicate(observed) || std::chrono::duration<double>(Clock::now() - start).count() >= seconds;
+    }, "Bounded native input observation", seconds + 10);
+    return observed;
+  }
+  Media held_media(int cycle, const std::string &phase, const std::string &session,
+                   const Media &before, double seconds)
+  {
+    const auto start = Clock::now();
+    Media after;
+    wait([&] {
+      after = media(session);
+      require(after.navigation_generation == before.navigation_generation && after.paused && !after.ended &&
+          !after.seeking && std::abs(after.current_time - before.current_time) <= 0.10,
+          "Paused media advanced, resumed, ended or changed navigation during " + phase);
+      return std::chrono::duration<double>(Clock::now() - start).count() >= seconds;
+    }, "Paused media hold " + phase, seconds + 10);
+    result_["media_holds"].push_back({{"cycle", cycle}, {"phase", phase},
+        {"observed_wall_seconds", std::chrono::duration<double>(Clock::now() - start).count()},
+        {"before", media_json(before)}, {"after", media_json(after)}});
+    save(); return after;
+  }
+  std::shared_ptr<document_preview::ResourceSession> media_session(const std::string &session)
+  {
+    std::string error;
+    auto resources = document_preview::test::resource_session(window_.native_window_handle(), session, error);
+    require(bool(resources) && resources->active(), error.empty() ? "Missing actual native resource session" : error);
+    return resources;
+  }
+  void native_media_click(int cycle, const std::string &phase, ui::Rect bounds, const Media &observed,
+                          double x, double y)
+  {
+    // Parent UI hover state is independent of the native child's local input. Leave
+    // toolbar buttons so their delayed tooltip cannot hide/pause the playing child.
+    move_pointer({bounds.cx(), bounds.cy()});
+    require(observed.viewport_width > 0 && observed.viewport_height > 0 &&
+        observed.rect_width > 0 && observed.rect_height > 0, "Media control geometry must be observed");
+    const double nx = (observed.rect_x + observed.rect_width * x) / observed.viewport_width;
+    const double ny = (observed.rect_y + observed.rect_height * y) / observed.viewport_height;
+    const auto viewport = native_bounds(bounds);
+    std::string delivery, error;
+    require(native_input_.click_document(window_.native_window_handle(), viewport, window_.width(),
+        window_.height(), nx, ny, delivery, error), error);
+    result_["native_media_inputs"].push_back({{"cycle", cycle}, {"phase", phase}, {"action", "click"},
+        {"video_normalized_top_left", {x, y}}, {"viewport_normalized_top_left", {nx, ny}},
+        {"delivery", delivery}, {"before", media_json(observed)}});
+    save(); process();
+  }
+  void native_media_key(int cycle, const std::string &phase, ui::Rect bounds, wm::Key key,
+                        const char *name, const Media &before)
+  {
+    move_pointer({bounds.cx(), bounds.cy()});
+    std::string delivery, error;
+    require(native_input_.key_document(window_.native_window_handle(), native_bounds(bounds),
+        window_.width(), window_.height(), key, delivery, error), error);
+    result_["native_media_inputs"].push_back({{"cycle", cycle}, {"phase", phase}, {"action", "key"},
+        {"key", name}, {"delivery", delivery}, {"before", media_json(before)}});
+    save(); process();
+  }
+  ui::Rect media_rectangle(ui::Rect bounds, const Media &observed) const
+  {
+    const auto native = native_bounds(bounds);
+    require(observed.viewport_width > 0 && observed.viewport_height > 0 && observed.rect_width >= 100 &&
+        observed.rect_height >= 75 && observed.rect_x >= -0.5 && observed.rect_y >= -0.5 &&
+        observed.rect_x + observed.rect_width <= observed.viewport_width + 0.5 &&
+        observed.rect_y + observed.rect_height <= observed.viewport_height + 0.5,
+        "The complete native media element must fit inside its observed viewport");
+    require(observed.video_width == 320 && observed.video_height == 180,
+        "Decoded video dimensions must match the pinned public fixture");
+    const double scale = std::min(observed.rect_width / observed.video_width,
+        observed.rect_height / observed.video_height);
+    const double width = scale * observed.video_width, height = scale * observed.video_height;
+    // Standalone wrappers use object-fit:contain; ordinary HTML preserves intrinsic ratio.
+    const double left = observed.rect_x + (observed.rect_width - width) * 0.5;
+    const double top = observed.rect_y + (observed.rect_height - height) * 0.5;
+    return {float(native.x + left / observed.viewport_width * native.width),
+        float(window_.height() - native.y - native.height + top / observed.viewport_height * native.height),
+        float(width / observed.viewport_width * native.width), float(height / observed.viewport_height * native.height)};
+  }
+  void media_capture(int cycle, const std::string &phase, int color, ui::Rect rectangle,
+                     const Media &observed, const std::string &live_session = {})
+  {
+    // Observe the middle of the actual video, excluding native controls and letterbox edges.
+    // Red/blue frames come from the pinned MP4 only; the HTML fixture has no poster/image.
+    const int x = int(std::ceil(rectangle.x + rectangle.w * 0.15f));
+    const int y = int(std::ceil(rectangle.y + rectangle.h * 0.20f));
+    const int right = int(std::floor(rectangle.x + rectangle.w * 0.85f));
+    const int bottom = int(std::floor(rectangle.y + rectangle.h * 0.65f));
+    require(x >= 0 && y >= 0 && right <= window_.width() && bottom <= window_.height() &&
+        right - x >= 32 && bottom - y >= 24, "Independent media pixel region must fit this STK client");
+    std::unique_ptr<document_preview::WindowEvidenceCapture> pending;
+    int consecutive = 0;
+    wait([&] {
+      if (!pending) { pending = document_preview::capture_window_evidence(window_.native_window_handle()); return false; }
+      auto captured = pending->poll();
+      if (!captured) { return false; } pending.reset();
+      require(captured->error.empty(), "OS media client capture: " + captured->error);
+      const auto &pixels = captured->image;
+      require(pixels.channels == 4 && pixels.width == uint32_t(window_.width()) &&
+          pixels.height == uint32_t(window_.height()), "Media OS capture must match this STK client framebuffer");
+      Media current = observed;
+      if (!live_session.empty()) {
+        current = media(live_session);
+        require(current.navigation_generation == observed.navigation_generation && current.paused &&
+            !current.ended && !current.seeking && std::abs(current.current_time - observed.current_time) <= 0.10,
+            "Media must remain paused at the observed time during each completed OS capture");
+      }
+      size_t red = 0, blue = 0, total = 0;
+      for (int row = y; row < bottom; row += 2) for (int column = x; column < right; column += 2) {
+        const auto *p = pixels.pixel(uint32_t(column), uint32_t(row)); ++total;
+        if (p[0] >= 120 && p[0] >= int(p[1]) * 2 + 30 && p[0] >= int(p[2]) * 2 + 30) { ++red; }
+        if (p[2] >= 120 && p[2] >= int(p[0]) * 2 + 30 && p[2] >= int(p[1]) * 2 + 30) { ++blue; }
+      }
+      const double red_fraction = double(red) / double(total), blue_fraction = double(blue) / double(total);
+      const bool matched = color == 1 ? red_fraction >= 0.80 && blue_fraction <= 0.05 :
+                           color == 2 ? blue_fraction >= 0.80 && red_fraction <= 0.05 :
+                                        red_fraction <= 0.05 && blue_fraction <= 0.05;
+      consecutive = matched ? consecutive + 1 : 0;
+      const auto filename = "cycle-" + std::to_string(cycle) + "-" + phase +
+          (consecutive >= 2 ? ".png" : "-waiting.png");
+      const auto png = io::encode_png(pixels); io::write_png(directory_ / filename, pixels);
+      result_["last_media_observation"] = {{"cycle", cycle}, {"phase", phase}, {"file", filename},
+          {"sha256", core::Sha256::hex(png)}, {"backend", captured->backend},
+          {"client_size", {pixels.width, pixels.height}}, {"sample_region_top_left", {x, y, right - x, bottom - y}},
+          {"expected_color", color == 1 ? "red" : color == 2 ? "blue" : "neither"},
+          {"red_fraction", red_fraction}, {"blue_fraction", blue_fraction},
+          {"consecutive_matches", consecutive}, {"media_before_capture", media_json(observed)},
+          {"live_pause_verified_at_capture", !live_session.empty()}, {"media_at_capture", media_json(current)}};
+      if (consecutive >= 2) { result_["images"].push_back(result_["last_media_observation"]); }
+      save(); return consecutive >= 2;
+    }, "Independent OS media pixels " + phase, 25);
+  }
+#endif
   int clicks = 0, wheels = 0, layout_drags = 0, pointer_moves = 0;
  private:
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+  document_preview::ViewBounds native_bounds(ui::Rect bounds) const
+  {
+    const auto r = screen_.rect();
+    const int x = r.xmin + int(std::ceil(bounds.x));
+    const int y = r.ymax - int(std::floor(bounds.y + bounds.h));
+    return {x, y, r.xmin + int(std::floor(bounds.x + bounds.w)) - x,
+        r.ymax - int(std::ceil(bounds.y)) - y};
+  }
+  reports_native_test::NativeInput native_input_;
+#endif
   void check_native_scroll() const
   {
     std::string error;
@@ -387,7 +579,13 @@ def observed(self, action, params):
     if action in ('asset', 'preview', 'preview_resources'):
         item = {'action': action}
         if action == 'preview_resources':
-            item.update({k: result['preview'][k] for k in ('project_id', 'report_id', 'source_sha256', 'session_id')})
+            preview = result['preview']
+            item.update({k: preview[k] for k in ('revision', 'project_id', 'report_id', 'source_sha256', 'session_id',
+                'path', 'renderer', 'mime', 'source_mime', 'content_sha256', 'source_content_sha256', 'size', 'source_size')})
+            item['source_path'] = preview.get('source_path', preview['path'])
+            data = base64.b64decode(preview['data'], validate=True)
+            item.update(data_sha256=hashlib.sha256(data).hexdigest(), data_size=len(data),
+                resources=result['resources'], total_size=result['total_size'])
         elif action == 'preview':
             item.update({k: result[k] for k in ('revision', 'project_id', 'report_id', 'source_sha256', 'session_id',
                 'path', 'renderer', 'mime', 'source_mime', 'content_sha256', 'source_content_sha256', 'size', 'source_size')})
@@ -445,28 +643,45 @@ raise SystemExit(main())
   ui.wait([&] { return project.loaded() && !project.busy(); }, "Project loaded");
   const auto handle = project.project()->handle;
   const bool pdf = options.source == "pdf";
-  const std::string entry = pdf ? "report.pdf" : options.source == "html" ? "report.html" : "report.md";
+  const bool video = options.source == "video" || options.source == "html-video";
+  const bool html_video = options.source == "html-video";
+  std::string media_bytes;
+  if (video) {
+    std::ifstream file(options.media_fixture, std::ios::binary);
+    require(file.good(), "Pinned public MP4 fixture is required");
+    media_bytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    require(media_bytes.size() == 41558 && core::Sha256::hex(media_bytes) == kMediaSha256,
+        "Public MP4 fixture must match the complete pinned H264/AAC bytes");
+  }
+  const std::string entry = pdf ? "report.pdf" : video ? html_video ? "report.html" : "clip.mp4" :
+      options.source == "html" ? "report.html" : "report.md";
   const std::string body_marker = "██  ████  ███  █████\n█████  ██  ████  ███\n███  █████  ██  ████";
-  const std::string source_bytes = pdf ? document_preview::make_pdf_fixture() : options.source == "html" ?
+  const std::string source_bytes = video ? html_video ?
+      "<!doctype html><html><body><video controls preload='none'>"
+      "<source src='clip.mp4' type='video/mp4'></video></body></html>" : media_bytes :
+      pdf ? document_preview::make_pdf_fixture() : options.source == "html" ?
       "<!doctype html><html><body><img src='marker.png' alt='Native evidence marker'><pre>" + body_marker +
       "</pre><h1>Frozen HTML report</h1><p>Public synthetic values: A 300 K; B 325 K.</p></body></html>" :
       "![Native evidence marker](marker.png)\n\n```text\n" + body_marker +
       "\n```\n\n# Frozen Markdown report\n\n| Sample | Temperature / K |\n| --- | --- |\n| A | 300 |\n| B | 325 |\n";
   write(folder / entry, source_bytes);
   Json paths = Json::array({core::path_to_utf8(folder / entry)});
-  if (!pdf) { io::write_png(folder / "marker.png", marker()); paths.push_back(core::path_to_utf8(folder / "marker.png")); }
+  if (html_video) { write(folder / "clip.mp4", media_bytes); paths.push_back(core::path_to_utf8(folder / "clip.mp4")); }
+  else if (!pdf && !video) { io::write_png(folder / "marker.png", marker()); paths.push_back(core::path_to_utf8(folder / "marker.png")); }
   const auto indexed = call("project.files.index", {{"handle", handle}, {"expected_revision", 0},
       {"paths", paths}});
   const auto ids = indexed.at("record_ids");
   const auto snapshot = call("project.snapshots.capture", {{"handle", handle}, {"record_ids", ids}, {"expected_revision", 1}});
   Json report_assets = Json::array({{{"record_id", ids.at(0)}, {"path", entry}}});
-  if (!pdf) { report_assets.push_back({{"record_id", ids.at(1)}, {"path", "marker.png"}}); }
+  if (html_video) { report_assets.push_back({{"record_id", ids.at(1)}, {"path", "clip.mp4"}}); }
+  else if (!pdf && !video) { report_assets.push_back({{"record_id", ids.at(1)}, {"path", "marker.png"}}); }
   call("project.reports.create", {{"handle", handle}, {"report_id", kReport}, {"name", "Frozen native acceptance"},
       {"snapshot_id", snapshot.at("snapshot").at("id")}, {"entry_record_id", ids.at(0)}, {"expected_revision", 2},
       {"assets", report_assets},
       {"sources", Json::array()}});
   const auto report = call("project.reports.get", {{"handle", handle}, {"report_id", kReport}}).at("report");
-  require(fs::remove(folder / entry) && (pdf || fs::remove(folder / "marker.png")), "Delete live source after freezing");
+  require(fs::remove(folder / entry) && (html_video ? fs::remove(folder / "clip.mp4") :
+      (pdf || video || fs::remove(folder / "marker.png"))), "Delete all live sources after freezing");
   project.refresh(); ui.wait([&] { return project.loaded() && !project.busy(); }, "Frozen project refresh");
   require(project.project()->revision == 3, "Expected exact fixture revision");
   auto &viewer = shell.store().viewer(); viewer.set_auto_evaluate(false); viewer.prefetch_neighbours = false;
@@ -513,6 +728,177 @@ raise SystemExit(main())
   };
   ui.click("reports_preview", *area); ui.wait(ready, "Production native report ready");
   result["initial_reading_clicks"] = ui.clicks;
+  std::set<std::string> sessions;
+  int prepares = 0, image_reads = 0;
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+  std::shared_ptr<document_preview::ResourceSession> final_media_resources;
+  std::string final_media_url;
+  ui::Rect final_media_rectangle;
+  Media final_media_observed;
+  if (video) {
+    result["media_fixture"] = {{"size", media_bytes.size()}, {"sha256", kMediaSha256},
+        {"container", "MP4"}, {"video_codec", "H264 Baseline"}, {"audio_codec", "AAC"},
+        {"duration_seconds", 6}, {"live_source_deleted_before_prepare", true}};
+    result["required_images"] = 161;
+    result["body_text_pixel_criterion"] = "Pinned MP4 decoded red/blue picture region in independent OS client captures; HTML contains no poster/image/script";
+    result["not_proven_here"] = "Physical hardware input, audio output, arbitrary codec support, IME, physical scanout and browser memory stability; final guarded memory remains the separate after-static spike gate";
+    result["native_media_inputs"] = Json::array(); result["media_holds"] = Json::array();
+    result["media_scope_revocations"] = Json::array(); result["media_transitions"] = Json::array();
+    auto latest_session = [&] {
+      std::ifstream input(trace); std::string text, session;
+      while (std::getline(input, text)) {
+        const auto item = Json::parse(text);
+        if (item.at("action") == "preview_resources") { session = item.at("session_id").get<std::string>(); }
+      }
+      require(!session.empty(), "Actual bridge must return a prepared video session"); return session;
+    };
+    auto paused = [&](const std::string &session, const std::string &phase) {
+      return ui.media_until(session, [](const Media &m) { return m.paused && !m.seeking && !m.ended; }, phase);
+    };
+    auto play = [&](int cycle, const std::string &phase, const std::string &session, ui::Rect bounds) {
+      const auto before = ui.media(session);
+      require(before.paused && !before.ended && before.current_time <= 1.25,
+          "Explicit Play must start paused in the early part of the clip");
+      // These are bounded local user events, never DOM media setters or injected play().
+      ui.native_media_click(cycle, phase, bounds, before, 0.50, 0.50);
+      auto after = ui.observe_input(session, [](const Media &m) { return !m.paused; });
+      if (after.paused) {
+        ui.native_media_key(cycle, phase + "-space", bounds, wm::Key::Space, "Space", after);
+      }
+      after = ui.media_until(session, [&](const Media &m) {
+        return !m.paused && !m.ended && !m.seeking && m.ready_state >= 2 &&
+            m.current_time >= before.current_time + 0.10;
+      }, "Actual native Play advances the decoded clip", 8);
+      require(after.navigation_generation == before.navigation_generation && after.duration_known &&
+          std::abs(after.duration - 6.0) < 0.10 && after.current_time < 2.5,
+          "Play must advance this navigation well before natural ending");
+      result["media_transitions"].push_back({{"cycle", cycle}, {"phase", phase},
+          {"before", media_json(before)}, {"after", media_json(after)}}); ui.save(); return after;
+    };
+    auto seek = [&](int cycle, bool late, const std::string &session, ui::Rect bounds) {
+      const std::string phase = late ? "seek-blue" : "seek-early";
+      const auto original = ui.media(session);
+      require(original.paused && !original.ended, "Native seek starts explicitly paused");
+      auto target = [&](const Media &m) {
+        return m.paused && !m.ended && !m.seeking && m.ready_state >= 2 && m.duration_known &&
+            (late ? m.current_time >= 3.5 && m.current_time <= 5.65 : m.current_time <= 0.90);
+      };
+      ui.native_media_key(cycle, phase, bounds, late ? wm::Key::RightArrow : wm::Key::LeftArrow,
+          late ? "RightArrow" : "LeftArrow", original);
+      auto observed = ui.observe_input(session, target);
+      // Native controls differ by system. A fixed, bounded set of real timeline clicks
+      // is allowed, and every attempt is recorded; only observed seek+OS color can pass.
+      for (const double y : {0.94, 0.86, 0.98, 0.78}) {
+        if (target(observed)) { break; }
+        if (!observed.paused) { ui.click("reports_document_pause", *area); observed = paused(session, phase); }
+        ui.native_media_click(cycle, phase + "-timeline", bounds, observed, late ? 0.78 : 0.14, y);
+        observed = ui.observe_input(session, target);
+      }
+      if (!observed.paused) { ui.click("reports_document_pause", *area); }
+      observed = ui.media_until(session, target, "Native seek reaches the requested clip segment", 5);
+      require(observed.navigation_generation == original.navigation_generation &&
+          std::abs(observed.current_time - original.current_time) > 2.0,
+          "Seek must change actual media time without changing navigation");
+      result["media_transitions"].push_back({{"cycle", cycle}, {"phase", phase},
+          {"before", media_json(original)}, {"after", media_json(observed)}}); ui.save(); return observed;
+    };
+    for (int cycle = 1; cycle <= 20; ++cycle) {
+      ui.wait(ready, "Video report visible");
+      const auto session = latest_session();
+      require(sessions.insert(session).second, "Each explicit video preparation must use a fresh session");
+      ++prepares;
+      auto resources = ui.media_session(session);
+      require(resources->identity().project_id == project.project()->id &&
+          resources->identity().resource_id == kReport && resources->identity().source_version ==
+          report.at("source_sha256").get<std::string>(), "Observed native session must bind this frozen report");
+      const auto old_url = resources->url("clip.mp4");
+      const auto complete = resources->read(old_url);
+      require(complete.status == 200 && complete.mime == "video/mp4" && complete.content_length == 41558 &&
+          core::Sha256::hex(complete.bytes) == kMediaSha256 && !resources->allows_navigation(old_url),
+          "Actual native session must contain the exact verified MP4 and deny its top-level navigation");
+      const auto slice = resources->read(old_url, "GET", "bytes=0-31");
+      require(slice.status == 206 && slice.content_length == 32 && slice.content_range == "bytes 0-31/41558" &&
+          slice.bytes == std::vector<uint8_t>(complete.bytes.begin(), complete.bytes.begin() + 32),
+          "Actual native session single Range must retain the verified full MP4 identity");
+      auto initial = ui.media(session);
+      require(initial.paused && !initial.ended && initial.current_time <= 0.10,
+          "Initial or explicitly reprepared video must never autoplay");
+      ui.held_media(cycle, "initial-no-autoplay", session, initial, 0.50);
+      const auto bounds = ui.widget("reports_document_viewport")->rect;
+      play(cycle, "explicit-play", session, bounds);
+      ui.click("reports_document_pause", *area);
+      auto red = paused(session, "Explicit Pause button");
+      require(red.current_time > 0.05 && red.current_time < 2.6 && !red.ended,
+          "Explicit pause must stop actual playback before the blue/ended segment");
+      ui.held_media(cycle, "explicit-pause", session, red, 0.25);
+      auto rectangle = ui.media_rectangle(bounds, red);
+      ui.media_capture(cycle, "played-red-paused", 1, rectangle, red, session);
+      // Observe a natural red-to-blue transition after explicit Play, before any seek.
+      // Pausing only after >3.3s gives OS capture ample time without allowing ended
+      // or capture latency to masquerade as a successful pause.
+      play(cycle, "explicit-play-color-transition", session, bounds);
+      const auto progressing = ui.media_until(session, [](const Media &m) {
+        return !m.paused && !m.ended && !m.seeking && m.current_time >= 3.30;
+      }, "Explicit native Play crosses the actual MP4 color boundary", 8);
+      require(progressing.current_time < 4.50, "Natural frame transition must be observed well before ending");
+      ui.click("reports_document_pause", *area);
+      auto natural_blue = paused(session, "Explicit Pause after natural color transition");
+      require(natural_blue.current_time >= 3.30 && natural_blue.current_time < 4.80 && !natural_blue.ended,
+          "Pause after actual natural playback must not be a natural ended state");
+      ui.media_capture(cycle, "natural-play-blue-paused", 2, ui.media_rectangle(bounds, natural_blue), natural_blue, session);
+      const auto sought_red = seek(cycle, false, session, bounds);
+      ui.media_capture(cycle, "seek-early-red-paused", 1, ui.media_rectangle(bounds, sought_red), sought_red, session);
+      auto blue = seek(cycle, true, session, bounds);
+      ui.media_capture(cycle, "seek-blue-paused", 2, ui.media_rectangle(bounds, blue), blue, session);
+      auto early = seek(cycle, false, session, bounds);
+      ui.held_media(cycle, "seek-early-paused", session, early, 0.25);
+      const auto playing = play(cycle, "play-before-hide", session, bounds);
+      require(!playing.paused && playing.current_time < 2.5, "Hide must interrupt a playing early clip");
+      ui.tab(*area, 1);
+      auto hidden = paused(session, "Hide must pause the actual native media");
+      require(hidden.current_time < 2.9 && hidden.current_time >= playing.current_time - 0.05 && !hidden.ended,
+          "Hidden pause must precede the color transition and natural ending");
+      hidden = ui.held_media(cycle, "hidden-tab-pause", session, hidden, 0.75);
+      ui.media_capture(cycle, "hidden-video-tab", 0, rectangle, hidden, session);
+      require(area->tab(1).save_workspace_state() == draft_state, "Video hide preserves the Python draft");
+      ui.tab(*area, 0); ui.wait(ready, "Paused video report shown again");
+      auto reshown = ui.held_media(cycle, "reshown-no-autoresume", session, hidden, 0.50);
+      ui.media_capture(cycle, "reshown-red-paused", 1, ui.media_rectangle(bounds, reshown), reshown, session);
+      // Return to the earliest segment before a second explicit Play. Rewinding is
+      // itself local input; showing the tab must never provide that playback action.
+      if (reshown.current_time > 0.90) {
+        ui.native_media_key(cycle, "rewind-after-show", bounds, wm::Key::LeftArrow, "LeftArrow", reshown);
+        reshown = ui.media_until(session, [](const Media &m) {
+          return m.paused && !m.ended && !m.seeking && m.current_time <= 0.90;
+        }, "Native LeftArrow rewinds before explicit resume", 5);
+      }
+      play(cycle, "explicit-play-after-show", session, bounds);
+      ui.click("reports_document_pause", *area);
+      auto resumed = paused(session, "Pause after explicit Play on shown tab");
+      require(resumed.current_time < 2.9 && !resumed.ended, "Explicit resume must still be observed before natural ending");
+      ui.media_capture(cycle, "explicit-resume-red-paused", 1, ui.media_rectangle(bounds, resumed), resumed, session);
+      ui.click("reports_document_close", *area);
+      require(!resources->active() && resources->read(old_url, "GET", "bytes=0-1").status == 410 &&
+          resources->read(old_url, "HEAD").status == 410,
+          "Actual preview close must revoke the retained session and old media URL");
+      result["media_scope_revocations"].push_back({{"cycle", cycle}, {"scope", "preview-close"},
+          {"session_id", session}, {"old_url_get_range_status", 410}, {"old_url_head_status", 410}});
+      ui.media_capture(cycle, "closed-video", 0, rectangle, resumed);
+      ui.wait([&] { const auto *w = ui.widget("reports_preview"); return w && w->enabled; }, "Explicit video prepare action");
+      ui.click("reports_preview", *area); ui.wait(ready, "Explicit video prepare creates the next view");
+      const auto next = latest_session();
+      require(next != session, "Video prepare must not reuse the closed session");
+      initial = ui.media(next);
+      require(initial.paused && !initial.ended && initial.current_time <= 0.10, "Newly prepared video must remain paused");
+      ui.held_media(cycle, "reprepared-no-autoplay", next, initial, 0.25);
+      final_media_resources = ui.media_session(next); final_media_url = final_media_resources->url("clip.mp4");
+      final_media_rectangle = rectangle; final_media_observed = initial;
+      result["completed_cycles"] = cycle; ui.save();
+    }
+    require(sessions.insert(latest_session()).second, "The final explicit video preparation is also unique"); ++prepares;
+  }
+  else
+#endif
   for (int cycle = 1; cycle <= 20; ++cycle) {
     ui.wait(ready, "Native report visible");
     const auto bounds = ui.widget("reports_document_viewport")->rect;
@@ -540,7 +926,6 @@ raise SystemExit(main())
     ui.capture(cycle, "reprepared-page1", 1, ui.widget("reports_document_viewport")->rect, !pdf);
     result["completed_cycles"] = cycle; ui.save();
   }
-  std::set<std::string> sessions;
   const auto &assets = report.at("manifest").at("assets");
   const auto image_asset = std::find_if(assets.begin(), assets.end(), [](const Json &asset) {
     return asset.at("path") == "marker.png";
@@ -548,14 +933,44 @@ raise SystemExit(main())
   const auto entry_asset = std::find_if(assets.begin(), assets.end(), [&](const Json &asset) { return asset.at("path") == entry; });
   require(entry_asset != assets.end() && entry_asset->at("sha256") == core::Sha256::hex(source_bytes) &&
       entry_asset->at("size") == source_bytes.size(), "Frozen entry must match the complete fixture bytes");
-  require(pdf ? assets.size() == 1 : image_asset != assets.end(), "Exact frozen report asset set");
-  std::ifstream calls(trace); std::string line; int prepares = 0, image_reads = 0;
+  require(video ? assets.size() == (html_video ? 2 : 1) : pdf ? assets.size() == 1 : image_asset != assets.end(),
+      "Exact frozen report asset set");
+  std::ifstream calls(trace); std::string line;
+  int trace_prepares = 0;
   bool awaiting_image = false;
   while (std::getline(calls, line)) {
     const auto item = Json::parse(line);
     require(item.at("project_id") == project.project()->id && item.at("report_id") == kReport &&
         item.at("source_sha256") == report.at("source_sha256"), "Every preparation must bind the frozen report");
-    if (pdf) {
+    if (video) {
+      if (item.at("action") == "preview_resources") {
+        require(!awaiting_image && item.at("revision") == 3 && item.at("source_path") == entry &&
+            item.at("renderer") == "stk.report-renderer/2" && item.at("mime") == "text/html; charset=utf-8" &&
+            item.at("source_mime") == (html_video ? "text/html; charset=utf-8" : "video/mp4") &&
+            item.at("source_content_sha256") == entry_asset->at("sha256") &&
+            item.at("source_size") == entry_asset->at("size") && item.at("data_size") == item.at("size") &&
+            item.at("data_sha256") == item.at("content_sha256") && item.at("resources").size() == 1 &&
+            item.at("resources").at(0).at("path") == "clip.mp4" &&
+            item.at("resources").at(0).at("mime") == "video/mp4" &&
+            item.at("resources").at(0).at("sha256") == kMediaSha256 &&
+            item.at("resources").at(0).at("size") == 41558 &&
+            item.at("total_size").get<uint64_t>() == item.at("size").get<uint64_t>() + 41558,
+            "Every video preparation must bind complete frozen source/wrapper and exactly one listed MP4");
+        const auto session = item.at("session_id").get<std::string>();
+        require(sessions.contains(session), "Every bridge preparation must correspond to an observed real native session");
+        require(html_video ? item.at("path") == entry :
+            item.at("path") == "_stk-preview/" + session + "/player.html",
+            "Standalone MP4 uses a separate virtual HTML wrapper and retains the exact source_path");
+        ++trace_prepares; awaiting_image = true;
+      }
+      else {
+        require(item.at("action") == "asset" && awaiting_image && item.at("path") == "clip.mp4" &&
+            item.at("content_sha256") == kMediaSha256 && item.at("size") == 41558,
+            "Video preparation may read only the exact frozen MP4 after its descriptor");
+        ++image_reads; awaiting_image = false;
+      }
+    }
+    else if (pdf) {
       require(item.at("action") == "preview" && item.at("revision") == 3 && item.at("path") == entry &&
           item.at("renderer") == "identity" && item.at("mime") == "application/pdf" &&
           item.at("source_mime") == "application/pdf" && item.at("content_sha256") == entry_asset->at("sha256") &&
@@ -577,8 +992,9 @@ raise SystemExit(main())
       ++image_reads; awaiting_image = false;
     }
   }
-  require(prepares == 21 && image_reads == (pdf ? 0 : 21) && !awaiting_image,
-      "Exactly 21 explicit preparations; PDF has no asset/preview_resources calls, text has one image read per prepare");
+  require(prepares == 21 && (video ? trace_prepares == 21 : true) &&
+      image_reads == (pdf ? 0 : 21) && !awaiting_image,
+      "Exactly 21 explicit preparations; PDF has no extra assets and text/video has one frozen resource read each");
   require(area->tab(1).save_workspace_state() == draft_state && area->tab(1).has_unsaved_changes() &&
       shell.store().scripts().history().empty(), "Reading must preserve hidden unexecuted Python draft");
   require(viewer.save_workspace_state() == viewer_state && viewer.camera_serial() == camera &&
@@ -589,11 +1005,35 @@ raise SystemExit(main())
     require(call(method, {{"handle", handle}}).at("runs").empty(), "No simulation, workflow or analysis may run");
   }
   require(client->stats().schema_violations == 0, "Bridge schema violations");
-  require(result.at("images").size() == (pdf ? 160 : 140) && result.at("completed_cycles") == 20,
+  require(result.at("images").size() == (video ? 160 : pdf ? 160 : 140) && result.at("completed_cycles") == 20,
       "All 20 production reading cycles and the source-specific OS observation count must complete");
   require(pdf ? result.at("native_scroll_requests").size() >= 20 : result.at("native_scroll_requests").empty(),
       "Each PDF cycle requires native wheel input; text acceptance must not claim native scrolling");
-  result["explicit_preparations"] = prepares; result["frozen_image_reads"] = image_reads;
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+  if (video) {
+    require(final_media_resources && final_media_resources->active(), "Final native session must still be live before closing the project scope");
+    auto completion = std::make_shared<std::optional<bridge::Result<bool>>>();
+    require(project.close([completion](auto reply) { *completion = std::move(reply); }),
+        "Actual ProjectState close must accept the final scope action");
+    // Production invalidation must happen synchronously, before the close ACK.
+    require(!final_media_resources->active() &&
+        final_media_resources->read(final_media_url, "GET", "bytes=0-1").status == 410 &&
+        final_media_resources->read(final_media_url, "HEAD").status == 410,
+        "Actual project close intent must revoke old media URLs before its bridge ACK");
+    result["media_scope_revocations"].push_back({{"cycle", 21}, {"scope", "project-close-before-ACK"},
+        {"session_id", final_media_resources->identity().session_id},
+        {"old_url_get_range_status", 410}, {"old_url_head_status", 410}});
+    ui.wait([&] { return completion->has_value(); }, "Project close ACK");
+    require(completion->value().ok() && completion->value().value(), "Actual project close must complete successfully");
+    ui.media_capture(21, "project-scope-closed", 0, final_media_rectangle, final_media_observed);
+    require(result.at("images").size() == 161 && result.at("media_scope_revocations").size() == 21,
+        "All twenty playback cycles and the final actual project-scope revocation must complete");
+    // This trace observes explicit bridge asset RPCs. prepare also reads and
+    // validates the frozen MP4 internally before returning its descriptors.
+    result["explicit_frozen_media_asset_rpc_reads"] = image_reads;
+  }
+#endif
+  result["explicit_preparations"] = prepares; result["frozen_image_reads"] = video ? 0 : image_reads;
   result["unique_sessions"] = sessions.size();
   result["actual_mouse_clicks"] = ui.clicks; result["wheel_steps"] = ui.wheels;
   result["viewer_preserved"] = true; result["python_draft_preserved"] = true;
@@ -611,15 +1051,20 @@ int main(int argc, char **argv)
     else if (arg == "--gpu-backend") { options.backend = argv[++i]; }
     else if (arg == "--evidence-dir") { options.output = core::path_from_utf8(argv[++i]); }
     else if (arg == "--source") { options.source = argv[++i]; }
+    else if (arg == "--media-fixture") { options.media_fixture = core::path_from_utf8(argv[++i]); }
     else { return 2; }
   }
   if (options.python.empty() || options.output.empty() ||
-      (options.source != "markdown" && options.source != "html" && options.source != "pdf")) {
-    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf\n"); return 2;
+      (options.source != "markdown" && options.source != "html" && options.source != "pdf"
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+       && options.source != "video" && options.source != "html-video"
+#endif
+      )) {
+    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4]\n"); return 2;
   }
   Json result = {{"format", "stk.reports-native-evidence/1"}, {"status", "running"}, {"required_cycles", 20},
       {"completed_cycles", 0}, {"images", Json::array()}, {"native_scroll_requests", Json::array()},
-      {"claim", "Production ReportsEditor mouse actions, frozen bridge resources and OS-composited STK client pixels"},
+      {"claim", "Production ReportsEditor app actions, frozen bridge resources and OS-composited STK client pixels; opt-in media also records bounded local native child input and fixed read-only media observations"},
       {"not_proven_here", "OS hardware input, IME, arbitrary PDF fidelity/search/selection, modal same-OS-batch ordering, physical scanout and browser memory stability; URL410/parent-close are separate Host CPU and spike native tests; final guarded memory is the separate after-static spike gate"}};
   fs::path directory;
   try {

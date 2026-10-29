@@ -18,7 +18,7 @@ struct ReportPreviewAsset {
 struct PreparedReportPreview {
   ReportPreviewIdentity identity;
   std::string entry_path;
-  // Sanitized HTML followed by verified raster images, or one unchanged PDF entry.
+  // Sanitized HTML/player followed by verified raster/MP4 assets, or one unchanged PDF.
   std::vector<ReportPreviewAsset> assets;
   // Transient AppStore scope, never serialized or treated as a persistent report identity.
   uint64_t project_scope_epoch = 0;
@@ -56,7 +56,7 @@ class ProjectReports {
 
   /** Whether the selected entry's MIME/budget and advertised bridge methods permit preview. */
   bool supports_preview() const;
-  /** Explicit preparation. HTML verifies entry plus images; PDF verifies one unchanged entry.
+  /** Explicit preparation. HTML/MP4 verifies a display entry plus images/video; PDF stays unchanged.
    * No view/session is created and no partial assets escape. */
   bool prepare_preview();
   void clear_preview();

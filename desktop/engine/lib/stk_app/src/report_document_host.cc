@@ -26,7 +26,7 @@ struct ReportDocumentHost::State : std::enable_shared_from_this<State> {
   wm::Window *window = nullptr;
   ui::Context *ui_identity = nullptr; // Compared only; access comes from the live Screen.
   ui::WidgetId viewport = 0, previous_anchor = 0, next_anchor = 0;
-  bool visible_requested = false, surface_visible = false;
+  bool visible_requested = false, surface_visible = false, has_media = false;
   struct FocusRequest {
     ResourceSession *session;
     Editor *owner;
@@ -43,13 +43,18 @@ struct ReportDocumentHost::State : std::enable_shared_from_this<State> {
   void hide() noexcept
   {
     pending_focus.reset();
+    const bool was_visible = surface_visible;
     surface_visible = false;
     bool failed = false;
     try {
       if (view) {
+        if (has_media && was_visible) {
+          std::string pause_error;
+          if (!view->pause_media(pause_error)) { failed = true; }
+        }
         view->set_visible(false);
         const auto actual = view->state();
-        failed = actual.visible || actual.focused;
+        failed = failed || actual.visible || actual.focused;
       }
     }
     catch (...) { failed = true; }
@@ -73,7 +78,7 @@ struct ReportDocumentHost::State : std::enable_shared_from_this<State> {
     hide();
     if (resources) { resources->close(); }
     try { if (view) { view->set_focus_exit_handler({}); view->close(); } } catch (...) {}
-    view.reset(); resources.reset(); entry.clear(); error.clear(); status = NativeViewStatus::Closed;
+    view.reset(); resources.reset(); entry.clear(); error.clear(); has_media = false; status = NativeViewStatus::Closed;
   }
   void disconnect() noexcept
   {
@@ -232,18 +237,21 @@ bool ReportDocumentHost::adopt(PreparedReportPreview preview)
   }
   std::vector<ResourceAsset> assets;
   assets.reserve(preview.assets.size());
+  bool has_media = false;
   for (size_t i = 0; i < preview.assets.size(); ++i) {
     auto &asset = preview.assets[i];
     if (i && asset.mime != "image/png" && asset.mime != "image/jpeg" &&
-        asset.mime != "image/gif" && asset.mime != "image/webp") {
-      state.fail("Prepared report contains a non-image secondary resource"); return false;
+        asset.mime != "image/gif" && asset.mime != "image/webp" && asset.mime != "video/mp4") {
+      state.fail("Prepared report contains an unsupported secondary resource"); return false;
     }
+    has_media = has_media || asset.mime == "video/mp4";
     assets.push_back({std::move(asset.path), std::move(asset.mime), std::move(asset.bytes)});
   }
   auto &id = preview.identity;
   state.resources = ResourceSession::create({std::move(id.project_id), std::move(id.report_id),
       std::move(id.source_sha256), std::move(id.session_id)}, std::move(assets), state.error);
   if (!state.resources) { state.status = NativeViewStatus::Failed; return false; }
+  state.has_media = has_media;
   state.scope_epoch = preview.project_scope_epoch; state.entry = std::move(preview.entry_path);
   state.status = NativeViewStatus::Loading;
   if (state.screen && state.layout) { state.screen->tag_redraw(); }
@@ -306,6 +314,25 @@ void ReportDocumentHost::return_focus()
 {
   if (state_->view && state_->view->return_focus()) { state_->focus_anchor(); }
 }
+bool ReportDocumentHost::pause_media()
+{
+  auto &state = *state_;
+  if (!state.has_media || !state.view || !state.resources || !state.resources->active() ||
+      state.scope_epoch != state.store.project_scope_epoch()) { return false; }
+  try {
+    std::string error;
+    if (!state.view->pause_media(error)) {
+      state.fail(error.empty() ? "Video playback could not be paused and was closed" : error);
+      return false;
+    }
+    if (state.screen && state.layout) { state.screen->tag_redraw(); }
+    return true;
+  }
+  catch (const std::exception &error) { state.fail(error.what()); }
+  catch (...) { state.fail("Video playback could not be paused and was closed"); }
+  return false;
+}
+bool ReportDocumentHost::has_media() const { return state_->has_media && has_content(); }
 NativeViewState ReportDocumentHost::state() const
 {
   if (state_->view) { return state_->view->state(); }

@@ -1,13 +1,14 @@
 # 冻结项目报告
 
-报告把一份 Markdown、HTML、PDF 或文本入口与选定资产保存在项目中，关闭并重新打开后仍读取同一份快照字节。
+报告把一份 Markdown、HTML、PDF、MP4 或文本入口与选定资产保存在项目中，关闭并重新打开后仍读取同一份快照字节。
 报告还可以记录当时选定的上下文及运行状态。它使用普通项目表和已有文件快照，不创建第二套运行系统。
 创建、读取、预览和导出均不会执行分析、启动任务或发送模型请求。
 
 报告存储、离线 Markdown／HTML 净化渲染接口及独立桌面报告标签和创建表单已有交付。
 源码 `023aa66` 已接入正式报告页的独立 Markdown／HTML／PDF 视口候选；原生后端仍默认关闭，实际验收状态见
 [运行记录](runtime-validation.md)。AI 报告表单及三模式布局已接入并完成本机专项；PDF 平台阅读验收、
-LaTeX 与视频继续按 P4 推进，平台实际显示仍以验收记录为准。
+LaTeX 主链已完成本机与真实工具链验证，见[编译指南](latex-workflows.md)。MP4 预览正在按 P4 接入；
+平台实际播放、文档显示与交互仍以验收记录为准，不能据此标记完整 P4 完成。
 原生后端的复现入口及尚需验证的交互见[文档原型](design/document-preview-spike.md)。
 
 ## 创建一份报告
@@ -79,7 +80,7 @@ Python 调用方可用 `reviewed = p.reports.review_sources(sources, expected_re
 不把生成正文伪装成文件索引或输入快照。版本与预算见[生成报告契约](specs/report-2.md)。
 
 在 **报告 / Reports** 页展开 **生成报告**，在 **报告证据** 中读取并添加已保存的上下文及需要的运行来源，
-至少包含一个上下文。需要图片时，展开 **可选冻结图片**，读取快照、选择图片并核对报告内路径；
+至少包含一个上下文。需要图片或 MP4 时，展开 **可选冻结图片与视频**，读取快照、选择资产并核对报告内路径；
 没有图片时无需选择快照。点击 **核对所选来源** 后可分页检查完整证据，再选其中一个作为 **主上下文**。
 
 选择现有端点和模型，输入 **报告要求**。Enter 换行，Ctrl+Enter（macOS 为 Command+Enter）完成文本编辑。
@@ -151,8 +152,8 @@ PNG 解码限单边 4096、总计 4,194,304 像素。其他资产保留元数据
 
 ### 文档阅读视图
 
-选择可读的 Markdown／HTML／PDF 报告后，明确点击 **预览报告**。
-Markdown／HTML 先准备净化入口，再串行读取并校验选定图片；PDF 通过既有预览接口读取最多 4 MiB 的完整二进制，
+选择可读的 Markdown／HTML／PDF／MP4 报告后，明确点击 **预览报告**。
+Markdown／HTML 先准备净化入口，再串行读取并校验选定图片与 MP4；PDF 通过既有预览接口读取最多 4 MiB 的完整二进制，
 分别核对来源与显示的 MIME、大小和实际 SHA，作为单入口交付，不读取其他附件。
 完整集合通过后才交给本标签的文档宿主；桥能力按入口类型发现，旧桥有 PDF 预览能力不代表支持 HTML 图片集合。
 阅读视图提供 **原文与资产**、**重新准备**、**关闭预览**、**进入文档**和**返回控件**。
@@ -166,6 +167,20 @@ Markdown／HTML 先准备净化入口，再串行读取并校验选定图片；P
 原生候选目前仅针对 macOS WKWebView 和 Windows WebView2；默认构建及 Linux 返回不支持提示，
 仍可检查原文、PNG 或导出 ZIP。开启候选的构建方法见[验证入口](design/document-preview-spike.md#候选源码与有限使用)。
 编译成功、净化资源和无窗口视口测试均不能证明实际浏览器显示、输入法或跨屏缩放通过；以逐平台证据为准。
+
+### 视频预览
+
+把 MP4 登记、冻结后，可直接设为报告入口；也可与 Markdown／HTML 入口一起加入报告，使用报告内路径引用：
+
+```html
+<video src="media/clip.mp4"></video>
+```
+
+单个 MP4 仍限 4 MiB，报告及显示集合分别限 32 MiB。请在系统视频控件中明确点击播放和拖动进度，
+或使用 STK 的 **暂停视频**。隐藏预览会暂停，重新显示不会自动续播；切换项目或来源会关闭旧会话。
+MP4 单独入口使用独立播放器页面，不把原始视频当成 HTML。视频不发送给模型，报告生成请求只保存附件元数据。
+容器后缀不保证编码可播放；系统缺少相应解码能力时，保留原文件和 ZIP 导出。当前原生候选仍默认关闭，
+Linux 不提供内嵌播放；无窗口测试和独立 FFmpeg 解码都不代替 macOS／Windows 的实际播放验收。
 
 Python 可以按当前选择读取或导出：
 
@@ -189,14 +204,17 @@ receipt = p.reports.export_file(report_id, "/absolute/new-report.zip", **bound)
 例如在源码目录执行 `python -m pip install ".[documents]"`；缺依赖会明确失败。
 
 面向原生资源会话的调用方还可显式使用 `p.reports.preview_resources(report_id, **bound)`，
-返回 `{preview, resources, total_size}`。这里只接受 Markdown／HTML 入口：`preview` 是上述净化预览，
-`resources` 仅含原清单中 PNG／JPEG／GIF／WebP 图片的 `{record_id, path, mime, sha256, size}`。
+返回 `{preview, resources, total_size}`。接受 Markdown／HTML 或 MP4 入口：`preview.source_path` 绑定原入口，
+`resources` 是原清单中 PNG／JPEG／GIF／WebP／MP4 的 `{record_id, path, mime, sha256, size}`。
+含视频时使用 `stk.report-renderer/2`；无媒体仍为 `/1`，兼容旧版没有 `source_path` 的 `/1` 回复。
+MP4 独立入口的 `preview.path` 为 `_stk-preview/{session_id}/player.html`，资源仅包含该原始 MP4，
+显示字节摘要与原始视频摘要独立核对。播放器不依赖 Markdown／nh3，也不会自动播放。
 次级 HTML、Markdown、CSS、文本和 PDF 不进入资源清单或页面相对链接映射，避免从净化入口进入未净化文档。
 
-此步骤只读取入口，不读取图片正文。调用方仍须按同一修订和清单摘要逐项调用 `asset`，核对身份、
+此步骤只读取入口，不读取其他图片或视频正文。调用方仍须按同一修订和清单摘要逐项调用 `asset`，核对身份、
 路径、MIME、大小和实际字节哈希，全部成功后才能一次建立原生会话；不能把其他原始 HTML 加入会话。
-返回的 `total_size` 按实际净化入口字节与图片声明大小计算，上限仍为 32 MiB。
-图片元数据不代表图片副本已通过内容校验或格式解码。关闭、切换项目或句柄／桥会话变化时应废弃准备结果，
+返回的 `total_size` 按实际显示入口字节与资源声明大小计算，上限仍为 32 MiB。
+资源元数据不代表副本已通过内容校验或媒体解码。关闭、切换项目或句柄／桥会话变化时应废弃准备结果，
 并关闭旧资源会话，使旧 URL 失效。这个接口本身不创建浏览器，也不表示完整富文档 UI 已交付。
 
 ZIP 包含 `stk-report.json` 和选定的完整原始资产，逐项验摘要后才发布新文件，不覆盖已有目标。

@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 
 namespace stk::app {
 namespace {
@@ -26,6 +27,7 @@ const std::string pdf_report_id = "c3333333-3333-4333-8333-333333333333";
 const std::string generated_report_id = "d4444444-4444-4444-8444-444444444444";
 const std::string generated_request_id = "e5555555-5555-4555-8555-555555555555";
 const std::string generated_response = "# Frozen generated reply\n\nOnly the saved observations are evidence.\n";
+const std::string video_report_id = "e6666666-6666-4666-8666-666666666666";
 
 // Keep real services and strict schema validation. Faults retain valid wire shapes so the
 // controller must independently bind every receipt. Hold replies only after service locks end.
@@ -108,6 +110,13 @@ def altered_prepare(*args, **kwargs):
     if current == 'omitted': result['total_size'] -= result['resources'].pop()['size']
     if current == 'reordered': result['resources'].reverse()
     if current == 'total': result['total_size'] += 1
+    if current == 'video_source_path': p['source_path'] = 'other.mp4'
+    if current == 'video_player_path': p['path'] = p['source_path']
+    if current == 'video_source_hash': p['source_content_sha256'] = '0' * 64
+    if current == 'video_resource_hash': result['resources'][0]['sha256'] = '0' * 64
+    if current == 'video_omitted': result['total_size'] -= result['resources'].pop(0)['size']
+    if current == 'video_legacy_renderer': p['renderer'] = 'stk.report-renderer/1'
+    if current == 'legacy_prepare_shape': p.pop('source_path', None)
     return result
 report_previews.preview_resources = altered_prepare
 identity_preview = report_previews.preview
@@ -139,6 +148,8 @@ report_previews.preview = altered_identity
 read = Reports.asset
 def altered_asset(self, *args, **kwargs):
     result = read(self, *args, **kwargs)
+    if result['mime'] == 'video/mp4' and mode() == 'video_bytes':
+        result['data'] = base64.b64encode(b'x' * result['size']).decode('ascii')
     if result['mime'].startswith('image/'):
         if mode() == 'image_bytes': result['data'] = base64.b64encode(b'x' * result['size']).decode('ascii')
         if mode() == 'image_second_bytes' and result['path'] == 'images/second.png':
@@ -192,7 +203,7 @@ class ReportsPreviewPython : public ::testing::Test {
   std::shared_ptr<const io::Payload> shown;
   std::string python, source_sha, project_id;
   const std::string markdown = "# Frozen report\n\n![Plot](../images/plot.png)\n\n[Unsafe](secondary.html)\n";
-  std::vector<uint8_t> png, second_png, pdf_bytes;
+  std::vector<uint8_t> png, second_png, pdf_bytes, video_bytes;
   std::string pdf_sha;
   std::string generated_sha;
   Json manifest, viewer_state;
@@ -279,10 +290,44 @@ class ReportsPreviewPython : public ::testing::Test {
         {"snapshot_id", snapshot.at("snapshot").at("id")}, {"entry_record_id", id}, {"expected_revision", revision + 2},
         {"assets", Json::array({{{"record_id", id}, {"path", "reports/document.pdf"}},
                                {{"record_id", image}, {"path", "images/plot.png"}}})}}).is_object());
-    project().refresh(); ASSERT_NO_FATAL_FAILURE(settle_project());
+    project().refresh();
+  ASSERT_NO_FATAL_FAILURE(settle_project());
     const auto record = call("project.reports.get", {{"handle", handle}, {"report_id", pdf_report_id}});
     ASSERT_TRUE(record.is_object()); pdf_sha = record.at("report").at("source_sha256").get<std::string>();
     ASSERT_NO_FATAL_FAILURE(load(pdf_report_id));
+  }
+  void create_video(bool embedded = false)
+  {
+    std::ifstream input(std::string(STK_REPO_ROOT) + "/desktop/spike/document_preview/fixtures/frozen-preview.mp4",
+                        std::ios::binary);
+    ASSERT_TRUE(input.good());
+    video_bytes.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    ASSERT_EQ(core::Sha256::hex(std::span<const uint8_t>(video_bytes)),
+              "a54fb5baf8ca34545a8e31ea46c8801347db722cc9c876279186ab8c94f860d1");
+    { std::ofstream output(dir.path() / "project/clip.mp4", std::ios::binary);
+      output.write(reinterpret_cast<const char *>(video_bytes.data()), std::streamsize(video_bytes.size()));
+      ASSERT_TRUE(output.good()); }
+    ASSERT_TRUE(wmtest::write_text(dir.str() + "/project/video.html",
+        "<h1>Frozen video</h1><video autoplay loop src=\"../media/视频%20%23100%25.mp4\"></video>"));
+    const auto handle = project().project()->handle;
+    const auto revision = project().project()->revision;
+    const auto indexed = call("project.files.index", {{"handle", handle}, {"expected_revision", revision},
+        {"paths", Json::array({"clip.mp4", "video.html"})}});
+    ASSERT_TRUE(indexed.is_object()); const auto ids = indexed.at("record_ids");
+    const auto image = manifest.at("assets").at(1).at("record_id");
+    const auto snapshot = call("project.snapshots.capture", {{"handle", handle}, {"expected_revision", revision + 1},
+        {"record_ids", Json::array({ids.at(0), ids.at(1), image})}});
+    ASSERT_TRUE(snapshot.is_object());
+    Json assets = Json::array();
+    if (embedded) { assets.push_back({{"record_id", ids.at(1)}, {"path", "reports/video.html"}}); }
+    assets.push_back({{"record_id", ids.at(0)}, {"path", "media/视频 #100%.mp4"}});
+    assets.push_back({{"record_id", image}, {"path", "images/plot.png"}});
+    ASSERT_TRUE(call("project.reports.create", {{"handle", handle}, {"name", "Frozen MP4"}, {"report_id", video_report_id},
+        {"snapshot_id", snapshot.at("snapshot").at("id")}, {"entry_record_id", embedded ? ids.at(1) : ids.at(0)},
+        {"expected_revision", revision + 2}, {"assets", assets}}).is_object());
+    project().refresh();
+  ASSERT_NO_FATAL_FAILURE(settle_project());
+    ASSERT_NO_FATAL_FAILURE(load(video_report_id));
   }
   void create_generated(const std::string &body, bool with_image = false, const std::string &entry = "report.md")
   {
@@ -800,7 +845,8 @@ TEST_F(ReportsPreviewPython, RestoringAReportWorkspaceDoesNotAutomaticallyPrepar
 TEST_F(ReportsPreviewPython, PdfUsesOneIdentityResponseWithBinaryBytesAndFreshSessions)
 {
   ASSERT_NO_FATAL_FAILURE(create_pdf()); ASSERT_TRUE(reports->supports_preview());
-  ASSERT_TRUE(reports->read_asset()); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->read_asset());
+  ASSERT_NO_FATAL_FAILURE(settle());
   const auto raw = reports->asset_bytes(); const auto version = reports->asset_version();
   const auto selection = reports->selected();
   ASSERT_TRUE(fs::remove(dir.path() / "project/document.pdf"));
@@ -839,7 +885,8 @@ TEST_F(ReportsPreviewPython, PdfWorksWithLegacyPreviewWhileHtmlStillRequiresReso
   ASSERT_NO_FATAL_FAILURE(settle_project()); reports->sync();
   ASSERT_NO_FATAL_FAILURE(load(pdf_report_id));
   ASSERT_FALSE(reports->supports("project.reports.preview_resources")); ASSERT_TRUE(reports->supports_preview());
-  ASSERT_TRUE(reports->prepare_preview()); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle());
   ASSERT_TRUE(reports->prepared_preview()); EXPECT_EQ(reports->prepared_preview()->assets[0].bytes, pdf_bytes);
   ASSERT_NO_FATAL_FAILURE(load()); EXPECT_FALSE(reports->supports_preview()); EXPECT_FALSE(reports->prepare_preview());
   EXPECT_EQ(count("pdf_prepare"), 1); EXPECT_EQ(count("prepare"), 0); old->close();
@@ -855,7 +902,8 @@ TEST_F(ReportsPreviewPython, MissingIdentityPreviewDisablesPdfWithoutDisablingHt
   EXPECT_FALSE(reports->supports_preview()); EXPECT_FALSE(reports->prepare_preview());
   EXPECT_FALSE(reports->preview_error().empty()); EXPECT_EQ(count("pdf_prepare"), 0);
   ASSERT_NO_FATAL_FAILURE(load()); ASSERT_TRUE(reports->supports_preview());
-  ASSERT_TRUE(reports->prepare_preview()); ASSERT_NO_FATAL_FAILURE(settle()); ASSERT_TRUE(reports->prepared_preview());
+  ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle()); ASSERT_TRUE(reports->prepared_preview());
   old->close();
 }
 
@@ -891,14 +939,17 @@ TEST_P(ReportsPdfInvalidation, HeldPdfCannotEscapeAnInvalidatedScopeOrSelection)
   else if (operation == "revision") {
     ASSERT_TRUE(call("project.apply", {{"handle", project().project()->handle}, {"expected_revision", reports->revision()},
         {"commands", Json::array({{{"op", "create_table"}, {"id", "f6666666-6666-4666-8666-666666666666"}, {"name", "Later"}}})}}).is_object());
-    project().refresh(); ASSERT_NO_FATAL_FAILURE(settle_project());
+    project().refresh();
+  ASSERT_NO_FATAL_FAILURE(settle_project());
   }
   else if (operation == "project") {
-    ASSERT_TRUE(project().create(dir.str() + "/other-pdf", "Other")); ASSERT_NO_FATAL_FAILURE(settle_project());
+    ASSERT_TRUE(project().create(dir.str() + "/other-pdf", "Other"));
+  ASSERT_NO_FATAL_FAILURE(settle_project());
   }
   else if (operation == "bridge") {
     old = std::move(client); project().attach(nullptr); store().set_bridge(nullptr); reports->sync();
-    ASSERT_TRUE(start_client("replacement-pdf")); ASSERT_NO_FATAL_FAILURE(settle_project());
+    ASSERT_TRUE(start_client("replacement-pdf"));
+  ASSERT_NO_FATAL_FAILURE(settle_project());
   }
   ASSERT_NO_FATAL_FAILURE(mode(""));
   ASSERT_NO_FATAL_FAILURE(drain(old ? *old : *client));
@@ -907,5 +958,92 @@ TEST_P(ReportsPdfInvalidation, HeldPdfCannotEscapeAnInvalidatedScopeOrSelection)
 }
 INSTANTIATE_TEST_SUITE_P(Scopes, ReportsPdfInvalidation,
     ::testing::Values("clear", "scope", "report", "close", "revision", "project", "bridge"));
+
+TEST_F(ReportsPreviewPython, Mp4UsesADistinctPlayerAndFrozenBytesAfterTheWorkingFileDisappears)
+{
+  ASSERT_NO_FATAL_FAILURE(create_video());
+  ASSERT_TRUE(fs::remove(dir.path() / "project/clip.mp4"));
+  ASSERT_TRUE(reports->supports_preview());
+  ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->prepared_preview()) << reports->preview_error();
+  const auto &preview = *reports->prepared_preview();
+  ASSERT_EQ(preview.assets.size(), 2u);
+  EXPECT_EQ(preview.entry_path, "_stk-preview/" + preview.identity.session_id + "/player.html");
+  EXPECT_EQ(preview.assets[0].path, preview.entry_path);
+  EXPECT_EQ(preview.assets[0].mime, "text/html; charset=utf-8");
+  EXPECT_EQ(preview.assets[1].path, "media/视频 #100%.mp4");
+  EXPECT_EQ(preview.assets[1].mime, "video/mp4"); EXPECT_EQ(preview.assets[1].bytes, video_bytes);
+  const std::string html(preview.assets[0].bytes.begin(), preview.assets[0].bytes.end());
+  EXPECT_NE(html.find("controls"), std::string::npos); EXPECT_NE(html.find("preload=\"none\""), std::string::npos);
+  EXPECT_EQ(html.find(" autoplay"), std::string::npos); EXPECT_EQ(html.find(" loop"), std::string::npos);
+  EXPECT_EQ(count("asset:media/视频 #100%.mp4"), 1); EXPECT_EQ(count("asset:images/plot.png"), 0);
+  EXPECT_FALSE(reports->asset_loaded()); EXPECT_EQ(count("model_start"), 0);
+  ASSERT_NO_FATAL_FAILURE(expect_viewer());
+}
+
+TEST_F(ReportsPreviewPython, HtmlVerifiesVideoAndRasterAssetsBeforePublishingOneCollection)
+{
+  ASSERT_NO_FATAL_FAILURE(create_video(true));
+  ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->prepared_preview()) << reports->preview_error();
+  const auto &preview = *reports->prepared_preview(); ASSERT_EQ(preview.assets.size(), 3u);
+  EXPECT_EQ(preview.entry_path, "reports/video.html");
+  EXPECT_EQ(preview.assets[1].mime, "video/mp4"); EXPECT_EQ(preview.assets[1].bytes, video_bytes);
+  EXPECT_EQ(preview.assets[2].mime, "image/png"); EXPECT_EQ(preview.assets[2].bytes, png);
+  const std::string html(preview.assets[0].bytes.begin(), preview.assets[0].bytes.end());
+  EXPECT_NE(html.find("<video"), std::string::npos); EXPECT_NE(html.find("controls"), std::string::npos);
+  EXPECT_EQ(html.find(" autoplay"), std::string::npos); EXPECT_EQ(html.find(" loop"), std::string::npos);
+  EXPECT_EQ(count("asset:media/视频 #100%.mp4"), 1); EXPECT_EQ(count("asset:images/plot.png"), 1);
+  EXPECT_EQ(count("prepare"), 1); EXPECT_FALSE(reports->asset_loaded());
+}
+
+class ReportsVideoInvalid : public ReportsPreviewPython, public ::testing::WithParamInterface<const char *> {};
+TEST_P(ReportsVideoInvalid, RejectsVideoSourcePlayerAndByteDriftBeforePublishingAnything)
+{
+  ASSERT_NO_FATAL_FAILURE(create_video());
+  ASSERT_NO_FATAL_FAILURE(mode(GetParam()));
+  ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  EXPECT_FALSE(reports->prepared_preview()); EXPECT_FALSE(reports->preview_error().empty());
+  EXPECT_FALSE(reports->asset_loaded()); EXPECT_EQ(count("prepare"), 1);
+}
+INSTANTIATE_TEST_SUITE_P(VideoReceipts, ReportsVideoInvalid, ::testing::Values(
+    "video_source_path", "video_player_path", "video_source_hash", "video_resource_hash", "video_omitted", "video_bytes"));
+
+TEST_F(ReportsPreviewPython, EmbeddedVideoCannotUseALegacyRendererThatDoesNotConfineMedia)
+{
+  ASSERT_NO_FATAL_FAILURE(create_video(true));
+  ASSERT_NO_FATAL_FAILURE(mode("video_legacy_renderer"));
+  ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  EXPECT_FALSE(reports->prepared_preview()); EXPECT_FALSE(reports->preview_error().empty());
+  EXPECT_EQ(count("asset:media/视频 #100%.mp4"), 0);
+}
+
+TEST_F(ReportsPreviewPython, ALoadedVideoReplyCannotCrossAProjectScopeInvalidation)
+{
+  ASSERT_NO_FATAL_FAILURE(create_video());
+  ASSERT_NO_FATAL_FAILURE(mode("hold_image"));
+  ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_TRUE(loop.pump_until([&] { reports->sync(); return fs::exists(dir.path() / "mode.held"); }, 30));
+  ASSERT_FALSE(reports->prepared_preview()); EXPECT_TRUE(reports->preview_busy());
+  store().invalidate_project_scope();
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  ASSERT_NO_FATAL_FAILURE(drain(*client));
+  EXPECT_FALSE(reports->prepared_preview()); EXPECT_FALSE(reports->preview_busy());
+  EXPECT_EQ(count("asset:media/视频 #100%.mp4"), 1); EXPECT_FALSE(reports->asset_loaded());
+}
+
+TEST_F(ReportsPreviewPython, LegacyHtmlPreparationRemainsCompatibleWithoutTheNewSourcePathField)
+{
+  ASSERT_NO_FATAL_FAILURE(load());
+  ASSERT_NO_FATAL_FAILURE(mode("legacy_prepare_shape"));
+  ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->prepared_preview()) << reports->preview_error();
+  EXPECT_EQ(reports->prepared_preview()->assets.size(), 3u);
+}
 }  // namespace
 }  // namespace stk::app

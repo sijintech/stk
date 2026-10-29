@@ -45,7 +45,8 @@ _MIMES = {".md": "text/markdown; charset=utf-8", ".markdown": "text/markdown; ch
           ".css": "text/css; charset=utf-8", ".txt": "text/plain; charset=utf-8",
           ".tex": "text/plain; charset=utf-8", ".log": "text/plain; charset=utf-8",
           ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-          ".gif": "image/gif", ".webp": "image/webp", ".pdf": "application/pdf"}
+          ".gif": "image/gif", ".webp": "image/webp", ".pdf": "application/pdf",
+          ".mp4": "video/mp4"}
 _KINDS = {"context", "simulation_run", "analysis_run", "workflow_run"}
 
 
@@ -91,7 +92,7 @@ def _path(value):
 def _mime(path):
     result = _MIMES.get(PurePosixPath(path).suffix.lower())
     if result is None:
-        raise ProjectError("Report assets support Markdown, HTML, CSS, text, PNG, JPEG, GIF, WebP and PDF")
+        raise ProjectError("Report assets support Markdown, HTML, CSS, text, PNG, JPEG, GIF, WebP, PDF and MP4")
     return result
 
 

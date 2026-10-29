@@ -21986,7 +21986,8 @@
             "image/jpeg",
             "image/gif",
             "image/webp",
-            "application/pdf"
+            "application/pdf",
+            "video/mp4"
           ]
         },
         "sha256": {
@@ -22325,7 +22326,8 @@
             "image/jpeg",
             "image/gif",
             "image/webp",
-            "application/pdf"
+            "application/pdf",
+            "video/mp4"
           ]
         },
         "content_sha256": {
@@ -22382,7 +22384,8 @@
             "image/jpeg",
             "image/gif",
             "image/webp",
-            "application/pdf"
+            "application/pdf",
+            "video/mp4"
           ]
         },
         "content_sha256": {
@@ -22409,7 +22412,8 @@
         "renderer": {
           "enum": [
             "identity",
-            "stk.report-renderer/1"
+            "stk.report-renderer/1",
+            "stk.report-renderer/2"
           ]
         },
         "source_mime": {
@@ -22422,7 +22426,8 @@
             "image/jpeg",
             "image/gif",
             "image/webp",
-            "application/pdf"
+            "application/pdf",
+            "video/mp4"
           ]
         },
         "source_content_sha256": {
@@ -22432,6 +22437,12 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 4194304
+        },
+        "source_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "Original manifest entry path. Resource preparation includes this binding; a standalone MP4 uses a separate virtual HTML player path."
         }
       },
       "required": [
@@ -22464,7 +22475,10 @@
             {
               "properties": {
                 "renderer": {
-                  "const": "stk.report-renderer/1"
+                  "enum": [
+                    "stk.report-renderer/1",
+                    "stk.report-renderer/2"
+                  ]
                 },
                 "mime": {
                   "const": "text/html; charset=utf-8"
@@ -22472,13 +22486,39 @@
                 "source_mime": {
                   "enum": [
                     "text/markdown; charset=utf-8",
-                    "text/html; charset=utf-8"
+                    "text/html; charset=utf-8",
+                    "video/mp4"
                   ]
-                },
-                "source_size": {
-                  "maximum": 1048576
                 }
-              }
+              },
+              "anyOf": [
+                {
+                  "properties": {
+                    "source_mime": {
+                      "enum": [
+                        "text/markdown; charset=utf-8",
+                        "text/html; charset=utf-8"
+                      ]
+                    },
+                    "source_size": {
+                      "maximum": 1048576
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "source_mime": {
+                      "const": "video/mp4"
+                    },
+                    "renderer": {
+                      "const": "stk.report-renderer/2"
+                    }
+                  },
+                  "required": [
+                    "source_path"
+                  ]
+                }
+              ]
             }
           ]
         },
@@ -22496,7 +22536,8 @@
                       "image/png",
                       "image/jpeg",
                       "image/gif",
-                      "image/webp"
+                      "image/webp",
+                      "video/mp4"
                     ]
                   }
                 }
@@ -22517,7 +22558,7 @@
         "total_size"
       ],
       "additionalProperties": false,
-      "description": "Exactly one sanitized Markdown/HTML entry plus up to 63 non-entry raster image descriptors, preserving original manifest order. Descriptors do not attest that image objects currently exist or match their checksums; retrieve them through asset with the same revision and manifest digest. total_size counts rendered entry bytes plus the declared image bytes."
+      "description": "One sanitized Markdown/HTML entry or a distinct virtual HTML player for a frozen MP4, plus up to 63 image/video descriptors in manifest order. source_path binds the original entry. A standalone MP4 includes only that MP4 as a resource; document entries include non-entry raster/MP4 resources. Descriptors require separate complete verified asset reads; total_size counts display entry plus original resource bytes. No playback, browser, model or compilation starts."
     },
     "projectReportExportResult": {
       "type": "object",

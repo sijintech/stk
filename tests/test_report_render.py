@@ -237,7 +237,7 @@ def test_malformed_html_does_not_reintroduce_active_content(source):
 def test_csp_default_blocks_fetches_and_only_hash_authorizes_trusted_style():
     document = Document(render("<p>hello</p>"))
     for directive in ("default-src", "script-src", "connect-src", "frame-src", "child-src",
-                      "object-src", "base-uri", "form-action", "img-src"):
+                      "object-src", "base-uri", "form-action", "img-src", "media-src"):
         assert f"{directive} 'none'" in document.csp
     expected = base64.b64encode(hashlib.sha256(report_render._STYLE.encode()).digest()).decode()
     assert f"style-src 'sha256-{expected}'" in document.csp
@@ -249,7 +249,7 @@ def test_csp_host_can_admit_only_bound_preview_prefix_or_exact_asset():
     custom = preview_prefix("stk-preview") + "图%20像/a%23b%25.png"
     document = Document(render("<p>hello</p>", csp_img_sources=(https, custom, https)))
     normalized = preview_prefix("stk-preview") + quote("图 像/a#b%.png", safe="/")
-    assert document.csp.endswith(f"img-src {https} {normalized}")
+    assert f"img-src {https} {normalized}" in [part.strip() for part in document.csp.split(";")]
     assert "file:" not in document.csp and "'self'" not in document.csp
 
 
@@ -366,3 +366,110 @@ def test_markdown_extensions_are_objects_and_never_use_plugin_discovery(monkeypa
 
     monkeypatch.setattr(markdown.core.util, "get_installed_extensions", forbidden, raising=False)
     assert b"<table>" in render("a | b\n--|--\n1 | 2", "text/markdown")
+
+
+@pytest.mark.parametrize("mime", ["text/html; charset=utf-8", "text/markdown; charset=utf-8"])
+def test_listed_mp4_has_manual_native_controls_without_active_page_content(mime):
+    selected = "clips/视频 #a%.mp4"
+    reference = "../" + quote(selected, safe="/")
+    mapped = "../source/" + quote(selected, safe="/")
+    media = {selected: mapped, "clips/second.mp4": "../source/clips/second.mp4"}
+    images = {"images/poster.png": "../source/images/poster.png"}
+    original_media, original_images = dict(media), dict(images)
+    source = (
+        '<video src="' + reference + '" autoplay loop muted preload="auto" '
+        'onplay="startUnsafe()" style="background:url(https://outside.invalid)">'
+        '<source src="../clips/second.mp4" type="video/mp4" onerror="unsafe()">'
+        '<source src="../clips/unselected.mp4" type="video/webm">'
+        '<p>Manual playback fallback</p></video><script>unsafe-project-script</script>'
+    ).encode()
+    unchanged = bytes(source)
+    document = Document(render(source, mime, asset_urls=images, media_urls=media))
+    assert document.attrs("video") == [
+        {"src": mapped, "controls": "", "preload": "none", "playsinline": ""},
+    ]
+    sources = document.attrs("source")
+    assert sources[0] == {"src": "../source/clips/second.mp4", "type": "video/mp4"}
+    assert "src" not in sources[1] and sources[1].get("type") in {None, "video/mp4"}
+    assert "Manual playback fallback" in body(render(source, mime, media_urls=media))
+    assert not document.attrs("script")
+    assert all(not name.startswith("on") and name not in {"autoplay", "loop", "muted", "style"}
+               for tag, attrs in document.elements if tag != "meta" for name in attrs)
+    assert {"name": "generator", "content": "stk.report-renderer/2"} in document.attrs("meta")
+    assert "media-src 'none'" in document.csp  # Rewriting never grants a fetch permission by itself.
+    assert "script-src 'none'" in document.csp and "connect-src 'none'" in document.csp
+    assert source == unchanged and media == original_media and images == original_images
+
+
+def test_generic_asset_mapping_does_not_authorize_video_source():
+    document = Document(render('<video src="clip.mp4"><source src="clip.mp4"></video>',
+                               asset_urls={"reports/clip.mp4": "clip.mp4"}))
+    assert all("src" not in attrs for tag in ("video", "source") for attrs in document.attrs(tag))
+    assert "media-src 'none'" in document.csp
+
+
+@pytest.mark.parametrize("url", [
+    "https://outside.invalid/clip.mp4", "//outside.invalid/clip.mp4", "file:///tmp/clip.mp4",
+    "data:video/mp4;base64,AAAA", "blob:https://stk-preview.invalid/movie", "javascript:play()",
+    "/clips/movie.mp4", "../../clips/movie.mp4", "../clips/unselected.mp4",
+    "../clips/movie.mp4?x=1", "../clips/movie.mp4#fragment", "../clips/%2fmovie.mp4",
+    "../clips/%5cmovie.mp4", "../clips/movie%00.mp4", "../clips/movie%C2%80.mp4",
+    "..\\clips\\movie.mp4", "../clips/%ff.mp4",
+])
+def test_video_and_source_reject_external_or_unselected_urls(url):
+    escaped = html.escape(url, quote=True)
+    document = Document(render(f'<video src="{escaped}"><source src="{escaped}"></video>',
+                               media_urls={"clips/movie.mp4": "../clips/movie.mp4"}))
+    assert all("src" not in attrs for tag in ("video", "source") for attrs in document.attrs(tag))
+    assert document.attrs("video") == [{"controls": "", "preload": "none", "playsinline": ""}]
+
+
+def test_mp4_csp_is_exact_session_asset_urls_and_keeps_other_fetches_closed():
+    filename = "clips/视频 #a%.mp4"
+    encoded = quote(filename, safe="/")
+    https = preview_prefix() + encoded
+    custom = preview_prefix("stk-preview") + encoded
+    document = Document(render('<video src="../' + encoded + '"></video>',
+        media_urls={filename: "../" + encoded}, csp_media_sources=(https, custom, https)))
+    policies = {part.strip().split(" ", 1)[0]: part.strip().split(" ", 1)[1]
+                for part in document.csp.split(";") if part.strip()}
+    assert policies["media-src"] == https + " " + custom
+    assert policies["img-src"] == "'none'" and policies["script-src"] == "'none'"
+    assert policies["connect-src"] == "'none'" and policies["object-src"] == "'none'"
+    assert "'self'" not in document.csp and "*" not in document.csp
+
+
+@pytest.mark.parametrize("source", [
+    "'self'", "https://outside.invalid/clip.mp4", "file:///tmp/clip.mp4", "stk-preview:",
+    preview_prefix(), preview_prefix("stk-preview"),
+    preview_prefix() + "clip.png", preview_prefix() + "clip.webm", preview_prefix() + "clip.mp4/",
+    preview_prefix() + "../clip.mp4", preview_prefix() + "%2fclip.mp4",
+    preview_prefix() + "clip.mp4?x=1", preview_prefix() + "clip.mp4#fragment",
+    preview_prefix().replace("11111111-1111-1111-1111-111111111111", "wrong-session") + "clip.mp4",
+    preview_prefix().replace("a" * 64, "wrong-digest") + "clip.mp4",
+    preview_prefix().replace("stk-preview.invalid/", "user@stk-preview.invalid/") + "clip.mp4",
+])
+def test_media_csp_refuses_broad_non_mp4_or_unbound_permissions(source):
+    with pytest.raises(ProjectError):
+        render("safe", media_urls={"clip.mp4": "clip.mp4"}, csp_media_sources=(source,))
+
+
+@pytest.mark.parametrize("media", [
+    [], {"clip.png": "clip.png"}, {"clip.webm": "clip.webm"}, {"../clip.mp4": "clip.mp4"},
+    {"clip.mp4": "https://outside.invalid/clip.mp4"}, {"clip.mp4": "file:///clip.mp4"},
+    {"clip.mp4": "//outside.invalid/clip.mp4"}, {"clip.mp4": "clip.mp4?x=1"},
+    {"clip.mp4": "clip.mp4#fragment"}, {"clip.mp4": "a%2fclip.mp4"},
+    {"clip.mp4": "bad%clip.mp4"}, {"clip.mp4": 42},
+])
+def test_explicit_media_map_rejects_non_mp4_and_unsafe_destinations(media):
+    with pytest.raises(ProjectError):
+        render("safe", media_urls=media)
+
+
+def test_media_filename_delimiters_stay_encoded_in_one_csp_directive():
+    filename = 'clip; media-src * & "quoted".mp4'
+    source = preview_prefix() + filename
+    document = Document(render("safe", media_urls={filename: quote(filename, safe="/")},
+                               csp_media_sources=(source,)))
+    assert quote(filename, safe="/.-_~") in document.csp
+    assert [part.strip().split(" ")[0] for part in document.csp.split(";")].count("media-src") == 1

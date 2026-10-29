@@ -138,6 +138,41 @@ TEST(ReportDocumentHost, HiddenReadingRetainsBytesButClearAndDestructionRevokeTh
   EXPECT_EQ(borrowed->read(url).status, 410);
 }
 
+TEST(ReportDocumentHost, FrozenVideoIsAConfinedSubresourceAndPreparationCannotStartPlayback)
+{
+  AppStore store; int creates = 0;
+  ReportDocumentHost host(store, [&](auto, auto, auto &) {
+    ++creates; return std::unique_ptr<document_preview::NativeDocumentView>{};
+  });
+  auto video = prepared(store);
+  video.assets.push_back({"media/视频 #100%.mp4", "video/mp4", {0, 0, 0, 16, 'f', 't', 'y', 'p'}});
+  const auto expected = video.assets.back().bytes;
+  ASSERT_TRUE(host.adopt(std::move(video))); ASSERT_TRUE(host.has_media());
+  EXPECT_EQ(creates, 0); EXPECT_FALSE(host.pause_media()); // No native Window or player exists.
+  const auto resources = host.session(); ASSERT_TRUE(resources);
+  const auto url = resources->url("media/视频 #100%.mp4"); ASSERT_FALSE(url.empty());
+  EXPECT_FALSE(resources->allows_navigation(url)); EXPECT_EQ(resources->read(url).bytes, expected);
+  const auto part = resources->read(url, "GET", "bytes=4-7");
+  EXPECT_EQ(part.status, 206); EXPECT_EQ(part.bytes, (std::vector<uint8_t>{'f', 't', 'y', 'p'}));
+  host.set_visible(false); host.set_visible(true);
+  EXPECT_EQ(creates, 0); EXPECT_EQ(resources->read(url).status, 200);
+  store.invalidate_project_scope();
+  EXPECT_FALSE(host.has_media()); EXPECT_FALSE(host.has_content()); EXPECT_EQ(resources->read(url).status, 410);
+}
+
+TEST(ReportDocumentHost, VideoRequiresAnHtmlPlayerAndRejectsUnsupportedMediaAtomically)
+{
+  AppStore store; ReportDocumentHost host(store);
+  for (const auto &mime : {"video/mp4", "video/webm", "audio/mpeg"}) {
+    auto invalid = prepared(store);
+    if (std::string(mime) == "video/mp4") {
+      invalid.entry_path = "movie.mp4"; invalid.assets = {{"movie.mp4", mime, {0, 1, 2}}};
+    }
+    else { invalid.assets.push_back({"media/movie", mime, {0, 1, 2}}); }
+    EXPECT_FALSE(host.adopt(std::move(invalid))); EXPECT_FALSE(host.has_media()); EXPECT_FALSE(host.session());
+  }
+}
+
 TEST(ReportDocumentHost, HeadlessLayoutNeverClaimsAttachmentAndChangingScreenRevokesSession)
 {
   wmtest::AppFixture first, second; int creates = 0;

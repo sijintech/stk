@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Confined report bytes are CPU-only; platform browser adapters are an explicit candidate.
+option(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_TEST_PROBES
+  "Build fixed, read-only own-window media probes for native document acceptance tests" OFF)
+if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_TEST_PROBES AND NOT STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW)
+  message(FATAL_ERROR "Native document test probes require the explicit native preview candidate")
+endif()
 add_library(stk_document_resources STATIC src/resources.cc)
 target_include_directories(stk_document_resources PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_features(stk_document_resources PUBLIC cxx_std_20)
@@ -18,6 +23,11 @@ add_library(stk_document_native STATIC ${_native_source})
 target_link_libraries(stk_document_native PUBLIC stk_document_resources stk_wm)
 target_compile_features(stk_document_native PUBLIC cxx_std_20)
 target_include_directories(stk_document_native PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_TEST_PROBES)
+  target_sources(stk_document_native PRIVATE src/test_media_probe.cc)
+  target_compile_definitions(stk_document_native PUBLIC STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES=1)
+  target_link_libraries(stk_document_native PRIVATE stk_io)
+endif()
 
 if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW AND APPLE)
   set_target_properties(stk_document_native PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)

@@ -4,6 +4,9 @@
  * install a Runtime, grant a directory to a page, or expose the desktop bridge to JavaScript.
  */
 #include "stk/document/native_view.hh"
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+#  include "stk/document/test_media_probe.hh"
+#endif
 
 #ifndef NOMINMAX
 #  define NOMINMAX
@@ -158,6 +161,11 @@ void cleanup_after_browser_exit(ICoreWebView2Environment *environment,
   profile->cleanup_scheduled = SUCCEEDED(result);
 }
 
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+struct View;
+std::vector<std::weak_ptr<View>> test_views;
+#endif
+
 struct View : std::enable_shared_from_this<View> {
   HWND parent = nullptr;
   // A private child makes focus ownership unambiguous when several native views share a
@@ -175,11 +183,14 @@ struct View : std::enable_shared_from_this<View> {
   bool has_bounds = false;
   FocusExitHandler focus_exit;
   uint64_t focus_generation = 0;
+  uint64_t media_generation = 0;
+  uint64_t resource_policy_generation = 0;
   bool closed = false;
   bool fatal = false;
   bool shutting_down = false;
   bool navigation_requested = false;
   bool awaiting_navigation_start = false;
+  bool autoplay_policy_ready = false;
   UINT64 navigation_id = 0;
   std::string pending_url;
   std::string submitted_url;
@@ -230,6 +241,8 @@ struct View : std::enable_shared_from_this<View> {
     }
     shutting_down = true;
     ++focus_generation;
+    ++media_generation;
+    ++resource_policy_generation;
     focus_exit = {};
     if (resources) {
       resources->close();
@@ -323,19 +336,37 @@ struct View : std::enable_shared_from_this<View> {
     if (FAILED(result)) {
       return result;
     }
-    ComText uri, method;
+    ComText uri, method, range;
     if (FAILED(result = request->get_Uri(&uri.value)) ||
         FAILED(result = request->get_Method(&method.value))) {
       return result;
     }
+    ComPtr<ICoreWebView2HttpRequestHeaders> request_headers;
+    BOOL has_range = FALSE;
+    if (FAILED(result = request->get_Headers(&request_headers)) ||
+        FAILED(result = request_headers->Contains(L"Range", &has_range))) {
+      return result;
+    }
+    BOOL duplicate_range = FALSE;
+    if (has_range) {
+      ComPtr<ICoreWebView2HttpHeadersCollectionIterator> ranges;
+      ComText name;
+      if (FAILED(result = request_headers->GetHeaders(L"Range", &ranges)) ||
+          FAILED(result = ranges->GetCurrentHeader(&name.value, &range.value)) ||
+          FAILED(result = ranges->MoveNext(&duplicate_range))) { return result; }
+    }
     const std::string request_method = utf8(method.value);
-    ResourceResponse response = resources->read(utf8(uri.value), request_method);
-    if (response.status != 200) {
+    const auto range_text = utf8(range.value);
+    ResourceResponse response = resources->read(utf8(uri.value), request_method,
+        duplicate_range || (has_range && range_text.empty()) ?
+            std::string_view{"invalid-range"} : std::string_view{range_text});
+    if (response.status != 200 && response.status != 206) {
       ++report.blocked_requests;
     }
     if (response.bytes.size() > std::numeric_limits<UINT>::max() ||
         response.mime.find_first_of("\r\n") != std::string::npos ||
-        response.content_security_policy.find_first_of("\r\n") != std::string::npos) {
+        response.content_security_policy.find_first_of("\r\n") != std::string::npos ||
+        response.content_range.find_first_of("\r\n") != std::string::npos) {
       return E_INVALIDARG;
     }
     ComPtr<IStream> content;
@@ -346,18 +377,20 @@ struct View : std::enable_shared_from_this<View> {
     std::string response_headers = "Content-Type: " + response.mime +
                                    "\r\nContent-Security-Policy: " + response.content_security_policy +
                                    "\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff"
-                                   "\r\nReferrer-Policy: no-referrer\r\n";
-    if (request_method != "HEAD") {
-      response_headers += "Content-Length: " + std::to_string(response.bytes.size()) + "\r\n";
-    }
+                                   "\r\nReferrer-Policy: no-referrer\r\nContent-Length: " +
+                                   std::to_string(response.content_length) + "\r\n";
+    if (response.accept_ranges) { response_headers += "Accept-Ranges: bytes\r\n"; }
+    if (!response.content_range.empty()) { response_headers += "Content-Range: " + response.content_range + "\r\n"; }
     const auto headers = wide(response_headers);
     if (headers.empty()) {
       return E_INVALIDARG;
     }
     ComPtr<ICoreWebView2WebResourceResponse> native_response;
+    const wchar_t *reason = response.status == 200 ? L"OK" : response.status == 206 ? L"Partial Content" :
+                            response.status == 416 ? L"Range Not Satisfiable" : L"Blocked";
     result = environment->CreateWebResourceResponse(content.Get(),
                                                     response.status,
-                                                    response.status == 200 ? L"OK" : L"Blocked",
+                                                    reason,
                                                     headers.c_str(),
                                                     &native_response);
     return FAILED(result) ? result : args->put_Response(native_response.Get());
@@ -605,7 +638,7 @@ struct View : std::enable_shared_from_this<View> {
       return result;
     }
     // Escape stays with the browser/IME; this event only represents native Tab traversal.
-    return controller->add_MoveFocusRequested(
+    result = controller->add_MoveFocusRequested(
         Callback<ICoreWebView2MoveFocusRequestedEventHandler>(
             [weak](ICoreWebView2Controller *, ICoreWebView2MoveFocusRequestedEventArgs *args) -> HRESULT {
               const HRESULT handled = args->put_Handled(TRUE);
@@ -645,11 +678,42 @@ struct View : std::enable_shared_from_this<View> {
               }
               return handled;
             }).Get(), &token);
+    if (FAILED(result)) { return result; }
+    ComPtr<ICoreWebView2_13> profile_web;
+    ComPtr<ICoreWebView2Profile> native_profile;
+    ComPtr<ICoreWebView2Profile4> permissions;
+    if (FAILED(result = web.As(&profile_web)) ||
+        FAILED(result = profile_web->get_Profile(&native_profile)) ||
+        FAILED(result = native_profile.As(&permissions))) {
+      return result;
+    }
+    // Apply the official origin permission before the first document navigation. The
+    // private preview profile is disposable; no user/browser profile setting is modified.
+    const auto policy_generation = ++resource_policy_generation;
+    const auto *expected_web = web.Get();
+    return permissions->SetPermissionState(
+        COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY, L"https://stk-preview.invalid",
+        COREWEBVIEW2_PERMISSION_STATE_DENY,
+        Callback<ICoreWebView2SetPermissionStateCompletedHandler>(
+            [weak, policy_generation, expected_web](HRESULT completed) -> HRESULT {
+              auto self = weak.lock();
+              if (!self || self->closed || self->fatal || !self->resources || !self->resources->active() ||
+                  self->resource_policy_generation != policy_generation || self->web.Get() != expected_web) {
+                return S_OK;
+              }
+              if (FAILED(completed)) {
+                self->fail("Could not disable document media autoplay", completed);
+                return S_OK;
+              }
+              self->autoplay_policy_ready = true;
+              self->navigate_pending();
+              return S_OK;
+            }).Get());
   }
 
   void navigate_pending()
   {
-    if (!web || pending_url.empty() || closed || fatal || !navigation_requested ||
+    if (!web || !autoplay_policy_ready || pending_url.empty() || closed || fatal || !navigation_requested ||
         awaiting_navigation_start) {
       return;
     }
@@ -819,6 +883,45 @@ class Win32DocumentView final : public NativeDocumentView {
     }
   }
 
+  bool pause_media(std::string &error) override
+  {
+    const auto view = view_;
+    error.clear();
+    if (!view->on_thread() || view->closed || view->fatal || !view->web ||
+        !view->resources || !view->resources->active()) {
+      error = "The native document view is closed or unavailable";
+      return false;
+    }
+    const auto generation = ++view->media_generation;
+    const auto navigation = view->report.navigation_generation;
+    const auto web = view->web;
+    const auto *expected_web = web.Get();
+    const std::weak_ptr<View> weak = view;
+    // ExecuteScript is host injection even when IsScriptEnabled is false. No project text,
+    // paths or arguments enter this fixed pause-only expression; page scripts stay disabled.
+    const HRESULT result = web->ExecuteScript(
+        LR"JS((() => { const media = Array.from(document.querySelectorAll('video,audio'));
+          for (const item of media) { item.pause(); }
+          return media.every(item => item.paused); })())JS",
+        Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
+            [weak, generation, navigation, expected_web](HRESULT completed, LPCWSTR value) -> HRESULT {
+              auto current = weak.lock();
+              if (!current || current->closed || current->fatal ||
+                  current->media_generation != generation || current->report.navigation_generation != navigation ||
+                  current->web.Get() != expected_web) { return S_OK; }
+              if (FAILED(completed) || !value || std::wcscmp(value, L"true") != 0) {
+                current->fail("Could not pause document media playback", FAILED(completed) ? completed : E_FAIL);
+              }
+              return S_OK;
+            }).Get());
+    if (FAILED(result)) {
+      view->fail("Could not request document media playback pause", result);
+      error = view->report.message;
+      return false;
+    }
+    return true;
+  }
+
   void focus() override
   {
     const auto view = view_;
@@ -923,6 +1026,9 @@ std::unique_ptr<NativeDocumentView> create_native_document_view(
   auto view = std::make_shared<View>();
   view->parent = static_cast<HWND>(parent.value);
   view->resources = std::move(resources);
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+  test_views.push_back(view);
+#endif
   view->report.message = "Creating the WebView2 native child view";
   const HRESULT started = view->begin();
   if (FAILED(started)) {
@@ -932,5 +1038,76 @@ std::unique_ptr<NativeDocumentView> create_native_document_view(
   // Keep a readable Failed state for missing Runtime; never silently open another window.
   return std::make_unique<Win32DocumentView>(std::move(view));
 }
+
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+namespace test {
+namespace {
+std::shared_ptr<View> find_view(wm::NativeWindowHandle parent, std::string_view session_id,
+                              std::string &error)
+{
+  error.clear();
+  DWORD pid = 0;
+  const auto window = static_cast<HWND>(parent.value);
+  if (parent.kind != wm::NativeWindowKind::Win32 || !IsWindow(window) ||
+      GetWindowThreadProcessId(window, &pid) != GetCurrentThreadId() || pid != GetCurrentProcessId() ||
+      session_id.size() != 36) {
+    error = "Media test probe requires this process's exact UI window and session"; return {};
+  }
+  std::erase_if(test_views, [](const auto &weak) { return weak.expired(); });
+  std::shared_ptr<View> found;
+  for (const auto &weak : test_views) {
+    const auto view = weak.lock();
+    if (!view || view->parent != window || view->closed || view->fatal || !view->resources ||
+        !view->resources->active() || view->resources->identity().session_id != session_id) { continue; }
+    if (found) { error = "Media test probe matched more than one live view"; return {}; }
+    found = view;
+  }
+  if (!found) { error = "Media test probe session is no longer attached to this window"; }
+  return found;
+}
+}
+
+std::shared_ptr<ResourceSession> resource_session(wm::NativeWindowHandle parent,
+                                                std::string_view session_id, std::string &error)
+{
+  const auto view = find_view(parent, session_id, error);
+  return view ? view->resources : nullptr;
+}
+
+bool probe_media(wm::NativeWindowHandle parent, std::string_view session_id,
+                 MediaProbeCallback callback, std::string &error)
+{
+  const auto view = find_view(parent, session_id, error);
+  if (!view || !callback || !view->web || view->report.status != NativeViewStatus::Ready) {
+    if (error.empty()) { error = "Media test probe requires a ready native document and callback"; }
+    return false;
+  }
+  const auto navigation = view->report.navigation_generation;
+  const auto session = view->resources;
+  const auto *expected_web = view->web.Get();
+  const std::weak_ptr<View> weak = view;
+  const HRESULT started = view->web->ExecuteScript(kMediaProbeScriptWide,
+      Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
+          [weak, navigation, session, expected_web, callback](HRESULT completed, LPCWSTR value) -> HRESULT {
+            MediaProbeResult result;
+            const auto current = weak.lock();
+            if (!current || current->closed || current->fatal || current->resources != session ||
+                !session->active() || current->report.navigation_generation != navigation ||
+                current->web.Get() != expected_web) {
+              result.error = "Media test probe source changed before its reply";
+            }
+            else if (FAILED(completed) || !value) { result.error = "Read-only media test probe failed"; }
+            else {
+              result.media.navigation_generation = navigation;
+              result.ok = parse_media_snapshot(utf8(value), result.media, result.error);
+            }
+            callback(std::move(result));
+            return S_OK;
+          }).Get());
+  if (FAILED(started)) { error = failure_message("Could not start read-only media test probe", started); return false; }
+  return true;
+}
+}  // namespace test
+#endif
 
 }  // namespace stk::document_preview

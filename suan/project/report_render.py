@@ -15,6 +15,7 @@ from .store import ProjectError
 
 
 RENDERER_ID = "stk.report-renderer/1"
+MEDIA_RENDERER_ID = "stk.report-renderer/2"
 MAX_INPUT_BYTES = 1024 * 1024
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 _MAX_PATH_BYTES = 1024
@@ -210,6 +211,73 @@ def _dependency(name):
         ) from None
 
 
+def _media_urls(values):
+    if values is None:
+        return {}
+    if type(values) is not dict:
+        raise ProjectError("Document media must map selected MP4 paths to relative URLs")
+    result = {}
+    for path, value in values.items():
+        mapped = _mapped_url(value)
+        if not _canonical_path(path) or not path.lower().endswith(".mp4") or mapped is None:
+            raise ProjectError("Document media must map selected MP4 paths to relative URLs")
+        result[path] = mapped
+    return result
+
+
+def _media_sources(sources, media):
+    # Reuse the established origin/identity/escaping check, then narrow media to
+    # concrete selected files. An image prefix must never grant a media subtree.
+    allowed = _image_sources(sources)
+    identity = None
+    for value in sources:
+        parts = _decode(urlsplit(value).path)[1:].split("/")
+        current = tuple(parts[:4])
+        if identity is not None and current != identity:
+            raise ProjectError("Document CSP media sources must bind one preview identity")
+        identity = current
+        if "/".join(parts[5:]) not in media:
+            raise ProjectError("Document CSP media source must select an exact listed MP4 asset")
+    return allowed
+
+
+def _document(body, title, image_sources, media_sources, *, renderer, player=False):
+    if not _utf8(title, limit=MAX_OUTPUT_BYTES):
+        raise ProjectError("Document title must be valid bounded UTF-8 text")
+    style = _STYLE + ("video { max-width: 100%; height: auto; }\n" if renderer == MEDIA_RENDERER_ID else "")
+    if player:
+        style += ("html, body { margin: 0; padding: 0; max-width: none; width: 100%; height: 100%; }\n"
+                  "video { display: block; width: 100%; height: 100vh; object-fit: contain; }\n")
+    style_hash = base64.b64encode(hashlib.sha256(style.encode("utf-8")).digest()).decode("ascii")
+    csp = (
+        "default-src 'none'; script-src 'none'; connect-src 'none'; frame-src 'none'; "
+        "child-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; "
+        f"style-src 'sha256-{style_hash}'; img-src {image_sources}"
+    )
+    csp += "; media-src " + media_sources
+    document = (
+        '<!doctype html>\n<html><head><meta charset="utf-8">'
+        '<meta http-equiv="Content-Security-Policy" content="' + html.escape(csp, quote=True) + '">'
+        '<meta name="referrer" content="no-referrer">'
+        '<meta name="generator" content="' + renderer + '">'
+        '<title>' + html.escape(title, quote=True) + '</title>'
+        '<style>' + style + '</style></head><body>' + body + '</body></html>\n'
+    ).encode("utf-8")
+    if len(document) > MAX_OUTPUT_BYTES:
+        raise ProjectError("Rendered document exceeds the 4 MiB output limit")
+    return document
+
+
+def render_media_player(*, media_path, media_url, csp_media_sources, title=""):
+    """Produce a fixed inert player; no optional renderer dependency or file I/O."""
+    media = _media_urls({media_path: media_url})
+    sources = _media_sources(csp_media_sources, media)
+    body = ('<video controls="" preload="none" playsinline="">'
+            '<source src="' + html.escape(media[media_path], quote=True) + '" type="video/mp4">'
+            '</video>')
+    return _document(body, title, "'none'", sources, renderer=MEDIA_RENDERER_ID, player=True)
+
+
 def render_document(
     source: bytes,
     mime: str,
@@ -218,6 +286,8 @@ def render_document(
     asset_urls: dict[str, str],
     title: str = "",
     csp_img_sources: tuple[str, ...] = (),
+    media_urls: dict[str, str] | None = None,
+    csp_media_sources: tuple[str, ...] = (),
 ) -> bytes:
     """Return a sanitized complete UTF-8 document without changing source bytes.
 
@@ -232,6 +302,11 @@ def render_document(
     ending in /assets/ or an exact asset path. This does not authorize any ordinary
     web origin or local filesystem directory. Native resource and navigation gates
     remain necessary even when these explicitly bound image sources are supplied.
+
+    ``media_urls`` separately identifies selected MP4 assets; ordinary asset links
+    do not grant video sources. Media is blocked unless ``csp_media_sources`` also
+    names exact MP4 files under one preview identity. Media-capable output uses
+    renderer/2 and fixed manual controls, without executing document scripts.
     """
     if type(source) is not bytes or len(source) > MAX_INPUT_BYTES:
         raise ProjectError("Document source must be bytes within the 1 MiB input limit")
@@ -253,6 +328,8 @@ def render_document(
     if not _utf8(title, limit=MAX_OUTPUT_BYTES):
         raise ProjectError("Document title must be valid bounded UTF-8 text")
     image_sources = _image_sources(csp_img_sources)
+    media = _media_urls(media_urls)
+    media_sources = _media_sources(csp_media_sources, media)
     try:
         text = source.decode("utf-8")
     except UnicodeError:
@@ -276,6 +353,12 @@ def render_document(
             raise ProjectError("Document Markdown could not be rendered") from None
 
     def attribute(tag, name, value):
+        if tag in {"video", "source"}:
+            if name == "src":
+                return _asset_url(value, entry_path, media, fragment=False)
+            if tag == "video":
+                return {"controls": "", "preload": "none", "playsinline": ""}.get(name)
+            return "video/mp4" if name == "type" else None
         if name in ("href", "src"):
             return _asset_url(value, entry_path, assets, fragment=tag == "a")
         if _controls(value):
@@ -295,27 +378,17 @@ def render_document(
         return value
 
     try:
+        attributes = {tag: set(values) for tag, values in _ATTRIBUTES.items()}
+        if media:
+            attributes.update(video={"src", "controls", "preload", "playsinline"}, source={"src", "type"})
         body = sanitizer.clean(
-            text, tags=_TAGS, clean_content_tags=_DROP_CONTENT,
-            attributes=_ATTRIBUTES, attribute_filter=attribute,
+            text, tags=_TAGS | ({"video", "source"} if media else set()), clean_content_tags=_DROP_CONTENT,
+            attributes=attributes, attribute_filter=attribute,
+            set_tag_attribute_values={"video": {"controls": "", "preload": "none", "playsinline": ""},
+                                      "source": {"type": "video/mp4"}} if media else {},
             url_schemes=set(), strip_comments=True,
         )
     except (ValueError, RecursionError):
         raise ProjectError("Document HTML could not be sanitized") from None
-    style_hash = base64.b64encode(hashlib.sha256(_STYLE.encode("utf-8")).digest()).decode("ascii")
-    csp = (
-        "default-src 'none'; script-src 'none'; connect-src 'none'; frame-src 'none'; "
-        "child-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; "
-        f"style-src 'sha256-{style_hash}'; img-src {image_sources}"
-    )
-    document = (
-        '<!doctype html>\n<html><head><meta charset="utf-8">'
-        '<meta http-equiv="Content-Security-Policy" content="' + html.escape(csp, quote=True) + '">'
-        '<meta name="referrer" content="no-referrer">'
-        '<meta name="generator" content="' + RENDERER_ID + '">'
-        '<title>' + html.escape(title, quote=True) + '</title>'
-        '<style>' + _STYLE + '</style></head><body>' + body + '</body></html>\n'
-    ).encode("utf-8")
-    if len(document) > MAX_OUTPUT_BYTES:
-        raise ProjectError("Rendered document exceeds the 4 MiB output limit")
-    return document
+    return _document(body, title, image_sources, media_sources,
+                     renderer=MEDIA_RENDERER_ID if media else RENDERER_ID)

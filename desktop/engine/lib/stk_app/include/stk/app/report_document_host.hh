@@ -30,6 +30,9 @@ class ReportDocumentHost {
   void set_visible(bool visible);
   void focus();
   void return_focus();
+  /** Explicitly pause admitted video. Becoming visible never resumes playback. */
+  bool pause_media();
+  bool has_media() const;
   document_preview::NativeViewState state() const;
   bool has_content() const;
   /** Borrowed immutable collection identity, also used by lifecycle contract tests. */

@@ -815,3 +815,205 @@ def test_review_empty_and_stale_revision_and_invalid_cas(project, monkeypatch):
             store.reports.create("Invalid", project[1]["id"], project[2][0]["record_id"], project[2],
                 report_id=str(uuid4()), expected_revision=2, expected_sources_sha256="not-a-checksum")
     assert store.info()["revision"] == 2
+
+
+# Actual ffmpeg H.264/yuv420p fixture: two 16x16 red/blue frames, 1 s, no audio.
+# Generated without project/model inputs; independently decoded during validation.
+MP4 = base64.b64decode(
+    'AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMMbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAA'
+    'AAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAA'
+    'Alt0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAA'
+    'AAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAHTbWRpYQAAACBtZGhk'
+    'AAAAAAAAAAAAAAAAAABAAAAAQABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABfm1p'
+    'bmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAT5zdGJsAAAAvnN0c2QA'
+    'AAAAAAAAAQAAAK5hdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABDExhdmMgbGlieDI2NAAAAAAA'
+    'AAAAAAAAAAAAAAAAAAAAGP//AAAANGF2Y0MBZAAK/+EAF2dkAAqs2V7ARAAAAwAEAAADABA8SJZYAQAGaOvjyyLA/fj4AAAAABBw'
+    'YXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAABbIAAAAAAAAABhzdHRzAAAAAAAAAAEAAAACAAAgAAAAABRzdHNzAAAAAAAAAAEAAAAB'
+    'AAAAHHN0c2MAAAAAAAAAAQAAAAEAAAACAAAAAQAAABxzdHN6AAAAAAAAAAAAAAACAAACvAAAAB0AAAAUc3RjbwAAAAAAAAABAAAD'
+    'PAAAAD11ZHRhAAAANW1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAACGlsc3QAAAAIZnJlZQAAAuFt'
+    'ZGF0AAACnwYF//+b3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE2NSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5'
+    'bGVmdCAyMDAzLTIwMjUgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0z'
+    'IGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDM6MHgxMTMgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhl'
+    'ZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTEgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFz'
+    'dF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9'
+    'MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9'
+    'MyBiX3B5cmFtaWQ9MiBiX2FkYXB0PTEgYl9iaWFzPTAgZGlyZWN0PTEgd2VpZ2h0Yj0xIG9wZW5fZ29wPTAgd2VpZ2h0cD0yIGtl'
+    'eWludD0yNTAga2V5aW50X21pbj0yIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1i'
+    'dHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4w'
+    'MACAAAAAFWWIhAAS//7oyfzLKy/j1DezRimzTQAAABlBmiFsQS/Yf/7R1P/wlbvay4FNqZQDNgle'
+)
+
+
+def _media_saved(tmp_path, *, entry="media/clip #100%.mp4", extra=True):
+    store = ProjectStore.create(tmp_path / "project", "Frozen media")
+    table, field, row, context = (str(uuid4()) for _ in range(4))
+    store.apply([{"op": "create_table", "id": table, "name": "Evidence"},
+                 {"op": "add_field", "id": field, "table_id": table, "name": "Origin", "type": "text"},
+                 {"op": "add_record", "id": row, "table_id": table},
+                 {"op": "set_cell", "table_id": table, "record_id": row, "field_id": field,
+                  "value": "Synthetic two-color offline fixture"}], expected_revision=0)
+    store.contexts.capture(table, [row], [field], expected_revision=store.info()["revision"],
+                           title="Media evidence", context_id=context)
+    movie = "media/clip #100%.mp4"
+    document = (b'<h1>Frozen media</h1><video autoplay loop onplay="evil()">'
+                b'<source src="../media/clip%20%23100%25.mp4" type="video/mp4"></video>')
+    inputs = {entry: MP4 if entry.endswith(".mp4") else document}
+    if entry != movie:
+        inputs[movie] = MP4
+    if extra:
+        inputs.update({"unused/second.mp4": MP4, "unused/image.png": PNG, "unused/other.html": b"<script>evil()</script>"})
+    for path, data in inputs.items():
+        target = store.directory / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    records = store.files.index(list(inputs), expected_revision=store.info()["revision"])["record_ids"]
+    snapshot = store.snapshots.capture(records, expected_revision=store.info()["revision"])["snapshot"]
+    assets = [{"record_id": record, "path": path} for record, path in zip(records, inputs)]
+    sources = [{"kind": "context", "id": context}]
+    revision = store.info()["revision"]
+    reviewed = store.reports.review_sources(sources, expected_revision=revision)
+    identity = str(uuid4())
+    store.reports.create("Frozen video", snapshot["id"], records[0], assets, sources=sources,
+        report_id=identity, expected_revision=revision, expected_sources_sha256=reviewed["sources_sha256"])
+    report = store.reports.get(identity)["report"]
+    selection = {"expected_revision": store.info()["revision"], "expected_source_sha256": report["source_sha256"]}
+    return store, identity, report, selection, inputs
+
+
+def test_mp4_entry_uses_inert_unique_wrapper_and_only_original_media_descriptor(tmp_path, monkeypatch):
+    from suan.project import report_previews, report_render
+    from test_report_render import Document
+    store, identity, report, selection, inputs = _media_saved(tmp_path)
+    before, history = store.snapshot(), store.history()
+    for path in inputs:
+        (store.directory / path).unlink()
+    monkeypatch.setattr(report_render, "_dependency", lambda *a: pytest.fail("MP4 player needs no Markdown/nh3"))
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("Preview never executes programs"))
+    result = report_previews.preview_resources(store, identity, **selection)
+    preview = result["preview"]
+    original = report["manifest"]["assets"][0]
+    assert result["resources"] == [original]
+    assert preview["source_path"] == original["path"] == report["manifest"]["entry_path"]
+    assert preview["path"] == "_stk-preview/" + preview["session_id"] + "/player.html"
+    assert preview["source_mime"] == "video/mp4" and preview["renderer"] == "stk.report-renderer/2"
+    assert preview["source_size"] == len(MP4) and preview["source_content_sha256"] == hashlib.sha256(MP4).hexdigest()
+    assert preview["source_sha256"] == report["source_sha256"]
+    data = base64.b64decode(preview["data"], validate=True)
+    assert preview["content_sha256"] == hashlib.sha256(data).hexdigest() != original["sha256"]
+    assert result["total_size"] == len(data) + len(MP4)
+    document = Document(data)
+    assert document.attrs("video") == [{"controls": "", "preload": "none", "playsinline": ""}]
+    assert document.attrs("source") == [{"src": "../../media/clip%20%23100%25.mp4", "type": "video/mp4"}]
+    assert not document.attrs("script") and "script-src 'none'" in document.csp
+    prefix = "/".join((preview["session_id"], preview["project_id"], identity, report["source_sha256"], "assets"))
+    assert "media-src stk-preview://local/" + prefix + "/media/clip%20%23100%25.mp4" in document.csp
+    assert "unused" not in document.csp and "img-src 'none'" in document.csp
+    # The original immutable input and context remain the report evidence; rendering makes no record.
+    assert report["manifest"]["sources"][0]["kind"] == "context"
+    assert report["manifest"]["sources"][0]["id"]
+    assert store.snapshot() == before and store.history() == history
+    again = report_previews.preview_resources(store, identity, **selection)["preview"]
+    assert again["session_id"] != preview["session_id"] and again["path"] != preview["path"]
+
+
+@pytest.mark.parametrize("entry", ["docs/report.html", "docs/report.md"])
+def test_listed_mp4_inside_documents_is_sanitized_with_exact_media_csp_and_preserved_source(tmp_path, entry):
+    from suan.project import report_previews
+    from test_report_render import Document
+    store, identity, report, selection, inputs = _media_saved(tmp_path, entry=entry)
+    result = report_previews.preview_resources(store, identity, **selection)
+    preview = result["preview"]
+    assert preview["path"] == preview["source_path"] == entry
+    assert preview["renderer"] == "stk.report-renderer/2"
+    assert [item["mime"] for item in result["resources"]] == ["video/mp4", "video/mp4", "image/png"]
+    document = Document(base64.b64decode(preview["data"]))
+    assert document.attrs("video") == [{"controls": "", "preload": "none", "playsinline": ""}]
+    assert document.attrs("source") == [{"src": "../media/clip%20%23100%25.mp4", "type": "video/mp4"}]
+    directive = next(item.strip() for item in document.csp.split(";") if item.strip().startswith("media-src "))
+    assert directive.count("/media/clip%20%23100%25.mp4") == 2
+    assert directive.count("/unused/second.mp4") == 2 and ".png" not in directive
+    asset = store.reports.asset(identity, entry, **selection)
+    assert base64.b64decode(asset["data"]) == inputs[entry]
+    assert asset["content_sha256"] == preview["source_content_sha256"]
+    # Legacy method preserves its old response shape and rendering capability.
+    legacy = report_previews.preview(store, identity, **selection)
+    assert "source_path" not in legacy and legacy["path"] == entry
+    assert legacy["renderer"] == "stk.report-renderer/1"
+
+
+def test_mp4_saved_report_reopens_exports_exact_bytes_and_rejects_corruption(tmp_path, monkeypatch):
+    from suan.project import report_previews
+    store, identity, report, selection, inputs = _media_saved(tmp_path, extra=False)
+    entry = report["manifest"]["entry_path"]
+    for path in inputs:
+        (store.directory / path).unlink()
+    reopened = ProjectStore(store.directory)
+    before, history = reopened.snapshot(), reopened.history()
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("Reopen/export never plays media"))
+    raw = reopened.reports.asset(identity, entry, **selection)
+    assert raw["mime"] == "video/mp4" and base64.b64decode(raw["data"]) == MP4
+    assert raw["content_sha256"] == hashlib.sha256(MP4).hexdigest()
+    preview = report_previews.preview_resources(reopened, identity, **selection)["preview"]
+    assert preview["source_content_sha256"] == raw["content_sha256"]
+    destination = tmp_path / "frozen-video.zip"
+    reopened.reports.export_file(identity, str(destination), **selection)
+    with zipfile.ZipFile(destination) as archive:
+        assert archive.read(entry) == MP4
+        envelope = json.loads(archive.read(reports.EXPORT_MANIFEST))
+        assert envelope["source_sha256"] == report["source_sha256"] and envelope["manifest"] == report["manifest"]
+    assert reopened.snapshot() == before and reopened.history() == history
+    for wrong in ({"expected_revision": selection["expected_revision"] - 1}, {"expected_source_sha256": "0" * 64}):
+        with pytest.raises(RevisionConflict):
+            report_previews.preview_resources(reopened, identity, **{**selection, **wrong})
+    store.snapshots._object(raw["content_sha256"]).write_bytes(MP4[:-1] + bytes([MP4[-1] ^ 1]))
+    with pytest.raises(ProjectError, match="checksum"):
+        report_previews.preview_resources(reopened, identity, **selection)
+    with pytest.raises(ProjectError, match="checksum"):
+        reopened.reports.export_file(identity, str(tmp_path / "bad.zip"), **selection)
+    assert not (tmp_path / "bad.zip").exists()
+
+
+def test_mp4_preview_rechecks_revision_after_read_and_counts_wrapper_in_total_budget(tmp_path, monkeypatch):
+    from suan.project import report_previews
+    store, identity, report, selection, _ = _media_saved(tmp_path, extra=False)
+    with monkeypatch.context() as patch:
+        patch.setattr(reports, "MAX_TOTAL_BYTES", len(MP4))
+        with pytest.raises(ProjectError, match="32 MiB"):
+            report_previews.preview_resources(store, identity, **selection)
+    original = reports._read_asset
+    def change_after_read(*args):
+        data = original(*args)
+        literal(store, identity, "name", "Concurrent report edit")
+        return data
+    monkeypatch.setattr(reports, "_read_asset", change_after_read)
+    with pytest.raises(RevisionConflict):
+        report_previews.preview_resources(store, identity, **selection)
+
+
+def test_mp4_storage_limits_are_checked_before_publication_at_exact_byte_boundaries(tmp_path, monkeypatch):
+    assert reports.MAX_ASSET_BYTES == 4 * 1024 * 1024 and reports.MAX_TOTAL_BYTES == 32 * 1024 * 1024
+    store = ProjectStore.create(tmp_path / "project", "Media byte limits")
+    source = store.directory / "clip.mp4"
+    source.write_bytes(MP4)
+    record = store.files.index([str(source)], expected_revision=0)["record_ids"][0]
+    snapshot = store.snapshots.capture([record], expected_revision=store.info()["revision"])["snapshot"]
+    revision, history = store.info()["revision"], store.history()
+    def save():
+        return store.reports.create("Limits", snapshot["id"], record, [{"record_id": record, "path": "clip.mp4"}],
+                                    report_id=str(uuid4()), expected_revision=revision)
+    for maximum in ("MAX_ASSET_BYTES", "MAX_TOTAL_BYTES"):
+        with monkeypatch.context() as patch:
+            patch.setattr(reports, maximum, len(MP4) - 1)
+            with pytest.raises(ProjectError):
+                save()
+        assert store.history() == history and store.reports.list()["total"] == 0
+    with monkeypatch.context() as patch:
+        patch.setattr(reports, "MAX_ASSET_BYTES", len(MP4))
+        patch.setattr(reports, "MAX_TOTAL_BYTES", len(MP4))
+        identity = save()["record_id"]
+        manifest = store.reports.get(identity)["report"]["manifest"]
+        assert manifest["assets"][0]["mime"] == "video/mp4"
+        assert manifest["assets"][0]["size"] == len(MP4)
+        assert manifest["assets"][0]["sha256"] == hashlib.sha256(MP4).hexdigest()

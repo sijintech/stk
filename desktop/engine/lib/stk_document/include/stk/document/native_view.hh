@@ -42,6 +42,13 @@ class NativeDocumentView {
   virtual bool navigate(std::string_view asset_path, std::string &error) = 0;
   virtual void set_bounds(ViewBounds bounds) = 0;
   virtual void set_visible(bool visible) = 0;
+  /** Pause only, never resume. False means a synchronous failure; asynchronous platform
+   * failures close the view and revoke its resources. Static views need no media implementation. */
+  virtual bool pause_media(std::string &error)
+  {
+    error = "Media playback control is not supported by this view.";
+    return false;
+  }
   /** Explicit focus only while the parent is active; never activate a background window. */
   virtual void focus() = 0;
   /** Called after native Tab traversal leaves the page and OS focus has been returned.

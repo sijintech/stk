@@ -414,3 +414,38 @@ def test_corrupt_source_observation_returns_a_public_error_before_review_seriali
     assert error["code"] == "invalid_params" and "provenance" in error["message"]
     assert store.history() == history and store.info()["revision"] == revision
     harness.assert_clean()
+
+
+@pytest.mark.parametrize("entry", ["media/clip #100%.mp4", "docs/report.html"])
+def test_actual_mp4_resources_cross_strict_bridge_with_source_identity_and_no_execution(inproc, tmp_path, monkeypatch, entry):
+    from test_project_reports import MP4, _media_saved
+    from suan.project import report_render
+    store, identity, report, selection, inputs = _media_saved(tmp_path, entry=entry)
+    harness = inproc()
+    handle = harness.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    params = {"handle": handle, "report_id": identity, **selection}
+    for path in inputs:
+        (store.directory / path).unlink()
+    before, history = store.snapshot(), store.history()
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("Media inspection never executes programs"))
+    if entry.endswith(".mp4"):
+        monkeypatch.setattr(report_render, "_dependency", lambda *a: pytest.fail("MP4 player needs no optional renderer"))
+    result = harness.call("project.reports.preview_resources", params)
+    preview = result["preview"]
+    assert preview["source_path"] == entry and preview["renderer"] == "stk.report-renderer/2"
+    assert preview["source_sha256"] == report["source_sha256"] and preview["source_size"] == len(inputs[entry])
+    if entry.endswith(".mp4"):
+        assert preview["path"] == "_stk-preview/" + preview["session_id"] + "/player.html"
+        assert len(result["resources"]) == 1
+    else:
+        assert preview["path"] == entry
+    videos = [item for item in result["resources"] if item["mime"] == "video/mp4"]
+    assert videos
+    for asset in videos:
+        read = harness.call("project.reports.asset", {**params, "path": asset["path"]})
+        assert base64.b64decode(read["data"]) == MP4
+        assert read["content_sha256"] == asset["sha256"] == hashlib.sha256(MP4).hexdigest()
+    assert harness.error("project.reports.preview_resources", {**params, "expected_source_sha256": "0" * 64})["code"] == "conflict"
+    assert store.snapshot() == before and store.history() == history
+    harness.assert_clean()

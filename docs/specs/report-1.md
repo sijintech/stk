@@ -35,11 +35,14 @@ Hashes provide consistency checks; ordinary table access is not a cryptographic 
 
 Asset records must be distinct members of that snapshot, with matching size and hash.
 Source and virtual suffixes must map to the same admitted MIME. Supported suffixes are `.md`, `.markdown`,
-`.html`, `.htm`, `.css`, `.txt`, `.tex`, `.log`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` and `.pdf`.
+`.html`, `.htm`, `.css`, `.txt`, `.tex`, `.log`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.pdf` and `.mp4`.
 Text MIME includes `charset=utf-8`. MIME admission does not validate every image or PDF encoding.
 The 2026-10-27 additive extension admits `.tex` and `.log` as `text/plain; charset=utf-8`
 for exact source and compilation-log evidence. They remain inert UTF-8 assets: creating,
 reading, reopening or exporting a report never starts a compiler or interprets log contents.
+The 2026-10-29 additive extension admits `.mp4` as `video/mp4`. The original bytes and provenance
+remain frozen report assets. Container admission does not certify a codec or system decoder;
+unsupported playback must retain the source and export path. Preparing or reopening never plays media.
 Paths are portable relative POSIX names, at most 1024 UTF-8 bytes: no absolute paths, `.`/`..`, backslashes,
 controls, Windows reserved names, trailing dot/space or NFC/case-folded file/directory collisions.
 `stk-report.json` is reserved at the root. Source paths are never used as arbitrary host filesystem paths.
@@ -91,7 +94,8 @@ The host binds and invalidates its own resource session; a UUID is not an author
 `preview_resources` is an additive, optional two-stage native resource preparation method. It accepts the
 same selection arguments as `preview` and returns exactly `{preview, resources, total_size}`. `preview`
 has the existing preview result shape, with a fresh session UUID, a Markdown/HTML source entry and
-sanitized HTML display bytes. `resources` contains only non-entry PNG/JPEG/GIF/WebP descriptors copied
+sanitized HTML display bytes. The media extension below preserves existing no-media and legacy `preview`
+behavior. `resources` contains only non-entry PNG/JPEG/GIF/WebP descriptors copied
 from the frozen manifest, in manifest order, each exactly `{record_id, path, mime, sha256, size}`.
 Secondary HTML/Markdown, CSS, plain text and PDF are excluded from both the resource list and generated
 URL mappings. Image CSP sources identify the exact admitted raster paths under the session/project/report/
@@ -111,6 +115,39 @@ at 32 MiB. Source and display bytes are budgeted separately: each rendered outpu
 Markdown/HTML input is at most 1 MiB; at most 63 resource descriptors accompany the one entry. No image
 body is embedded in this response. Separate, bounded `asset` responses avoid placing the 32 MiB display
 collection into one bridge line. Metadata and actual bytes still need final host verification before display.
+
+### Frozen MP4 resource preparation
+
+For `preview_resources`, a Markdown/HTML entry may additionally reference explicitly selected MP4 assets.
+Those resource descriptors follow the same manifest order, complete-byte verification, 4 MiB per-asset,
+32 MiB collection and 63-descriptor limits as images. A media-capable rendered entry uses
+`stk.report-renderer/2`; without MP4 resources it continues to use `/1`. The new response includes
+`preview.source_path`, exactly the original manifest entry. Legacy `/1` responses without that additive
+field remain readable. No secondary documents, remote media URLs, arbitrary filesystem paths or guessed
+assets are admitted.
+
+An MP4 can itself be the report entry. Its `source_path`, `source_mime`, `source_size` and
+`source_content_sha256` describe that original frozen MP4. Its display `path` is the distinct virtual name
+`_stk-preview/{session_id}/player.html`; `mime` is HTML, `renderer` is `/2`, and display hash/size cover
+the generated player. `resources` contains exactly the original MP4 descriptor, even if the report stores
+other unreferenced assets. Its relative URL is resolved from the player's virtual directory. The player
+uses only standard-library generation; it does not require Markdown/nh3 or start another program.
+
+The renderer accepts media references only through a separate typed MP4 map. Video controls are always
+present, preload is `none`, and inline playback is allowed. Autoplay, looping, event handlers and arbitrary
+page script remain disabled. Both document CSP and native resource policy restrict `media-src` to the
+exact listed MP4 URLs under this session/project/report/manifest identity. A video URL cannot become a
+top-level navigation. Native system controls provide explicit play and seeking; returning to a hidden
+preview never resumes playback. The host pauses media before hiding or closes and revokes the view if
+pause fails. Changing project, report, source version, bridge session or owning area revokes the session.
+These lifecycle rules do not prove that a particular system codec has decoded a frame.
+
+Native resource reads accept only GET/HEAD. GET supports one bounded byte range (`start-end`, `start-`
+or `-suffix`), returns 206 with generated `Content-Range` and correct length, and clamps an end beyond the
+entity. Malformed, multipart, overflowing and unsatisfiable ranges return 416 with `bytes */N`; HEAD
+ignores Range and returns the full entity length without a body. Closed sessions return 410 before
+method/range handling. Range responses slice already verified immutable bytes, not live files or network
+sources. Codec, actual play/seek, native focus and OS capture acceptance remain separate platform evidence.
 
 The renderer removes active content, arbitrary styles and external URLs, and admits only selected relative
 asset references. It produces a full UTF-8 HTML document with a restrictive CSP and fixed stylesheet hash.

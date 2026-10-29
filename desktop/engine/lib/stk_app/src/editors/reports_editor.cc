@@ -330,6 +330,12 @@ class ReportsEditor final : public Editor {
     focus.button("reports_document_return_focus", ctx.tr("reports.preview_return"), [this, current] {
       if (current()) { document_->return_focus(); }
     });
+    if (document_->has_media()) {
+      focus.button("reports_document_pause", ctx.tr("reports.video_pause"), [this, current] {
+        if (current()) { document_->pause_media(); }
+      }).disable(actual.status != NativeViewStatus::Ready);
+      layout.paragraph(ctx.tr("reports.video_help"));
+    }
     if (reports_->preview_busy()) { layout.label(ctx.tr("reports.preview_preparing")); }
     else if (!reports_->preview_error().empty()) { layout.paragraph(reports_->preview_error()); }
     else if (actual.status == NativeViewStatus::Unsupported) { layout.paragraph(ctx.tr("reports.preview_unsupported")); }
@@ -342,10 +348,11 @@ class ReportsEditor final : public Editor {
     const float unit = ctx.ui ? ctx.ui->style().unit : 20.0f;
     const float height = ctx.draw ? float(ctx.draw->rect.height()) : 0.0f;
     ui::WidgetId viewport = 0;
-    if (height >= 12.0f * unit && document_->has_content()) {
+    const float reserved_rows = document_->has_media() ? 15.0f : 10.0f;
+    if (height >= (reserved_rows + 2.0f) * unit && document_->has_content()) {
       // The reading mode has a fixed compact toolbar; leave an additional row below the
       // dedicated viewport so Tab can leave forwards as well as backwards.
-      viewport = layout.native_viewport("reports_document_viewport", std::max(1.0f, height / unit - 10.0f)).id;
+      viewport = layout.native_viewport("reports_document_viewport", std::max(1.0f, height / unit - reserved_rows)).id;
     }
     else if (document_->has_content()) { layout.label(ctx.tr("reports.preview_enlarge")); }
     const auto next_anchor = layout.button("reports_document_after", ctx.tr("reports.source_view"), [this, current] {

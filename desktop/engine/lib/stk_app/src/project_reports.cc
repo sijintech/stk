@@ -222,6 +222,10 @@ bool raster_mime(const std::string &mime)
 {
   return mime == "image/png" || mime == "image/jpeg" || mime == "image/gif" || mime == "image/webp";
 }
+bool media_mime(const std::string &mime)
+{
+  return mime == "video/mp4";
+}
 bool same_asset_descriptor(const Json &actual, const Json &expected)
 {
   if (!actual.is_object() || actual.size() != 5) { return false; }
@@ -573,7 +577,8 @@ bool ProjectReports::supports_preview() const
     if (mime == "application/pdf") {
       return size >= 0 && size <= max_asset_bytes && supports("project.reports.preview");
     }
-    return document_mime(mime) && size >= 0 && size <= 1024 * 1024 &&
+    return (document_mime(mime) || media_mime(mime)) && size >= 0 &&
+        size <= (media_mime(mime) ? max_asset_bytes : 1024 * 1024) &&
         supports("project.reports.preview_resources") && supports("project.reports.asset");
   }
   return false;
@@ -598,7 +603,7 @@ bool ProjectReports::prepare_preview()
   const bool pdf = io::get_string(*entry, "mime") == "application/pdf";
   if (!supports_preview()) {
     preview_error_ = pdf ? "PDF preview requires the preview bridge method and an entry within 4 MiB" :
-        "Resource preview requires the resource bridge methods and a Markdown or HTML entry within 1 MiB";
+        "Resource preview requires Markdown/HTML within 1 MiB or MP4 within 4 MiB and the resource bridge methods";
     changed(); return false;
   }
   preview_pending_ = std::make_unique<PreviewPreparation>();
@@ -654,7 +659,8 @@ void ProjectReports::accept_preview(const Json &result)
 {
   check_analysis_json_bounds(result, 6 * 1024 * 1024);
   require(preview_pending_ && result.is_object() && result.size() == 3 &&
-      result.contains("preview") && result.at("preview").is_object() && result.at("preview").size() == 14 &&
+      result.contains("preview") && result.at("preview").is_object() &&
+      result.at("preview").size() == (result.at("preview").contains("source_path") ? 15 : 14) &&
       result.contains("resources") && result.at("resources").is_array() && result.at("resources").size() <= 63,
       "Invalid report resource preparation response");
   auto &pending = *preview_pending_;
@@ -664,7 +670,11 @@ void ProjectReports::accept_preview(const Json &result)
     return io::get_string(asset, "path") == pending.result.entry_path;
   });
   require(entry != pending.manifest_assets.end(), "The report entry is missing from its manifest");
+  const bool video_entry = media_mime(io::get_string(*entry, "mime"));
+  const bool includes_media = std::any_of(pending.manifest_assets.begin(), pending.manifest_assets.end(),
+      [](const Json &asset) { return media_mime(io::get_string(asset, "mime")); });
   const auto session = io::get_string(preview, "session_id");
+  const auto display_path = video_entry ? "_stk-preview/" + session + "/player.html" : pending.result.entry_path;
   const auto display_sha = io::get_string(preview, "content_sha256");
   const auto display_size = io::get_int(preview, "size", -1);
   const auto source_size = io::get_int(preview, "source_size", -1);
@@ -672,23 +682,28 @@ void ProjectReports::accept_preview(const Json &result)
       io::get_string(preview, "project_id") == identity.project_id &&
       io::get_string(preview, "report_id") == identity.report_id &&
       io::get_string(preview, "source_sha256") == identity.source_sha256 && canonical_uuid(session) &&
-      io::get_string(preview, "path") == pending.result.entry_path &&
-      io::get_string(preview, "renderer") == "stk.report-renderer/1" &&
+      io::get_string(preview, "path") == display_path &&
+      (!preview.contains("source_path") || io::get_string(preview, "source_path") == pending.result.entry_path) &&
+      (!includes_media || preview.contains("source_path")) &&
+      io::get_string(preview, "renderer") == (includes_media ? "stk.report-renderer/2" : "stk.report-renderer/1") &&
       io::get_string(preview, "mime") == "text/html; charset=utf-8" &&
-      document_mime(io::get_string(preview, "source_mime")) &&
+      (document_mime(io::get_string(preview, "source_mime")) || video_entry) &&
       io::get_string(preview, "source_mime") == io::get_string(*entry, "mime") &&
       io::get_string(preview, "source_content_sha256") == io::get_string(*entry, "sha256") &&
-      source_size >= 0 && source_size <= 1024 * 1024 && source_size == io::get_int(*entry, "size", -1) &&
+      source_size >= 0 && source_size <= (video_entry ? max_asset_bytes : 1024 * 1024) &&
+      source_size == io::get_int(*entry, "size", -1) &&
       core::is_sha256_hex(display_sha) && display_size >= 0 && display_size <= max_asset_bytes,
       "Report preview source or display identity differs from the frozen manifest");
   Json expected = Json::array();
   for (const auto &asset : pending.manifest_assets) {
-    if (io::get_string(asset, "path") != pending.result.entry_path && raster_mime(io::get_string(asset, "mime"))) {
+    if (video_entry ? io::get_string(asset, "path") == pending.result.entry_path :
+        io::get_string(asset, "path") != pending.result.entry_path &&
+        (raster_mime(io::get_string(asset, "mime")) || media_mime(io::get_string(asset, "mime")))) {
       expected.push_back(asset);
     }
   }
   const auto &resources = result.at("resources");
-  require(resources.size() == expected.size(), "Report preview omitted or added raster resources");
+  require(resources.size() == expected.size(), "Report preview omitted or added image/video resources");
   int64_t total = display_size;
   for (size_t i = 0; i < expected.size(); ++i) {
     require(same_asset_descriptor(resources.at(i), expected.at(i)),
@@ -700,6 +715,7 @@ void ProjectReports::accept_preview(const Json &result)
   auto bytes = verified_preview_bytes(preview, display_size, display_sha);
   validate_preview_text(bytes);
   pending.result.identity.session_id = session;
+  pending.result.entry_path = display_path;
   pending.result.assets.push_back({pending.result.entry_path, "text/html; charset=utf-8", std::move(bytes)});
   pending.resources = std::move(expected);
   pending.total_size = total; pending.received_size = display_size;
@@ -729,21 +745,21 @@ void ProjectReports::read_preview_resource()
         io::get_string(result, "source_sha256") == identity.source_sha256 &&
         io::get_string(result, "path") == io::get_string(descriptor, "path") &&
         io::get_string(result, "mime") == io::get_string(descriptor, "mime") &&
-        raster_mime(io::get_string(result, "mime")) &&
+        (raster_mime(io::get_string(result, "mime")) || media_mime(io::get_string(result, "mime"))) &&
         io::get_string(result, "content_sha256") == io::get_string(descriptor, "sha256") &&
         io::get_int(result, "size", -1) == io::get_int(descriptor, "size", -2),
-        "Report preview image receipt differs from its frozen descriptor");
+        "Report preview image/video receipt differs from its frozen descriptor");
     const auto size = io::get_int(descriptor, "size", -1);
     auto bytes = verified_preview_bytes(result, size, io::get_string(descriptor, "sha256"));
     auto &current = *preview_pending_;
     require(size >= 0 && size <= 32 * 1024 * 1024 - current.received_size,
-            "Report preview images exceed the display budget");
+            "Report preview images/videos exceed the display budget");
     current.received_size += size;
     current.result.assets.push_back({io::get_string(descriptor, "path"), io::get_string(descriptor, "mime"), std::move(bytes)});
     ++current.next_resource;
     read_preview_resource();
   })) {
-    fail_preview("Report preview selection changed before its images were verified");
+    fail_preview("Report preview selection changed before its image/video assets were verified");
   }
 }
 }  // namespace stk::app

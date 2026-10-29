@@ -313,7 +313,8 @@ class ReportsEditorPython : public ::testing::Test {
     ASSERT_TRUE(item->enabled) << key;
     ASSERT_FALSE(item->rect.intersect(item->clip).empty()) << key;
     const auto [x, y] = f.widget_center(key);
-    ASSERT_GE(x, 0); ASSERT_LT(x, 1440); ASSERT_GE(y, 0); ASSERT_LT(y, 1000);
+    ASSERT_GE(x, f.screen.rect().xmin); ASSERT_LT(x, f.screen.rect().xmax);
+    ASSERT_GE(y, f.screen.rect().ymin); ASSERT_LT(y, f.screen.rect().ymax);
     ASSERT_TRUE(f.drv->click(x, y)) << key; ++clicks; frame();
   }
   void click_row(const std::string &key, int index)
@@ -323,7 +324,8 @@ class ReportsEditorPython : public ::testing::Test {
     const auto &style = f.screen.ui()->style();
     const int x = int(item->rect.x + item->rect.w * 0.5f);
     const int y = f.screen.rect().ymax - 1 - int(item->rect.y + style.pixel + style.unit * (float(index) + 0.5f));
-    ASSERT_GE(x, 0); ASSERT_LT(x, 1440); ASSERT_GE(y, 0); ASSERT_LT(y, 1000);
+    ASSERT_GE(x, f.screen.rect().xmin); ASSERT_LT(x, f.screen.rect().xmax);
+    ASSERT_GE(y, f.screen.rect().ymin); ASSERT_LT(y, f.screen.rect().ymax);
     ASSERT_TRUE(f.drv->click(x, y)); ++clicks; frame();
   }
   void text(const std::string &key, const std::string &value)
@@ -1097,6 +1099,118 @@ TEST_F(ReportsEditorPython, PdfPreviewButtonUsesTheIdentityMethodAndKeepsTheSour
   EXPECT_EQ(count("asset"), reads); EXPECT_EQ(area().editor().save_workspace_state(), reading);
   EXPECT_EQ(area().tab(1).save_workspace_state(), draft); expect_viewer();
 }
+
+struct ReportVideoLayout {
+  const char *language;
+  int width, height;
+  float scale;
+  const char *name;
+};
+
+void PrintTo(const ReportVideoLayout &layout, std::ostream *output)
+{
+  *output << layout.name;
+}
+class ReportsVideoMouse : public ReportsEditorPython,
+                          public ::testing::WithParamInterface<ReportVideoLayout> {};
+
+TEST_P(ReportsVideoMouse, FiveClicksPreviewFrozenMp4AndReturnWithoutPlaybackOrLosingDrafts)
+{
+  const auto layout = GetParam();
+  store().set_language(layout.language);
+  f.drv = std::make_unique<wmtest::ScreenDriver>(f.screen, layout.width, layout.height, layout.scale);
+  frame();
+  const std::string video_id = "d4444444-4444-4444-8444-444444444444";
+  const auto fixture = fs::path(STK_REPO_ROOT) / "desktop/spike/document_preview/fixtures/frozen-preview.mp4";
+  const auto bytes = read_bytes(fixture);
+  ASSERT_EQ(bytes.size(), 41558u);
+  ASSERT_EQ(core::Sha256::hex(bytes), "a54fb5baf8ca34545a8e31ea46c8801347db722cc9c876279186ab8c94f860d1");
+  const auto live = dir.path() / "project/clip.mp4";
+  ASSERT_TRUE(fs::copy_file(fixture, live));
+  const auto handle = project().project()->handle;
+  const auto revision = project().project()->revision;
+  const auto indexed = call("project.files.index", {{"handle", handle}, {"expected_revision", revision},
+      {"paths", Json::array({core::path_to_utf8(live)})}});
+  ASSERT_TRUE(indexed.is_object());
+  const auto ids = indexed.at("record_ids"); ASSERT_EQ(ids.size(), 1u);
+  const auto captured = call("project.snapshots.capture", {{"handle", handle}, {"record_ids", ids},
+      {"expected_revision", revision + 1}});
+  ASSERT_TRUE(captured.is_object());
+  ASSERT_TRUE(call("project.reports.create", {{"handle", handle}, {"name", "Frozen MP4 mouse fixture"},
+      {"snapshot_id", captured.at("snapshot").at("id")}, {"entry_record_id", ids.at(0)},
+      {"assets", Json::array({{{"record_id", ids.at(0)}, {"path", "clip.mp4"}}})},
+      {"report_id", video_id}, {"expected_revision", revision + 2}}).is_object());
+  ASSERT_TRUE(fs::remove(live)); // The five-click flow must read only the frozen snapshot.
+  project().refresh(); ASSERT_NO_FATAL_FAILURE(settle_project());
+  ASSERT_NO_FATAL_FAILURE(prepare_create("Keep this unsaved video creation draft"));
+  ASSERT_NO_FATAL_FAILURE(click("reports_create_panel")); // Collapse without discarding the draft.
+  const auto create_draft = area().editor().save_workspace_state().at("create_draft");
+  const auto hidden_python = area().tab(1).save_workspace_state();
+  ASSERT_TRUE(area().editor().has_unsaved_changes());
+  ASSERT_TRUE(area().tab(1).has_unsaved_changes());
+  EXPECT_EQ(count("prepare"), 0); EXPECT_EQ(count("pdf_prepare"), 0); EXPECT_EQ(count("asset"), 0);
+  EXPECT_EQ(widget("reports_document_viewport"), nullptr);
+  const auto *list = widget("reports_list"); ASSERT_NE(list, nullptr); ASSERT_NE(list->list, nullptr);
+  int row = -1;
+  for (int i = 0; i < list->list->count; ++i) {
+    if (list->list->text(i) == "Frozen MP4 mouse fixture") { row = i; break; }
+  }
+  ASSERT_GE(row, 0);
+  RecordProperty("starting_layout", std::string(layout.language) + " " + std::to_string(layout.width) +
+      "x" + std::to_string(layout.height) + " scale=" + std::to_string(layout.scale) +
+      "; a4 maximized Reports list; collapsed unsaved create draft; hidden Python draft; existing Viewer payload");
+  clicks = 0;
+  ASSERT_NO_FATAL_FAILURE(click_row("reports_list", row));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_preview"));
+  const auto reading = area().editor().save_workspace_state();
+  ASSERT_EQ(reading.at("report_id"), video_id); ASSERT_EQ(reading.at("asset_path"), "clip.mp4");
+  EXPECT_EQ(reading.at("create_draft"), create_draft);
+  EXPECT_EQ(count("prepare"), 0); EXPECT_EQ(count("pdf_prepare"), 0); EXPECT_EQ(count("asset"), 0);
+  ASSERT_NO_FATAL_FAILURE(click("reports_preview"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_document_viewport"));
+  ASSERT_NE(widget("reports_document_pause"), nullptr);
+  ASSERT_NE(widget("reports_document_focus"), nullptr);
+  EXPECT_EQ(widget("reports_document_viewport")->type, ui::WidgetType::NativeViewport);
+  // This CPU screen has no native Window. Preparation is not evidence of playback.
+  EXPECT_FALSE(widget("reports_document_pause")->enabled);
+  EXPECT_FALSE(widget("reports_document_focus")->enabled);
+  EXPECT_EQ(count("prepare"), 1); EXPECT_EQ(count("pdf_prepare"), 0); EXPECT_EQ(count("asset"), 2);
+  // One source verification occurs inside preparation; one explicit asset RPC verifies the native resource.
+  EXPECT_EQ(widget("reports_text_page"), nullptr); EXPECT_EQ(widget("reports_image"), nullptr);
+  EXPECT_EQ(area().editor().save_workspace_state(), reading);
+  ASSERT_NO_FATAL_FAILURE(click("reports_document_source"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_read_asset"));
+  EXPECT_EQ(widget("reports_document_viewport"), nullptr); EXPECT_EQ(widget("reports_document_pause"), nullptr);
+  EXPECT_EQ(count("prepare"), 1); EXPECT_EQ(count("asset"), 2);
+  EXPECT_EQ(area().editor().save_workspace_state(), reading);
+  ASSERT_NO_FATAL_FAILURE(click("reports_preview"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_document_viewport"));
+  ASSERT_NE(widget("reports_document_pause"), nullptr); EXPECT_FALSE(widget("reports_document_pause")->enabled);
+  EXPECT_EQ(count("prepare"), 1); EXPECT_EQ(count("asset"), 2); // Reuse the verified prepared resources.
+  ASSERT_NO_FATAL_FAILURE(click("reports_document_close"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_read_asset"));
+  EXPECT_EQ(clicks, 5); RecordProperty("actual_mouse_clicks", clicks);
+  EXPECT_EQ(widget("reports_document_viewport"), nullptr); EXPECT_EQ(widget("reports_document_pause"), nullptr);
+  EXPECT_EQ(area().editor().save_workspace_state(), reading);
+  EXPECT_EQ(area().tab(1).save_workspace_state(), hidden_python);
+  EXPECT_TRUE(area().editor().has_unsaved_changes()); EXPECT_TRUE(area().tab(1).has_unsaved_changes());
+  expect_viewer();
+  ASSERT_TRUE(area().editor().load_workspace_state(reading));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_preview"));
+  EXPECT_EQ(widget("reports_document_viewport"), nullptr); EXPECT_EQ(widget("reports_document_pause"), nullptr);
+  EXPECT_EQ(count("prepare"), 1); EXPECT_EQ(count("pdf_prepare"), 0); EXPECT_EQ(count("asset"), 2);
+  EXPECT_EQ(area().editor().save_workspace_state(), reading);
+  EXPECT_EQ(area().tab(1).save_workspace_state(), hidden_python);
+  EXPECT_TRUE(area().editor().has_unsaved_changes()); EXPECT_TRUE(area().tab(1).has_unsaved_changes());
+  expect_viewer();
+}
+
+INSTANTIATE_TEST_SUITE_P(LanguagesWidthsAndScales, ReportsVideoMouse, ::testing::Values(
+    ReportVideoLayout{"en", 1440, 1000, 1.0f, "EnglishWide1x"},
+    ReportVideoLayout{"zh_CN", 1440, 1000, 1.0f, "ChineseWide1x"},
+    ReportVideoLayout{"en", 900, 1000, 1.0f, "EnglishNarrow1x"},
+    ReportVideoLayout{"zh_CN", 1800, 2000, 2.0f, "ChineseNarrow2x"}),
+    [](const ::testing::TestParamInfo<ReportVideoLayout> &info) { return info.param.name; });
 
 }  // namespace
 }  // namespace stk::app

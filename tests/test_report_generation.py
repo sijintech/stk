@@ -25,6 +25,7 @@ from suan.project.request_executor import ConfirmedCancellation, DefinitiveFailu
 from suan.project.requests import REPORT_PROMPT_VERSION, _request_hash
 from test_project_contexts import model, capture, cell  # noqa: F401
 from test_request_executor import ControlledAdapter, eventually, idle
+from test_project_reports import MP4
 
 
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5WQAAAAASUVORK5CYII=")
@@ -242,6 +243,93 @@ def test_mixed_sources_and_real_snapshot_survive_run_progress_and_deleted_live_f
     reopened = ProjectStore(store.directory)
     assert reopened.reports.get(result["record_id"])["report"] == report
     assert reopened.reports.generation_request(request["id"])["input"] == frozen
+
+
+@pytest.mark.parametrize("entry", ["report.md", "report.html"])
+def test_generated_video_freezes_metadata_and_preserves_original_snapshot_through_export(
+        model, monkeypatch, tmp_path, entry):
+    from test_report_render import Document
+
+    store, _ = model
+    context = capture(model)
+    live = store.directory / "clip #100%.mp4"
+    live.write_bytes(MP4)  # Real two-frame H.264 fixture, shared with file-report tests.
+    indexed = store.files.index([str(live)], expected_revision=store.info()["revision"])
+    identity = indexed["record_ids"][0]
+    snapshot = store.snapshots.capture([identity], expected_revision=indexed["revision"])["snapshot"]
+    asset = {"record_id": identity, "path": "media/clip #100%.mp4"}
+    descriptor = {**asset, "mime": "video/mp4", "sha256": hashlib.sha256(MP4).hexdigest(), "size": len(MP4)}
+    selected = selection(store, snapshot=snapshot, assets=[asset])
+    # Preparing the frozen request and its wire payload may read metadata only.
+    with monkeypatch.context() as patch:
+        patch.setattr(reports, "_read_asset", lambda *a: pytest.fail("request read video bytes"))
+        patch.setattr(store.snapshots, "resolve", lambda *a, **k: pytest.fail("request resolved video bytes"))
+        request = prepare(store, context, selected)
+        frozen = store.requests.input(request["id"])
+        payload, stream_payload, digest = _payload(frozen, adapter="controlled")
+    assert frozen["report_input"]["assets"] == [descriptor]
+    evidence = json.loads(json.loads(payload)["messages"][1]["content"])
+    assert evidence == {"saved_context": context, "question": frozen["message"]["text"],
+                        "report_input": frozen["report_input"]}
+    assert json.loads(stream_payload)["messages"] == json.loads(payload)["messages"]
+    assert digest.hex() == request["input_sha256"] == _digest(frozen)
+    for encoded in (_encode(frozen), payload, stream_payload):
+        assert MP4 not in encoded and base64.b64encode(MP4) not in encoded
+
+    # Complete the saved journal directly; no executor, model or network is used.
+    monkeypatch.setattr(RequestExecutor, "start", lambda *a, **k: pytest.fail("unexpected model execution"))
+    video = '<video autoplay loop><source src="media/clip%20%23100%25.mp4" type="video/mp4"></video>'
+    reply = ("# Frozen video\n\n" if entry.endswith(".md") else "<h1>Frozen video</h1>\n") + video
+    executor_id = str(uuid4())
+    claimed, accepted = store.requests._claim(request["id"], executor_id=executor_id)
+    assert accepted and claimed["status"] == "running"
+    done = store.requests._complete(request["id"], executor_id=executor_id, text=reply,
+                                    metadata={"model": "report-test"})
+    assert done["status"] == "completed" and store.reports.list()["total"] == 0
+    result = freeze(store, done, reply, entry_path=entry)
+    report = store.reports.get(result["record_id"])["report"]
+    manifest = report["manifest"]
+    assert report["format"] == "stk.report/2" and manifest["assets"][1:] == [descriptor]
+    assert manifest["snapshot_id"] == snapshot["id"] and manifest["snapshot_sha256"] == snapshot["sha256"]
+    assert manifest["generation"]["body"] == reply and manifest["generation"]["edited"] is False
+    assert manifest["generation"]["input_sha256"] == _digest(frozen)
+    assert manifest["sources"][0]["context"] == context
+    kwargs = {"expected_revision": result["revision"], "expected_source_sha256": report["source_sha256"]}
+    prepared = preview_resources(store, result["record_id"], **kwargs)
+    assert prepared["resources"] == [descriptor]
+    preview = prepared["preview"]
+    assert preview["renderer"] == "stk.report-renderer/2" and preview["path"] == preview["source_path"] == entry
+    assert preview["source_content_sha256"] == hashlib.sha256(reply.encode()).hexdigest()
+    document = Document(base64.b64decode(preview["data"]))
+    assert document.attrs("video") == [{"controls": "", "preload": "none", "playsinline": ""}]
+    assert document.attrs("source") == [{"src": "media/clip%20%23100%25.mp4", "type": "video/mp4"}]
+    media = next(part.strip() for part in document.csp.split(";") if part.strip().startswith("media-src "))
+    prefix = "/".join((preview["session_id"], preview["project_id"], result["record_id"],
+                       report["source_sha256"], "assets", "media/clip%20%23100%25.mp4"))
+    assert media == "media-src stk-preview://local/" + prefix + " https://stk-preview.invalid/" + prefix
+    assert prepared["total_size"] == preview["size"] + len(MP4)
+
+    live.unlink()
+    reopened = ProjectStore(store.directory)
+    before, history = reopened.snapshot(), reopened.history()
+    assert reopened.reports.get(result["record_id"])["report"] == report
+    assert reopened.reports.generation_request(request["id"])["input"] == frozen
+    assert reopened.requests.get(request["id"]) == done
+    ready = preview_resources(reopened, result["record_id"], **kwargs)
+    assert ready["resources"] == [descriptor] and ready["preview"]["renderer"] == "stk.report-renderer/2"
+    raw = reopened.reports.asset(result["record_id"], asset["path"], **kwargs)
+    assert raw["content_sha256"] == descriptor["sha256"] and base64.b64decode(raw["data"]) == MP4
+    assert base64.b64decode(reopened.reports.asset(result["record_id"], entry, **kwargs)["data"]) == reply.encode()
+    destination = tmp_path / (entry + ".zip")
+    receipt = reopened.reports.export_file(result["record_id"], str(destination), **kwargs)
+    assert receipt["sha256"] == hashlib.sha256(destination.read_bytes()).hexdigest()
+    with zipfile.ZipFile(destination) as archive:
+        assert set(archive.namelist()) == {reports.EXPORT_MANIFEST, entry, asset["path"], INPUT_EXPORT, RESPONSE_EXPORT}
+        assert archive.read(asset["path"]) == MP4 and archive.read(entry) == reply.encode()
+        assert archive.read(INPUT_EXPORT) == _encode(frozen) and archive.read(RESPONSE_EXPORT) == reply.encode()
+        envelope = json.loads(archive.read(reports.EXPORT_MANIFEST))
+        assert envelope["manifest"] == manifest and envelope["source_sha256"] == report["source_sha256"]
+    assert reopened.snapshot() == before and reopened.history() == history
 
 
 @pytest.mark.parametrize("kind", ["simulation_run", "analysis_run", "workflow_run"])
