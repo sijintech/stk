@@ -70,16 +70,20 @@ def _regular(path, maximum, *, atomic_record=False):
     before_path = path.lstat()
     if stat.S_ISLNK(before_path.st_mode) or not stat.S_ISREG(before_path.st_mode):
         raise LatexError("Expected a regular, non-link file")
-    with _reader(path) as stream:
+    with _reader(path, share_delete=atomic_record) as stream:
         before = os.fstat(stream.fileno())
-        if not stat.S_ISREG(before.st_mode) or before.st_size > maximum:
+        if (not stat.S_ISREG(before.st_mode) or before.st_size > maximum or
+                getattr(before, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
             raise LatexError("File exceeds its byte budget or is not regular")
         raw = stream.read(maximum + 1)
         after = os.fstat(stream.fileno())
     signatures = (_signature(before), _signature(after))
     stable = signatures[0][:4] == signatures[1][:4] if atomic_record else signatures[0] == signatures[1]
-    if (len(raw) > maximum or not stable
-            or not atomic_record and _signature(after) != _signature(path.lstat())):
+    # Windows 3.12 can expose change time through fstat and creation time through lstat.
+    # Same-API before/after checks stay strict; only that cross-API comparison omits ctime.
+    cross_fields = 4 if os.name == "nt" else 5
+    if (len(raw) > maximum or not stable or not atomic_record and
+            _signature(after)[:cross_fields] != _signature(path.lstat())[:cross_fields]):
         raise LatexError("File changed while reading or exceeds its byte budget")
     return raw
 
@@ -117,15 +121,31 @@ def _directory(store, directory, *, create=False):
     parts = directory.split("/")
     if parts[:2] != ["results", "workflow-runs"] or len(parts) < 3:
         raise LatexError("Compilation attempts belong below results/workflow-runs")
+
+    def checked(path):
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return False
+        if (stat.S_ISLNK(info.st_mode) or
+                getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+            raise LatexError("Compilation directories cannot contain links or reparse points")
+        if not stat.S_ISDIR(info.st_mode):
+            raise LatexError("Compilation directory is missing or is not a directory")
+        return True
+
     current = store.directory
     for index, part in enumerate(parts):
         current = current / part
-        if current.is_symlink():
-            raise LatexError("Compilation directories cannot contain links")
+        if not checked(current) and not create:
+            raise LatexError("Compilation directory is missing or is not a directory")
         if create:
             current.mkdir(mode=0o700, exist_ok=index != len(parts) - 1)
-        if not current.is_dir():
-            raise LatexError("Compilation directory is missing or is not a directory")
+            # Recheck the created/existing component itself, not its resolved target.
+            # This rejects junctions too; it is not an OS sandbox against hostile
+            # concurrent replacement of already checked parent directories.
+            if not checked(current):
+                raise LatexError("Compilation directory is missing or is not a directory")
     return current
 
 

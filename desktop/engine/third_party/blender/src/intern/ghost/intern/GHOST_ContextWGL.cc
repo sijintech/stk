@@ -16,6 +16,31 @@
 #include <cstdio>
 #include <vector>
 
+/* STK: libepoxy 1.5.10 switches its WGL entry points to per-thread dispatch after
+ * the second context switch, but a newly created thread initially has a zeroed
+ * table. Its wglMakeCurrent wrapper calls that table before initializing it.
+ * Use the already-loaded native entry point, then notify epoxy through its public
+ * external-switch API so each thread resolves GL functions for its actual context.
+ * This also applies to failed switches, which WGL says detach the old context. */
+static BOOL wgl_make_current_with_epoxy(HDC dc, HGLRC context)
+{
+  const HMODULE module = GetModuleHandleW(L"opengl32.dll");
+  if (module == nullptr) {
+    return FALSE;
+  }
+  using MakeCurrent = BOOL(WINAPI *)(HDC, HGLRC);
+  const auto make_current = reinterpret_cast<MakeCurrent>(GetProcAddress(module, "wglMakeCurrent"));
+  if (make_current == nullptr) {
+    return FALSE;
+  }
+
+  const BOOL result = make_current(dc, context);
+  const DWORD error = GetLastError();
+  epoxy_handle_external_wglMakeCurrent();
+  SetLastError(error);
+  return result;
+}
+
 HGLRC GHOST_ContextWGL::s_sharedHGLRC = nullptr;
 int GHOST_ContextWGL::s_sharedCount = 0;
 std::list<GHOST_ContextWGL::OffscreenWindowHandle>
@@ -77,7 +102,7 @@ GHOST_ContextWGL::~GHOST_ContextWGL()
 {
   if (h_GLRC_ != nullptr) {
     if (h_GLRC_ == ::wglGetCurrentContext()) {
-      WIN32_CHK(::wglMakeCurrent(nullptr, nullptr));
+      WIN32_CHK(wgl_make_current_with_epoxy(nullptr, nullptr));
     }
 
     if (h_GLRC_ != s_sharedHGLRC || s_sharedCount == 1) {
@@ -132,7 +157,7 @@ GHOST_TSuccess GHOST_ContextWGL::getSwapInterval(int &interval_out)
 
 GHOST_TSuccess GHOST_ContextWGL::activateDrawingContext()
 {
-  if (WIN32_CHK(::wglMakeCurrent(h_DC_, h_GLRC_))) {
+  if (WIN32_CHK(wgl_make_current_with_epoxy(h_DC_, h_GLRC_))) {
     active_context_ = this;
     return GHOST_kSuccess;
   }
@@ -145,7 +170,7 @@ GHOST_TSuccess GHOST_ContextWGL::releaseDrawingContext()
 {
   /* Calling wglMakeCurrent(nullptr, nullptr) without an active context returns an error,
    * so we always pass the device context handle. */
-  if (WIN32_CHK(::wglMakeCurrent(h_DC_, nullptr))) {
+  if (WIN32_CHK(wgl_make_current_with_epoxy(h_DC_, nullptr))) {
     active_context_ = nullptr;
     return GHOST_kSuccess;
   }
@@ -435,7 +460,7 @@ struct DummyContextWGL {
       return;
     }
 
-    if (!WIN32_CHK(::wglMakeCurrent(dummyHDC, dummyHGLRC))) {
+    if (!WIN32_CHK(wgl_make_current_with_epoxy(dummyHDC, dummyHGLRC))) {
       return;
     }
 
@@ -449,7 +474,7 @@ struct DummyContextWGL {
 
   ~DummyContextWGL()
   {
-    WIN32_CHK(::wglMakeCurrent(prevHDC, prevHGLRC));
+    WIN32_CHK(wgl_make_current_with_epoxy(prevHDC, prevHGLRC));
 
     if (dummyHGLRC != nullptr) {
       WIN32_CHK(::wglDeleteContext(dummyHGLRC));
@@ -650,7 +675,7 @@ GHOST_TSuccess GHOST_ContextWGL::initializeDrawingContext()
     s_sharedHGLRC = h_GLRC_;
   }
 
-  if (!WIN32_CHK(::wglMakeCurrent(h_DC_, h_GLRC_))) {
+  if (!WIN32_CHK(wgl_make_current_with_epoxy(h_DC_, h_GLRC_))) {
     goto error;
   }
 
@@ -690,7 +715,7 @@ GHOST_TSuccess GHOST_ContextWGL::initializeDrawingContext()
   active_context_ = this;
   return GHOST_kSuccess;
 error:
-  ::wglMakeCurrent(prevHDC, prevHGLRC);
+  wgl_make_current_with_epoxy(prevHDC, prevHGLRC);
   return GHOST_kFailure;
 }
 

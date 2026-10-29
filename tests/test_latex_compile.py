@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import threading
@@ -267,6 +268,97 @@ def test_same_attempt_directory_cannot_be_replayed(project, compiler_fixture):
     assert compiler_fixture[1].read_bytes() == before
 
 
+@pytest.mark.parametrize("component", ["results", "results/workflow-runs", "results/workflow-runs/attempt"])
+@pytest.mark.parametrize("when", ["before_mkdir", "after_mkdir", "read_existing"])
+def test_compilation_directory_rejects_reparse_attributes_on_each_component(tmp_path, monkeypatch, component, when):
+    from types import SimpleNamespace
+
+    root = tmp_path / "project"
+    root.mkdir()
+    store = SimpleNamespace(directory=root)
+    target = root / component
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # The leaf is genuinely new for the post-mkdir check, preserving no-replay.
+    if when != "after_mkdir" or target.name != "attempt":
+        target.mkdir(exist_ok=True)
+    actual_stat, actual_mkdir = Path.lstat, Path.mkdir
+    created, observed, marked = [], [], []
+
+    def lstat(path, *args, **kwargs):
+        info = actual_stat(path, *args, **kwargs)
+        if path == target:
+            observed.append(path)
+            if when != "after_mkdir" or marked:
+                values = {key: getattr(info, key) for key in dir(info) if key.startswith("st_")}
+                values["st_file_attributes"] = getattr(info, "st_file_attributes", 0) | 0x400
+                # A directory junction can have S_IFDIR without S_IFLNK.
+                assert stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode)
+                return SimpleNamespace(**values)
+        return info
+
+    def mkdir(path, *args, **kwargs):
+        created.append(path)
+        result = actual_mkdir(path, *args, **kwargs)
+        if path == target:
+            marked.append(path)
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "lstat", lstat)
+        patch.setattr(Path, "mkdir", mkdir)
+        with pytest.raises(latex.LatexError, match="links or reparse"):
+            latex._directory(store, "results/workflow-runs/attempt", create=when != "read_existing")
+    assert observed and (bool(marked) == (when == "after_mkdir"))
+    assert all(path == target or path in target.parents for path in created)
+    if when == "read_existing":
+        assert created == []
+
+
+def test_missing_compilation_directory_is_read_only_until_explicit_create(tmp_path):
+    from types import SimpleNamespace
+
+    root = tmp_path / "project"
+    root.mkdir()
+    store = SimpleNamespace(directory=root)
+    with pytest.raises(latex.LatexError, match="missing"):
+        latex._directory(store, "results/workflow-runs/attempt")
+    assert list(root.iterdir()) == []
+    path = latex._directory(store, "results/workflow-runs/attempt", create=True)
+    assert path == root / "results/workflow-runs/attempt" and path.is_dir()
+    assert latex._directory(store, "results/workflow-runs/attempt") == path
+    with pytest.raises(FileExistsError):
+        latex._directory(store, "results/workflow-runs/attempt", create=True)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Actual Windows directory junctions require Windows")
+@pytest.mark.parametrize("component", ["results", "results/workflow-runs", "results/workflow-runs/attempt"])
+@pytest.mark.parametrize("create", [False, True])
+def test_actual_windows_junction_cannot_redirect_compilation_directories(tmp_path, component, create):
+    from types import SimpleNamespace
+    import _winapi
+
+    root, outside = tmp_path / "project", tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    marker = outside / "unchanged.txt"
+    marker.write_bytes(b"public junction boundary fixture")
+    junction = root / component
+    junction.parent.mkdir(parents=True, exist_ok=True)
+    # CPython's Windows API takes (existing target, new junction), positional only.
+    # Failure is a test failure on Windows, not a capability skip.
+    _winapi.CreateJunction(str(outside), str(junction))
+    try:
+        info = junction.lstat()
+        assert info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        assert not junction.is_symlink() and junction.samefile(outside)
+        with pytest.raises(latex.LatexError, match="links or reparse"):
+            latex._directory(SimpleNamespace(directory=root), "results/workflow-runs/attempt", create=create)
+        assert list(outside.iterdir()) == [marker]
+        assert marker.read_bytes() == b"public junction boundary fixture"
+    finally:
+        junction.rmdir()  # Remove the junction itself, never its target contents.
+
+
 def test_log_path_and_wrong_identity_cannot_authorize_host_reads(project, compiler_fixture):
     identity, directory, _ = execute(project)
     with pytest.raises(latex.LatexError):
@@ -336,8 +428,8 @@ def test_atomic_receipt_replacement_yields_one_complete_generation(project, comp
     new = deepcopy(old)
     new["version"] += "\nnext complete publication"
     reader, replaced = snapshots._reader, []
-    def replace_after_open(candidate):
-        stream = reader(candidate)
+    def replace_after_open(candidate, **options):
+        stream = reader(candidate, **options)
         if candidate == path and not replaced:
             replaced.append(True)
             latex._write(path, new)
@@ -345,6 +437,42 @@ def test_atomic_receipt_replacement_yields_one_complete_generation(project, comp
     monkeypatch.setattr(snapshots, "_reader", replace_after_open)
     assert latex.read_receipt(project[0], directory, attempt_id=identity) == old
     assert latex.read_receipt(project[0], directory, attempt_id=identity) == new
+
+
+@pytest.mark.parametrize("changed_during_read", [False, True])
+def test_windows_fd_change_time_is_checked_within_its_own_api(tmp_path, monkeypatch, changed_during_read):
+    from types import SimpleNamespace
+    path = tmp_path / "source.tex"
+    path.write_bytes(b"frozen source")
+    actual = os.fstat
+    calls = []
+
+    def fd_stat(fd):
+        info = actual(fd)
+        values = {key: getattr(info, key) for key in dir(info) if key.startswith("st_")}
+        calls.append(fd)
+        # fstat and path.lstat have different ctime meanings on Windows 3.12.
+        # A further fd-to-fd change must still be rejected, regardless of path metadata.
+        values["st_ctime_ns"] += 2 if changed_during_read and len(calls) > 1 else 1
+        return SimpleNamespace(**values)
+
+    # Keep the real os module and pathlib unchanged; only the reader's API interpretation is Windows.
+    monkeypatch.setattr(latex, "os", SimpleNamespace(name="nt", fstat=fd_stat))
+    if changed_during_read:
+        with pytest.raises(latex.LatexError, match="changed"):
+            latex._regular(path, 1024)
+    else:
+        assert latex._regular(path, 1024) == b"frozen source"
+    assert len(calls) == 2
+
+
+def test_atomic_record_reader_is_not_inherited_by_child_processes(tmp_path):
+    from suan.project.snapshots import _reader
+    path = tmp_path / "record.json"
+    path.write_bytes(b"{}")
+    with _reader(path, share_delete=True) as stream:
+        assert not os.get_inheritable(stream.fileno())
+        assert stream.read() == b"{}"
 
 
 @pytest.mark.parametrize("boundary", ["before_authorization", "interrupted_publication", "running_with_descendant"])

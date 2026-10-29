@@ -457,7 +457,9 @@ class WorkflowEditorPython : public ::testing::Test {
     const auto previews = calls("project.reports.preview_resources");
     size_t opened = 0;
     project().open_vscode_at = [&](const std::string &path, int line, int column, std::string *) {
-      ++opened; EXPECT_EQ(path, core::path_to_utf8(directory.path() / "project" / "main.tex"));
+      ++opened;
+      EXPECT_EQ(core::path_from_utf8(path).lexically_normal(),
+                (directory.path() / "project" / "main.tex").lexically_normal());
       EXPECT_EQ(line, 7); EXPECT_EQ(column, 3); return true;
     };
     ASSERT_NO_FATAL_FAILURE(mouse("workflow_compilation/compile"));

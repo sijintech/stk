@@ -385,6 +385,14 @@ std::string native_evidence_environment_error()
   }
   const auto gl_module = GetModuleHandleW(L"opengl32.dll"); // Borrowed module already imported.
   if (!gl_module) { return "Cannot identify the loaded OpenGL module"; }
+  // These are raw OpenGL imports. Tell the already-loaded epoxy dispatcher about
+  // every native switch, just as the production GHOST context does. Resolve its
+  // public notifier without importing the epoxy macros over this independent probe.
+  using NotifyEpoxy = void (*)();
+  const auto epoxy_module = GetModuleHandleW(L"epoxy-0.dll"); // Borrowed; do not FreeLibrary.
+  const auto notify_epoxy = epoxy_module ? reinterpret_cast<NotifyEpoxy>(
+      GetProcAddress(epoxy_module, "epoxy_handle_external_wglMakeCurrent")) : nullptr;
+  if (!notify_epoxy) { return "Cannot notify the loaded epoxy dispatcher of native WGL switches"; }
   std::wstring module_path(32768, L'\0');
   const auto path_size = GetModuleFileNameW(gl_module, module_path.data(), DWORD(module_path.size()));
   if (!path_size || path_size >= module_path.size()) {
@@ -447,18 +455,30 @@ std::string native_evidence_environment_error()
   // so a runner with only Microsoft's GL 1.1 fails with a durable, non-interactive diagnosis.
   // This DC belongs solely to this temporary STK window: no screen DC or pixels are read.
   struct Probe {
+    explicit Probe(NotifyEpoxy notify) : notify_epoxy(notify) {}
+    const NotifyEpoxy notify_epoxy;
     HINSTANCE instance = GetModuleHandleW(nullptr);
     const wchar_t *name = L"STKNativeEvidenceGLProbe";
     ATOM atom = 0;
     HWND window = nullptr;
     HDC dc = nullptr;
     HGLRC legacy = nullptr, modern = nullptr;
+    BOOL make_current(HDC target_dc, HGLRC context) const
+    {
+      const auto result = wglMakeCurrent(target_dc, context);
+      const auto error = GetLastError();
+      // Failure also detaches the old current context. Preserve its error for the
+      // existing strict capability gate and lifecycle evidence.
+      notify_epoxy();
+      SetLastError(error);
+      return result;
+    }
     ~Probe()
     {
       stage("probe.teardown.begin");
       if (legacy || modern) {
         stage("probe.unbind.before");
-        const auto ok = wglMakeCurrent(nullptr, nullptr);
+        const auto ok = make_current(nullptr, nullptr);
         stage("probe.unbind.after", ok, ok ? 0 : GetLastError());
       }
       if (modern) {
@@ -488,7 +508,7 @@ std::string native_evidence_environment_error()
       }
       stage("probe.teardown.end");
     }
-  } p;
+  } p{notify_epoxy};
   WNDCLASSW cls{};
   cls.style = CS_OWNDC;
   cls.lpfnWndProc = DefWindowProcW;
@@ -521,7 +541,7 @@ std::string native_evidence_environment_error()
   stage("probe.create-legacy.after", p.legacy != nullptr, p.legacy ? 0 : GetLastError());
   if (!p.legacy) { return "Windows runner cannot create an OpenGL context; native preview is unverified"; }
   stage("probe.bind-legacy.before");
-  if (!wglMakeCurrent(p.dc, p.legacy)) {
+  if (!p.make_current(p.dc, p.legacy)) {
     return "Windows runner cannot create an OpenGL context; native preview is unverified";
   }
   stage("probe.bind-legacy.after", 1);
@@ -546,7 +566,7 @@ std::string native_evidence_environment_error()
     return "Native STK window needs OpenGL 4.3 core; creation failed on runner GL " + legacy_version;
   }
   stage("probe.bind-core.before");
-  if (!wglMakeCurrent(p.dc, p.modern)) {
+  if (!p.make_current(p.dc, p.modern)) {
     return "Native STK window needs OpenGL 4.3 core; creation failed on runner GL " + legacy_version;
   }
   stage("probe.bind-core.after", 1);

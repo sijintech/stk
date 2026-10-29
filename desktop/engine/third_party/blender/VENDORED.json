@@ -18,6 +18,10 @@
   {
    "file": "0003-wayland-cooperative-event-thread-stop.patch",
    "sha256": "570fbdc2645a788c18eb52b5dd336d292698d0c110ccf7ea6245762709f454e2"
+  },
+  {
+   "file": "0004-win32-epoxy-thread-context-switch.patch",
+   "sha256": "c9714e9510e5e9b16e2ff77af298aa278275b42382ae1ea5e62638344cc7e96e"
   }
  ],
  "shims_used": [
@@ -301,7 +305,7 @@
   "intern/ghost/intern/GHOST_ContextNone.hh": "cde925ea1fb1446c90c15f5f1eaaad2fe1073cd221fde80b61c44d3bbb9866c9",
   "intern/ghost/intern/GHOST_ContextVK.cc": "6fbcaac3ce0960db546f9ed13ff8cd5d0ec980728224e896f54c9fa1c63e8233",
   "intern/ghost/intern/GHOST_ContextVK.hh": "79a87ec03f0fcdaa52fee681cd87b6d4f10b42aed598de667855f24586af2f16",
-  "intern/ghost/intern/GHOST_ContextWGL.cc": "aab14ba7747f84bec364f866702bfce3d2f72f10cfc2d5e27a03f88738175448",
+  "intern/ghost/intern/GHOST_ContextWGL.cc": "b9a385d0aecce88ae76a3913e6fac21e4c3abd8ddba8a107cb01492dd3083158",
   "intern/ghost/intern/GHOST_ContextWGL.hh": "e99d25fb870caa6924df60f843359c02e90ec3f012fbe00e88c25048282cd78a",
   "intern/ghost/intern/GHOST_Debug.hh": "3a44349fe9345dbfa2ce977aa9365ad2737d3f6f389c42c785cdc47dbcd69f39",
   "intern/ghost/intern/GHOST_DropTargetWin32.cc": "fe6fbc641a2032cabff52704c67a3d0db5e89396a0be54e46963c8a907ad3f50",

@@ -208,9 +208,9 @@ def test_explicit_retry_refuses_unsettled_previous_execution(selection, compiler
     settled(h, handle, run["id"])
     identity = store.workflow_runs.local_attempt(run["id"], "compile", row, 1)
     receipt_path = store.directory / identity["directory"] / "compile.json"
-    receipt = json.loads(receipt_path.read_text())
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     receipt["state"] = "running"  # A saved attempt still names this live owner.
-    receipt_path.write_text(json.dumps(receipt))
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
     compiler_fixture[0].write_text("good")
     for attempt in (2, 3):
         h.call("project.workflow_runs.start", {"handle": handle, "run_id": run["id"]})
