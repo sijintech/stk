@@ -582,6 +582,9 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.workflow_runs.get` / `start` / `cancel` / `recover` | `{handle, run_id}` | `{run: workflowRun}` |
 | `project.workflow_runs.list` | `{handle, offset?, limit?, workflow_id?}` | `{runs: [workflowRunSummary], next_offset}` |
 | `project.workflow_runs.stale` | `{handle, run_id}` | `{run_id, revision, rows: [{id, number, stale, steps}], stale_rows}` |
+| `project.workflow_runs.compilation` | `{handle, run_id, step, row, attempt}` | exact identity plus `{receipt}`; bounded local LaTeX evidence |
+| `project.workflow_runs.compilation_log` | same identity, `stream?`, `offset?`, `limit?` | exact identity plus `{attempt_id, stream, offset, next_offset, data: base64, terminal}` |
+| `project.workflow_runs.compilation_source` | same identity, `diagnostic`, `expected_revision` | verified current `{revision, record_id, path, source_sha256, line, column}` plus attempt identity |
 | `project.attention.list` | `{handle}` | `{revision, items: [projectAttentionItem], counts: {needs_you, running, unviewed_done}}` |
 | `project.attention.viewed` | `{handle, keys}` | `{viewed}` |
 | `project.search` | `{handle, query, limit?}` | `{revision, query, results: [projectSearchItem], counts, truncated}` |
@@ -809,6 +812,30 @@ running, and the next `start` adopts it instead of submitting again; a failed or
 aside), `analysis_changed`/`analysis_missing`, `template_unavailable`, `value_changed` (a field the step takes from the
 row, with `before`/`after`; for `muferro/1` every case field), `value_error`, `row_removed`, `workflow_missing`, and
 `upstream_changed` downstream of a stale step. It reads only; old runs never change, and re-running `stale_rows` is a new `prepare`.
+
+Additive local document compilation extension (2026-10-27): the registered `latex-compile/1` template consumes required
+`rows` and `files` ports. Preparation freezes an explicitly selected absolute TeX Live/MiKTeX compiler identity and the
+portable input selection; it does not run `--version` or compile. A static Files input freezes its existing Snapshot;
+a dynamic upstream input is bound to that step's successful output Snapshot during explicit execution. Only `start`
+authorizes the version probe and fixed compilation flags. It is not a Viewer graph node. Successful PDF and three logs
+are ordinary registered output files and a new Snapshot; failure/cancellation logs remain under their original attempt.
+The template never creates a Report or opens a preview automatically. See [LaTeX workflows](../latex-workflows.md).
+
+The three optional compilation inspection methods are reads. They neither execute a compiler, inspect live process
+identities nor recover/retry an attempt. Callers supply canonical run/row UUIDs, a step identifier and a positive attempt
+number, never a directory or PID. The journal resolves the location. The receipt must match the frozen plan's compiler
+and input selection, including the actual successful upstream output for dynamic input. A receipt presents lifecycle,
+compiler identity/version, source Snapshot/entry/checksum, at most 256 bound diagnostics and four bounded output descriptors;
+it omits internal owner/runner PIDs. `compilation_log` accepts only `stdout.txt`, `stderr.txt`, `compiler.txt`, nonnegative
+byte offsets, and `1..65536` bytes per page (default 65536). Terminal logs must match their stored length and SHA-256;
+live logs are bounded observed prefixes. Base64 pages can split a UTF-8 code point; streaming readers must retain its
+incomplete suffix. `terminal` describes the receipt state, not whether the selected page reached EOF.
+
+`compilation_source` selects a diagnostic by its zero-based index; it does not trust an arbitrary path parsed from log
+text. The diagnostic is bound to an input record/path/SHA, with one-based line and optional one-based column. The registered
+current source must exist at `expected_revision` and its actual bytes must still match the frozen source SHA. Otherwise
+the read fails and returns no editor destination. Opening VS Code is a separate explicit desktop action. A null column
+uses column 1 when opening. Reading old evidence remains possible after the live source is edited or deleted.
 
 The optional `project.attention.*` methods (experimental, design in `docs/design/ux-package-2026-10.md`) summarize what
 needs a person across workflow runs (format 10), analysis runs not started by a workflow run (format 9), simulation runs,

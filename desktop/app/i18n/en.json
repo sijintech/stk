@@ -2521,5 +2521,22 @@
   "reports.generation.phase.completed": "Complete response available for editing",
   "reports.generation.phase.terminal": "Request stopped",
   "reports.generation.phase.save_pending": "Checking report save",
-  "reports.generation.phase.saved": "Frozen report saved"
+  "reports.generation.phase.saved": "Frozen report saved",
+  "workflow.compilation.inspect": "Inspect {step} compilation",
+  "workflow.compilation.summary": "{step} · attempt {attempt} · {state}",
+  "workflow.compilation.frozen": "This record describes frozen inputs. Reading it never compiles. Source locations open only while the current file still matches.",
+  "workflow.compilation.previous": "Earlier attempt",
+  "workflow.compilation.next": "Later attempt",
+  "workflow.compilation.refresh": "Refresh record",
+  "workflow.compilation.source": "Source",
+  "workflow.compilation.location": "Line:column",
+  "workflow.compilation.message": "Diagnostic",
+  "workflow.compilation.open_source": "Open selected location in VS Code",
+  "workflow.compilation.input_active": "Finish the active text edit, then open the source location again.",
+  "workflow.compilation.vscode_unavailable": "VS Code could not be opened. Install it and enable its vscode:// URL handler, then try again.",
+  "workflow.compilation.log.stdout.txt": "Compiler output",
+  "workflow.compilation.log.stderr.txt": "Compiler errors",
+  "workflow.compilation.log.compiler.txt": "TeX log",
+  "workflow.compilation.log_next": "Read next log page",
+  "workflow.compilation.save_pdf": "The PDF and logs are in this task’s output snapshot. In Reports, explicitly create a report from that snapshot with report.pdf as its entry. Preview and export remain explicit."
 }

@@ -431,11 +431,30 @@ std::string vscode_file_url(const std::string_view path)
   return url;
 }
 
+std::string vscode_file_url(const std::string_view path, const int line, const int column)
+{
+  if (line < 1 || column < 1) { return {}; }
+  auto url = vscode_file_url(path);
+  if (url.empty()) { return {}; }
+  // https://code.visualstudio.com/docs/configure/command-line#_opening-vs-code-with-urls
+  return url + ":" + std::to_string(line) + ":" + std::to_string(column);
+}
+
 bool open_with_vscode(const std::string &path, std::string *error)
 {
   const std::string url = vscode_file_url(path);
   if (url.empty()) {
     if (error) { *error = "VS Code URLs require an absolute local path without UNC or colon-containing names"; }
+    return false;
+  }
+  return open_with_system(url, error);
+}
+
+bool open_with_vscode_at(const std::string &path, const int line, const int column, std::string *error)
+{
+  const std::string url = vscode_file_url(path, line, column);
+  if (url.empty()) {
+    if (error) { *error = "VS Code diagnostic locations require an absolute local path and positive line and column"; }
     return false;
   }
   return open_with_system(url, error);

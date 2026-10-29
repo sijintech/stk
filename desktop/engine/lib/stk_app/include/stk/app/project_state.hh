@@ -236,6 +236,7 @@ class ProjectState {
   int64_t runs_next_offset() const { return runs_next_offset_; }
   int selected_run() const;
   std::function<bool(const std::string &, std::string *)> open_external, open_vscode;
+  std::function<bool(const std::string &, int, int, std::string *)> open_vscode_at;
   const ProjectTable *table() const;
   const std::string &table_id() const { return table_id_; }
   const std::string &record_id() const { return record_id_; }

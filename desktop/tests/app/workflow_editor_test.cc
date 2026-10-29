@@ -143,12 +143,38 @@ import json
 from pathlib import Path
 import sys
 import threading
+import time
 from suan.desktop_bridge.server import Bridge
 from suan.desktop_bridge.__main__ import main
 
 control = Path(sys.argv.pop(1))
+(control / 'python.txt').write_text(sys.executable, encoding='utf-8')
 lock = threading.Lock()
 original_run = Bridge._run
+
+# Only tests which explicitly create this marker substitute the compiler body.
+# The production workflow, frozen copies, real process gate and durable receipt
+# are exercised; this fixture makes no claim about an installed TeX distribution.
+from suan.documents import latex
+original_command = latex._run_command
+compiler_body = r'''
+import pathlib, sys
+if '--version' in sys.argv:
+    print('pdfTeX (TeX Live controlled native UI fixture)')
+    raise SystemExit(0)
+prefix = b'main.tex:7:3: selected source diagnostic\n'
+sys.stdout.buffer.write(prefix + b'x' * (8191 - len(prefix)) + '\u4e2d\u6587\u8de8\u9875\u6807\u8bb0'.encode('utf-8') + b'\n')
+sys.stdout.buffer.flush()
+pathlib.Path('_stk-out/report.log').write_text('main.tex:7:3: selected source diagnostic\n', encoding='utf-8')
+raise SystemExit(9)
+'''
+def command(argv, *args, **kwargs):
+    if (control / 'latex-fixture').exists():
+        actual = [sys.executable, '-I', '-S', '-c', compiler_body, *argv[1:]]
+        args[2]['argv'] = actual
+        return original_command(actual, *args, **kwargs)
+    return original_command(argv, *args, **kwargs)
+latex._run_command = command
 
 def run(self, identity, method, params):
     with lock, (control / 'calls.jsonl').open('a', encoding='utf-8') as stream:
@@ -360,6 +386,101 @@ class WorkflowEditorPython : public ::testing::Test {
         widget("workflow_param/" + name + "/mode")->enabled && shows("All references and links are valid."); }));
   }
 
+  void prepare_compilation(const std::string &run_id, const std::string &row)
+  {
+    { std::ofstream file(directory.path() / "latex-fixture"); file << "controlled"; }
+    std::ifstream interpreter(directory.path() / "python.txt"); std::string python;
+    std::getline(interpreter, python); ASSERT_FALSE(python.empty());
+    const auto source = directory.path() / "project" / "main.tex";
+    { std::ofstream file(source); file << "frozen source\n"; }
+    Json out;
+    ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", revision}, {"commands", {
+        {{"op", "add_record"}, {"id", row}, {"table_id", table_id}}}}}, out));
+    ASSERT_NO_FATAL_FAILURE(call("project.files.index", {{"handle", handle()}, {"expected_revision", revision},
+        {"paths", {core::path_to_utf8(source)}}}, out));
+    const auto record = out.at("record_ids")[0].get<std::string>();
+    ASSERT_NO_FATAL_FAILURE(call("project.snapshots.capture", {{"handle", handle()}, {"expected_revision", revision}, {"record_ids", {record}}}, out));
+    const auto snapshot = out.at("snapshot").at("id").get<std::string>();
+    const Json document = {{"format", "stk.workflow/1"}, {"ui", Json::object()}, {"steps", {
+        {{"id", "cases"}, {"kind", "table"}, {"ref", {{"table", table_id}}}},
+        {{"id", "source"}, {"kind", "files"}, {"ref", {{"snapshot", snapshot}}}},
+        {{"id", "compile"}, {"kind", "simulation"}, {"ref", {{"template", "latex-compile/1"}}},
+         {"inputs", {{"rows", {{"from", "cases.rows"}}}, {"files", {{"from", "source.files"}}}}},
+         {"parameters", {{"compiler_path", python}, {"assets", {{{"source", "main.tex"}, {"path", "main.tex"}}}}}}}}}};
+    ASSERT_NO_FATAL_FAILURE(call("project.workflows.update", {{"handle", handle()}, {"workflow_id", workflow_id}, {"name", "Compile frozen source"},
+        {"document", document}, {"expected_revision", revision}}, out));
+    ASSERT_NO_FATAL_FAILURE(call("project.workflow_runs.prepare", {{"handle", handle()}, {"workflow_id", workflow_id}, {"rows", {row}},
+        {"run_id", run_id}, {"expected_revision", revision}}, out));
+    ASSERT_NO_FATAL_FAILURE(call("project.workflow_runs.start", {{"handle", handle()}, {"run_id", run_id}}, out));
+    ASSERT_TRUE(loop.pump_until([&] {
+      call("project.workflow_runs.get", {{"handle", handle()}, {"run_id", run_id}}, out);
+      return out.contains("run") && io::get_string(out.at("run"), "status") == "stopped";
+    }, 30));
+    ASSERT_EQ(out.at("run").at("counts").at("failed"), 1) << out.dump();
+    project().refresh();
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy() && project().project()->revision == revision; }));
+  }
+
+  void inspect_compilation(const std::string &language)
+  {
+    const std::string run_id = "3ac95e14-1f24-4d84-8012-0c639dab671f", row = "21a97c6c-2aff-46d0-900b-c5d4483e03d1";
+    ASSERT_NO_FATAL_FAILURE(prepare_compilation(run_id, row));
+    store().set_language(language);
+    std::string reason;
+    ASSERT_TRUE(area().editor().navigate({{"workflow_id", workflow_id}, {"run_id", run_id}}, {}, reason));
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_run_tasks") && widget("workflow_run_tasks")->table->rows == 1; }));
+    const auto viewer = store().viewer().save_workspace_state();
+    int clicks = 0;
+    const auto mouse = [&](const std::string &key) {
+      const auto *item = widget(key); ASSERT_NE(item, nullptr) << key; ASSERT_TRUE(item->enabled) << key;
+      const auto [x, y] = f.widget_center(item->key);
+      ASSERT_TRUE(item->clip.contains({item->rect.cx(), item->rect.cy()})) << key;
+      ASSERT_GE(x, 0); ASSERT_LT(x, 1440); ASSERT_GE(y, 0); ASSERT_LT(y, 2200);
+      f.drv->click(x, y); f.screen.run_deferred(); f.drv->frame(); ++clicks;
+    };
+    const auto mouse_row = [&](const std::string &key) {
+      const auto *item = widget(key); ASSERT_NE(item, nullptr) << key; ASSERT_TRUE(item->table);
+      const auto &style = f.screen.ui()->style();
+      const ui::Vec2 point{item->rect.x + style.unit, item->rect.y + style.pixel + 1.5f * style.unit * item->table->row_height};
+      ASSERT_TRUE(item->clip.contains(point)) << key;
+      const int x = int(point.x), y = f.screen.rect().ymax - 1 - int(point.y);
+      ASSERT_GE(x, 0); ASSERT_LT(x, 1440); ASSERT_GE(y, 0); ASSERT_LT(y, 2200);
+      f.drv->click(x, y); f.screen.run_deferred(); f.drv->frame(); ++clicks;
+    };
+    ASSERT_NO_FATAL_FAILURE(mouse_row("workflow_run_tasks"));
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_compilation/compile") && widget("workflow_compilation/compile")->enabled; }));
+    const auto before = project().project()->revision;
+    const auto starts = calls("project.workflow_runs.start"), prepares = calls("project.workflow_runs.prepare");
+    const auto previews = calls("project.reports.preview_resources");
+    size_t opened = 0;
+    project().open_vscode_at = [&](const std::string &path, int line, int column, std::string *) {
+      ++opened; EXPECT_EQ(path, core::path_to_utf8(directory.path() / "project" / "main.tex"));
+      EXPECT_EQ(line, 7); EXPECT_EQ(column, 3); return true;
+    };
+    ASSERT_NO_FATAL_FAILURE(mouse("workflow_compilation/compile"));
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_compilation_diagnostics") != nullptr; }));
+    ASSERT_EQ(widget("workflow_compilation_diagnostics")->table->rows, 2);
+    ASSERT_NO_FATAL_FAILURE(mouse_row("workflow_compilation_diagnostics"));
+    ASSERT_NO_FATAL_FAILURE(mouse("workflow_compilation_open_source"));
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return opened == 1; }));
+    ASSERT_NO_FATAL_FAILURE(mouse("workflow_compilation_log/stdout.txt"));
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("selected source diagnostic") && widget("workflow_compilation_log_next") != nullptr; }));
+    ASSERT_TRUE(widget("workflow_compilation_log_next")->enabled);
+    ASSERT_NO_FATAL_FAILURE(mouse("workflow_compilation_log_next"));
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("中文跨页标记") && !widget("workflow_compilation_log_next")->enabled; }));
+    { std::ofstream file(directory.path() / "project" / "main.tex"); file << "changed after compilation\n"; }
+    EXPECT_EQ(clicks, 6);
+    ASSERT_NO_FATAL_FAILURE(mouse("workflow_compilation_open_source"));
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("changed since compilation"); }));
+    EXPECT_EQ(opened, 1u);
+    EXPECT_EQ(project().project()->revision, before);
+    EXPECT_EQ(calls("project.workflow_runs.start"), starts); EXPECT_EQ(calls("project.workflow_runs.prepare"), prepares);
+    EXPECT_EQ(calls("project.reports.preview_resources"), previews); EXPECT_EQ(calls("project.reports.create"), 0u);
+    EXPECT_EQ(f.area("a2").editor().type().id, kEditorViewer);
+    EXPECT_EQ(store().viewer().save_workspace_state(), viewer);
+    EXPECT_EQ(clicks, 7);  // Six for inspection, one explicit stale-source rejection.
+  }
+
   void publish_output_clicks(const std::string &language, float scale, int width)
   {
     store().set_language(language);
@@ -390,6 +511,73 @@ class WorkflowEditorPython : public ::testing::Test {
     EXPECT_EQ(store().viewer().save_workspace_state(), viewer);
   }
 };
+
+TEST_F(WorkflowEditorPython, CompilationEvidenceReadsLogsAndOpensOnlyMatchingSourcesEnglish)
+{
+  ASSERT_NO_FATAL_FAILURE(inspect_compilation("en"));
+}
+
+TEST_F(WorkflowEditorPython, CompilationEvidenceReadsLogsAndOpensOnlyMatchingSourcesChinese)
+{
+  ASSERT_NO_FATAL_FAILURE(inspect_compilation("zh_CN"));
+}
+
+TEST_F(WorkflowEditorPython, CompilationReadCancelledBeforeDeliveryCannotRepopulateClearedSelection)
+{
+  const std::string run_id = "3ac95e14-1f24-4d84-8012-0c639dab671f", row = "21a97c6c-2aff-46d0-900b-c5d4483e03d1";
+  ASSERT_NO_FATAL_FAILURE(prepare_compilation(run_id, row));
+  ProjectWorkflows workflows(store());
+  ASSERT_TRUE(workflows.load(workflow_id));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy() && !workflows.validation().is_null(); }));
+  ASSERT_TRUE(workflows.load_run(run_id));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy(); }));
+  ASSERT_TRUE(workflows.load_compilation("compile", row, 1));
+  workflows.clear_compilation();
+  Json out;
+  ASSERT_NO_FATAL_FAILURE(call("project.workflow_runs.compilation", {{"handle", handle()}, {"run_id", run_id},
+      {"step", "compile"}, {"row", row}, {"attempt", 1}}, out));
+  loop.run_ready();
+  EXPECT_TRUE(workflows.compilation().is_null()); EXPECT_TRUE(workflows.compilation_log().is_null());
+  EXPECT_FALSE(workflows.compilation_busy()); EXPECT_TRUE(workflows.compilation_text().empty());
+  ASSERT_TRUE(workflows.load_compilation("compile", row, 1));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.compilation_busy(); }));
+  ASSERT_FALSE(workflows.compilation().is_null());
+  const auto starts = calls("project.workflow_runs.start");
+  ASSERT_TRUE(project().close());
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().project(); }));
+  workflows.sync();
+  EXPECT_TRUE(workflows.compilation().is_null());
+  EXPECT_FALSE(workflows.load_compilation_log("stdout.txt"));
+  EXPECT_EQ(calls("project.workflow_runs.start"), starts);
+}
+
+TEST_F(WorkflowEditorPython, CompilationSourceReplyCannotOpenAfterRunOrWorkflowSwitchWasRequested)
+{
+  const std::string run_id = "3ac95e14-1f24-4d84-8012-0c639dab671f", row = "21a97c6c-2aff-46d0-900b-c5d4483e03d1";
+  ASSERT_NO_FATAL_FAILURE(prepare_compilation(run_id, row));
+  ProjectWorkflows workflows(store());
+  ASSERT_TRUE(workflows.load(workflow_id));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy() && !workflows.validation().is_null(); }));
+  ASSERT_TRUE(workflows.load_run(run_id));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy(); }));
+  ASSERT_TRUE(workflows.load_compilation("compile", row, 1));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.compilation_busy(); }));
+  int opened = 0;
+  ASSERT_TRUE(workflows.read_compilation_source(0, [&](const Json &) { ++opened; }));
+  // Do not pump the UI executor: the source response may arrive, but cannot
+  // dispatch its opener before this explicit switch invalidates its ticket.
+  ASSERT_TRUE(workflows.load_run("01111111-1111-4111-8111-111111111111"));
+  EXPECT_TRUE(workflows.compilation().is_null());
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy(); }));
+  EXPECT_EQ(opened, 0);
+  ASSERT_TRUE(workflows.load_compilation("compile", row, 1));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.compilation_busy(); }));
+  ASSERT_TRUE(workflows.read_compilation_source(0, [&](const Json &) { ++opened; }));
+  ASSERT_TRUE(workflows.load(broken_id));
+  EXPECT_TRUE(workflows.compilation().is_null());
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy() && io::get_string(workflows.selected(), "id") == broken_id; }));
+  EXPECT_EQ(opened, 0);
+}
 
 TEST_F(WorkflowEditorPython, ExposesAndSavesAnOutputInTwoClicksEnglish)
 {

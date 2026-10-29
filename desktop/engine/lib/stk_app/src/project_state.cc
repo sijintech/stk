@@ -208,6 +208,7 @@ ProjectState::ProjectState(AppStore &store) : store_(store)
   agent_ = std::make_unique<ProjectAgent>(store, *this);
   open_external = platform::open_with_system;
   open_vscode = platform::open_with_vscode;
+  open_vscode_at = platform::open_with_vscode_at;
 }
 
 ProjectState::~ProjectState()

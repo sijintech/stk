@@ -94,7 +94,13 @@ bool open_with_system(const std::string &path, std::string *error = nullptr);
 /** Construct a VS Code file URL from an absolute POSIX or drive-letter Windows path.
  * Encodes UTF-8, spaces and URL delimiters; returns empty for unsupported/ambiguous paths. */
 std::string vscode_file_url(std::string_view path);
+/** Locate a diagnostic using one-based line/column numbers. Invalid positions return empty;
+ * path data is encoded before the location suffix is added. */
+std::string vscode_file_url(std::string_view path, int line, int column = 1);
 /** Ask the OS's registered vscode handler to edit a file/folder; no command shell is used. */
 bool open_with_vscode(const std::string &path, std::string *error = nullptr);
+/** Explicitly open a diagnostic location. Does not read, compile or modify the file. */
+bool open_with_vscode_at(const std::string &path, int line, int column = 1,
+                         std::string *error = nullptr);
 
 }  // namespace stk::platform

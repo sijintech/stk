@@ -43,6 +43,7 @@ EXPORT_MANIFEST = "stk-report.json"
 _MIMES = {".md": "text/markdown; charset=utf-8", ".markdown": "text/markdown; charset=utf-8",
           ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8",
           ".css": "text/css; charset=utf-8", ".txt": "text/plain; charset=utf-8",
+          ".tex": "text/plain; charset=utf-8", ".log": "text/plain; charset=utf-8",
           ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
           ".gif": "image/gif", ".webp": "image/webp", ".pdf": "application/pdf"}
 _KINDS = {"context", "simulation_run", "analysis_run", "workflow_run"}

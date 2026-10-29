@@ -23,6 +23,7 @@ include = [
     { path = "docs/hub.md", format = "sdist" },
     { path = "docs/project.md", format = "sdist" },
     { path = "docs/project-reports.md", format = "sdist" },
+    { path = "docs/latex-workflows.md", format = "sdist" },
     { path = "docs/project-table-io.md", format = "sdist" },
     { path = "docs/design/portable-workspaces.md", format = "sdist" },
     { path = "docs/lammps*.md", format = "sdist" },

@@ -2521,5 +2521,22 @@
   "reports.generation.phase.completed": "完整回复已可编辑",
   "reports.generation.phase.terminal": "请求已停止",
   "reports.generation.phase.save_pending": "正在确认报告保存",
-  "reports.generation.phase.saved": "冻结报告已保存"
+  "reports.generation.phase.saved": "冻结报告已保存",
+  "workflow.compilation.inspect": "查看 {step} 编译记录",
+  "workflow.compilation.summary": "{step} · 第 {attempt} 次尝试 · {state}",
+  "workflow.compilation.frozen": "本记录对应冻结输入；查看不会编译。仅当当前源文件仍匹配时，才允许打开错误位置。",
+  "workflow.compilation.previous": "上次尝试",
+  "workflow.compilation.next": "下次尝试",
+  "workflow.compilation.refresh": "刷新记录",
+  "workflow.compilation.source": "源文件",
+  "workflow.compilation.location": "行:列",
+  "workflow.compilation.message": "诊断信息",
+  "workflow.compilation.open_source": "在 VS Code 打开选中位置",
+  "workflow.compilation.input_active": "请先结束当前文字输入，再打开源文件位置。",
+  "workflow.compilation.vscode_unavailable": "无法打开 VS Code。请安装并启用 vscode:// 链接处理后重试。",
+  "workflow.compilation.log.stdout.txt": "编译输出",
+  "workflow.compilation.log.stderr.txt": "编译错误",
+  "workflow.compilation.log.compiler.txt": "TeX 日志",
+  "workflow.compilation.log_next": "读取下一页日志",
+  "workflow.compilation.save_pdf": "PDF 与日志已保存到本任务的输出快照。在报告页明确选择该快照，以 report.pdf 为入口创建报告。预览与导出仍需明确操作。"
 }

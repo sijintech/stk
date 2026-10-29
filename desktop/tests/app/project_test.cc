@@ -158,6 +158,29 @@ TEST(ProjectFiles, VscodeUrlsEncodePathDataAndRejectAmbiguousLocations)
   EXPECT_FALSE(error.empty());
 }
 
+TEST(ProjectFiles, VscodeDiagnosticLocationsKeepPathEncodingAndRejectInvalidPositions)
+{
+  EXPECT_EQ(platform::vscode_file_url("/tmp/报告 #1%.tex", 42, 7),
+      "vscode://file/tmp/%E6%8A%A5%E5%91%8A%20%231%25.tex:42:7");
+  EXPECT_EQ(platform::vscode_file_url("C:\\Research\\main.tex", 5),
+      "vscode://file/C:/Research/main.tex:5:1");
+  EXPECT_EQ(platform::vscode_file_url("/tmp/main.tex", 2147483647, 2147483647),
+      "vscode://file/tmp/main.tex:2147483647:2147483647");
+  EXPECT_TRUE(platform::vscode_file_url("/tmp/main.tex", 0).empty());
+  EXPECT_TRUE(platform::vscode_file_url("/tmp/main.tex", -1).empty());
+  EXPECT_TRUE(platform::vscode_file_url("/tmp/main.tex", 1, 0).empty());
+  EXPECT_TRUE(platform::vscode_file_url("/tmp/main.tex", 1, -1).empty());
+  EXPECT_TRUE(platform::vscode_file_url("relative.tex", 1).empty());
+  EXPECT_TRUE(platform::vscode_file_url("/tmp/ambiguous:12", 1).empty());
+  EXPECT_TRUE(platform::vscode_file_url("\\\\server\\share\\main.tex", 1).empty());
+  std::string error;
+  EXPECT_FALSE(platform::open_with_vscode_at("/tmp/main.tex", 0, 1, &error));
+  EXPECT_FALSE(error.empty());
+  error.clear();
+  EXPECT_FALSE(platform::open_with_vscode_at("relative.tex", 1, 1, &error));
+  EXPECT_FALSE(error.empty());
+}
+
 TEST(ProjectTable, ValuesFollowFieldIdsAndDistinguishUnsetFromNull)
 {
   ProjectTable table = ProjectTable::from_json({

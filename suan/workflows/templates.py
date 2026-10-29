@@ -15,10 +15,12 @@ Engines outside STK register templates through the ``stk.engines`` entry-point g
 built-in identities cannot be replaced. Loading problems are reported by ``engine_diagnostics()``.
 """
 import math
+import re
 import threading
 
 from . import lammps, muferro
 from .pet import DEFAULT_PARAMETERS as PET_DEFAULTS, OUTPUTS as PET_OUTPUTS
+from .latex import LatexCompileTemplate
 from suan.runtime.models import TaskSpec
 from suan.lammps.spec import lammps_spec
 from suan.mupro.spec import muferro_spec
@@ -180,13 +182,31 @@ class PetStudyTemplate:
 
 
 LOCAL_TEMPLATES = {DemoSyntheticTemplate.id: DemoSyntheticTemplate(), PetModelTemplate.id: PetModelTemplate(),
-                   PetStudyTemplate.id: PetStudyTemplate()}
+                   PetStudyTemplate.id: PetStudyTemplate(), LatexCompileTemplate.id: LatexCompileTemplate()}
 ENTRY_POINT_GROUP = "stk.engines"
 _REMOTE_PROTOCOL = ("id", "name", "table_id", "field_ids", "describe", "describe_values", "prepare", "collect",
                     "results_prefix", "final_state")
 _loaded = False
 _problems = []
 _lock = threading.Lock()
+
+
+def workflow_inputs(template):
+    """Ports come only from installed, registered code, never from project JSON.
+
+    Older local/remote templates retain their single rows input. A frozen local
+    template may additionally consume one upstream Files/Snapshot collection.
+    """
+    ports = [{"name": "rows", "type": "rows", "required": True}]
+    port = getattr(template, "file_input", None)
+    if port is not None:
+        if (not getattr(template, "local", False) or type(port) is not str or port == "rows"
+                or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,63}", port)
+                or not callable(getattr(template, "freeze_workflow", None))
+                or not callable(getattr(template, "execute_frozen", None))):
+            raise ValueError("A file-consuming template needs a bounded port and trusted freeze/execute hooks")
+        ports.append({"name": port, "type": "files", "required": True})
+    return ports
 
 
 def _load_entry_points():
@@ -216,6 +236,7 @@ def _load_locked():
                 else [name for name in ("id", "name", "run", "parameters", "outputs") if not hasattr(instance, name)]
             if missing:
                 raise TypeError("missing " + ", ".join(missing))
+            workflow_inputs(instance)
             if not isinstance(instance.id, str) or instance.id in TEMPLATES or instance.id in LOCAL_TEMPLATES:
                 raise ValueError(f"{instance.id} is already registered")
             (TEMPLATES if getattr(instance, "remote", False) else LOCAL_TEMPLATES)[instance.id] = instance

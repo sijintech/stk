@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <string_view>
 namespace stk::document_preview {
 namespace {
@@ -56,6 +57,181 @@ TEST(DocumentEvidence, CroppedIncompleteStripeAndInvalidBufferFailClosed)
   EXPECT_FALSE(evidence_marker(image, 1));
   image.width = 0xffffffffu;
   EXPECT_FALSE(evidence_marker(image, 1));
+}
+
+// Independent literal RGB values and rational mixtures model raster resampling;
+// these helpers neither use the recognizer's palette nor its classification rule.
+constexpr std::array<std::array<uint8_t, 3>, 6> kRasterColors = {{
+    {26, 78, 210}, {230, 118, 24}, {30, 174, 74},
+    {154, 42, 190}, {24, 186, 202}, {218, 38, 58}}};
+struct RasterStripe {
+  io::Image image;
+  std::array<int, 6> starts{}, widths{};
+  std::array<int, 5> edges{}, seams{};
+  int top = 12, height;
+};
+RasterStripe raster_stripe(int page, std::array<int, 6> widths,
+                           std::array<int, 5> seams, int height = 13)
+{
+  int total = 0;
+  for (const auto width : widths) { total += width; }
+  for (const auto seam : seams) { total += seam; }
+  RasterStripe result{io::Image(uint32_t(total + 83), 80), {}, widths, {}, seams, 12, height};
+  std::fill(result.image.pixels.begin(), result.image.pixels.end(), 255);
+  int x = 31;
+  for (int i = 0; i < 6; ++i) {
+    result.starts[i] = x;
+    const auto &from = kRasterColors[page == 1 ? i : 5 - i];
+    for (int y = result.top; y < result.top + height; ++y) for (int dx = 0; dx < widths[i]; ++dx) {
+      std::copy(from.begin(), from.end(), result.image.pixel(x + dx, y));
+    }
+    x += widths[i];
+    if (i == 5) { continue; }
+    result.edges[i] = x;
+    const auto &to = kRasterColors[page == 1 ? i + 1 : 4 - i];
+    for (int j = 1; j <= seams[i]; ++j) {
+      for (int y = result.top; y < result.top + height; ++y) {
+        auto *pixel = result.image.pixel(x, y);
+        for (int c = 0; c < 3; ++c) {
+          // Fixed 1/2 or 1/3,2/3 samples, rounded once to 8-bit pixels.
+          pixel[c] = uint8_t(std::lround((from[c] * (seams[i] + 1 - j) + to[c] * j) /
+                                       double(seams[i] + 1)));
+        }
+      }
+      ++x;
+    }
+  }
+  return result;
+}
+void paint_stripe_columns(RasterStripe &stripe, int left, int width,
+                          std::array<uint8_t, 4> color)
+{
+  for (int y = stripe.top; y < stripe.top + stripe.height; ++y) for (int x = left; x < left + width; ++x) {
+    std::copy(color.begin(), color.end(), stripe.image.pixel(x, y));
+  }
+}
+
+TEST(DocumentEvidence, ScaledRasterAllowsOnlyNarrowAdjacentColorMixturesAtDifferentSizes)
+{
+  for (const int cell : {12, 20, 32}) for (const int height : {8, 13, 24}) for (const int page : {1, 2}) {
+    // Nonuniform solid interiors reproduce 1..2px PDF raster transitions, rather
+    // than relying on one screenshot's coordinates, size or page identity.
+    const auto stripe = raster_stripe(page, {cell, cell - 2, cell - 2, cell - 2, cell - 3, cell - 1},
+                                      {1, 1, 1, 2, 2}, height);
+    const auto decoded = io::decode_png(io::encode_png(stripe.image));
+    EXPECT_TRUE(evidence_marker(decoded, page)) << "cell=" << cell << " height=" << height << " page=" << page;
+    EXPECT_FALSE(evidence_marker(decoded, 3 - page));
+    for (const int seam : {1, 2}) {
+      const auto uniform = raster_stripe(page, {cell, cell, cell, cell, cell, cell},
+                                        {seam, seam, seam, seam, seam}, height);
+      EXPECT_TRUE(evidence_marker(uniform.image, page)) << "seam=" << seam << " page=" << page;
+      EXPECT_FALSE(evidence_marker(uniform.image, 3 - page));
+    }
+  }
+}
+
+TEST(DocumentEvidence, ScaledRasterRejectsWrongOrderMissingColorsAndThirdColorTransitions)
+{
+  for (const int page : {1, 2}) {
+    const auto original = raster_stripe(page, {20, 18, 18, 18, 17, 19}, {1, 1, 1, 2, 2});
+    auto swapped = original;
+    const auto &a = kRasterColors[page == 1 ? 1 : 4];
+    const auto &b = kRasterColors[page == 1 ? 2 : 3];
+    paint_stripe_columns(swapped, swapped.starts[1], swapped.widths[1], {b[0], b[1], b[2], 255});
+    paint_stripe_columns(swapped, swapped.starts[2], swapped.widths[2], {a[0], a[1], a[2], 255});
+    EXPECT_FALSE(evidence_marker(swapped.image, page));
+    for (int missing = 0; missing < 6; ++missing) {
+      auto incomplete = original;
+      paint_stripe_columns(incomplete, incomplete.starts[missing], incomplete.widths[missing], {255, 255, 255, 255});
+      EXPECT_FALSE(evidence_marker(incomplete.image, page)) << "missing=" << missing << " page=" << page;
+    }
+    for (const auto invalid : {std::array<uint8_t, 4>{255, 0, 255, 255},
+                              std::array<uint8_t, 4>{255, 255, 255, 255},
+                              std::array<uint8_t, 4>{128, 128, 128, 255},
+                              std::array<uint8_t, 4>{230, 118, 24, 239}}) {
+      for (int edge = 0; edge < 5; ++edge) {
+        auto bad = original;
+        paint_stripe_columns(bad, bad.edges[edge], bad.seams[edge], invalid);
+        EXPECT_FALSE(evidence_marker(bad.image, page)) << "edge=" << edge << " page=" << page;
+      }
+    }
+  }
+}
+
+TEST(DocumentEvidence, ScaledRasterRejectsReversedAndOffSegmentTransitionPixels)
+{
+  for (const int page : {1, 2}) {
+    const auto original = raster_stripe(page, {20, 20, 20, 20, 20, 20}, {2, 2, 2, 2, 2});
+    for (int edge = 0; edge < 5; ++edge) {
+      auto reversed = original;
+      for (int y = reversed.top; y < reversed.top + reversed.height; ++y) {
+        auto *left = reversed.image.pixel(reversed.edges[edge], y);
+        auto *right = reversed.image.pixel(reversed.edges[edge] + 1, y);
+        for (int c = 0; c < 4; ++c) { std::swap(left[c], right[c]); }
+      }
+      EXPECT_FALSE(evidence_marker(reversed.image, page)) << "edge=" << edge << " page=" << page;
+    }
+    auto off_segment = original;
+    // A pixel near the first pair's midpoint is still invalid if its blue
+    // channel cannot come from either adjacent color's shared blend fraction.
+    paint_stripe_columns(off_segment, off_segment.edges[0], 2, {128, 98, 124, 255});
+    EXPECT_FALSE(evidence_marker(off_segment.image, page));
+  }
+}
+
+TEST(DocumentEvidence, ScaledRasterRejectsWideGapsDistortedWidthsAndIncompleteHeight)
+{
+  for (const int page : {1, 2}) {
+    for (int edge = 0; edge < 5; ++edge) {
+      std::array<int, 5> seams = {1, 1, 1, 1, 1};
+      seams[edge] = 3;
+      EXPECT_FALSE(evidence_marker(raster_stripe(page, {20, 20, 20, 20, 20, 20}, seams).image, page))
+          << "edge=" << edge << " page=" << page;
+    }
+    EXPECT_FALSE(evidence_marker(raster_stripe(page, {20, 20, 27, 20, 20, 20}, {1, 1, 1, 2, 2}).image, page));
+    EXPECT_FALSE(evidence_marker(raster_stripe(page, {20, 20, 7, 20, 20, 20}, {1, 1, 1, 2, 2}).image, page));
+    EXPECT_FALSE(evidence_marker(raster_stripe(page, {160, 160, 160, 160, 160, 160}, {2, 2, 2, 2, 2}).image, page));
+    EXPECT_FALSE(evidence_marker(raster_stripe(page, {20, 18, 18, 18, 17, 19}, {1, 1, 1, 2, 2}, 7).image, page));
+  }
+}
+
+TEST(DocumentEvidence, ScaledRasterRejectsClippedAndBackgroundLikeStripes)
+{
+  for (const int page : {1, 2}) {
+    const auto original = raster_stripe(page, {20, 18, 18, 18, 17, 19}, {1, 1, 1, 2, 2});
+    // Retain only seven solid pixels from the last color; all earlier colors
+    // and every permitted transition are still present.
+    io::Image clipped(uint32_t(original.starts[5] + 7), original.image.height);
+    for (uint32_t y = 0; y < clipped.height; ++y) {
+      std::copy_n(original.image.row(y), clipped.stride(), clipped.row(y));
+    }
+    EXPECT_FALSE(evidence_marker(clipped, page));
+    auto pale = original;
+    for (size_t i = 0; i < pale.image.pixels.size(); i += 4) for (int c = 0; c < 3; ++c) {
+      pale.image.pixels[i + c] = uint8_t((3 * pale.image.pixels[i + c] + 255) / 4);
+    }
+    EXPECT_FALSE(evidence_marker(pale.image, page));
+    auto transparent = original;
+    for (size_t i = 3; i < transparent.image.pixels.size(); i += 4) { transparent.image.pixels[i] = 239; }
+    EXPECT_FALSE(evidence_marker(transparent.image, page));
+  }
+}
+
+TEST(DocumentEvidence, CapturedMacPdfFirstPageKeepsItsIdentityInsideTheNativeViewport)
+{
+  // Public synthetic OS capture from Desktop run 40472799346, head 3ac89623.
+  // This replays pixels; it does not claim a new OS/browser execution.
+  const auto image = io::read_png(std::filesystem::path(STK_DOCUMENT_FIXTURE_DIR) / "macos-pdf-scaled-boundaries.png");
+  ASSERT_EQ(image.width, 1024u); ASSERT_EQ(image.height, 653u);
+  io::Image viewport(385, 256), outside = image;
+  for (uint32_t y = 0; y < viewport.height; ++y) for (uint32_t x = 0; x < viewport.width; ++x) {
+    std::copy_n(image.pixel(631 + x, 200 + y), 4, viewport.pixel(x, y));
+    std::fill_n(outside.pixel(631 + x, 200 + y), 4, 255);
+  }
+  EXPECT_TRUE(evidence_marker(viewport, 1));
+  EXPECT_FALSE(evidence_marker(viewport, 2));
+  EXPECT_FALSE(evidence_marker(outside, 1));
+  EXPECT_FALSE(evidence_marker(outside, 2));
 }
 
 // These literal text rows are deliberately independent of the recognizer's run

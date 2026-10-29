@@ -263,6 +263,19 @@ class WorkflowRuns:
             if frozen["kind"] == "analysis" and frozen["source"] and frozen_steps.get(frozen["source"], {}).get("duplicates"):
                 raise ProjectError(f"Step {identity}: the input files of step {frozen['source']} repeat the names "
                                    + ", ".join(frozen_steps[frozen["source"]]["duplicates"][:5]))
+        for step in steps:
+            if step["kind"] != "simulation":
+                continue
+            template = templates[step["ref"]["template"]]
+            port = getattr(template, "file_input", None)
+            if port is None:
+                continue  # Preserve existing frozen plans and parameter-only template behavior.
+            source = step["inputs"][port]["from"].split(".", 1)[0]
+            frozen = frozen_steps[step["id"]]
+            frozen["file_source"] = source
+            frozen["prepared"] = {row["id"]: template.freeze_workflow(
+                self.store, parameters[step["id"]][row["id"]], frozen_steps[source], expected_revision=revision)
+                for row in frozen_rows}
         plan = {"id": run_id, "project_id": self.store._project_id, "workflow_id": workflow_id,
                 "workflow_name": record["name"], "document": document,
                 "document_sha256": hashlib.sha256(canonical_json(document)).hexdigest(),
@@ -353,6 +366,62 @@ class WorkflowRuns:
         with self.store._connect() as db:
             plan, events = self._read(db, run_id)
         return {**plan, "plan_sha256": _hash(plan), **self._state(plan, events)}
+
+    def local_attempt(self, run_id, step, row, attempt):
+        """Resolve persisted evidence without execution or accepting a caller path.
+
+        Failed and interrupted attempts remain inspectable under the exact
+        identity used by the independent compiler's receipt and logs.
+        """
+        from suan.workflows.latex import LatexCompileTemplate, attempt_identity
+        if type(attempt) is not int or attempt < 1:
+            raise ProjectError("A local attempt number must be positive")
+        with self.store._connect() as db:
+            plan, events = self._read(db, run_id)
+        frozen = plan["steps"].get(step, {})
+        selected = next((item for item in plan["rows"] if item["id"] == row), None)
+        if (frozen.get("template") != LatexCompileTemplate.id or selected is None
+                or not any(event["step"] == step and event["row"] == row and event["attempt"] == attempt
+                           for event in events)):
+            raise ProjectError("No such persisted local compilation attempt")
+        return {"attempt_id": attempt_identity(run_id, step, row, attempt),
+                "directory": f"{plan['directory']}/row-{selected['number']}/{step}/attempt-{attempt}"}
+
+    def compilation_evidence(self, run_id, step, row, attempt):
+        """Bind a compiler receipt to the plan and the input that preceded this attempt.
+
+        Later attempts and later upstream results cannot retarget historical evidence.
+        This only reads the journal; it never probes, recovers or executes a process.
+        """
+        from suan.workflows.latex import LatexCompileTemplate, attempt_identity
+        if type(attempt) is not int or attempt < 1:
+            raise ProjectError("A local attempt number must be positive")
+        with self.store._connect() as db:
+            plan, events = self._read(db, run_id)
+        frozen = plan["steps"].get(step, {})
+        selected = next((item for item in plan["rows"] if item["id"] == row), None)
+        prepared = frozen.get("prepared", {}).get(row)
+        source_step = frozen.get("file_source")
+        if (frozen.get("template") != LatexCompileTemplate.id or selected is None
+                or type(prepared) is not dict or prepared.get("format") != "stk.latex-workflow/1"
+                or source_step not in plan["steps"]):
+            raise ProjectError("No frozen compilation input for this workflow task")
+        starts = [index for index, event in enumerate(events)
+                  if event["step"] == step and event["row"] == row and event["attempt"] == attempt
+                  and event["status"] == "running" and "progress" not in event]
+        if len(starts) != 1:
+            raise ProjectError("No unique persisted local compilation attempt")
+        source = None
+        for event in events[:starts[0]]:
+            if event["step"] == source_step and event["row"] == row and "progress" not in event:
+                source = event
+        produced = source.get("produced") if source else None
+        if (source is None or source["status"] != "succeeded" or type(produced) is not dict
+                or type(produced.get("snapshot_id")) is not str or type(produced.get("files")) is not dict):
+            raise ProjectError("Compilation input was not a successful file snapshot before this attempt")
+        return {"location": {"attempt_id": attempt_identity(run_id, step, row, attempt),
+                             "directory": f"{plan['directory']}/row-{selected['number']}/{step}/attempt-{attempt}"},
+                "prepared": prepared, "source": produced, "source_attempt": source["attempt"]}
 
     def list(self, *, offset=0, limit=50, workflow_id=None, archived=None):
         if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:

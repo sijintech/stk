@@ -3,6 +3,7 @@
 
 #include "stk/app/analysis_parameter_draft.hh"
 #include "stk/bridge/client.hh"
+#include "stk/core/utf8.hh"
 
 namespace stk::app {
 class AppStore;
@@ -90,6 +91,19 @@ class ProjectWorkflows {
   const io::Json &run_staleness() const { return stale_; }
   bool load_run_staleness();
 
+  /** Explicit read-only compilation inspection. Separate from save/run requests;
+   * reopening a workspace never calls these methods. Older attempts remain readable. */
+  bool compilations_supported() const;
+  bool load_compilation(const std::string &step, const std::string &row, int64_t attempt);
+  bool load_compilation_log(const std::string &stream, int64_t offset = 0);
+  bool read_compilation_source(size_t diagnostic, std::function<void(const io::Json &)> done);
+  void clear_compilation();
+  bool compilation_busy() const { return compilation_busy_; }
+  const io::Json &compilation() const { return compilation_; }
+  const io::Json &compilation_log() const { return compilation_log_; }
+  const std::string &compilation_text() const { return compilation_text_; }
+  const std::string &compilation_error() const { return compilation_error_; }
+
  private:
   void reset();
   void changed();
@@ -99,6 +113,7 @@ class ProjectWorkflows {
              int64_t revision);
   bool run_call(const std::string &method, io::Json params);
   void accept_run(const io::Json &result);
+  bool compilation_call(const std::string &method, io::Json params, std::function<void(const io::Json &)> done);
 
   AppStore &store_;
   ProjectState &project_;
@@ -113,5 +128,11 @@ class ProjectWorkflows {
   std::optional<bool> list_archived_, runs_archived_;
   std::optional<bridge::Future<io::Json>> future_, check_future_;
   AnalysisCandidateValidation candidate_;
+  io::Json compilation_key_, compilation_, compilation_log_;
+  std::string compilation_text_, compilation_error_;
+  core::utf8::StreamDecoder compilation_decoder_;
+  bool compilation_busy_ = false;
+  uint64_t compilation_generation_ = 0;
+  std::optional<bridge::Future<io::Json>> compilation_future_;
 };
 }  // namespace stk::app

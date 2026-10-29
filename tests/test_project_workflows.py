@@ -274,6 +274,8 @@ def test_choices_list_referencable_objects_only(store, project):
                                    {"id": "pet-model/1", "name": "PET molecular modeling / PET 分子建模", "table_id": None,
                                     "remote": False, "local": True},
                                    {"id": "pet-study/1", "name": "PET simulation study / PET 全流程模拟研究", "table_id": None,
+                                    "remote": False, "local": True},
+                                   {"id": "latex-compile/1", "name": "Local LaTeX compilation / 本机 LaTeX 编译", "table_id": None,
                                     "remote": False, "local": True}]
     assert store.snapshot() == before and store.history() == history  # read-only
     store.apply([{"op": "set_cell", "table_id": analyses.TABLE_ID, "record_id": project["dynamic"],
@@ -376,6 +378,8 @@ def test_bridge_methods_scripting_api_and_events(inproc, tmp_path):
                                                    {"id": "pet-model/1", "name": "PET molecular modeling / PET 分子建模", "table_id": None,
                                                     "remote": False, "local": True},
                                                    {"id": "pet-study/1", "name": "PET simulation study / PET 全流程模拟研究", "table_id": None,
+                                                    "remote": False, "local": True},
+                                                   {"id": "latex-compile/1", "name": "Local LaTeX compilation / 本机 LaTeX 编译", "table_id": None,
                                                     "remote": False, "local": True}]}
     error = h.error("project.workflows.get", {"handle": info["handle"], "workflow_id": str(uuid4())})
     assert error["code"] == "not_found"

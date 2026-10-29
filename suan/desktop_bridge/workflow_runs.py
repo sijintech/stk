@@ -275,7 +275,8 @@ class WorkflowRunExecutor:
                 self._submit(job, plan, step, row, attempt, tasks[(step, row["id"])])
                 return  # followed by later passes until the Runtime task finishes
             if frozen["kind"] == "simulation":
-                produced = self._simulate(job, plan, step, row, attempt)
+                source = tasks.get((frozen.get("file_source"), row["id"]))
+                produced = self._simulate(job, plan, step, row, attempt, (source or {}).get("produced"))
             elif frozen["kind"] == "files":
                 produced = {"snapshot_id": frozen["snapshot_id"], "files": frozen["files"]}
             else:
@@ -485,18 +486,22 @@ class WorkflowRunExecutor:
                 job.cancel.set()  # The run disappeared or its project became unavailable.
         return job.cancel.is_set()
 
-    def _simulate(self, job, plan, step, row, attempt):
+    def _simulate(self, job, plan, step, row, attempt, source=None):
         from suan.workflows.templates import workflow_templates
         frozen = plan["steps"][step]
         template = workflow_templates()[frozen["template"]]
         relative = Path(plan["directory"], f"row-{row['number']}", step, f"attempt-{attempt}")
         directory = job.store.directory / relative
-        directory.parent.mkdir(parents=True, exist_ok=True)
+        frozen_executor = getattr(template, "execute_frozen", None) if "prepared" in frozen else None
+        if not callable(frozen_executor):
+            directory.parent.mkdir(parents=True, exist_ok=True)
         finished, observer = threading.Event(), None
         try:
             cancellable = getattr(template, "run_cancellable", None)
             coordinator = getattr(template, "execute_local", None)
-            if callable(cancellable) or callable(coordinator):
+            if "file_source" in frozen and not callable(frozen_executor):
+                raise ProjectError("The frozen file-consuming template is no longer available")
+            if callable(cancellable) or callable(coordinator) or callable(frozen_executor):
                 if self._local_cancelled(job):
                     raise _Cancelled()
 
@@ -508,7 +513,18 @@ class WorkflowRunExecutor:
                 observer = threading.Thread(target=observe, daemon=True,
                                             name="stk-workflow-cancel-" + job.run_id)
                 observer.start()
-                if callable(coordinator):
+                if callable(frozen_executor):
+                    from suan.workflows.latex import attempt_identity
+                    previous_guard = getattr(template, "check_previous_attempts", None)
+                    if callable(previous_guard):
+                        previous_guard(job.store, [
+                            {"directory": (relative.parent / f"attempt-{number}").as_posix(),
+                             "attempt_id": attempt_identity(job.run_id, step, row["id"], number)}
+                            for number in range(1, attempt)])
+                    frozen_executor(job.store, frozen["prepared"][row["id"]], source,
+                                    directory=relative.as_posix(),
+                                    attempt_id=attempt_identity(job.run_id, step, row["id"], attempt), cancel=job.cancel)
+                elif callable(coordinator):
                     coordinator(stk=self._api(job), cleanup_stk=self._api(job, cancellable=False),
                                 parameters=plan["parameters"][step][row["id"]], directory=directory,
                                 cancel=job.cancel, context={"run_id": job.run_id, "step": step,

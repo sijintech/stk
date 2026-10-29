@@ -12335,6 +12335,296 @@
         "result": {
           "$ref": "#/$defs/projectAnalysisWriteResult"
         }
+      },
+      "project.workflow_runs.compilation": {
+        "description": "Read a persisted local LaTeX attempt receipt, including failures. No execution, process probing or recovery.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "step": {
+              "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+            },
+            "row": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "handle",
+            "run_id",
+            "step",
+            "row",
+            "attempt"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "step": {
+              "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+            },
+            "row": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "receipt": {
+              "$ref": "#/$defs/projectCompilationReceipt"
+            }
+          },
+          "required": [
+            "run_id",
+            "step",
+            "row",
+            "attempt",
+            "receipt"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.workflow_runs.compilation_log": {
+        "description": "Read at most 64 KiB of a named persisted compilation log. The journal chooses the attempt path; terminal bytes are checksum verified.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "step": {
+              "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+            },
+            "row": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "stream": {
+              "enum": [
+                "stdout.txt",
+                "stderr.txt",
+                "compiler.txt"
+              ]
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536
+            }
+          },
+          "required": [
+            "handle",
+            "run_id",
+            "step",
+            "row",
+            "attempt"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "step": {
+              "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+            },
+            "row": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "attempt_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "stream": {
+              "enum": [
+                "stdout.txt",
+                "stderr.txt",
+                "compiler.txt"
+              ]
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "next_offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "data": {
+              "type": "string",
+              "maxLength": 87384
+            },
+            "terminal": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "run_id",
+            "step",
+            "row",
+            "attempt",
+            "attempt_id",
+            "stream",
+            "offset",
+            "next_offset",
+            "data",
+            "terminal"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.workflow_runs.compilation_source": {
+        "description": "Resolve a frozen diagnostic to the registered current source only when its actual bytes still match. Does not open an editor or compile.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "step": {
+              "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+            },
+            "row": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "diagnostic": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "handle",
+            "run_id",
+            "step",
+            "row",
+            "attempt",
+            "diagnostic",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "step": {
+              "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+            },
+            "row": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "attempt_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "diagnostic": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "record_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "source_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "line": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "column": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "run_id",
+            "step",
+            "row",
+            "attempt",
+            "attempt_id",
+            "diagnostic",
+            "revision",
+            "record_id",
+            "path",
+            "source_sha256",
+            "line",
+            "column"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -22581,6 +22871,200 @@
       ],
       "additionalProperties": false,
       "description": "Frozen generated Markdown/HTML entry held inline in generation.body, plus optional real snapshot assets. Generated entry UUID is UUIDv5(request_id, stk.report-generated-entry/1), never a Files-table record. Metadata including title <=384 KiB. ZIP also carries the exact original request input and response as checksum-bound evidence."
+    },
+    "projectCompilationDiagnostic": {
+      "type": "object",
+      "properties": {
+        "record_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "path": {
+          "$ref": "#/$defs/relPath"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "column": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "record_id",
+        "path",
+        "source_sha256",
+        "line",
+        "column",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "projectCompilationReceipt": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.latex-compile/1"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "state": {
+          "enum": [
+            "preparing",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ]
+        },
+        "exit_code": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": -2147483648,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inputs_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "snapshot_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "snapshot_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "entry_path": {
+          "$ref": "#/$defs/relPath"
+        },
+        "compiler": {
+          "type": "object",
+          "properties": {
+            "engine": {
+              "enum": [
+                "pdflatex",
+                "xelatex"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 49152
+            }
+          },
+          "required": [
+            "engine",
+            "path",
+            "sha256",
+            "version"
+          ],
+          "additionalProperties": false
+        },
+        "files": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "enum": [
+                  "report.pdf",
+                  "stdout.txt",
+                  "stderr.txt",
+                  "compiler.txt"
+                ]
+              },
+              "sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4194304
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "size"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/projectCompilationDiagnostic"
+          }
+        }
+      },
+      "required": [
+        "format",
+        "attempt_id",
+        "state",
+        "exit_code",
+        "reason",
+        "error",
+        "inputs_sha256",
+        "snapshot_id",
+        "snapshot_sha256",
+        "entry_path",
+        "compiler",
+        "files",
+        "diagnostics"
+      ],
+      "additionalProperties": false
     }
   }
 }

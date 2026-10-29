@@ -98,6 +98,50 @@ def test_all_assets_are_exact_untruncated_bytes_and_live_changes_are_ignored(pro
     assert store.history() == before
 
 
+@pytest.mark.parametrize("name", ["main.tex", "compile.log"])
+def test_compilation_evidence_is_inert_utf8_and_survives_reopen_and_export(tmp_path, monkeypatch, name):
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("Report evidence must not execute a compiler"))
+    store = ProjectStore.create(tmp_path / "project", "Compilation evidence")
+    body = "\\write18{must-never-run}\n冻结源及诊断 / source.tex:5:7\n".encode()
+    source = store.directory / name
+    source.write_bytes(body)
+    record = store.files.index([str(source)], expected_revision=0)["record_ids"][0]
+    snapshot = store.snapshots.capture([record], expected_revision=1)["snapshot"]
+    identity = str(uuid4())
+    Reports(store).create("Evidence", snapshot["id"], record, [{"record_id": record, "path": name}],
+                          report_id=identity, expected_revision=2)
+    source.unlink()
+    reopened = Reports(ProjectStore(store.directory))
+    report = reopened.get(identity)["report"]
+    asset = report["manifest"]["assets"][0]
+    assert asset["mime"] == "text/plain; charset=utf-8"
+    assert asset["sha256"] == hashlib.sha256(body).hexdigest()
+    value = reopened.asset(identity, name, expected_revision=3, expected_source_sha256=report["source_sha256"])
+    assert base64.b64decode(value["data"]) == body
+    output = tmp_path / "evidence.zip"
+    reopened.export_file(identity, output, expected_revision=3, expected_source_sha256=report["source_sha256"])
+    with zipfile.ZipFile(output) as archive:
+        assert archive.read(name) == body
+        assert json.loads(archive.read("stk-report.json"))["manifest"] == report["manifest"]
+    assert store.info()["revision"] == 3
+
+
+@pytest.mark.parametrize("name", ["main.tex", "compile.log"])
+def test_compilation_evidence_rejects_non_utf8_before_report_edit(tmp_path, name):
+    store = ProjectStore.create(tmp_path / "project", "Invalid compilation evidence")
+    source = store.directory / name
+    source.write_bytes(b"invalid UTF-8: \xff")
+    record = store.files.index([str(source)], expected_revision=0)["record_ids"][0]
+    snapshot = store.snapshots.capture([record], expected_revision=1)["snapshot"]
+    before = store.history()
+    with pytest.raises(ProjectError):
+        Reports(store).create("Invalid", snapshot["id"], record, [{"record_id": record, "path": name}],
+                              report_id=str(uuid4()), expected_revision=2)
+    assert store.history() == before and store.info()["revision"] == 2
+    assert Reports(store).list()["total"] == 0
+
+
 def test_large_markdown_is_not_attachment_preview_truncated(tmp_path):
     store = ProjectStore.create(tmp_path / "p", "Long text")
     text = b"# Heading\n" + b"x" * 100000

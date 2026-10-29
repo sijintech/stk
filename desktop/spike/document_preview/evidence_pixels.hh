@@ -8,7 +8,8 @@ namespace stk::document_preview {
 inline constexpr std::array<std::array<uint8_t, 3>, 6> kEvidenceColors = {{
     {26, 78, 210}, {230, 118, 24}, {30, 174, 74},
     {154, 42, 190}, {24, 186, 202}, {218, 38, 58}}};
-// Require a spatially contiguous six-color stripe, repeated on >=8 consecutive rows.
+// Require six ordered solid colors on >=8 aligned rows; only <=2px opaque
+// mixtures of each adjacent expected pair may bridge scaled raster boundaries.
 // page=1 normal order, page=2 reverse order. No rendering/GPU/OS dependencies.
 bool evidence_marker(const io::Image &image, int page);
 // Recognize this separate, neutral high-contrast U+2588/space text in a <pre>:

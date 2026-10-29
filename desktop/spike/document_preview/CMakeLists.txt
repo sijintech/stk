@@ -11,6 +11,8 @@ target_include_directories(stk_document_evidence_pixels PUBLIC "${CMAKE_CURRENT_
 target_compile_features(stk_document_evidence_pixels PUBLIC cxx_std_20)
 add_executable(stk-document-evidence-tests evidence_pixels_test.cc)
 target_link_libraries(stk-document-evidence-tests PRIVATE stk_document_evidence_pixels GTest::gtest_main)
+target_compile_definitions(stk-document-evidence-tests PRIVATE
+  STK_DOCUMENT_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
 if(COMMAND stk_target_warnings)
   stk_target_warnings(stk_document_evidence_pixels)

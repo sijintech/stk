@@ -22,6 +22,28 @@ bool evidence_marker(const io::Image &image, int page)
     }
     return -1;
   };
+  // PDF raster scaling can mix the two adjacent stripe colors across one or
+  // two pixels, even for a single image with /Interpolate false. Admit only an
+  // opaque mixture on that exact RGB segment; a background gap or third color
+  // must not join otherwise unrelated color runs.
+  const auto transition = [&](uint32_t x, uint32_t y, int before, double &blend) {
+    const auto *p = image.pixel(x, y);
+    if (p[3] < 240) { return false; }
+    const auto &from = kEvidenceColors[page == 1 ? before : 5 - before];
+    const auto &to = kEvidenceColors[page == 1 ? before + 1 : 4 - before];
+    double numerator = 0, denominator = 0;
+    for (int c = 0; c < 3; ++c) {
+      const int delta = int(to[c]) - from[c];
+      numerator += (int(p[c]) - from[c]) * delta;
+      denominator += delta * delta;
+    }
+    blend = numerator / denominator;
+    if (blend <= 0 || blend >= 1) { return false; }
+    for (int c = 0; c < 3; ++c) {
+      if (std::abs(p[c] - (from[c] + blend * (int(to[c]) - from[c]))) > 2) { return false; }
+    }
+    return true;
+  };
   uint32_t prior_x = 0, prior_width = 0;
   int rows = 0;
   for (uint32_t y = 0; y < image.height; ++y) {
@@ -29,17 +51,41 @@ bool evidence_marker(const io::Image &image, int page)
     for (uint32_t x = 0; x < image.width;) {
       if (color(x, y) != 0) { ++x; continue; }
       const uint32_t start = x;
-      uint32_t min_width = UINT32_MAX, max_width = 0;
+      std::array<uint32_t, 6> solid_widths{};
+      std::array<uint32_t, 5> transition_widths{};
       int n = 0;
       for (; n < 6; ++n) {
         const uint32_t begin = x;
         while (x < image.width && color(x, y) == n) { ++x; }
         const uint32_t width = x - begin;
         if (width < 8 || width > 160) { break; }
-        min_width = std::min(min_width, width);
-        max_width = std::max(max_width, width);
+        solid_widths[n] = width;
+        if (n < 5) {
+          const uint32_t edge = x;
+          double previous_blend = 0;
+          while (x < image.width && color(x, y) == -1 && x - edge < 2) {
+            double blend = 0;
+            if (!transition(x, y, n, blend) || blend + .02 < previous_blend) { break; }
+            previous_blend = blend;
+            ++x;
+          }
+          transition_widths[n] = x - edge;
+          if (x == image.width || color(x, y) != n + 1) { break; }
+        }
       }
-      if (n == 6 && max_width - min_width <= 2) {
+      // Split each admitted transition evenly between its neighbours. In half
+      // pixels this retains the original 8..160px widths and <=2px difference,
+      // without treating their mixed boundary as missing solid-color content.
+      uint32_t min_width = UINT32_MAX, max_width = 0;
+      if (n == 6) {
+        for (size_t i = 0; i < solid_widths.size(); ++i) {
+          const auto width = 2 * solid_widths[i] + (i ? transition_widths[i - 1] : 0) +
+              (i + 1 < solid_widths.size() ? transition_widths[i] : 0);
+          min_width = std::min(min_width, width);
+          max_width = std::max(max_width, width);
+        }
+      }
+      if (n == 6 && min_width >= 16 && max_width <= 320 && max_width - min_width <= 4) {
         const auto width = x - start;
         rows = rows && std::abs(int(start) - int(prior_x)) <= 1 &&
                                std::abs(int(width) - int(prior_width)) <= 2 ? rows + 1 : 1;

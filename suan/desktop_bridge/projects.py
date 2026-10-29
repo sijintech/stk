@@ -489,6 +489,9 @@ class ProjectSessions:
                                  workflow_id=params.get("workflow_id"), archived=params.get("archived"))
             if action == "stale":
                 return runs.stale(params["run_id"])
+            if action in {"compilation", "compilation_log", "compilation_source"}:
+                from .compilations import read
+                return read(store, action, params)
             if self._workflow_executor is None:
                 raise BridgeError("unsupported", "No local workflow executor is installed")
             if action == "recover":

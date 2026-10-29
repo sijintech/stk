@@ -46,6 +46,49 @@ void write(const fs::path &path, const std::string &text)
 }
 struct Options { std::string python, backend, source = "markdown"; fs::path output; };
 
+void log_last_observation(const Json &result) noexcept
+{
+  try {
+    const auto observation = result.find("last_observation");
+    if (observation == result.end() || !observation->is_object()) {
+      std::fputs("STK_NATIVE_LAST_OBSERVATION unavailable\n", stderr);
+      return;
+    }
+    // Copy only synthetic pixel measurements, never file/backend strings or resource URLs.
+    Json diagnostic = Json::object();
+    for (const auto *key : {"page1_marker_in_viewport", "page2_marker_in_viewport",
+             "marker_outside_viewport", "body_text_required", "body_text_marker_in_viewport",
+             "body_text_marker_outside_viewport"}) {
+      const auto value = observation->find(key);
+      diagnostic[key] = value != observation->end() && value->is_boolean() ? *value : Json(nullptr);
+    }
+    for (const auto *key : {"cycle", "expected_page", "consecutive_matches",
+             "native_scroll_requests_this_phase", "host_colored_samples"}) {
+      const auto value = observation->find(key);
+      diagnostic[key] = value != observation->end() && value->is_number_integer() ? *value : Json(nullptr);
+    }
+    const auto geometry = [&](const char *key, size_t size) {
+      const auto value = observation->find(key);
+      diagnostic[key] = value != observation->end() && value->is_array() && value->size() == size &&
+          std::all_of(value->begin(), value->end(), [](const Json &v) { return v.is_number_integer(); }) ?
+          *value : Json(nullptr);
+    };
+    geometry("viewport_top_left", 4);
+    geometry("client_size", 2);
+    diagnostic["phase"] = nullptr;
+    const auto phase = observation->find("phase");
+    if (phase != observation->end() && phase->is_string()) {
+      const auto &name = phase->get_ref<const std::string &>();
+      for (const auto *allowed : {"visible-page1", "scrolled-page2", "hidden-tab", "reshown",
+               "popup", "after-popup", "closed", "reprepared-page1"}) {
+        if (name == allowed) { diagnostic["phase"] = name; break; }
+      }
+    }
+    std::fprintf(stderr, "STK_NATIVE_LAST_OBSERVATION %s\n", diagnostic.dump().c_str());
+  }
+  catch (...) { std::fputs("STK_NATIVE_LAST_OBSERVATION unavailable\n", stderr); }
+}
+
 io::Image marker()
 {
   io::Image image(240, 24);
@@ -594,8 +637,13 @@ int main(int argc, char **argv)
     return 0;
   }
   catch (const std::exception &error) {
-    result["status"] = "failed"; result["error"] = error.what();
-    if (!directory.empty()) { try { write(directory / "result.json", result.dump(2)); } catch (...) {} }
-    std::fprintf(stderr, "FAIL: %s\n", error.what()); return 1;
+    std::fprintf(stderr, "FAIL: %s\n", error.what());
+    log_last_observation(result);
+    try {
+      result["status"] = "failed"; result["error"] = error.what();
+      if (!directory.empty()) { write(directory / "result.json", result.dump(2)); }
+    }
+    catch (...) {}
+    return 1;
   }
 }

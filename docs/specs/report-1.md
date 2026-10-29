@@ -35,8 +35,11 @@ Hashes provide consistency checks; ordinary table access is not a cryptographic 
 
 Asset records must be distinct members of that snapshot, with matching size and hash.
 Source and virtual suffixes must map to the same admitted MIME. Supported suffixes are `.md`, `.markdown`,
-`.html`, `.htm`, `.css`, `.txt`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` and `.pdf`.
+`.html`, `.htm`, `.css`, `.txt`, `.tex`, `.log`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` and `.pdf`.
 Text MIME includes `charset=utf-8`. MIME admission does not validate every image or PDF encoding.
+The 2026-10-27 additive extension admits `.tex` and `.log` as `text/plain; charset=utf-8`
+for exact source and compilation-log evidence. They remain inert UTF-8 assets: creating,
+reading, reopening or exporting a report never starts a compiler or interprets log contents.
 Paths are portable relative POSIX names, at most 1024 UTF-8 bytes: no absolute paths, `.`/`..`, backslashes,
 controls, Windows reserved names, trailing dot/space or NFC/case-folded file/directory collisions.
 `stk-report.json` is reserved at the root. Source paths are never used as arbitrary host filesystem paths.

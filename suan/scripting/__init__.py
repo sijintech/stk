@@ -856,6 +856,23 @@ class ProjectWorkflowRuns:
         Re-run them with a new ``prepare`` over ``stale(...)["stale_rows"]``; old runs never change."""
         return self._call("project.workflow_runs.stale", {"handle": self.handle, "run_id": run_id})
 
+    def compilation(self, run_id, step, row, attempt):
+        """Read one persisted LaTeX attempt, including failures; never starts or recovers it."""
+        return self._call("project.workflow_runs.compilation", {"handle": self.handle, "run_id": run_id,
+            "step": step, "row": row, "attempt": attempt})
+
+    def compilation_log(self, run_id, step, row, attempt, *, stream="stdout.txt", offset=0, limit=65536):
+        """Read a bounded base64 log page of an exact compilation attempt."""
+        return self._call("project.workflow_runs.compilation_log", {"handle": self.handle, "run_id": run_id,
+            "step": step, "row": row, "attempt": attempt, "stream": stream, "offset": offset, "limit": limit})
+
+    def compilation_source(self, run_id, step, row, attempt, diagnostic, *, expected_revision):
+        """Resolve a diagnostic only while the registered source still matches its frozen bytes.
+        This returns a location; opening an editor is a separate desktop action.
+        """
+        return self._call("project.workflow_runs.compilation_source", {"handle": self.handle, "run_id": run_id,
+            "step": step, "row": row, "attempt": attempt, "diagnostic": diagnostic, "expected_revision": expected_revision})
+
 
 class ProjectAnalysisRuns:
     """Snapshot-bound local analysis runs, separate from Runtime simulation tasks.

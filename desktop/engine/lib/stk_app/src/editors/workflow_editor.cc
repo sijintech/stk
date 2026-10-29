@@ -1765,7 +1765,10 @@ class WorkflowEditor final : public Editor {
       return {0, 0, 0, 0};
     };
     const int chosen = run_row_;
-    spec.selected = {[chosen] { return chosen; }, [this](const int row) { run_row_ = row; redraw(); }};
+    spec.selected = {[chosen] { return chosen; }, [this](const int row) {
+      if (run_row_ != row) { workflows_->clear_compilation(); compilation_diagnostic_ = -1; }
+      run_row_ = row; redraw();
+    }};
     panel.table("workflow_run_tasks", std::move(spec));
     results_question(panel, ctx, run);
     if (run_row_ >= 0 && size_t(run_row_) < rows.size()) {
@@ -1796,6 +1799,19 @@ class WorkflowEditor final : public Editor {
         }
         const auto analysis_run = io::get_string(member(task, "produced"), "analysis_run_id");
         const auto &frozen = member(member(run, "steps"), step.get_ref<const std::string &>().c_str());
+        if (io::get_string(frozen, "template") == "latex-compile/1") {
+          const auto attempt = io::get_int(task, "attempt", 0);
+          const auto step_id = step.get<std::string>();
+          const auto retain = valid();
+          panel.button("workflow_compilation/" + step_id,
+              catalog.format("workflow.compilation.inspect", {{"step", run_step_label(step_id)}}),
+              [this, retain, run_id, row_id, step_id, attempt] {
+            if (retain() && io::get_string(workflows_->run(), "id") == run_id) {
+              compilation_diagnostic_ = -1;
+              workflows_->load_compilation(step_id, row_id, attempt);
+            }
+          }).disable(attempt < 1 || workflows_->busy() || workflows_->compilation_busy() || !workflows_->compilations_supported());
+        }
         if (!analysis_run.empty()) {
           auto *shell = &ctx.area.shell();
           auto *area = &ctx.area;
@@ -1807,6 +1823,7 @@ class WorkflowEditor final : public Editor {
           }).disable(shell->text_input_active());
         }
       }
+      compilation_detail(panel, ctx, run_id, row_id);
     }
     else { panel.paragraph(ctx.tr("workflow.run.pick_row")); }
     auto ok = valid();
@@ -1833,6 +1850,97 @@ class WorkflowEditor final : public Editor {
         .tip(ctx.tr("workflow.run.recover.tip"));
     archive_button(actions, ctx, "workflow_run", run_id, "workflow_run_archive", false,
                    status != "running" && status != "cancel_requested" && !workflows_->busy());
+  }
+
+  void compilation_detail(ui::Layout &panel, EditorContext &ctx, const std::string &run_id, const std::string &row_id)
+  {
+    if (!workflows_->compilation_error().empty()) { panel.paragraph(workflows_->compilation_error()); }
+    const auto &evidence = workflows_->compilation();
+    if (io::get_string(evidence, "run_id") != run_id || io::get_string(evidence, "row") != row_id) { return; }
+    const auto &receipt = member(evidence, "receipt");
+    const auto step = io::get_string(evidence, "step"), attempt_id = io::get_string(receipt, "attempt_id");
+    const auto attempt = io::get_int(evidence, "attempt", 0);
+    const auto retain = valid();
+    auto *shell = &ctx.area.shell();
+    auto current = [this, retain, run_id, row_id, attempt_id] {
+      if (!retain()) { return false; }
+      const auto &rows = member(workflows_->run(), "rows");
+      return run_row_ >= 0 && rows.is_array() && size_t(run_row_) < rows.size() &&
+          io::get_string(rows[size_t(run_row_)], "id") == row_id && io::get_string(workflows_->run(), "id") == run_id &&
+          io::get_string(workflows_->compilation(), "row") == row_id &&
+          io::get_string(member(workflows_->compilation(), "receipt"), "attempt_id") == attempt_id;
+    };
+    auto &catalog = ctx.store.catalog();
+    const auto state = io::get_string(receipt, "state");
+    panel.paragraph(catalog.format("workflow.compilation.summary", {{"step", run_step_label(step)}, {"attempt", std::to_string(attempt)},
+        {"state", std::string(ctx.tr(state == "preparing" ? "workflow.run.stage.preparing" : "workflow.run.task." + state))}}));
+    panel.paragraph(ctx.tr("workflow.compilation.frozen"));
+    const auto &compiler = member(receipt, "compiler");
+    panel.paragraph(io::get_string(compiler, "engine") + " · " + io::get_string(compiler, "path"));
+    if (!member(receipt, "reason").is_null()) { panel.paragraph(io::get_string(receipt, "reason")); }
+    if (!member(receipt, "error").is_null()) { panel.paragraph(io::get_string(receipt, "error")); }
+    int64_t latest = attempt;
+    for (const auto &task : member(workflows_->run(), "tasks")) {
+      if (io::get_string(task, "step") == step && io::get_string(task, "row") == row_id) { latest = io::get_int(task, "attempt", attempt); }
+    }
+    auto &navigation = panel.row();
+    navigation.button("workflow_compilation_previous", ctx.tr("workflow.compilation.previous"), [this, current, step, row_id, attempt] {
+      if (current()) { compilation_diagnostic_ = -1; workflows_->load_compilation(step, row_id, attempt - 1); }
+    }).disable(attempt <= 1 || workflows_->compilation_busy());
+    navigation.button("workflow_compilation_refresh", ctx.tr("workflow.compilation.refresh"), [this, current, step, row_id, attempt] {
+      if (current()) { compilation_diagnostic_ = -1; workflows_->load_compilation(step, row_id, attempt); }
+    }).disable(workflows_->compilation_busy());
+    navigation.button("workflow_compilation_next", ctx.tr("workflow.compilation.next"), [this, current, step, row_id, attempt] {
+      if (current()) { compilation_diagnostic_ = -1; workflows_->load_compilation(step, row_id, attempt + 1); }
+    }).disable(attempt >= latest || workflows_->compilation_busy());
+
+    const auto &diagnostics = member(receipt, "diagnostics");
+    if (diagnostics.is_array() && !diagnostics.empty()) {
+      ui::TableSpec spec;
+      spec.columns = {{std::string(ctx.tr("workflow.compilation.source")), 5},
+                      {std::string(ctx.tr("workflow.compilation.location")), 2},
+                      {std::string(ctx.tr("workflow.compilation.message")), 9}};
+      spec.rows = int(diagnostics.size()); spec.visible_rows = float(std::min(5, spec.rows));
+      spec.data_version = workflows_->version();
+      spec.cell = [diagnostics](int row, int column) {
+        const auto &item = diagnostics.at(size_t(row));
+        if (column == 0) { return io::get_string(item, "path"); }
+        if (column == 1) { return std::to_string(io::get_int(item, "line", 0)) +
+            (member(item, "column").is_null() ? std::string() : ":" + std::to_string(io::get_int(item, "column", 0))); }
+        return io::get_string(item, "message");
+      };
+      const auto selected = compilation_diagnostic_;
+      spec.selected = {[selected] { return selected; }, [this, current](int row) { if (current()) { compilation_diagnostic_ = row; redraw(); } }};
+      panel.table("workflow_compilation_diagnostics", std::move(spec));
+      panel.button("workflow_compilation_open_source", ctx.tr("workflow.compilation.open_source"), [this, current, shell, selected] {
+        if (!current() || shell->text_input_active() || selected < 0) { return; }
+        workflows_->read_compilation_source(size_t(selected), [this, current, shell](const Json &source) {
+          if (!current()) { return; }
+          if (shell->text_input_active()) { throw std::runtime_error(std::string(store_->tr("workflow.compilation.input_active"))); }
+          std::string error;
+          const int column = member(source, "column").is_null() ? 1 : int(io::get_int(source, "column", 1));
+          if (!store_->project().open_vscode_at || !store_->project().open_vscode_at(io::get_string(source, "path"),
+                  int(io::get_int(source, "line", 0)), column, &error)) {
+            throw std::runtime_error(error.empty() ? std::string(store_->tr("workflow.compilation.vscode_unavailable")) : error);
+          }
+        });
+      }).disable(selected < 0 || size_t(selected) >= diagnostics.size() || workflows_->compilation_busy() || shell->text_input_active());
+    }
+    auto &logs = panel.row();
+    for (const auto *stream : {"stdout.txt", "stderr.txt", "compiler.txt"}) {
+      logs.button(std::string("workflow_compilation_log/") + stream, ctx.tr(std::string("workflow.compilation.log.") + stream),
+          [this, current, stream] { if (current()) { workflows_->load_compilation_log(stream); } }).disable(workflows_->compilation_busy());
+    }
+    const auto &page = workflows_->compilation_log();
+    if (page.is_object()) {
+      const auto stream = io::get_string(page, "stream");
+      const auto next = io::get_int(page, "next_offset", 0), offset = io::get_int(page, "offset", 0);
+      panel.button("workflow_compilation_log_next", ctx.tr("workflow.compilation.log_next"), [this, current, stream, next] {
+        if (current()) { workflows_->load_compilation_log(stream, next); }
+      }).disable(workflows_->compilation_busy() || (next - offset < 8192 && io::get_bool(page, "terminal", false)));
+      panel.paragraph(workflows_->compilation_text());
+    }
+    if (state == "succeeded") { panel.paragraph(ctx.tr("workflow.compilation.save_pdf")); }
   }
 
   void issues_panel(ui::Layout &layout, EditorContext &ctx)
@@ -2387,6 +2495,7 @@ class WorkflowEditor final : public Editor {
   std::optional<std::set<std::string>> run_only_;
   std::string run_rows_table_, run_finished_, stale_key_;
   int run_row_ = -1;
+  int compilation_diagnostic_ = -1;
   std::chrono::steady_clock::time_point last_poll_{};
   bool auto_selected_ = false, fit_ = true, dragging_ = false;
   SimulationTarget target_;  // where MuFerro steps run (W5)

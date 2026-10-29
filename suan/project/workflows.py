@@ -238,7 +238,8 @@ def _resolve(db, step, model, templates, read_analysis, *, interface_inputs=Fals
             return summary, ("unknown_template", f"Simulation template {target!r} is not registered")
         # A template's declared parameters (graph-parameter vocabulary) can be bound like an analysis's.
         parameters = [_parameter_summary(p) for p in getattr(template, "parameters", [])]
-        summary.update(name=template.name, parameters=parameters, inputs=[{"name": "rows", "type": "rows", "required": True}],
+        from suan.workflows.templates import workflow_inputs
+        summary.update(name=template.name, parameters=parameters, inputs=workflow_inputs(template),
                        outputs=[{"name": "files", "type": "files"}])
         return summary, None
     try:

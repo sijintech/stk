@@ -106,6 +106,7 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
         "project.workflow_runs.prepare", "project.workflow_runs.get", "project.workflow_runs.list",
         "project.workflow_runs.start", "project.workflow_runs.cancel", "project.workflow_runs.recover",
         "project.workflow_runs.stale", "project.attention.list", "project.attention.viewed", "project.search",
+        "project.workflow_runs.compilation", "project.workflow_runs.compilation_log", "project.workflow_runs.compilation_source",
         "project.archive.set", "project.archive.list", "project.labels.set", "project.labels.list",
         "project.agent.tools", "project.agent.route", "project.agent.create", "project.agent.say", "project.agent.start",
         "project.agent.cancel", "project.agent.recover", "project.agent.get", "project.agent.list", "project.agent.objects",

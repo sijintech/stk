@@ -90,12 +90,17 @@ void record_fault_stack(const CONTEXT *source) noexcept
   // driver unwind table must not prevent the already flushed exception record surviving.
   __try {
     CONTEXT context = *source;
-    for (unsigned index = 0; index < 32 && context.Rip; ++index) {
+    for (unsigned index = 0; index < 32; ++index) {
+      // An indirect call through null faults with RIP == 0, but its caller's return
+      // address can still be at the fault RSP. Record that initial null frame and
+      // use the bounded leaf-frame read below; otherwise this exact crash loses
+      // every caller frame. A later null IP still terminates normal unwinding.
+      if (index != 0 && context.Rip == 0) { break; }
       record_fault_frame(index, uintptr_t(context.Rip));
       const auto previous_ip = context.Rip;
       const auto previous_sp = context.Rsp;
       DWORD64 image_base = 0;
-      const auto entry = RtlLookupFunctionEntry(context.Rip, &image_base, nullptr);
+      const auto entry = context.Rip ? RtlLookupFunctionEntry(context.Rip, &image_base, nullptr) : nullptr;
       if (entry) {
         PVOID handler_data = nullptr;
         DWORD64 frame = 0;
