@@ -3,6 +3,41 @@
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
+## 2026-10-30：联邦基础最终源码验证（11844b25）
+
+源码 `11844b257e3a88f0db1e08611624a295e64b13c2` 已本地提交。证据根沿用下文 FLOWER_EVIDENCE/PEER_EVIDENCE；本批实际记录提交、AOCI/最终包/push及新CI由 `FLOWER_EVIDENCE/delivery-closure-summary.json` 记录，不从旧交接措辞推定。
+
+| 项目 | 实际结果 / 源绑定 |
+|---|---|
+| 完整Python首次 | 4467通过/31跳过/2排除、0失败/错误，pytest802.62秒、driver805.655秒；873输入pre/post一致。manifest SHA `d71272217415a15f56a69729f2eb28b5b6000c09e89230cc3ed04a9bd8f740de`。`PEER_EVIDENCE/p4-ci-bccb/integration-next/python-full/summary.json`。 |
+| 新核心范围 | full中updates150/consent43/flower37共230、peer202、两个watchdog测试实际通过，均无对应skip。另candidate-01隔离联合230/230，真实f32/f64 2/2，六federation成员的候选/安装/工作树SHA一致，worker实际来源独立site-packages；`production-adapter/candidate-01/acceptance-summary.json`。 |
+| 三节点多轮 | `production-adapter/multiround-02/summary.json`：三真实ClientApp PID3434122/3434123/3434124，各训练6次；18训练更新先owner审计再显式发送，6次生产隔离FedAvg与独立moment-gradient oracle 1e-13一致，最终[1.951042873829253,-0.9949775733564108]。撤回阻发送/少于3拒绝、不确定发送仅一次且重开审计保留。只用本机anonymous pipes，不是STK认证出站网络验收；原01脚本误用分页键失败保留。 |
+| Windows fixture | authority closing三版本各21/21；watchdog三版本各4/4零跳过，旧1.25秒慢暂存复现入队前超时，新测试真实lane acquire失败后才推进同一秒；另测暂存预算仍含在内，误杀active child负控精确失败。生产文件未改；`p4-ci-bccb/analysis-watchdog/summary.json`。 |
+| 原生候选 | 最终Linux all退出0，69/69相关CPU零跳过，4文件SHA稳定；`p4-ci-bccb/native-next-final-summary.json`。Cocoa显式激活请求+循环确认，键门禁不变；HTML decoded布局经真实divider且保原nav/暂停时间/!seeking，完整元素门槛不变。WGC仅补数值诊断，尺寸差仍失败。Linux不编Cocoa/Win32、不执行该原生媒体路径，20轮OS证据待新平台CI。 |
+| CI与源码扫描 | 独立Flower job YAML/三段bash/内嵌Python语法、230项真实XML门禁通过；精确要求f32/f64、零skip、主环境无flwr。源码163597字节gitleaks8.30.1/.gitleaks.toml脱敏零发现；不覆盖后来记录/AOCI。 |
+
+31skip分类为15离屏探针child SIG11、7 Windows专用、4可选PySide6/MCP、3真实MuFerro环境、2性能opt-in。原15离屏按JUnit精确选取，私有Xvfb/llvmpipe LLVM21.1.8、VTK9.7.0下首次补验15/15、零跳过，25.84秒；873输入与full同SHA，源码/golden及原full证据未变，结果单列于 `p4-ci-bccb/integration-next/render-followup/summary.json`，不修改原full31skip或声称硬件验收。原有Starlette弃用提示1项不影响退出0。新S4无产品UI表单，点击数不适用；native测试会记录实际初始客户区、布局拖动/点击和最终Viewer/草稿状态，本机CPU不能生成目标OS点击验收结论。KEY空、MODELunset，无收费请求，未改产品端点/网络策略。
+
+前头bccb32d7 Desktop41082221172和Runtime41082221295均completed/failure，Docs41082221284/Secret41082221188成功；原失败细节保留下文。仅证明前头push等待门满足，不证明11844b25的Mac/Windows候选已通过。S4真实STK网络/Runtime训练、桌面同意/准入及完整P4仍待完成。
+
+## 2026-10-30：转交时的实际验证与未验证项（历史）
+
+当前本地和远端 main 为 `bccb32d7`；新 federation 模块/测试/指南及 SQLite fixture 修正尚未提交。本次仅核已有 JUnit、源码摘要、构建/安装日志和 CI 快照并保存交接，未重新执行测试或产品 UI 操作；无新增点击验收。
+
+证据根 `FLOWER_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-flower-20261030`：`admission/summary.json` 为三 Python 各 150/150，`consent/summary.json` 各 43/43，均零跳过且源稳定；`foundation-layout-bound.xml` 为便携联合 228 通过，两个真实 Flower 用例另行排除，尚未运行。`production-adapter/candidate-01/build-summary.json` 证明离线 wheel/sdist 构建、输入稳定及六个 federation 成员一致，wheel SHA `35f7aad0c73b1fb2bff2c77b9b61d948c295da8985b8c0c4604445e7bb089d68`；install/pip-check 日志证明该 wheel 已装入新隔离环境、59 包兼容，不证明真实聚合或最终安装回归。原 algorithm-probe 的三节点六轮是独立框架研究，不是新 consent/outbox 或真实 STK 出站网络验收。
+
+`PEER_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-peer-20261030`：`p4-ci-bccb/authority-backup-close/summary.json` 为未提交 SQLite fixture 修正三版本各 21/21，零跳过，不冒充 Windows 已验。`p4-ci-bccb/agent-live-ci-summary.json` 保存 bccb32d7 最新 CI 和失败原日志：
+
+| 工作流 | 实际终态与限制 |
+|---|---|
+| [Desktop 41082221172](https://github.com/sijintech/stk/actions/runs/41082221172) | completed/failure，2026-10-30 16:23:11 UTC 结束；Windows CPU、Linux 主回归/包/smoke 成功，Mac/Windows native 失败；前代码头推送等待门满足。 |
+| Mac native | Markdown/HTML/PDF/spike 通过；video 在 `reports_native_input_cocoa.mm:150` 精确 key-window 检查失败，HTML-video 在 `reports_native_window.cc:435` 完整媒体 viewport 检查失败。旧 pause_failed 未再报不代表视频通过。 |
+| Windows native | 六项均 0 完整轮/0 验收图；前五项在 `window_evidence_win32.cc:363` frame.ContentSize 与 item.Size 不符，实际差值未知；HTML-video 同 viewport 检查失败。 |
+| [Runtime 41082221295](https://github.com/sijintech/stk/actions/runs/41082221295) | completed/failure，7/9 job 成功；Windows 3.11 为 1 failed/3670 passed，3.12 为 2 failed/3669 passed，两者各 168 skipped/327 deselected。两版本有 backup 句柄失败；3.12 另有 queued.wait(2) 失败，MAX_SECONDS=1 的 staging/watchdog 时序待证实和修复，不据日志猜根因。 |
+| [Docs 41082221284](https://github.com/sijintech/stk/actions/runs/41082221284)、[Secret 41082221188](https://github.com/sijintech/stk/actions/runs/41082221188) | success；Dependency Graph 41082235142 success。 |
+
+下一 Agent 的明确命令和顺序见 [handoff.md 最新首节](../handoff.md)。当前 WIP 的真实 worker、完整回归/安装来源、平台门槛、AOCI 最终维护、暂存密钥扫描及提交/push 尚未闭合；旧 peer 的对齐和扫描不覆盖新 WIP。没有新产品模型请求，不改端点或网络策略，S4/P4 均不标完成。
+
 2026-10-30续接收尾：先前handoff检查点的未推送/未维护状态是当时快照。记录提交、push、暂存扫描、AOCI完整批次与Verify/Check/Guide及新CI实际状态统一写入下述证据根的 `delivery-closure-summary.json`；未成功步骤不视为通过。最终文档包以 `peer/package-check/final-summary.json` 的成员比对绑定已安装测试候选，不额外声称重跑安装203项。
 
 ## 2026-10-30：S4本机端点与平台补修（代码51a795b9）

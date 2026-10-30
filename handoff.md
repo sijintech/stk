@@ -2,6 +2,119 @@
 
 更新：2026-10-30。先读 [AGENTS.md](AGENTS.md)、本文件与[开发计划](docs/development-plan.md)，核对真实 Git / CI，保护未提交修改。主目标是完成计划中的主要通用能力；PET 新专项后置。以下为当前工作树快照，历史证据见[运行验收](docs/runtime-validation.md)和[开发日志](docs/development-log.md)。
 
+## 最新进度：2026-10-30，联邦基础与平台验证续接
+
+交接检查点保存后，所有者的持续开发目标已恢复。本节覆盖下方转交时快照的 WIP、未执行测试和 CI 时态；不要重复已完成步骤。主要通用路线仍未完成，PET 新专项继续后置。
+
+- **源码已本地提交 `11844b257e3a88f0db1e08611624a295e64b13c2`**（21 文件），包含联邦数组/整轮校验、本机 owner consent/outbox、独立 Flower 聚合、精确依赖与指南，以及平台验收和 Windows 测试补修。本批记录提交、AOCI、最终包、push 和新 CI 的实际状态统一查 `FLOWER_EVIDENCE/delivery-closure-summary.json` 并核真实 Git；该步骤未成功时仍待完成，不凭文档推定已推送。`FLOWER_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-flower-20261030`；`PEER_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-peer-20261030`。
+- 上一远端 main 是 `bccb32d7`，其 Desktop `41082221172` 已重新核为 completed/failure，前头推送等待门满足；Runtime `41082221295` 7/9，Docs/Secret 成功。具体 Mac/Windows 失败见下方历史快照；**本次修正尚无目标平台新 CI 结果**。
+
+| 本批验证 | 实际结果与证据 |
+|---|---|
+| 完整 Python 首次运行 | **4467 通过、31 跳过、2 排除**，0 失败/错误，802.62 秒；873 输入摘要前后一致。`PEER_EVIDENCE/p4-ci-bccb/integration-next/python-full/summary.json`。 |
+| 联邦实际安装与联合 | **230/230，零跳过**，含 f32/f64 两次真实隔离聚合；六个 federation 安装/候选/工作树成员 SHA 一致，真实 worker 来源为独立 site-packages。`FLOWER_EVIDENCE/production-adapter/candidate-01/acceptance-summary.json`。 |
+| 3 节点 6 轮联合 | 三个独立真实 ClientApp 进程，18 份训练更新经过 owner grant/outbox，6 次生产隔离 FedAvg 与独立 moment-gradient 参考一致；撤回阻止发送、不确定发送不重放。`production-adapter/multiround-02/summary.json`。**本机 pipe，不是真实 STK 网络验收**；首轮外部脚本误用分页键的失败保留在 multiround-01，生产源未因该脚本错误改变。 |
+| Windows fixture | SQLite backup 两连接显式 closing：三版本 authority 各 21/21。Watchdog 改为真实 lane 排队后才推进模块局部时钟，并另测暂存预算；三版本各 4/4，有旧慢暂存红/新绿和误杀 active worker 的负控。生产预算、原等待时限不变。证据 `p4-ci-bccb/authority-backup-close/`、`analysis-watchdog/`。 |
+| 原生 Linux | 最终增量 all 编译成功、相关 **69/69 CPU** 零跳过，4 文件摘要稳定；`p4-ci-bccb/native-next-final-summary.json`。不包含 Cocoa/Win32 实际编译或 20 轮原生图像。 |
+| CI 门禁与暂存扫描 | federation-isolated job 独立 venv 装本次 wheel/精确依赖，基础环境前后断言无 flwr，精确要求 f32/f64 且零 skip；YAML、bash/Python 语法和真实 230 项 XML 门禁通过。源码暂存 163597 字节、gitleaks8.30.1/.gitleaks.toml 脱敏零发现；不覆盖后续记录/AOCI。 |
+
+31 个 full skip 已分类：15 离屏探针 SIG11、7 Windows 专用、4 可选 PySide6/MCP、3 真实 MuFerro 环境、2 性能 opt-in。原 15 项离屏已在私有 Xvfb/llvmpipe 精确补验 **15/15、零跳过、25.84秒**，873 输入摘要与 full 相同；证据 `PEER_EVIDENCE/p4-ci-bccb/integration-next/render-followup/`，不改写原 full。其他分项：peer 202/202、联邦 230/230 和两个 watchdog 场景实际通过，无对应 skip。
+
+平台候选现状：Cocoa 验收先显式请求自有窗口激活，再经 UI 循环确认 active app/精确 key window；原键门禁未放宽。HTML-video 解码后若完整元素超出 viewport，通过真实 report/Viewer 分隔条有界调整，记录实际拖动；重验同 navigation、暂停时间差≤0.10 秒且不 seeking/ended，保持原完整元素与 20 轮/像素判据。独立审查已修第三次拖动后漏判成功和布局重载可丢失时间基线的两处边界。Windows WGC **只补数值诊断**（初始池、当前 item/content/texture、差值、crop/rect/DPI、帧/poll/耗时）；没有猜边框补偿或放宽捕获判据。根因与目标 OS 实测仍待新 CI。
+
+接手顺序：
+
+1. 按当前 AOCI 合同建立本 Run 认知，核真实 Git/CI/closure；跟踪已有补验进程，已终态不重启。所有测试 KEY 空、MODEL unset，不改产品端点或网络策略。
+2. 完成本批四状态文档、最终发行包成员绑定、Observed 审查/AOCI 完整批次及 Verify/Check/Guide、记录暂存扫描和 main 记录提交/push；以 closure 的实际结果去掉已完成项。旧 peer 的 25 条维护及九路径 ack 不重做。
+3. 新 Mac/Windows CI 继续验证焦点/完整媒体布局和 WGC 实际尺寸；Linux 构建或 CPU 不代目标平台通过。保持 Viewer、隐藏草稿、明确运行/保存/发送和固定起点点击记录。
+4. S4 仍须桌面持久身份/pin/配对授权 UI、可分发 helper/依赖许可、授权不可变文件 manifest/断点整文件 SHA、部署信令及 IPv6→UDP（含端口预测）→TCP→TURN443；Flower 仍缺 `fl.message`/每 run blob 授权、出站 NodeAgent、Runtime 本机训练、持久协调轮次、桌面 consent/审计与显式模型准入。最终须三个出站 Linux 节点通过真实 STK 通道多轮；Hub 不装 flwr，首批不启 SecAgg+，不另起 Flower 服务。
+5. 随后 S5 文献/PDF、两层检索和可核对引用、授权陪读/结构化共享；S6 冻结复现到来源报告；P5/S7 干净机离线/Python、兼容迁移、IME/DPI/对话框/恢复/性能和更新回退。合作方 S3 格式/MuPRO 电场扫描、S2c 权限、分析提案持久形式三待决不擅选，PET 新专项后置。
+
+当前 AOCI 正式维护与收据事实以实时工具/本批 closure 为准；任何旧或子 Agent 收据不证明当前模型完整认知可靠。交接只保留安全续接身份与状态，不保存正式 Whole-Index/Header/Entry/Chunk/Challenge/Attestation 正文。
+
+## 转交时快照：2026-10-30（历史，以上方最新进度为准）
+
+所有者最新要求是写下待办并交给另一 Agent；本次只核对和保存交接，不继续开发、不提交或推送。**本节覆盖后文上一批交付中的“当前”“待新 CI”等旧时态。** 整份开发计划尚未完成。
+
+### 先保护工作树
+
+- 已核实本地 `HEAD`、`origin/main` 及远端 main 都是 **`bccb32d7b1da317121ee147ed54bf06a09b2f7c0`**；其父源码提交是 `51a795b9d09610f0bec31b526612cf849c230793`。上一批 peer 代码、记录和 AOCI 已推送，没有领先的本地提交。
+- **本轮联邦基础仍是未提交 WIP**：`suan/federation/` 六个文件，`tests/test_federation_updates.py`、`test_federation_consent.py`、`test_federation_flower.py`，`docs/federation.md`、`docs/specs/stk-federation-1.md`；另有已修改的 `pyproject.toml`、`docs/specs/README.md`、`docs/repository-structure.md`、`tests/test_peer_authority.py`。四份状态文档还有本次交接更新。先运行 `git status --short --branch`，不要 reset/clean 或覆盖这些文件。
+- 换机器接手时，**只 clone main 不会取得这些未提交和未跟踪文件**；还须移交当前工作树及下列外部证据目录。不要移交私钥、令牌或用户配置。
+- 下文用 `PEER_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-peer-20261030`，`FLOWER_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-flower-20261030`。它们不在 Git 内；不在同机则先取得证据或重新验证。
+
+### 当前 WIP 实现了什么
+
+| 文件 | 已实现范围与边界 |
+|---|---|
+| `suan/federation/updates.py` | 标准库的严格数组/更新/整轮校验；有限 f32/f64、小端原始数据、完整 SHA/长度、精确有序名称/dtype/shape；整包 64MiB、128 数组，3–20 个批准参与者且至少 3 份不同的有效更新。元数据校验不认证身份，接入方仍须验证实际载荷和可信授权。 |
+| `suan/federation/consent.py` | 本机所有者 SQLite grant/outbox；grant 必须固定 `model_layout`，prepare/read/send 重验实际布局。先持久化发送意图、再在当前授权租约下调用一次显式 deliver；撤销阻止后续发送，已接受发送可结束。发送或落账不确定保留 sending/uncertain，recover 不重发。不是调度器或网络认证；私有库丢失/回滚不保证全局 exactly-once。 |
+| `suan/federation/flower.py`、`flower_worker.py` | 父端先验全轮身份/载荷/布局和预算，以显式隔离 Python `-I -m` 启动有界子进程；子端调用 Flower FedAvg，从 base+delta 重建参与模型并按样本数聚合，父端严格复验结果及回执。只返回未登记候选，不训练、发布或自动重试。依赖固定 `flwr==1.42.0`、`numpy==2.5.4`，不进基础 STK/Hub 依赖。 |
+| 联邦规范和指南 | 描述上述基础 API；均为当前未提交候选，不能当作 main 已发布的契约或 S4 完成证明。 |
+| `tests/test_peer_authority.py` | 修复 Windows WinError32 的 fixture：SQLite context manager 不会关闭连接，backup 两端已改用 `contextlib.closing`。保留真实替换和旧 context 拒绝断言；生产授权代码未改。 |
+
+独立审查发现并已修：所有者授权未固定实际参数布局、SQLite TEXT 长度低估 UTF-8 审计字节数、子回执 `bool/float == int` 误通过，以及深 JSON/超大整数泄漏普通异常。相关反例已加入；这些修正不代表端到端集成完成。
+
+### 已有验证，别重复宣称更大范围
+
+| 证据（相对上述目录） | 已核实结果 |
+|---|---|
+| `FLOWER_EVIDENCE/admission/summary.json` | Python 3.11/3.12/3.14 各 150/150，合计 450，零跳过；updates 与测试摘要稳定。 |
+| `FLOWER_EVIDENCE/consent/summary.json` | 三版本各 43/43，合计 129，零跳过；含真实子进程崩溃、撤销竞态、持久布局及发送不确定性，摘要稳定。 |
+| `FLOWER_EVIDENCE/foundation-layout-bound.xml` | 当前基础三文件便携联合 228 通过、零失败/错误/跳过；**两个真实 Flower 子进程测试另行排除，尚未执行**。`parent-receipt-check.xml` 单列父端 35 项。旧 `foundation-preliminary.xml` 的 201 项是先前候选。 |
+| `PEER_EVIDENCE/p4-ci-bccb/authority-backup-close/summary.json` | SQLite fixture 修正三版本 authority 各 21/21，合计 63，真实 cryptography、零跳过；新 Windows CI 尚未验证此未提交修正。 |
+| `FLOWER_EVIDENCE/production-adapter/candidate-01/build-summary.json` | wheel/sdist 离线构建成功，输入摘要稳定，六个 federation 成员与源码一致；wheel SHA `35f7aad0c73b1fb2bff2c77b9b61d948c295da8985b8c0c4604445e7bb089d68`。 |
+| 同目录 `install.log`、`pip-check.log` | 新隔离环境安装该 wheel 成功，59 包依赖检查兼容；**不是已跑过聚合测试或安装态完整回归**。旧会话句柄 91692 已不存在，不要凭句柄重跑覆盖 candidate-01。 |
+
+当前关键源码 SHA：updates `18cf6c0e29bd29f1bd993dd862cf6d6b9c9970090455f1e982a17c0a1c17de19`；consent `b57d584406995905ffcb60d1801b5472c8750ac14af37cbb7666e1d3939d45d7`；flower `a1fcb75cc3e81bdab6369ef9e42eac103371f72516010e0f71f4f093f9baf75a`；worker `3758033588e73fdee040b050224f7448c29645929c05ff1bdc285bf32621def1`。接手后源码有变则重新绑定相应证据。
+
+原 `FLOWER_EVIDENCE/algorithm-probe/` 是独立框架研究，已有 3 个 Linux 子进程、6 轮和独立加权参考的结果，但没有接上新的 consent/outbox/STK 网络；保留原环境与原始失败。生产候选环境另在 `FLOWER_EVIDENCE/production-adapter/env/bin/python`。本机主 STK venv 未装 flwr；**未核验公网部署 Hub 环境**，不要混称已证明所有 Hub 不装 flwr。
+
+### bccb32d7 的最新 CI：均已终态
+
+快照及失败原日志：`PEER_EVIDENCE/p4-ci-bccb/agent-live-ci-summary.json`，记录于 2026-10-30 16:26 UTC；接手仍须重查真实 CI。
+
+| 工作流 | 结果 / 必须继续处理 |
+|---|---|
+| [Desktop 41082221172](https://github.com/sijintech/stk/actions/runs/41082221172) | completed/failure，16:23:11 UTC 已结束；Windows CPU 和三个 Linux job 成功；Mac、Windows native 失败。**前代码头 Desktop 等待门已满足**，不等于平台验收通过。 |
+| [Runtime 41082221295](https://github.com/sijintech/stk/actions/runs/41082221295) | completed/failure，7/9 job 成功，Windows 3.11/3.12 失败。3.11 为 1 failed/3670 passed；3.12 为 2 failed/3669 passed；两者各 168 skipped/327 deselected。 |
+| [Docs 41082221284](https://github.com/sijintech/stk/actions/runs/41082221284)、[Secret 41082221188](https://github.com/sijintech/stk/actions/runs/41082221188) | success；Dependency Graph 41082235142 也成功。 |
+
+- Windows 两版本的 authority registry replacement 失败由上述未提交 fixture 修正处理，不能把 Linux 三版本通过写成 Windows 已通过。
+- Windows 3.12 另失败于 `tests/test_analysis_run_executor.py::test_queued_attempt_watchdog_does_not_kill_an_unrelated_active_graph`，`queued.wait(2)` 未置位。测试先将 `MAX_SECONDS=1`，生产先启动 watchdog 再 staging、检查取消、进入 worker；可能入队前已超时，日志尚未证明根因。先将测试的入队因果与 staging 时间隔离，**不要只增加 wait 或放宽生产预算**。该项尚未修。
+- Windows native 六项均 **0 完整轮 / 0 验收图**：前五项命中 `desktop/spike/document_preview/window_evidence_win32.cc:363` 的 `frame.ContentSize != item_.Size()`，实际差值尚未输出，不能猜边框/缩放补偿；HTML-video 先命中 `desktop/tests/app/reports_native_window.cc:435` 的完整媒体超出 viewport。
+- Mac 六项中 Markdown/HTML/PDF 和独立 spike 通过；video 卡在 `desktop/tests/app/reports_native_input_cocoa.mm:150` 精确 STK key-window 门禁，尚未发送该键；HTML-video 同样未完整容纳媒体。旧 pause_failed 本轮未再出现，**不证明视频已验收**。不降低 20 轮、像素、DPI、焦点和隐藏暂停门槛。
+
+### 接手后的具体执行顺序
+
+1. 按 AGENTS 完成新 Run 的 AOCI 认知建立；核 Git/CI 和上列源码 SHA，阅读新增规范、指南及对应实现。所有测试清空 `STK_TOKEN_PLAN_API_KEY` 并 unset `STK_TOKEN_PLAN_MODEL`；不改变产品端点、密钥或网络策略，不调用收费模型。
+2. **先执行两个尚未跑的真实 Flower 聚合用例**，验证候选安装来源、f32/f64 加权值、回执/布局/SHA 与依赖隔离。可在当前机器仓库根运行：
+
+   ```bash
+   FLOWER_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-flower-20261030
+   env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= \
+     STK_FEDERATION_TEST_PYTHON="$FLOWER_EVIDENCE/production-adapter/env/bin/python" \
+     /home/mnemora/opt/stk-venv/bin/python -m pytest -q -p no:cacheprovider \
+       tests/test_federation_flower.py -k real_isolated_flower
+   ```
+
+   应实际执行两项，不接受缺解释器导致的 skip。失败须保留原结果，必要时在外部私有目录追踪固定阶段/异常类型，不能输出私有数组/数据或凭据；改源码后构建全新 candidate-02，别覆盖 candidate-01 或只补丁安装目录。
+3. 修 Windows watchdog 测试的真实时序问题；按原门槛继续 Mac 焦点/viewport、Windows WGC 几何及 viewport 修正。Linux 不编译目标分支，最终须目标平台新 CI/原生证据。
+4. 联邦基础继续做 3 节点多轮、独立本机 grant/outbox、发送审计/撤销/不确定性与独立数值参考的联合验证；本地 pipe 仿真仍不能标成真实 STK 出站网络验收。按最后源码跑有意义的联合、完整 Python 和安装态检查，核包成员与来源，保留失败和 skip 口径。现有 228 项不等于最新完整仓库回归。
+5. 稳定交付时更新四状态文档；按实时 Guide 处理新增/变更测试等 Observed 路径并维护全部 AOCI 候选、核 Verify/Check/Guide。对**实际暂存内容**用 `.gitleaks.toml` 扫描后在 main 提交；push 前确认前一代码头 Desktop 已终态。当前 WIP 尚未扫描暂存、提交、push 或完成 AOCI 收尾；旧 peer 扫描和对齐不覆盖它。
+6. 再补 S4 产品集成：桌面持久身份/pin/配对与授权 UI、可分发原生 helper/运行库/许可、认证下的不可变授权文件 manifest 和断点校验、部署信令及 IPv6→UDP（含端口预测）→TCP→TURN443 阶段策略。Flower 还缺 STK `fl.message`/每运行 blob 授权、出站 NodeAgent、Runtime 本地训练、持久协调轮次、桌面 consent/审计和显式模型准入；Hub 不装 flwr，不另启 SuperLink/SuperNode/gRPC。至少 3 方，最终须 3 个出站 Linux 节点经真实 STK 通道完成多轮；首批不启 SecAgg+。
+7. 后续通用路线仍为 S5 文献/PDF、两层检索、可核对引用和授权陪读/结构化共享；S6 文献参数→冻结工作流→明确运行→数值对比→来源报告；P5/S7 干净机离线包/Python、模块兼容迁移、IME/DPI/对话框/恢复/性能及模型更新回退。PET 新专项后置，保护既有 11 段真实软件路径，不能宣称物性收敛。
+
+### AOCI 与所有者待决边界
+
+上一 peer 批次 **25 条语义已 Apply，remaining=0，Verify/Check/Guide 对齐，已随 bccb32d7 推送**；旧九 Observed ack 也已完成，不重复交易。本次 WIP 还在待验证阶段，维护延后到源码和测试稳定；没有为本次交接签发或留下新的未决 Apply/Recovery。正式 scope identity 为 `55cd6386a7b2ace6089323d022d532ad469d87d68225dc3fb8850b83fb850ff2`、1121 对象，服务 `0.1.0-rc21`。这些身份只供核对；新 Agent 仍须按实时合同加载，不能用本文代替正式认知。本文不保存正式 Whole-Index/Header/Entry/Chunk/Challenge/Attestation 正文。
+
+三项所有者待决保持不变：合作方 S3 数据格式及 MuPRO 电场扫描、S2c 权限、保存分析修改提案的持久形式；没有新批准，不替所有者选项。UI 交付继续记录固定起点、实际点击数与结果，保留 Viewer、隐藏草稿和明确运行/保存/发送动作。本次只写交接，无产品 UI 点击验收。
+
+## 上一已交付批次与历史验证（51a795b9 / bccb32d7）
+
+以下保留原交付证据及通用构建入口；其中旧 CI 和“待新 CI”的说法由上方最新快照更新。
+
 ## 接手续接与完成边界
 
 此前应所有者要求保存了待办检查点 `PEER_EVIDENCE/handoff-checkpoint-summary.json`，其中“本地领先1提交、语义尚未Apply”是当时快照。之后按持续开发目标继续本批收尾；**整份开发计划仍未完成**。

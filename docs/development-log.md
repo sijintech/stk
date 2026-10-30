@@ -2,6 +2,24 @@
 
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
+## 2026-10-30：恢复通用目标，联邦基础与平台补修（11844b25）
+
+交接保存后继续开发；源码 `11844b257e3a88f0db1e08611624a295e64b13c2` 已本地提交21文件。隔离候选真实 f32/f64 聚合2/2、联合230/230零跳过，六成员与安装/工作树一致；三独立 ClientApp 六轮18份训练更新经过 consent/outbox，生产 FedAvg 与独立 moment-gradient 参考一致，撤回及不确定发送不重放通过。外部首轮脚本在最终审计读取误用分页键，失败保留，修脚本后新目录重验；未归因产品。
+
+Windows backup fixture 三版本各21；watchdog 通过真实lane排队与模块局部可控时钟隔离暂存耗时，三版本各4，另有慢暂存红绿、误杀无关active负控，未改生产预算/等待时限。Mac 测试显式请求并观察自有key窗口，HTML视频解码后经真实divider调整完整媒体布局并保护原导航/时间；独立复核修正第三次拖动漏判和新几何基线丢失播放身份两处问题。WGC仍拒绝相同尺寸差异，仅补自身窗数值诊断。最终Linux编译及69 CPU通过，不冒充目标平台。
+
+完整Python首次4467通过/31跳过/2排除、802.62秒、873输入SHA稳定；包含联邦230/peer202/两个watchdog实际通过。15个离屏SIG11 skip另补验且保留原full。源码暂存163597字节扫描零发现；本批记录、最终包、AOCI、push和新CI实际状态查 `FLOWER_EVIDENCE/delivery-closure-summary.json`，不能沿用旧handoff的WIP/未跑说法。前头bccb32d7 Desktop/Runtime已终态失败，Docs/Secret成功，推送等待门满足；S4/P4与后续路线尚未全部验收。
+
+完整回归原15个离屏SIG11 skip已按JUnit精确选取，在私有Xvfb/llvmpipe软件GL下15/15、25.84秒、零跳过补验；873输入与full同SHA，原full证据未改、无源码/golden变更，不代替硬件或目标OS验收。
+
+## 2026-10-30：按所有者要求转交待办（历史）
+
+已核本地/远端 main 为 `bccb32d7b1da317121ee147ed54bf06a09b2f7c0`，上一 peer 源码 `51a795b9`、25 条 AOCI 维护及记录已推送。新增联邦基础及 SQLite fixture 修正保留为未提交工作树；本次只写交接和同步状态文档，没有继续实现、运行新测试、提交或推送。
+
+已有联邦 admission 三版本各 150、consent 各 43，便携联合 228 通过；两个真实隔离 Flower 测试仍待执行。candidate-01 wheel/sdist 构建和隔离安装已完成，59 包依赖兼容；这不是聚合或完整安装回归。authority fixture 使用 closing 关闭 backup 两连接，三版本各 21 项通过，实际 Windows 修复效果待新 CI。证据入口、源码 SHA、测试命令及后续 S4/S5/S6/S7 任务均写入 [handoff.md](../handoff.md)。
+
+bccb32d7 的 Desktop/Runtime 已终态失败；Docs/Secret 成功。Mac video 精确 key-window、HTML-video viewport，Windows WGC frame/item 几何及 viewport 仍失败；Windows 3.12 另有 watchdog 排队事件未到，尚未修。未将 CPU/便携结果替代目标平台验收。WIP 尚未到源码最终稳定状态，AOCI 收尾、实际暂存密钥扫描和交付列为接手任务；旧交易不重复，PET 新专项及三个待决边界不变。
+
 2026-10-30续接：待办handoff检查点已保存，随后继续本批收尾；实际记录HEAD、push、AOCI批次/对齐、暂存密钥扫描与新CI由本批 `PEER_EVIDENCE/delivery-closure-summary.json` 记录。包最终比对绑定已测203项候选，不重复宣称安装验证；整份路线图尚未完成。
 
 ## 2026-10-30：S4真实连接后端与平台补修（代码51a795b9）

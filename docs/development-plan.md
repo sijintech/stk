@@ -4,6 +4,18 @@
 存储与求值方案见[项目数据模型](design/project-model.md)。设计目标不代表当前版本已经实现。
 当前模块职责、归档清单与新增代码放置原则见[仓库结构说明](repository-structure.md)。
 
+## 2026-10-30：联邦基础续接（源码11844b25，S4未完成）
+
+转交检查点后持续目标恢复，源码 `11844b257e3a88f0db1e08611624a295e64b13c2` 已本地提交：严格数组/整轮准入、本机逐数据集逐 run consent/outbox、独立 Flower 聚合和精确依赖/指南、独立算法 CI 门禁；同批 Windows fixture 时序/句柄与原生验收候选补修。完整 Python 首次 4467 通过/31 跳过/2 排除，873 输入稳定；联邦安装联合 230/230 含真实 f32/f64、三 ClientApp 六轮/18 份审计更新及独立数值参考通过，但用的是本机 pipe，不是 S4 的 STK 出站网络。Linux 最终 all/相关69 CPU通过；新 Mac/Windows 修正待目标平台 CI，Windows WGC 只补尺寸诊断，不假定根因或降低门槛。实际记录/push/AOCI/新CI见本批 `FLOWER_EVIDENCE/delivery-closure-summary.json` 与[交接](../handoff.md)；未成功的收尾仍待完成。S4 产品/网络训练、S5、S6、P5/S7 与三待决继续，PET 新专项后置。
+
+上方11844b25的原15个离屏SIG11 skip已在私有Xvfb/llvmpipe补验15/15、零跳过，873输入与full同摘要；原full记录不改写，软件GL不替代Mac/Windows原生验收。
+
+## 2026-10-30：转交检查点（历史）
+
+所有者要求保存待办并转交另一 Agent。[交接文件最新首节](../handoff.md)为当前接手入口，覆盖后文旧 CI 时态。本地与远端 main 均为 `bccb32d7`；上一 peer 代码/记录/AOCI 已推送。联邦数组/整轮校验、本机 consent/outbox 和隔离 Flower 聚合适配仍为未提交 WIP，便携联合 228 项通过，但两个真实安装态聚合测试尚未执行；候选构建/安装/依赖检查不代表训练或 S4 完成。
+
+该头 Desktop `41082221172`、Runtime `41082221295` 已终态失败，Docs/Secret 成功。继续处理 Windows SQLite fixture（工作树已修、三版本各 21 项通过，待 Windows）、Windows 3.12 watchdog 排队时序，以及 Mac 焦点/媒体 viewport、Windows WGC 几何/viewport；不降低原生验收门槛。接手顺序为真实 Flower 子进程验证与本批审查、平台修正、联合/安装回归和 AOCI/暂存扫描/交付，再补 S4 真实 STK 网络训练与配对/文件/网络产品缺口。S5、S6、P5/S7 仍按下列完成条件推进，PET 新专项后置，三项所有者待决不变。本次仅保存交接，不提交或推送，不将 WIP 标为已交付。
+
 ## 2026-10-24：通用能力优先的后续交付
 
 所有者要求完成本计划的主要内容，先完成通用功能，PET 等具体场景推迟开发。
