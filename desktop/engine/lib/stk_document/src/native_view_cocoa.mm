@@ -861,7 +861,31 @@ bool probe_media(wm::NativeWindowHandle parent, std::string_view session_id,
     if (!cocoa::live(current) || current->result.status != NativeViewStatus::Ready ||
         current->resources != session || !session->active() ||
         current->result.navigation_generation != navigation || current->view != expected_view) {
-      result.error = "Media test probe source changed before its reply";
+      // Keep this failure closed while recording only bounded native identity facts.
+      // A no-longer-ready WebKit process is different from a replaced document;
+      // never include resource URLs, DOM values or project content in diagnostics.
+      const char *reason = "other";
+      if (!current) { reason = "state_released"; }
+      else if (current->result.message == "Could not pause document media playback") {
+        reason = "pause_failed";
+      }
+      else if (current->result.message == "The WebKit content process exited; reopen the document explicitly.") {
+        reason = "content_process_terminated";
+      }
+      else if (current->result.message == "WKWebView could not load the admitted document.") {
+        reason = "navigation_failed";
+      }
+      else if (current->closed) { reason = "closed"; }
+      result.error = "Media test probe source changed before its reply (live=" +
+          std::to_string(cocoa::live(current)) + ", ready=" +
+          std::to_string(current && current->result.status == NativeViewStatus::Ready) +
+          ", session_matches=" + std::to_string(current && current->resources == session) +
+          ", session_active=" + std::to_string(session->active()) +
+          ", navigation_matches=" +
+          std::to_string(current && current->result.navigation_generation == navigation) +
+          ", view_matches=" + std::to_string(current && current->view == expected_view) +
+          ", status=" + std::to_string(current ? int(current->result.status) : -1) +
+          ", reason=" + reason + ")";
     }
     else if (failure || ![value isKindOfClass:NSDictionary.class]) {
       result.error = "Read-only media test probe failed";
