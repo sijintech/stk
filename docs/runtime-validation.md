@@ -3,6 +3,41 @@
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
+2026-10-30续接收尾：先前handoff检查点的未推送/未维护状态是当时快照。记录提交、push、暂存扫描、AOCI完整批次与Verify/Check/Guide及新CI实际状态统一写入下述证据根的 `delivery-closure-summary.json`；未成功步骤不视为通过。最终文档包以 `peer/package-check/final-summary.json` 的成员比对绑定已安装测试候选，不额外声称重跑安装203项。
+
+## 2026-10-30：S4本机端点与平台补修（代码51a795b9）
+
+已推送基线`cfb8c56136ddab92c3a3179d812d99b20eb592f0`；本批代码`51a795b9d09610f0bec31b526612cf849c230793`已提交，状态文档与AOCI随同批收尾。证据根 `PEER_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-peer-20261030/`，以下路径相对该根。测试key空、model unset，无收费模型请求。peer原型不放开本地stdio桥或Linux Runtime监听。
+
+| 验证 | 实际结果和范围 | 证据 |
+|---|---|---|
+| 最终端点/协议 | 47+94=141/141，35.433秒，0失败/错误/跳过，14文件和helper摘要稳定；真实UDP/TCP/IPv6、7.55MiB分页、授权撤销/CAS、lost-reply后重连原回执 | `endpoint/summary.json` |
+| 原生transport | 12/12，0跳过，8.110秒、源码稳定；真实双向16MiB控制包与64KiB/空blob、实际选路、指纹篡改、分片停滞/慢滴绝对截止；不是跨机器穿透 | `transport/summary.json` |
+| 三Python语义/安装前置 | 3.11.16/3.12.14/3.14.4各143/143，合计429/429零跳过；真实crypto50.0.2/Ed25519、fresh venv依赖检查和隔离导入，17文件SHA稳定 | `peer/matrix/summary.json` |
+| 首次联合失败 | 198项中40失败；helper因缺libnice.so.10在协议前退出127，源码稳定，保留日志；不解释为认证或网络失败 | `p4-ci-cfb8/integration/peer-combined-summary.json` |
+| ACK修正前联合 | 补齐已知开发运行库路径后198/198、0失败/错误/跳过，43.191秒，源码稳定；不改失败原结果 | `p4-ci-cfb8/integration/peer-combined-final-summary.json` |
+| Linux统一增量构建 | all退出0、10.586秒，1344输入SHA稳定；Mac引用捕获补修后再次all为no work，不代表Cocoa或Win32编译 | `p4-ci-cfb8/integration/native-build-summary.json` |
+| 最终相关CPU | DocumentResources/DocumentEvidence/NativeMediaProbe/ReportDocumentHost共65/65，0失败/错误/跳过，0.369秒、源码稳定；含3暂停时序/截止/代次及4几何边界 | `p4-ci-cfb8/integration/native-focused-final-summary.json` |
+| Windows几何独立探针 | C++20+UBSan编译/执行退出0；真实[-8,0]完整原点裁client到1024×697、错1像素、DPI/包含/负原点/overflow等；不代Windows实际capture | `p4-ci-cfb8/windows-fix/summary.json` |
+| Runtime字段验证隔离 | 最终6/6，4.48秒、0跳过、六文件SHA稳定；正例先通过，field坏值保持mean/min/max仍拒绝；真实science绘图与Runtime两次simulate扫描另实做 | `p4-ci-cfb8/runtime-acceptance/final.json` |
+| peer指南 | 三段示例以真实helper/临时签名callback/单向grant完成auth/start/catalog/apply/read/get，revision1/receipt一致；38相对链接核对 | `peer/docs/summary.json` |
+| 完整Python首轮 | 4231通过/31跳过/2排除、1失败，801.099秒、786输入SHA稳定；唯一失败为transport说明包含desktop路径触发既有MIT边界检查。仅改说明后原测试1/1通过；最终ACK语义修正另验，不冒称此轮全绿 | `p4-ci-cfb8/integration/python-full-*` |
+| 最终业务候选独立安装 | fresh离线wheel[peer,test]，202 peer+1安装源码许可边界=203/203，45.582秒（wall46.470），零失败/错误/跳过；551份py/Schema一致，112模块实际来源均在site，465份安装suan源码非空扫描；源码/二进制SHA稳定 | `peer/package-check/final-1/summary.json` |
+
+开发helper需要`transport/install/lib`和`transport/deps/usr/lib/x86_64-linux-gnu`两段动态库搜索路径；直接no-input启动曾退出127且stderr明确libnice缺失。新指南给出ldd前置和显式环境，Python wheel不携带网络库/helper；三平台依赖/许可闭包和干净机安装未验。
+
+[cfb8 Desktop41001132256](https://github.com/sijintech/stk/actions/runs/41001132256)已终态failure；Linux主回归123885530312、包123885530466、fresh smoke123888346084和WindowsCPU123885530399成功。Mac123885530110编译/CPU/Metal成功、原生静态和spike通过、两个视频失败；video固定诊断live0/ready0/session_matches1/session_active0/nav_matches0/view_matches0/status3/reason=pause_failed，html-video为state_released。此处没有下载本头大图片artifact，不把旧70449的20轮/440图数字移来。Windowsnative123898637995六项失败、均0完整轮/0图。
+
+Windows WGC item1040×736精确等于GetWindowRect[-8,0,1032,736]，而DWM[-1,0,1025,729]为1026×729；client[0,31,1024,728]。修正只接受这两个精确有依据的原点，追加物理per-monitor DPI及捕获期间矩形稳定再核，保留边长、像素、alpha、20轮门禁；没有任意border容差或桌面/GDI回退。鼠标三条local PostMessage只声明enqueue，后续DOM/OS图片仍须消费证明。独立review未发现几何/溢出问题，实际Win32编译与20轮仍待新CI。[GetWindowRect文档](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowrect)、[PostMessage语义](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postmessagew)。
+
+Mac暂停候选仍只发一次公共pause命令；从原请求开始绝对1秒，每25ms至多一个查询，ACK/查询无回调也关闭，Playing不算成功。回调绑定media/nav代次与WK实例、State/WK弱持有；独立审查发现本批异步Block捕获shared_ptr引用会悬空，已按值传入修正。CPU只验证等待/截止/过期交错，不声称Cocoa已编译或实际失败根因已复现。上游WebPage在corePage暂停调用返回后ACK，并另提供状态请求；允许状态收敛是本批候选判断，不等于证明CI使用的WebKit版本存在同类延迟。[WebKit调用](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/WebProcess/WebPage/WebPage.cpp)、[Clang Blocks引用规则](https://clang.llvm.org/docs/BlockLanguageSpec.html#c-extensions)。
+
+[Runtime41001132201](https://github.com/sijintech/stk/actions/runs/41001132201)7/8成功，仅Windows3.12 job123885529841在test_incorrect_field_is_rejected_even_when_summary_is_correct的simulate子进程communicate超时20秒，未到独立验证断言。历史日志没有子进程栈，不能锁定字体或DLL原因；Linux真实cold-MPL探针1.035秒成功。测试隔离只消除与无关完整绘图启动的耦合，不增加超时、不skip、不改simulate生产代码。Docs41001132275、Secret41001132164已终态成功。
+
+本批暂无新产品UI操作，点击数不适用；沿用既有Viewer/隐藏稿/明确保存运行发送约束。S4仍缺配对/持久身份、部署信令、显式IPv6→UDP（端口预测）→TCP→TURN443、授权文件传输、Flower；最终规范复核还发现accepted挑战对象与规范相反，同实现两端互通会相消；现发送本机已验证挑战、接收核对自己签过的对方挑战，两行修正完成。独立规范对端不复用PeerEndpoint/authcodec，两个role互操作及signed_instead/unrelated错ACK共4项修前全失败、修后全通过，原红绿保留于endpoint/ack-handshake-*；最终141与安装203覆盖修正，不沿用旧137/198冒充最终。Mac/Windows及P4完整验收未完成。九Observed路径已独立审查并核精确SHA，ack事务`74f56c840c267cc396c4732d`已Apply；正式语义维护与Verify/Check/Guide、最终推送/新CI以`PEER_EVIDENCE/delivery-closure-summary.json`和真实Git为准，资产对齐不代替当前模型完整认知可靠。
+
+已测业务候选wheel为48040887字节/668成员，SHA `84f43861d15260b5dd93a87d5642280d43d4dfc278a61e1edb3045fa4de6ad23`；sdist49086107字节/961成员，SHA `8b98e9937ccdbfc925efc7c7baf3030fb2319522cd5ee664346fd1004bed4b3f`，含peer指南。551口径为suan465 py+12 schema、toolkits47 py、stk_data13 py、structure_generator14 py；旧471为suan旧口径，不能直接作功能增量。与ACK修正前候选相比wheel仅endpoint.py、transport.py说明及RECORD变化，665成员相同；sdist新增指南、6项明确源码/规范/测试/声明/验收变化、954成员相同。最终文档版按`peer/package-check/final-summary.json`与该已测候选逐成员对比绑定，不宣称最终版另跑过安装203。源码暂存294782字节，gitleaks8.30.1/.gitleaks.toml脱敏扫描零发现。
+
 ## 2026-10-30：格式15原子回执本机验收与平台精确取证
 
 本地HEAD/格式15源码 `59f4cdc3e7bc9ca7c29a3bc75621b0152a3b377e`；Windows发现修正`e0139d9f`和Mac诊断`04aab01c`已本地提交，格式15源码也已本地提交；此为源码提交后的交付快照，新头推送/CI以真实Git及收尾机器证据核对。证据根 `EDIT_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-foundation-20261029/edit-operations/`；平台根同上级 `p4-ci-70449/`。测试key空、model unset，无收费模型请求。

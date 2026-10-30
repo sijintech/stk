@@ -2,6 +2,20 @@
 
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
+2026-10-30续接：待办handoff检查点已保存，随后继续本批收尾；实际记录HEAD、push、AOCI批次/对齐、暂存密钥扫描与新CI由本批 `PEER_EVIDENCE/delivery-closure-summary.json` 记录。包最终比对绑定已测203项候选，不重复宣称安装验证；整份路线图尚未完成。
+
+## 2026-10-30：S4真实连接后端与平台补修（代码51a795b9）
+
+已推送基线`cfb8c561`，本批代码`51a795b9d09610f0bec31b526612cf849c230793`加入独立`stk.peer/1`、可选libdatachannel/libnice原生helper、双方Ed25519实际通道绑定认证、owner持久授权/撤销与单主项目服务。远端仅选project/grant/generation UUID，复用分页、CAS与格式15回执；不开放stdio桥、Runtime监听、脚本或模型设置。提交后元数据/响应失败保留原UUID的不确定结果；真实重连get原回执已验。
+
+ACK修正前联合198/198、零跳过、43.191秒，最终端点/协议141/141、零跳过、35.433秒；三Python版本各143/143、真实crypto50.0.2，源码摘要稳定。首次联合因缺libnice.so.10退出127产生40失败，原日志保留；补齐开发运行库路径才通过，不冒称helper可直接发行。独立审查与真实反例修正了hello阻塞唯一reader、并发能力快照乱序和ready前业务派发。完整Python首轮4231通过/31跳过/2排除、1许可路径检查失败；仅改transport说明后原门禁1/1通过。最终ACK对象方向已两行修正，独立规范对端四项红→绿；fresh wheel安装202 peer+1边界203/203、零跳过、45.582秒，551份安装py/Schema一致、112模块来源正确，未含原生helper/libs。
+
+cfb8 Desktop已终态：WindowsCPU发现修正获验证，Mac静态/spike通过但两个视频失败，Windowsnative六项零轮/零图；Runtime7/8、Docs/Secret成功。当前Windows精确完整WindowRect/DWM原点与物理DPI、局部三条queued鼠标消息保持原验收门禁。Mac改为单次pause后绝对1秒内有界查询，超时关闭；独立审查修正本批Block引用捕获，State/WK仍weak。Linux增量all与最终65项相关CPU通过，不替代目标平台。acceptance字段篡改单测去掉无关绘图子进程20秒耦合，6项定向含真实绘图/两任务扫描通过；历史Windows内部耗时点仍不确定。
+
+本批无新增产品UI点击链；桌面配对、跨OS原生端点、授权文件传输、实际分阶段NAT/TURN443与端口预测、Flower及S5–S7继续。新的用户指南与正式规范入口已补；实际证据、Git和剩余任务见handoff及runtime-validation。
+
+源码暂存294782字节，gitleaks8.30.1配合仓库规则/脱敏扫描零发现。九Observed路径独立审查及精确SHA绑定完成，ack事务74f56c840c267cc396c4732d已Apply；正式语义维护/最终包比对/推送和新CI事实以本批closure与真实Git为准。
+
 ## 2026-10-30：原子项目编辑回执与热日志恢复收尾中
 
 格式15源码`59f4cdc3`已本地提交，本地 HEAD `59f4cdc3`，Hub 修复 `e5cea387`、Windows发现修正`e0139d9f`及Mac诊断`04aab01c`尚未推送。格式 15 工作树增加调用者保留 UUID 的原子编辑回执与本地桥/脚本接口，原请求摘要在生成对象 ID 前绑定；业务/修订/历史/回执同事务，查询及重复成功不编辑，旧库显式备份升级，未扩大智能体权限。真实800命令强制spill暴露只读打开无法回滚hot journal的问题，已限定精确776、初始读取身份检查、普通STKP header/文件身份验证及一次query_only原生物理恢复，恢复后重新只读打开，无业务重放或升级。
