@@ -3,6 +3,32 @@
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
+## 2026-10-30：格式15原子回执本机验收与平台精确取证
+
+本地HEAD/格式15源码 `59f4cdc3e7bc9ca7c29a3bc75621b0152a3b377e`；Windows发现修正`e0139d9f`和Mac诊断`04aab01c`已本地提交，格式15源码也已本地提交；此为源码提交后的交付快照，新头推送/CI以真实Git及收尾机器证据核对。证据根 `EDIT_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-foundation-20261029/edit-operations/`；平台根同上级 `p4-ci-70449/`。测试key空、model unset，无收费模型请求。
+
+| 验证 | 实际结果/范围 | 证据 |
+|---|---|---|
+| 核心最后精准回归 | 3.12 78/78、2.20秒；3.11/3.14恢复各15/15、1.43/1.46秒；零失败/错误/跳过、四文件前后SHA一致 | `final-lstat-py312/311/314.{xml,log,json}` |
+| 真实崩溃落盘 | 800命令/138558字节请求，cache_size5/cache_spill ON，hot journal及未提交脏页真实存在；正常fresh/既有Store读取恢复到byte-for-byte baseline、rev/table/history均0、无回执；提交后退出对照rev1/800表/1history/有回执 | `core-spill-probe/run-e23cf2fcce074bb0b58b62e0a9c73ffe/summary.json` |
+| 桥/API | 3.12扩大54/54、3.11/3.14各18/18，包含升级Schema修正，零跳过；早于最后恢复修复，后者另由核心及新安装测试覆盖 | `bridge-summary.json` |
+| 新恢复候选安装 | 独立Python3.12.14、20缓存依赖、无Torch，78核心+18桥96/96、零跳过，6.95秒；471份安装py/Schema一致，真实桥111模块及worker9模块来源来自安装目录 | `package-check/recovery-business-candidate-summary.json` |
+| 新候选构建 | 离线build退出0/10.072秒，764源pre/post/验证结束一致；与旧81候选wheel仅store/RECORD变，sdist另核心测试/规范变 | 同上；旧81候选不覆盖此恢复版本 |
+| 平台修正后Linux构建 | 全目标增量退出0、17.066秒、输入稳定；不代表Cocoa/Windows实际编译 | `platform-final-build-summary.json` |
+| 最终完整Python | 4034通过/31跳过/2排除、零失败、既有Starlette提示1项，779.39秒；wrapper783.015秒、source_stable=true | `final-python-full.xml/log/summary.json` |
+| 首轮完整原生 | 2020/2022、2失败/零错误/零跳过，486.74秒，source_stable=true；两个旧格式升级夹具漏删新表已修，原结果保留；新增真实桥回执/重启用例通过，最终已另跑通过 | `final-native-full.xml/log/summary.json` |
+| 最终完整原生/必跑 | 2022/2022、零失败/错误/跳过、483.82秒（wrapper483.895）、source_stable=true；当前工作流全部必跑退出0、1546项匹配、25.256秒 | `verified-native-full.xml/log/summary.json`、`required-current-summary.json` |
+
+新候选wheel 48018135字节/662成员，SHA `2f5bcd74cf1a1c7a98c15ffc11773094f4c5198531b2c1d9ecc4b34b5a788268`；sdist 49026410字节/948成员，SHA `b39ccf0eb8a1b7c310d5140fbef88a011632625d706506dec637a2b1d6d69aac`。产物在 `package-check/recovery-business-candidate/recovery-business-candidate-dist/`，最终文档版由`package-check/final-summary.json`的全成员比对绑定该已测96项候选，不声称额外运行过最终版安装测试。
+
+[70449dc Desktop40973399539](https://github.com/sijintech/stk/actions/runs/40973399539)已终态失败。Windows CPU job123795443006在GoogleTest构建后发现命令失败，可执行文件已链接；双标签拆平为错误属性，连带TIMEOUT/环境设置错配。修正仅将双标签移到发现后的TEST_INCLUDE_FILES，官方3.31.6模块和本机4.2.3独立元数据均证明22/22双标签、120秒、空key/model unset、CPU选择22/22；不替代真实Windows实测。原日志SHA `f6e7e1e52ca17a393576a5a6e60d42d94e9abf5e0f60e565ed801f1fff1d7745`，`windows-build/fix-summary.json`绑定源码及补丁。
+
+Mac job123795443025编译/CPU/Metal成功；原生6项中Markdown、HTML、PDF和独立spike通过，video/html-video失败。artifact12943950957的339193673字节ZIP SHA `cd138c07427e81fd7dc602475fbdb898da3600b8f43d43db71bfb0140d95356f`与GitHub API digest一致。三静态格式各20轮、140/140/160张验收图，全440张记录均核实际PNG SHA，root目视三格式最终图；均保留Viewer/隐藏Python稿。固定1024×653实际client、默认a3 Reports/Python和旁侧Viewer、一次记录的行splitter拖动起点，选择报告/预览共2点击；20轮还有隐藏、移位、滚动、关闭与重新准备动作，其实际事件由result.json记录，不能把2点击当全部轮次操作数。
+
+两个视频result均初始暂停保持一次、原生点击播放一次，实际time推进到约0.10/0.14秒、ready_state4、320×180、duration6；随后Pause附近probe身份guard拒绝，各0完整轮/0验收图。不再误记为首个probe失败；当前证据不足以区分暂停失败、状态报告或其他关闭路径。源码只在原guard失败时加布尔状态、status和固定原因枚举，不输出URL/DOM/项目内容，不重试、移除guard或放宽门禁；仍待新Mac CI。详情 `macos-native/artifact-evidence-summary.json` 及提取的五份result.json。Windowsnative123806568349因上游失败skipped，Linux三job成功。Runtime40973399517八job、Docs40973399507、Secret40973399529成功；前头Desktop推送等待条件已满足，但整个平台交付未完成。
+
+格式15回执规范见[项目编辑操作](specs/project-edit-operations-1.md)，这不是peer端点、授权或网络恰好一次交付。P4视频及第5–8项继续，PET新专项和三项所有者待决不改变。本批源码与记录最终稳定后统一维护AOCI，机器Apply/Verify/Check/Guide和发行收尾绑定见`delivery-closure-summary.json`；资产对齐不代替当前模型完整认知可靠性。
+
 ## 2026-10-29：S3交付闭环与Hub上传幂等修复
 
 S3记录/认知交付`70449dc15ed0635014f8bc66924bc7af123f0a8a`已推送。32条语义按13/12/7三批Apply，最终1105条，Verify/Check退出0、Guide complete=true/next_action=none，无未决事务、Recovery或第三方冲突。暂存141405字节gitleaks零发现。完整交付证明在S3证据根`delivery-closure-summary.json`；此前失败的Overview链保留，新链完整1102条/23块、约156129 tokens、Challenge10/10通过，随后索引身份已变，资产对齐与模型完整认知可靠性分开。
