@@ -13,6 +13,7 @@
 #include <winrt/Windows.Graphics.Capture.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 #include "window_evidence.hh"
+#include "window_capture_geometry.hh"
 #include "stk/io/json.hh"
 #include <atomic>
 #include <cstdint>
@@ -198,6 +199,35 @@ std::string install_crash_diagnostics()
   return {};
 }
 
+struct DpiState {
+  bool available = false;
+  UINT dpi = 0;
+  int thread_awareness = -1, window_awareness = -1;
+  bool physical() const { return available && dpi && thread_awareness == 2 && window_awareness == 2; }
+};
+DpiState dpi_state(HWND window)
+{
+  // WGC requires modern Windows; observe DPI state without changing application policy.
+  // The documented DPI_AWARENESS_PER_MONITOR_AWARE value is 2. Both contexts
+  // must use physical screen pixels before mixing Win32 and DWM rectangles.
+  using ThreadContext = HANDLE (WINAPI *)();
+  using WindowContext = HANDLE (WINAPI *)(HWND);
+  using Awareness = int (WINAPI *)(HANDLE);
+  using WindowDpi = UINT (WINAPI *)(HWND);
+  const auto user32 = GetModuleHandleW(L"user32.dll");
+  if (!user32) return {};
+  const auto thread_context = reinterpret_cast<ThreadContext>(GetProcAddress(user32, "GetThreadDpiAwarenessContext"));
+  const auto window_context = reinterpret_cast<WindowContext>(GetProcAddress(user32, "GetWindowDpiAwarenessContext"));
+  const auto awareness = reinterpret_cast<Awareness>(GetProcAddress(user32, "GetAwarenessFromDpiAwarenessContext"));
+  const auto window_dpi = reinterpret_cast<WindowDpi>(GetProcAddress(user32, "GetDpiForWindow"));
+  if (!thread_context || !window_context || !awareness || !window_dpi) return {};
+  return {true, window_dpi(window), awareness(thread_context()), awareness(window_context(window))};
+}
+capture_geometry::Rect geometry_rect(RECT rect)
+{
+  return {int32_t(rect.left), int32_t(rect.top), int32_t(rect.right), int32_t(rect.bottom)};
+}
+
 class Capture final : public WindowEvidenceCapture {
  public:
   explicit Capture(wm::NativeWindowHandle parent)
@@ -231,42 +261,42 @@ class Capture final : public WindowEvidenceCapture {
       winrt::check_hresult(interop->CreateForWindow(window_, winrt::guid_of<GraphicsCaptureItem>(),
                                                    winrt::put_abi(item_)));
       const auto size = item_.Size();
-      if (size.Width != outer_.right - outer_.left || size.Height != outer_.bottom - outer_.top ||
-          size.Width <= 0 || size.Height <= 0 || size.Width > 8192 || size.Height > 8192 ||
-          int64_t(size.Width) * size.Height > 16 * 1024 * 1024 ||
-          client_.left < outer_.left || client_.top < outer_.top ||
-          client_.right > outer_.right || client_.bottom > outer_.bottom) {
-        // Failure-only observations: keep every exact geometry gate above. DWM bounds and
-        // GetWindowRect have different documented DPI/border semantics; do not guess which
-        // one explains a rejected OS capture without recording the actual coordinates.
-        RECT window_rect{};
-        SetLastError(ERROR_SUCCESS);
-        const bool got_window_rect = GetWindowRect(window_, &window_rect) != FALSE;
-        const DWORD window_rect_error = got_window_rect ? ERROR_SUCCESS : GetLastError();
-        using GetWindowDpi = UINT (WINAPI *)(HWND);
-        const auto user32 = GetModuleHandleW(L"user32.dll"); // Borrowed, already loaded.
-        const auto get_window_dpi = user32 ? reinterpret_cast<GetWindowDpi>(
-            GetProcAddress(user32, "GetDpiForWindow")) : nullptr;
+      SetLastError(ERROR_SUCCESS);
+      const bool got_window_rect = GetWindowRect(window_, &window_rect_) != FALSE;
+      const DWORD window_rect_error = got_window_rect ? ERROR_SUCCESS : GetLastError();
+      dpi_ = dpi_state(window_);
+      const auto geometry = capture_geometry::select(size.Width, size.Height, geometry_rect(window_rect_),
+          geometry_rect(outer_), geometry_rect(client_), got_window_rect && dpi_.physical());
+      if (!geometry) {
         const io::Json details = {
             {"item_size", {size.Width, size.Height}},
             {"dwm_outer", {outer_.left, outer_.top, outer_.right, outer_.bottom}},
             {"client_screen", {client_.left, client_.top, client_.right, client_.bottom}},
             {"get_window_rect_ok", got_window_rect}, {"get_window_rect_error", window_rect_error},
-            {"window_rect", {window_rect.left, window_rect.top, window_rect.right, window_rect.bottom}},
-            {"window_dpi_api_available", get_window_dpi != nullptr},
-            {"window_dpi", get_window_dpi ? get_window_dpi(window_) : 0u},
+            {"window_rect", {window_rect_.left, window_rect_.top, window_rect_.right, window_rect_.bottom}},
+            {"window_dpi_api_available", dpi_.available}, {"window_dpi", dpi_.dpi},
+            {"thread_dpi_awareness", dpi_.thread_awareness},
+            {"window_dpi_awareness", dpi_.window_awareness}, {"physical_coordinates", dpi_.physical()},
             {"failed_predicates", {
-                {"item_width_differs_from_dwm", size.Width != outer_.right - outer_.left},
-                {"item_height_differs_from_dwm", size.Height != outer_.bottom - outer_.top},
+                {"item_width_differs_from_dwm", size.Width != capture_geometry::width(geometry_rect(outer_))},
+                {"item_height_differs_from_dwm", size.Height != capture_geometry::height(geometry_rect(outer_))},
+                {"item_width_differs_from_window", size.Width != capture_geometry::width(geometry_rect(window_rect_))},
+                {"item_height_differs_from_window", size.Height != capture_geometry::height(geometry_rect(window_rect_))},
                 {"item_width_nonpositive", size.Width <= 0}, {"item_height_nonpositive", size.Height <= 0},
                 {"item_width_over_8192", size.Width > 8192}, {"item_height_over_8192", size.Height > 8192},
                 {"item_pixels_over_16_mib", int64_t(size.Width) * size.Height > 16 * 1024 * 1024},
+                {"dwm_outside_window", !capture_geometry::contains(geometry_rect(window_rect_), geometry_rect(outer_))},
+                {"client_outside_dwm", !capture_geometry::contains(geometry_rect(outer_), geometry_rect(client_))},
                 {"client_left_before_dwm", client_.left < outer_.left},
                 {"client_top_before_dwm", client_.top < outer_.top},
                 {"client_right_after_dwm", client_.right > outer_.right},
                 {"client_bottom_after_dwm", client_.bottom > outer_.bottom}}}};
         throw std::runtime_error("Captured window geometry does not match the bounded STK client area; " + details.dump());
       }
+      geometry_ = *geometry;
+      backend_ += geometry_.origin == capture_geometry::Origin::FullWindowRect ?
+          ";capture_origin=window_rect" : ";capture_origin=dwm_visible";
+      backend_ += ";physical_dpi=" + std::to_string(dpi_.dpi);
       // Capture has its own D3D device; the STK rendering backend remains OpenGL.
       // Microsoft supports WARP through this same API. WGC support and actual pixels still
       // have to pass below; choosing WARP does not bypass any capability or image check.
@@ -319,9 +349,13 @@ class Capture final : public WindowEvidenceCapture {
       winrt::check_hresult(DwmGetWindowAttribute(window_, DWMWA_EXTENDED_FRAME_BOUNDS,
                                                  &current_outer, sizeof(current_outer)));
       const auto current_client = client_bounds();
+      RECT current_window{};
+      const auto current_dpi = dpi_state(window_);
       if (!IsWindow(window_) || !IsWindowVisible(window_) || IsIconic(window_) ||
+          !GetWindowRect(window_, &current_window) || !EqualRect(&window_rect_, &current_window) ||
+          !current_dpi.physical() || current_dpi.dpi != dpi_.dpi ||
           !EqualRect(&client_, &current_client) || !EqualRect(&outer_, &current_outer)) {
-        throw std::runtime_error("STK window moved or closed during evidence capture");
+        throw std::runtime_error("STK window geometry, DPI or visibility changed during evidence capture");
       }
       frame = pool_.TryGetNextFrame();
       if (!frame) { return std::nullopt; }
@@ -345,8 +379,7 @@ class Capture final : public WindowEvidenceCapture {
       desc.Usage = D3D11_USAGE_STAGING;
       desc.BindFlags = 0; desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ; desc.MiscFlags = 0;
       winrt::check_hresult(device_->CreateTexture2D(&desc, nullptr, staging.put()));
-      D3D11_BOX box{UINT(client_.left - outer_.left), UINT(client_.top - outer_.top), 0,
-                    UINT(client_.right - outer_.left), UINT(client_.bottom - outer_.top), 1};
+      D3D11_BOX box{geometry_.left, geometry_.top, 0, geometry_.right, geometry_.bottom, 1};
       context_->CopySubresourceRegion(staging.get(), 0, 0, 0, 0, texture.get(), 0, &box);
       D3D11_MAPPED_SUBRESOURCE data{};
       winrt::check_hresult(context_->Map(staging.get(), 0, D3D11_MAP_READ, 0, &data));
@@ -381,7 +414,9 @@ class Capture final : public WindowEvidenceCapture {
   }
   bool apartment_ = false;
   HWND window_ = nullptr;
-  RECT client_{}, outer_{};
+  RECT client_{}, outer_{}, window_rect_{};
+  DpiState dpi_{};
+  capture_geometry::Geometry geometry_{};
   std::string error_;
   std::string backend_ = "windows-graphics-capture-window-client";
   winrt::com_ptr<ID3D11Device> device_;

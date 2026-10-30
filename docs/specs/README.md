@@ -5,7 +5,7 @@
 
 These documents are the published contracts of STK. They were frozen for Milestone 1 (Phase A); later
 changes are additive, and a breaking change needs a new major version (`stk.graph/2`, `@2` node
-types, and so on). Every machine contract is a JSON Schema (draft 2020-12) under
+types, and so on). Published JSON Schemas (draft 2020-12) live under
 [`suan/contracts/schemas/`](../../suan/contracts/schemas/), loaded with the standard library by
 `suan.contracts.load_schema("<id>")`. Python validation where it matters is hand-written and
 NumPy-free (`suan.graph.schema.validate_graph`); `jsonschema` is not a runtime dependency.
@@ -30,6 +30,11 @@ are not existing graph-v1 or bridge-v1 capabilities; their schema and protocol e
 | [report-2.md](report-2.md) | Explicitly edited generated reports, frozen report requests, original response provenance and checksum-bound export evidence; report/1 remains unchanged | `desktop-bridge-1` generated report and request definitions |
 | [materials-training-1.md](materials-training-1.md) | Frozen local training inputs, persistent tasks and curves, transfer initialization, shared held-out comparison, admission and explicit recovery | `desktop-bridge-1` materials methods; capsule validation in `suan/materials/inputs.py` |
 | [project-edit-operations-1.md](project-edit-operations-1.md) | Format-15 permanent receipts for explicitly identified project edits, original-request replay, transaction and database-continuity limits | `desktop-bridge-1` methods `project.edit_operations.apply_once/get`; receipt validation in `suan/project/edit_operations.py` |
+| [stk-peer-1.md](stk-peer-1.md) | Independent `stk.peer/1` control messages, mutual channel-bound authentication, capability negotiation and explicitly authorized project operations; current backend prototype and acceptance limits | Bounded handwritten validator in `suan/peer/protocol.py`; authority, endpoint and shared-project adapter in `suan/peer/`; shared command/page/receipt types reuse `desktop-bridge-1` |
+
+The peer entry describes the implemented backend prototype, not completed cross-platform S4 acceptance.
+It adds no new `load_schema` ID. See the [peer build and integration guide](../peer.md) for explicit
+helper/runtime-library setup, trusted identity inputs and recovery after an uncertain write.
 
 ## How they relate
 

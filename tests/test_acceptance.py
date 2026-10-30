@@ -3,8 +3,6 @@
 import importlib.util
 import json
 from pathlib import Path
-import subprocess
-import sys
 
 import pytest
 
@@ -71,26 +69,30 @@ def test_acceptance_lost_submit_response_saves_retry_contract(
 
 def test_incorrect_field_is_rejected_even_when_summary_is_correct(demo, tmp_path):
     np = pytest.importorskip("numpy")
+    from PIL import Image
     from toolkits.sviz.field import read_field, write_field
 
-    source = Path(demo.__file__).parent / "inputs"
-    (tmp_path / "input.json").write_text(json.dumps({"amplitude": 1}))
-    result = subprocess.run(
-        [sys.executable, str(source / "simulate.py")],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=20,
+    # Test the independent verifier with known outputs. Starting the complete
+    # simulator here couples this corruption check to cold plotting/font setup;
+    # the shipped sweep and science tests exercise that producer separately.
+    x, y, z = np.indices((8, 6, 4))
+    field = (x + 2 * y + 3 * z).astype(float)
+    write_field(tmp_path / "field.dat", field)
+    write_field(tmp_path / "field.vtk", field)
+    Image.new("RGB", (2, 2), (20, 80, 160)).save(tmp_path / "preview.png")
+    (tmp_path / "summary.json").write_text(
+        json.dumps({"amplitude": 1, "mean": 13, "minimum": 0, "maximum": 26})
     )
-    assert result.returncode == 0, result.stderr
     assert (
         demo.verify_outputs(tmp_path, 1)["field_max_absolute_error"]["field.vtk"] == 0
     )
     original = read_field(tmp_path / "field.vtk")
     changed = original.copy()
-    # Preserve mean/max, so checking only summary.json cannot find the error.
-    changed[0, 0, 0, 0] += 1
-    changed[0, 0, 1, 0] -= 1
+    # Preserve every summary statistic, so only checking field values finds it.
+    changed[1, 0, 0, 0] += 1
+    changed[1, 0, 1, 0] -= 1
+    for statistic in (np.mean, np.min, np.max):
+        assert statistic(changed) == statistic(original)
     write_field(tmp_path / "field.vtk", changed)
     with pytest.raises(ValueError, match="field.vtk"):
         demo.verify_outputs(tmp_path, 1)

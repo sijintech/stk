@@ -23,7 +23,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6 openssh-server
       - run: sudo mkdir -p /run/sshd
       # Every non-desktop test runs here, including control, workbench and MuPRO end-to-end tests.
-      - run: python -m pip install ".[server,science,control,visualization,documents,test]" build
+      - run: python -m pip install ".[server,science,control,visualization,documents,peer,test]" build
       # Materials models (S3) train with PyTorch, an optional dependency installed separately (CPU build); on the
       # reference version only, so the other versions also check that everything else works without it.
       - if: matrix.python == '3.12'
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install ".[science,documents,test]"
+      - run: python -m pip install ".[science,documents,peer,test]"
       # No PYTHONUTF8 or PYTHONIOENCODING, so the cp1252 pipes are exercised.
       - run: python -m pytest -m "not server and not desktop" -rs
       - name: Client entry points and server refusal
@@ -76,6 +76,20 @@ jobs:
           out=$(suan-control init --state-dir "$RUNNER_TEMP/stk-control" 2>&1) && exit 1
           echo "$out" | grep -q 'Linux only'
           test ! -e "$RUNNER_TEMP/stk-control"
+  # Peer authorization and shared project semantics are cross-platform and do
+  # not start the Linux Runtime or require the optional native WebRTC helper.
+  peer-macos:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    env:
+      STK_TOKEN_PLAN_API_KEY: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ".[peer,test]"
+      - run: python -m pytest -q tests/test_peer_authority.py tests/test_peer_protocol.py tests/test_peer_projects.py
   desktop:
     runs-on: ubuntu-latest
     env:

@@ -17,7 +17,27 @@ struct Target {
   POINT child_point{};
   document_preview::ViewBounds bounds{};
   int width = 0, height = 0;
+  UINT dpi = 0;
 };
+
+UINT physical_dpi(HWND window)
+{
+  using ThreadContext = HANDLE (WINAPI *)();
+  using WindowContext = HANDLE (WINAPI *)(HWND);
+  using Awareness = int (WINAPI *)(HANDLE);
+  using WindowDpi = UINT (WINAPI *)(HWND);
+  const auto user32 = GetModuleHandleW(L"user32.dll");
+  if (!user32) return 0;
+  const auto thread_context = reinterpret_cast<ThreadContext>(GetProcAddress(user32, "GetThreadDpiAwarenessContext"));
+  const auto window_context = reinterpret_cast<WindowContext>(GetProcAddress(user32, "GetWindowDpiAwarenessContext"));
+  const auto awareness = reinterpret_cast<Awareness>(GetProcAddress(user32, "GetAwarenessFromDpiAwarenessContext"));
+  const auto window_dpi = reinterpret_cast<WindowDpi>(GetProcAddress(user32, "GetDpiForWindow"));
+  // 2 is the documented DPI_AWARENESS_PER_MONITOR_AWARE value: client/screen
+  // coordinates must stay in physical pixels, including the browser descendant.
+  if (!thread_context || !window_context || !awareness || !window_dpi ||
+      awareness(thread_context()) != 2 || awareness(window_context(window)) != 2) return 0;
+  return window_dpi(window);
+}
 
 bool exact_container(const Target &target)
 {
@@ -31,6 +51,7 @@ bool exact_container(const Target &target)
   return IsWindow(target.parent) && parent_pid == GetCurrentProcessId() &&
          parent_thread == GetCurrentThreadId() && parent_thread == target.parent_thread &&
          IsWindowVisible(target.parent) && !IsIconic(target.parent) &&
+         target.dpi != 0 && physical_dpi(target.parent) == target.dpi &&
          GetAncestor(target.parent, GA_ROOT) == target.parent &&
          GetClientRect(target.parent, &client) && client.left == 0 && client.top == 0 &&
          client.right == target.width && client.bottom == target.height &&
@@ -56,6 +77,7 @@ bool attached(const Target &target)
          IsChild(target.container, target.child) && GetAncestor(target.child, GA_ROOT) == target.parent &&
          IsWindowVisible(target.child) && IsWindowEnabled(target.child) &&
          pid == target.child_pid && thread == target.child_thread &&
+         physical_dpi(target.child) == target.dpi &&
          GetClientRect(target.child, &rectangle) && PtInRect(&rectangle, target.child_point);
 }
 
@@ -81,6 +103,8 @@ bool resolve(wm::NativeWindowHandle handle, document_preview::ViewBounds bounds,
       client.right != width || client.bottom != height) {
     return fail("Native input requires this process's exact visible top-level UI window");
   }
+  target.dpi = physical_dpi(target.parent);
+  if (!target.dpi) { return fail("Native input requires physical per-monitor DPI coordinates"); }
   const POINT parent_point{bounds.x + static_cast<LONG>(std::floor(nx * (bounds.width - 1))),
       height - bounds.y - bounds.height + static_cast<LONG>(std::floor(ny * (bounds.height - 1)))};
   target.container = ChildWindowFromPointEx(target.parent, parent_point,
@@ -162,13 +186,40 @@ bool send(const Target &target, UINT message, WPARAM wparam, LPARAM lparam, std:
   return true;
 }
 
+bool post_mouse(const Target &target, UINT message, WPARAM wparam, LPARAM lparam,
+                std::string &error)
+{
+  if (message != WM_MOUSEMOVE && message != WM_LBUTTONDOWN && message != WM_LBUTTONUP) {
+    error = "Native mouse queue refuses an unsupported message"; return false;
+  }
+  if (!attached(target)) { error = "Native mouse child/DPI changed before enqueue"; return false; }
+  // Mouse input is queued by Windows. A synchronous DOWN can wait inside a
+  // control's modal/capture dispatch before the caller can send its matching UP.
+  // Queue this fixed three-message sequence locally instead of blocking the host
+  // STA message pump. Success here proves enqueue only; the caller's subsequent
+  // observed media transition and OS pixels must still prove actual processing.
+  SetLastError(ERROR_SUCCESS);
+  const bool queued = PostMessageW(target.child, message, wparam, lparam) != FALSE;
+  const DWORD queue_error = queued ? ERROR_SUCCESS : GetLastError();
+  if (!queued) {
+    error = "PostMessage native mouse enqueue failed (message=" + std::to_string(message) +
+        "); win32_error=" + std::to_string(queue_error) +
+        "; expected_child_pid=" + std::to_string(target.child_pid) +
+        "; expected_child_thread=" + std::to_string(target.child_thread);
+    return false;
+  }
+  if (!attached(target)) { error = "Native mouse child/DPI changed during enqueue"; return false; }
+  return true;
+}
+
 std::string identity(const Target &target)
 {
   return "; parent=" + std::to_string(reinterpret_cast<uintptr_t>(target.parent)) +
       "; exact_STATIC_container=" + std::to_string(reinterpret_cast<uintptr_t>(target.container)) +
       "; browser_descendant=" + std::to_string(reinterpret_cast<uintptr_t>(target.child)) +
       "; descendant_pid=" + std::to_string(target.child_pid) +
-      "; descendant_thread=" + std::to_string(target.child_thread);
+      "; descendant_thread=" + std::to_string(target.child_thread) +
+      "; physical_dpi=" + std::to_string(target.dpi);
 }
 
 bool key_spec(wm::Key key, UINT &native_key, bool &extended)
@@ -197,12 +248,13 @@ bool NativeInput::click_document(wm::NativeWindowHandle handle, document_preview
   if (!resolve(handle, bounds, width, height, nx, ny, target, error)) { return false; }
   const LPARAM position = MAKELPARAM(static_cast<short>(target.child_point.x),
                                     static_cast<short>(target.child_point.y));
-  if (!send(target, WM_MOUSEMOVE, 0, position, error) ||
-      !send(target, WM_LBUTTONDOWN, MK_LBUTTON, position, error) ||
-      !send(target, WM_LBUTTONUP, 0, position, error)) { return false; }
-  delivery = "Win32 local SendMessageTimeout WM_MOUSEMOVE/WM_LBUTTONDOWN/WM_LBUTTONUP" + identity(target) +
+  if (!post_mouse(target, WM_MOUSEMOVE, 0, position, error) ||
+      !post_mouse(target, WM_LBUTTONDOWN, MK_LBUTTON, position, error) ||
+      !post_mouse(target, WM_LBUTTONUP, 0, position, error)) { return false; }
+  delivery = "Win32 local PostMessage queued WM_MOUSEMOVE/WM_LBUTTONDOWN/WM_LBUTTONUP" + identity(target) +
       "; child_point=" + std::to_string(target.child_point.x) + "," + std::to_string(target.child_point.y) +
-      "; normalized=" + std::to_string(nx) + "," + std::to_string(ny) + "; no global input injection";
+      "; normalized=" + std::to_string(nx) + "," + std::to_string(ny) +
+      "; enqueue_only=true; consumption_requires_media_observation_and_OS_pixels; no global input injection";
   return true;
 }
 

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "evidence_pixels.hh"
+#include "window_capture_geometry.hh"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cmath>
@@ -426,6 +427,72 @@ TEST(DocumentEvidence, TextPatternFailsClosedForClippedRowsAndMalformedBuffers)
   image.width = 0xffffffffu;
   EXPECT_FALSE(evidence_text_marker(image));
   EXPECT_FALSE(evidence_text_marker(io::Image{}));
+}
+
+TEST(DocumentEvidence, WindowCaptureGeometryUsesTheObservedFullWindowOriginWithoutBorderTolerance)
+{
+  using namespace capture_geometry;
+  // Exact cfb8c561 Windows WGC failure: the surface matches GetWindowRect,
+  // which includes invisible resize borders, rather than DWM visible bounds.
+  const Rect window{-8, 0, 1032, 736}, dwm{-1, 0, 1025, 729}, client{0, 31, 1024, 728};
+  const auto full = select(1040, 736, window, dwm, client, true);
+  ASSERT_TRUE(full);
+  EXPECT_EQ(full->origin, Origin::FullWindowRect);
+  EXPECT_EQ(full->left, 8u); EXPECT_EQ(full->top, 31u);
+  EXPECT_EQ(full->right, 1032u); EXPECT_EQ(full->bottom, 728u);
+  EXPECT_EQ(full->right - full->left, 1024u);
+  EXPECT_EQ(full->bottom - full->top, 697u);
+  const auto visible = select(1026, 729, window, dwm, client, true);
+  ASSERT_TRUE(visible);
+  EXPECT_EQ(visible->origin, Origin::DwmVisibleBounds);
+  EXPECT_EQ(visible->left, 1u); EXPECT_EQ(visible->top, 31u);
+  EXPECT_EQ(visible->right - visible->left, 1024u);
+  EXPECT_FALSE(select(1041, 736, window, dwm, client, true));
+  EXPECT_FALSE(select(1040, 735, window, dwm, client, true));
+  EXPECT_FALSE(select(1027, 729, window, dwm, client, true));
+  EXPECT_FALSE(select(1026, 730, window, dwm, client, true));
+}
+
+TEST(DocumentEvidence, WindowCaptureGeometryRequiresPhysicalDpiAndNestedPositiveRectangles)
+{
+  using namespace capture_geometry;
+  const Rect window{-8, 0, 1032, 736}, dwm{-1, 0, 1025, 729}, client{0, 31, 1024, 728};
+  EXPECT_FALSE(select(1040, 736, window, dwm, client, false));
+  EXPECT_FALSE(select(1026, 729, window, dwm, client, false));
+  EXPECT_FALSE(select(1040, 736, window, dwm, {-2, 31, 1024, 728}, true));
+  EXPECT_FALSE(select(1040, 736, window, dwm, {0, 31, 1026, 728}, true));
+  EXPECT_FALSE(select(1040, 736, window, {-9, 0, 1025, 729}, client, true));
+  EXPECT_FALSE(select(1040, 736, window, {-1, 0, 1033, 729}, client, true));
+  EXPECT_FALSE(select(1040, 736, window, dwm, {0, 31, 0, 728}, true));
+  EXPECT_FALSE(select(1040, 736, window, dwm, {0, 31, 1024, 30}, true));
+}
+
+TEST(DocumentEvidence, WindowCaptureGeometryPreservesPhysicalPixelsAtScaledAndNegativeDesktopOrigins)
+{
+  using namespace capture_geometry;
+  const auto scaled = select(2080, 1472, {-16, 0, 2064, 1472}, {-2, 0, 2050, 1458},
+                             {0, 62, 2048, 1456}, true);
+  ASSERT_TRUE(scaled);
+  EXPECT_EQ(scaled->left, 16u); EXPECT_EQ(scaled->top, 62u);
+  EXPECT_EQ(scaled->right - scaled->left, 2048u);
+  EXPECT_EQ(scaled->bottom - scaled->top, 1394u);
+  const auto negative = select(1040, 736, {-2048, -1000, -1008, -264},
+      {-2041, -1000, -1015, -271}, {-2040, -969, -1016, -272}, true);
+  ASSERT_TRUE(negative);
+  EXPECT_EQ(negative->left, 8u); EXPECT_EQ(negative->top, 31u);
+  EXPECT_EQ(negative->right - negative->left, 1024u);
+}
+
+TEST(DocumentEvidence, WindowCaptureGeometryKeepsExtentAndPixelBudgetsWithoutSignedOverflow)
+{
+  using namespace capture_geometry;
+  EXPECT_TRUE(select(8192, 2048, {0, 0, 8192, 2048}, {0, 0, 8192, 2048}, {0, 0, 8192, 2048}, true));
+  EXPECT_FALSE(select(8192, 2049, {0, 0, 8192, 2049}, {0, 0, 8192, 2049}, {0, 0, 8192, 2049}, true));
+  EXPECT_FALSE(select(8193, 10, {0, 0, 8193, 10}, {0, 0, 8193, 10}, {0, 0, 8193, 10}, true));
+  EXPECT_FALSE(select(0, 10, {0, 0, 1, 10}, {0, 0, 1, 10}, {0, 0, 1, 10}, true));
+  EXPECT_FALSE(select(-1, 10, {0, 0, 1, 10}, {0, 0, 1, 10}, {0, 0, 1, 10}, true));
+  EXPECT_FALSE(select(1040, 736, {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX},
+      {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX}, {0, 0, 1, 1}, true));
 }
 }  // namespace
 }  // namespace stk::document_preview

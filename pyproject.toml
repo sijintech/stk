@@ -31,6 +31,7 @@ include = [
     { path = "docs/design/pet-data-dictionary.md", format = "sdist" },
     { path = "docs/scripting.md", format = "sdist" },
     { path = "docs/ssh.md", format = "sdist" },
+    { path = "docs/peer.md", format = "sdist" },
     { path = "docs/specs", format = "sdist" },
     { path = "examples/runtime", format = "sdist" },
     { path = "examples/pet_model", format = "sdist" },
@@ -75,6 +76,7 @@ fastapi = { version = "==0.141.1", optional = true }
 uvicorn = { version = ">=0.34,<1", optional = true }
 httpx = { version = ">=0.28,<1", optional = true }
 websockets = { version = "==15.0.1", optional = true }
+cryptography = { version = ">=50.0.2,<51", optional = true }
 
 [tool.poetry.extras]
 server = []
@@ -87,6 +89,7 @@ test = ["pytest", "jsonschema"]
 control = ["fastapi", "uvicorn", "httpx", "websockets"]
 visualization = ["numpy", "vtk", "h5py", "Pillow"]
 documents = ["markdown", "nh3"]
+peer = ["cryptography"]
 
 # 添加 PyTorch 官方源
 [[tool.poetry.source]]

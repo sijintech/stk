@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/document/resources.hh"
+#include "stk/document/media_pause_verification.hh"
 
 #include <string>
 #include <utility>
@@ -9,6 +10,53 @@
 
 namespace stk::document_preview {
 namespace {
+
+TEST(DocumentResources, PauseWaitsForObservedNonPlayingStateWithinOriginalDeadline)
+{
+  using Check = detail::MediaPauseVerification;
+  using namespace std::chrono_literals;
+  const Check::Clock::time_point start{};
+  Check check(7, 3, start);
+  EXPECT_EQ(check.observe(true, 7, 3, start + 25ms), Check::Result::Waiting);
+  EXPECT_EQ(check.observe(true, 7, 3, start + 50ms), Check::Result::Waiting);
+  EXPECT_EQ(check.observe(false, 7, 3, start + 75ms), Check::Result::Paused);
+  // A late Playing response and the independent watchdog cannot revoke a
+  // completed verification or close a view after an explicit later play.
+  EXPECT_EQ(check.observe(true, 7, 3, start + 80ms), Check::Result::Ignored);
+  EXPECT_EQ(check.expire(7, 3, start + 2s), Check::Result::Ignored);
+}
+
+TEST(DocumentResources, PauseDeadlineCoversPlayingAndMissingCallbacksWithoutExtending)
+{
+  using Check = detail::MediaPauseVerification;
+  using namespace std::chrono_literals;
+  const Check::Clock::time_point start{};
+  Check playing(1, 2, start), no_ack(1, 2, start), no_state_reply(1, 2, start);
+  for (const auto offset : {25ms, 250ms, 500ms, 999ms}) {
+    EXPECT_EQ(playing.observe(true, 1, 2, start + offset), Check::Result::Waiting);
+  }
+  EXPECT_EQ(playing.observe(true, 1, 2, start + 1s), Check::Result::Failed);
+  EXPECT_EQ(no_ack.expire(1, 2, start + 1s), Check::Result::Failed);
+  EXPECT_EQ(no_state_reply.expire(1, 2, start + 1s), Check::Result::Failed);
+  // Even an otherwise successful response is too late at the absolute cutoff.
+  Check late(1, 2, start);
+  EXPECT_EQ(late.observe(false, 1, 2, start + 1s), Check::Result::Failed);
+  EXPECT_EQ(late.observe(false, 1, 2, start + 1001ms), Check::Result::Ignored);
+}
+
+TEST(DocumentResources, PauseCallbacksCannotAffectAnotherPauseOrNavigation)
+{
+  using Check = detail::MediaPauseVerification;
+  using namespace std::chrono_literals;
+  const Check::Clock::time_point start{};
+  Check check(11, 9, start);
+  EXPECT_EQ(check.observe(false, 12, 9, start + 25ms), Check::Result::Ignored);
+  EXPECT_EQ(check.observe(false, 11, 10, start + 25ms), Check::Result::Ignored);
+  EXPECT_EQ(check.expire(12, 9, start + 2s), Check::Result::Ignored);
+  EXPECT_EQ(check.expire(11, 10, start + 2s), Check::Result::Ignored);
+  EXPECT_EQ(check.observe(true, 11, 9, start + 100ms), Check::Result::Waiting);
+  EXPECT_EQ(check.observe(false, 11, 9, start + 200ms), Check::Result::Paused);
+}
 
 PreviewIdentity identity()
 {

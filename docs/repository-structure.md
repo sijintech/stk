@@ -1,6 +1,6 @@
 # 仓库结构与归档边界
 
-更新：2026-10-15。目标依据：[开发计划](development-plan.md)与[工作台设计](design/project-workbench.md)。
+更新：2026-10-30（补充 peer 边界；既有归档验证保留原交付范围）。目标依据：[开发计划](development-plan.md)与[工作台设计](design/project-workbench.md)。
 
 ## 检查结论
 
@@ -23,6 +23,19 @@
 | `examples/`、`deploy/` | 可执行工作流示例与部署配置 | 与 Runtime/客户端行为一同维护 |
 | `plugins/` | 可选 Synorder 集成 | 暂缓不等于无用；保留独立可选依赖，不加入主流程必需依赖 |
 | `archive/` | 不参与当前产品构建的历史文件 | 保留来源、理由与恢复说明；新功能不从这里导入代码 |
+
+## 独立 peer 与可选原生传输
+
+`suan/peer/` 提供独立 peer 后端：`protocol.py` 做有界消息校验与纯能力协商，
+`authority.py` 管理本机所有者批准的公钥、项目 grant 与数据库代次，`projects.py` 复用共享项目存储，
+`endpoint.py` 接入双向认证和受限项目 RPC，`transport.py` 适配显式启动的原生 helper。
+这不复用 `Bridge.hello` 的本机副作用，不把 stdio 桥开放到网络，也不改变 Linux Runtime 的 loopback/SSH 限制。
+
+`desktop/engine/lib/stk_peer/` 是独立 C++20 CPU helper，具有该目录明确的 MIT 许可例外；
+它不链接 Blender/GPU，不随 Python wheel 携带，也没有自动安装或依赖下载规则。
+当前开发构建需要显式 helper 路径与动态库搜索目录，完整发行运行库闭包和第三方许可打包仍待完成。
+构建、可信签名回调、批准/授权及一次性连接接入见 [peer 指南](peer.md)，契约见
+[stk.peer/1](specs/stk-peer-1.md)。当前验收限于 Linux 本机两端，多 Python 版本不等于多操作系统。
 
 ## 原生编辑器的独立模块
 

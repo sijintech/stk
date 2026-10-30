@@ -1,12 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "stk/document/native_view.hh"
+#include "stk/document/media_pause_verification.hh"
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
 #  include "stk/document/test_media_probe.hh"
 #endif
 
 #import <AppKit/AppKit.h>
 #import <WebKit/WebKit.h>
+#import <dispatch/dispatch.h>
 
 #include <algorithm>
 #include <memory>
@@ -99,6 +101,62 @@ static bool relinquish_focus(const std::shared_ptr<State> &state)
 }
 
 static void shutdown(const std::shared_ptr<State> &state, NativeViewStatus status, const char *message);
+
+struct PauseRequest {
+  std::weak_ptr<State> state;
+  __weak WKWebView *view = nil;
+  detail::MediaPauseVerification verification;
+  bool acknowledged = false;
+  bool query_inflight = false;
+
+  PauseRequest(const std::shared_ptr<State> &source, uint64_t generation)
+      : state(source),
+        view(source->view),
+        verification(generation, source->result.navigation_generation,
+                     detail::MediaPauseVerification::Clock::now())
+  {
+  }
+};
+
+static void verify_pause(std::shared_ptr<PauseRequest> request)
+{
+  auto current = request->state.lock();
+  if (!live(current) || current->view != request->view) {
+    return;
+  }
+  using Check = detail::MediaPauseVerification;
+  const auto pending = request->verification.expire(
+      current->media_generation, current->result.navigation_generation, Check::Clock::now());
+  if (pending == Check::Result::Failed) {
+    shutdown(current, NativeViewStatus::Failed, "Could not verify paused document media playback");
+    return;
+  }
+  if (pending != Check::Result::Waiting) {
+    return;
+  }
+  // The watchdog is independent of WebKit replies and never owns the view or
+  // State. There is at most one state query in flight, and no pause is replayed.
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+    verify_pause(request);
+  });
+  if (!request->acknowledged || request->query_inflight) {
+    return;
+  }
+  request->query_inflight = true;
+  [current->view requestMediaPlaybackStateWithCompletionHandler:^(WKMediaPlaybackState playback) {
+    request->query_inflight = false;
+    auto completed = request->state.lock();
+    if (!live(completed) || completed->view != request->view) {
+      return;
+    }
+    const auto result = request->verification.observe(
+        playback == WKMediaPlaybackStatePlaying, completed->media_generation,
+        completed->result.navigation_generation, Check::Clock::now());
+    if (result == Check::Result::Failed) {
+      shutdown(completed, NativeViewStatus::Failed, "Could not pause document media playback");
+    }
+  }];
+}
 
 static void sync_visibility(const std::shared_ptr<State> &state)
 {
@@ -634,22 +692,13 @@ class CocoaDocumentView final : public NativeDocumentView {
       return false;
     }
     const auto generation = ++state->media_generation;
-    const auto navigation = state->result.navigation_generation;
-    const std::weak_ptr<cocoa::State> weak = state;
-    __weak WKWebView *expected_view = state->view;
+    const auto request = std::make_shared<cocoa::PauseRequest>(state, generation);
+    cocoa::verify_pause(request);
     // Public macOS 12+ API; project JavaScript remains disabled. Pausing never resumes media.
+    // Completion acknowledges the pause command; independently verify the resulting
+    // state within the original deadline rather than treating the first sample as final.
     [state->view pauseAllMediaPlaybackWithCompletionHandler:^{
-      auto current = weak.lock();
-      if (!cocoa::live(current) || current->media_generation != generation ||
-          current->result.navigation_generation != navigation || current->view != expected_view) { return; }
-      [current->view requestMediaPlaybackStateWithCompletionHandler:^(WKMediaPlaybackState playback) {
-        auto completed = weak.lock();
-        if (!cocoa::live(completed) || completed->media_generation != generation ||
-            completed->result.navigation_generation != navigation || completed->view != expected_view) { return; }
-        if (playback == WKMediaPlaybackStatePlaying) {
-          cocoa::shutdown(completed, NativeViewStatus::Failed, "Could not pause document media playback");
-        }
-      }];
+      request->acknowledged = true;
     }];
     return true;
   }
@@ -868,6 +917,9 @@ bool probe_media(wm::NativeWindowHandle parent, std::string_view session_id,
       if (!current) { reason = "state_released"; }
       else if (current->result.message == "Could not pause document media playback") {
         reason = "pause_failed";
+      }
+      else if (current->result.message == "Could not verify paused document media playback") {
+        reason = "pause_verification_timeout";
       }
       else if (current->result.message == "The WebKit content process exited; reopen the document explicitly.") {
         reason = "content_process_terminated";
