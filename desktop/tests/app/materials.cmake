@@ -5,9 +5,19 @@ if(MSVC)
   target_compile_options(stk-materials-tests PRIVATE /W3 /utf-8 /bigobj)
 endif()
 gtest_discover_tests(stk-materials-tests DISCOVERY_TIMEOUT 60 NO_PRETTY_VALUES
-  PROPERTIES LABELS "materials;project" TIMEOUT 120
+  TEST_LIST stk_materials_tests
+  PROPERTIES TIMEOUT 120
   ENVIRONMENT "STK_TOKEN_PLAN_API_KEY="
   ENVIRONMENT_MODIFICATION "STK_TOKEN_PLAN_MODEL=unset:")
+# GoogleTest discovery flattens list-valued properties and breaks Windows quoting.
+# Apply the complete label list after CTest has included the discovered test names.
+set(_materials_labels_file "${CMAKE_CURRENT_BINARY_DIR}/stk-materials-test-labels.cmake")
+file(GENERATE OUTPUT "${_materials_labels_file}" CONTENT [=[
+if(stk_materials_tests)
+  set_tests_properties(${stk_materials_tests} PROPERTIES LABELS "materials;project")
+endif()
+]=])
+set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${_materials_labels_file}")
 
 # Production MaterialsEditor draw_gpu, actual fonts/offscreen GPU pixels, strict local bridge.
 # Both images are checked inside the plot rather than accepting its small legend swatches.
