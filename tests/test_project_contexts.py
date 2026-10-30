@@ -238,11 +238,12 @@ def test_format_six_explicit_upgrade_preserves_drafts_and_verified_backup(model,
             db.execute(f"DROP TABLE {name}")
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=6")
     with pytest.raises(UnsupportedProjectFormat, match="format 7"):
         capture(model)
     result = store.upgrade(expected_revision=1)
-    assert result["format_version"] == FORMAT_VERSION == 14 and result["revision"] == 2
+    assert result["format_version"] == FORMAT_VERSION == 15 and result["revision"] == 2
     assert store.drafts.get(draft["id"]) == draft and store.snapshot()["tables"] == before["tables"]
     assert store.snapshot()["edit_history"] == before["edit_history"] and store.history()[:-1] == history
     restored = tmp_path / "old"
@@ -274,6 +275,7 @@ def test_failed_format_seven_upgrade_rolls_back_all_metadata_tables(model, monke
             db.execute(f"DROP TABLE {name}")
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=6")
     before, history = store.snapshot(), store.history()
     monkeypatch.setattr(storage, "_DDL_V7", (*storage._DDL_V7, "invalid SQL"))

@@ -432,13 +432,14 @@ def test_format8_requires_explicit_verified_backup_upgrade_and_preserves_undo_an
             db.execute(f"DROP TABLE {table}")  # a format-8 database (format 10 adds the workflow run tables)
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=8")
     before, history = store.snapshot(), store.history()
     with pytest.raises(UnsupportedProjectFormat, match="format 9"):
         prepare(model)
     assert store.snapshot() == before
     upgraded = store.upgrade(expected_revision=3)
-    assert upgraded["format_version"] == FORMAT_VERSION == 14 and upgraded["revision"] == 4
+    assert upgraded["format_version"] == FORMAT_VERSION == 15 and upgraded["revision"] == 4
     expected_tables = deepcopy(before["tables"])
     for table in expected_tables:
         for field in table["fields"]:
@@ -467,6 +468,7 @@ def test_format9_migration_failure_rolls_back_and_retains_verified_old_backup(mo
             db.execute(f"DROP TABLE {table}")  # a format-8 database (format 10 adds the workflow run tables)
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=8")
     before = store.snapshot()
     monkeypatch.setattr(storage, "_DDL_V9", (*storage._DDL_V9, "bad SQL"))

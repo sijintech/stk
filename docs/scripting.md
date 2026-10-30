@@ -1,6 +1,6 @@
 # STK Python 编程
 
-状态：2026-10-14 已实现原生 Python 程序编辑器、有界文件编辑、共享执行会话、项目/Runtime 操作 API 和本机布局控制首版。
+状态：2026-10-29 已实现原生 Python 程序编辑器、有界文件编辑、共享执行会话、项目/Runtime 操作 API 和本机布局控制首版，并加入格式 15 的明确编辑回执。
 完整方向见[设计记录](design/scripting-and-connections.md)，全部操作覆盖与远程控制仍在后续计划中。
 
 `stk.muferro` 提供案例导入、选行准备、结果收集和三维打开，复用项目/Runtime/Viewer API，
@@ -79,6 +79,28 @@ print(result["revision"])
 `apply` 必须明确给出读取时的修订号。UI、CLI 或其他脚本修改了项目时，旧修订会得到 `conflict`；
 不能只提高修订号后盲目重试。事务命令、类型和稳定 ID 见[项目指南](project.md)。
 项目修改会发出与原生表格相同的 `project.changed` 通知，打开该项目的视图可以刷新。
+
+格式 15 另提供明确操作身份的[永久编辑回执](specs/project-edit-operations-1.md)。调用前先保留规范 UUID、
+完整原命令和读取时的修订，方法不会替你生成并遗忘身份，也不会自动重试：
+
+```python
+# 先把 operation_id、commands、base_revision 保存到你自己的恢复记录，再调用。
+operation_id = "11111111-1111-4111-8111-111111111111"
+commands = [{"op": "create_table", "name": "One explicit edit"}]
+base_revision = p.catalog()["project"]["revision"]
+result = p.edit_operations.apply_once(commands, operation_id=operation_id,
+                                      expected_revision=base_revision)
+receipt = p.edit_operations.get(operation_id)
+assert receipt == result["receipt"]
+```
+
+示例 UUID 仅作占位，实际每个新操作应使用独立 UUID 并在提交前持久保存。丢回复后先重开原项目、明确查询
+`get(operation_id)`，不要重新生成 UUID 或把修订改为最新。相同原请求的显式重复调用返回原回执和 `replayed=True`；
+更改原命令或基础修订得到 `conflict`。只有首次提交发一次 `project.changed`，重放和查询不通知、不增加修订。
+旧格式的新回执方法返回 `unsupported`，普通读取不升级；先明确备份升级，支持到格式 14 的旧客户端不能打开格式 15。
+请求规范 JSON 上限 256 KiB、完整回执 512 KiB；最多 10000 次、请求与回执累计 64 MiB，达到上限拒绝新编辑且不丢旧回执。
+回执不随撤销删除；数据库备份回退或副本的状态连续性不能证明跨代次全局恰好一次。
+脚本公开方法分为 `project_edit` 和 `read`，均未加入智能体工具，也不扩大 S2c 运行权限。
 
 大项目可先读取结构，再按页取记录，避免 `snapshot()` 一次加载全部单元格：
 
@@ -167,6 +189,7 @@ print(p.selection())
 | 原生项目共享表格/记录选择 | `stk.project.selection()` / `select(..., expected_revision=...)`；固定项目句柄与修订，不改变区域筛选、布局或数据库 |
 | 项目修改预览与原生检查 | `stk.project.preview` 返回内存候选；`stk.project.review` 将命令送入原生差异页，由用户明确应用，见[预览指南](project-preview.md) |
 | 持久修改草案与应用回执 | `stk.project.drafts.save/get/list/apply/discard`，格式 6；明确保存、检查和应用，撤销不重置应用回执，见[草案指南](project-drafts.md) |
+| 明确操作 UUID 与永久编辑回执 | `stk.project.edit_operations.apply_once/get`，格式 15；原请求绑定、编辑和回执同事务，查询不执行，旧 `apply` 不变，见[回执契约](specs/project-edit-operations-1.md) |
 | 明确选择的上下文、文字讨论与草案来源 | `stk.project.contexts.capture/get/list`、`stk.project.discussion.add/get/list/link_draft/proposals`，格式 7；不调用模型或执行消息内容，见[上下文指南](project-contexts.md) |
 | 请求意图、固定输入与执行观察 | `stk.project.requests.create/get/list/cancel/provider/start/recover`，格式 8；`start` 明确发送，普通查询不发送，取消不保证远端已停止，见[请求指南](project-requests.md) |
 | 材料预测模型（S3） | `stk.materials.synthetic/validate/prepare/start/train/job/jobs/curves/cancel/recover/models/activate/predict`：P–E 回线与容量衰减；`prepare`冻结数据与模型来源但不训练，`start`才启动可选PyTorch CPU；任务和每轮曲线持久保存，同一留出集过绝对门槛且不差于冻结活动模型才登记。重开和恢复不重训，合成数据只检验链路，见[训练契约](specs/materials-training-1.md)与[方案](design/materials-models-s3.md) |

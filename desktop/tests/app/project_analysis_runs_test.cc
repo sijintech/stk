@@ -54,6 +54,7 @@ def run(self, identity, method, params):
     if method in {'project.snapshot', 'project.catalog'} and mode() == 'legacy':
         store = self.projects._get(params['handle'])
         with store._connect(write=True) as database:
+            database.execute('DROP TABLE project_edit_operations')
             database.execute('DROP TABLE table_views')
             database.execute('DROP TABLE field_options')
             database.execute('DROP TABLE project_agent_objects')

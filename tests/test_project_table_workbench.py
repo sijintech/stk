@@ -123,6 +123,7 @@ def test_format13_explicit_backup_upgrade_preserves_old_journal_row_shapes(table
     store, ids = table
     with sqlite3.connect(store.path) as db:
         db.execute('DROP TABLE field_options'); db.execute('DROP TABLE table_views')
+        db.execute('DROP TABLE project_edit_operations')
         db.execute('PRAGMA user_version=13')
     before = store.snapshot()['tables']
     assert store.table.views_list(ids['table'], expected_revision=1)['views'] == []
@@ -130,12 +131,35 @@ def test_format13_explicit_backup_upgrade_preserves_old_journal_row_shapes(table
     with pytest.raises(UnsupportedProjectFormat):
         add_type(store, ids, 'date')
     upgraded = store.upgrade(expected_revision=1)
-    assert upgraded['format_version'] == FORMAT_VERSION == 14 and upgraded['backup']['format_version'] == 13
+    assert upgraded['format_version'] == FORMAT_VERSION == 15 and upgraded['backup']['format_version'] == 13
     assert [f['id'] for f in store.snapshot()['tables'][0]['fields']] == [f['id'] for f in before[0]['fields']]
     store.undo(expected_revision=2)
     assert store.snapshot()['tables'] == []
     store.redo(expected_revision=3)
     assert store.table.query(ids['table'], expected_revision=4)['total'] == 3
+
+
+def test_format14_opens_without_upgrade_and_explicit_upgrade_keeps_verified_backup(table):
+    store, ids = table
+    with sqlite3.connect(store.path) as db:
+        db.execute('DROP TABLE project_edit_operations')
+        db.execute('PRAGMA user_version=14')
+    old = ProjectStore(store.directory)
+    before = old.snapshot()['tables']
+    assert old.info()['format_version'] == 14
+    assert old.table.query(ids['table'], expected_revision=1)['total'] == 3
+    assert ProjectStore(store.directory).info()['format_version'] == 14
+
+    upgraded = old.upgrade(expected_revision=1)
+    assert upgraded['format_version'] == FORMAT_VERSION == 15
+    assert upgraded['revision'] == 2 and upgraded['backup']['format_version'] == 14
+    assert old.snapshot()['tables'] == before
+    assert old.table.query(ids['table'], expected_revision=2)['total'] == 3
+    with sqlite3.connect(upgraded['backup']['path']) as backup:
+        assert backup.execute('PRAGMA user_version').fetchone()[0] == 14
+        assert backup.execute('PRAGMA quick_check').fetchone()[0] == 'ok'
+        assert backup.execute("SELECT name FROM sqlite_master WHERE name='project_edit_operations'").fetchall() == []
+    assert ProjectStore(store.directory).info()['format_version'] == 15
 
 
 def test_query_numeric_sort_int64_formula_null_unset_and_filters_are_typed(table):

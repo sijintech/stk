@@ -366,7 +366,7 @@ TEST_F(PythonBridge, ProjectLifecycleAndRevisionedEdits)
   ASSERT_TRUE(created.ok()) << created.error().describe();
   const ProjectInfo project = created.value();
   EXPECT_EQ(project.revision, 0);
-  EXPECT_EQ(project.format_version, 14);
+  EXPECT_EQ(project.format_version, 15);
   EXPECT_EQ(project.name, "Parameter scan");
   const auto opened = client->project_open(project.directory).get();
   ASSERT_TRUE(opened.ok());
@@ -416,6 +416,76 @@ TEST_F(PythonBridge, ProjectLifecycleAndRevisionedEdits)
   EXPECT_EQ(reopened.value().revision, 1);
   EXPECT_EQ(client->stats().schema_violations, 0u);
   EXPECT_EQ(client->stats().protocol_errors, 0u);
+}
+
+TEST_F(PythonBridge, ProjectEditOperationReceiptSurvivesRetryAndBridgeRestart)
+{
+  auto client = started(options());
+  ASSERT_TRUE(client->hello_info()->has_method("project.edit_operations.apply_once"));
+  ASSERT_TRUE(client->hello_info()->has_method("project.edit_operations.get"));
+  const auto created = client->project_create(dir_.str() + "/receipt-project", "Durable edit").get();
+  ASSERT_TRUE(created.ok()) << created.error().describe();
+  const ProjectInfo project = created.value();
+  ASSERT_EQ(project.format_version, 15);
+  const std::string operation_id = "10000000-0000-4000-8000-000000000001";
+  Json request = {{"handle", project.handle},
+                  {"operation_id", operation_id},
+                  {"expected_revision", 0},
+                  {"commands", Json::array({{{"op", "create_table"}, {"name", "Created once"}}})}};
+  CallOptions once;
+  once.retry = CallOptions::Retry::Never;
+  const auto first = client->call("project.edit_operations.apply_once", request, once).get();
+  ASSERT_TRUE(first.ok()) << first.error().describe();
+  EXPECT_EQ(first.value()["replayed"], false);
+
+  /* The caller retries as though the first reply was lost: same unexpanded commands and old base,
+   * without adopting the generated table UUID or changing the expected revision. */
+  const auto replay = client->call("project.edit_operations.apply_once", request, once).get();
+  ASSERT_TRUE(replay.ok()) << replay.error().describe();
+  EXPECT_EQ(replay.value()["replayed"], true);
+  const Json receipt = replay.value()["receipt"];
+  EXPECT_EQ(nlohmann::json(receipt), nlohmann::json(first.value()["receipt"]));
+  EXPECT_EQ(receipt["format"], "stk.project-edit-receipt/1");
+  EXPECT_EQ(receipt["project_id"], project.id);
+  EXPECT_EQ(receipt["operation_id"], operation_id);
+  EXPECT_EQ(receipt["scope"], "local");
+  EXPECT_EQ(receipt["base_revision"], 0);
+  EXPECT_EQ(receipt["applied_revision"], 1);
+  ASSERT_EQ(receipt["commands"].size(), 1u);
+  ASSERT_TRUE(receipt["commands"][0]["id"].is_string());
+  const std::string table_id = receipt["commands"][0]["id"].get<std::string>();
+  EXPECT_EQ(table_id.size(), 36u);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+  EXPECT_EQ(client->stats().protocol_errors, 0u);
+  client->close();
+  client.reset();
+
+  client = started(options());
+  const auto reopened = client->project_open(project.directory).get();
+  ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+  EXPECT_EQ(reopened.value().id, project.id);
+  EXPECT_EQ(reopened.value().revision, 1);
+  const auto persisted = client->call("project.edit_operations.get",
+                                      {{"handle", reopened.value().handle}, {"operation_id", operation_id}},
+                                      once).get();
+  ASSERT_TRUE(persisted.ok()) << persisted.error().describe();
+  EXPECT_EQ(nlohmann::json(persisted.value()["receipt"]), nlohmann::json(receipt));
+  request["handle"] = reopened.value().handle;
+  const auto replay_after_restart = client->call("project.edit_operations.apply_once", request, once).get();
+  ASSERT_TRUE(replay_after_restart.ok()) << replay_after_restart.error().describe();
+  EXPECT_EQ(replay_after_restart.value()["replayed"], true);
+  EXPECT_EQ(nlohmann::json(replay_after_restart.value()["receipt"]), nlohmann::json(receipt));
+  const auto snapshot = client->project_snapshot(reopened.value().handle).get();
+  ASSERT_TRUE(snapshot.ok()) << snapshot.error().describe();
+  EXPECT_EQ(snapshot.value()["project"]["revision"], 1);
+  ASSERT_EQ(snapshot.value()["tables"].size(), 1u);
+  EXPECT_EQ(snapshot.value()["tables"][0]["id"], table_id);
+  const auto history = client->project_history(reopened.value().handle).get();
+  ASSERT_TRUE(history.ok()) << history.error().describe();
+  EXPECT_EQ(history.value().size(), 1u);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+  EXPECT_EQ(client->stats().protocol_errors, 0u);
+  client->close();
 }
 
 TEST_F(PythonBridge, ASecondBridgeOnTheSameStateDirFailsWithoutRestarting)

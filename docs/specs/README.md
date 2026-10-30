@@ -29,6 +29,7 @@ are not existing graph-v1 or bridge-v1 capabilities; their schema and protocol e
 | [report-1.md](report-1.md) | Frozen project reports, asset and provenance identities, derived preview bytes and create-if-absent source ZIP export | `desktop-bridge-1` report definitions and `project.reports.*` |
 | [report-2.md](report-2.md) | Explicitly edited generated reports, frozen report requests, original response provenance and checksum-bound export evidence; report/1 remains unchanged | `desktop-bridge-1` generated report and request definitions |
 | [materials-training-1.md](materials-training-1.md) | Frozen local training inputs, persistent tasks and curves, transfer initialization, shared held-out comparison, admission and explicit recovery | `desktop-bridge-1` materials methods; capsule validation in `suan/materials/inputs.py` |
+| [project-edit-operations-1.md](project-edit-operations-1.md) | Format-15 permanent receipts for explicitly identified project edits, original-request replay, transaction and database-continuity limits | `desktop-bridge-1` methods `project.edit_operations.apply_once/get`; receipt validation in `suan/project/edit_operations.py` |
 
 ## How they relate
 

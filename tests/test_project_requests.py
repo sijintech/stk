@@ -328,6 +328,7 @@ def test_format7_upgrade_preserves_context_and_messages_and_backs_up_before_sche
         db.execute("DROP TABLE project_requests")
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=7")
     old = ProjectStore(store.directory)
     assert old.info()["format_version"] == 7

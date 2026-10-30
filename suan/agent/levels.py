@@ -30,6 +30,8 @@ OPERATIONS = {
     "project.catalog": ("read", "paged project structure only; not used by agent tools"),
     "project.table.read": ("read", "revision-bound record page; not used by agent tools"),
     "project.apply": ("project_edit", "changes the project: only through drafts a person applies"),
+    "project.edit_operations.apply_once": ("project_edit", "explicit durable edit; not an agent tool"),
+    "project.edit_operations.get": ("read", "reads a durable edit receipt; not used by agent tools"),
     "project.preview": ("read", "not needed: proposals go through requests and drafts"),
     "project.table.views.list": ("read", "bounded table metadata; not used by agent tools"),
     "project.table.views.get": ("read", "bounded table metadata; not used by agent tools"),

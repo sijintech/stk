@@ -341,6 +341,7 @@ def test_format_two_is_not_implicitly_upgraded(store):
     with sqlite3.connect(store.path) as db:
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=2")
     for action in (lambda: store.analyses.list(), lambda: store.analyses.get(str(uuid4())), lambda: create(store)):
         with pytest.raises(UnsupportedProjectFormat):

@@ -26,6 +26,12 @@ Converted pixels have a separate checksum from the original source. The [table c
 defines content checks, truncation and source semantics. Existing object resolution
 remains metadata-only. Discover the new method before use; project format remains 14.
 
+2026-10-29 additive edit receipts: [project edit operations / format 15](project-edit-operations-1.md)
+adds `project.edit_operations.apply_once/get`. New projects use format 15; formats 1–14 remain
+readable without migration, and receipt operations require the explicit backup-first upgrade.
+Clients supporting only format 14 must refuse format 15. Existing `project.apply` and the format-14
+table contract retain their original semantics. Discover these methods before using them.
+
 The bridge replaces the file-queue bridge of the Blender workbench (`suan/blender_client/bridge.py`,
 archived at D1 exit under the tag `archive/blender-workbench-2026-09`).
 
@@ -535,6 +541,8 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.catalog` | `{handle, expected_revision?, offset?, limit?}` | `{format_version, project, tables, total, offset, next_offset, edit_history?, file_index?}` |
 | `project.table.read` | `{handle, table_id, expected_revision, offset?, limit?, record_id?}` | `{project_id, revision, format_version, table, total, offset, next_offset}` |
 | `project.apply` | `{handle, expected_revision, commands}` | `{revision, commands}` |
+| `project.edit_operations.apply_once` | `{handle, operation_id, expected_revision, commands}` | `{receipt, replayed: boolean}` |
+| `project.edit_operations.get` | `{handle, operation_id}` | `{receipt}` |
 | `project.preview` | `{handle, expected_revision, commands}` | `{persisted: false, base_revision, proposed_revision, commands, snapshot}` |
 | `project.drafts.save` | `{handle, draft_id, expected_revision, title, commands}` | `{draft}` |
 | `project.drafts.get` | `{handle, draft_id}` | `{draft}` |
@@ -941,6 +949,28 @@ back plugin side effects. Lost workers leave recoverable uncertainty and are nev
 SQLite-only backup excludes input objects and result archives. See the [analysis-run guide](../project-analysis-runs.md)
 for native navigation, explicit import into an empty shared Viewer, and project-directory preservation.
 
+- `project.edit_operations.apply_once` explicitly names an ordinary edit with a canonical UUID
+  `operation_id`. The local trusted bridge supplies `scope="local"`; callers cannot supply a scope.
+  The full original request (project UUID, scope, operation UUID, base revision and original commands)
+  is canonical finite UTF-8 JSON, at most 256 KiB, and is hashed before any command UUID is generated.
+  A successful edit, its revision/history and permanent receipt commit in the same SQLite transaction.
+  Repeating the exact original request returns the original receipt with `replayed=true`, even after
+  later edits or undo; changing commands or the original base revision returns `conflict` rather than
+  retargeting the request. No automatic retry is authorized by this additive method.
+  `project.edit_operations.get` only reads the original local-scope receipt; missing success is
+  `not_found`, and formats 1–14 return `unsupported` for both methods without upgrading.
+  The receipt is `{format:"stk.project-edit-receipt/1", project_id, scope, operation_id,
+  request_sha256, base_revision, applied_revision, commands, created_at, sha256}`. Its commands include
+  the actual generated UUIDs. `sha256` hashes its canonical JSON without that field; the complete
+  receipt including it is at most 512 KiB. At most 10000 receipts and 64 MiB of request-plus-receipt
+  bytes are retained; exhaustion rejects the entire new edit, and receipts are not garbage-collected
+  or undone. Only a first successful application emits one `project.changed` at `applied_revision`;
+  replay and get emit none. Retain the original UUID/request independently of the reply, reopen by
+  project identity after disconnect, and explicitly query that UUID. A backup rollback or copied
+  database does not prove global exactly-once execution across database generations. Future network
+  adapters must bind the authenticated caller, owner and database generation independently; the
+  local scope is not network authorization. These methods are available to explicit Python callers,
+  classified as project-edit/read respectively, and are not added to agent tools or S2c permissions.
 - `project.preview` evaluates ordinary edit commands on an in-memory SQLite copy (source logical size
   at most 128 MiB). It performs no persisted edit, file operation or task submission, and emits no
   `project.changed`. Its snapshot, revision and edit-history pointers are hypothetical. Formula

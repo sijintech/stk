@@ -259,6 +259,8 @@ class Bridge:
             "project.catalog": lambda p, c: self.projects.catalog(p),
             "project.table.read": lambda p, c: self.projects.read_table(p),
             "project.apply": self.apply_project,
+            "project.edit_operations.apply_once": self.apply_project_edit_operation,
+            "project.edit_operations.get": lambda p, c: self.projects.edit_operations("get", p),
             "project.preview": lambda p, c: self.projects.preview(p),
             "project.sweep.plan": lambda p, c: self.projects.sweep_plan(p),
             "project.table.views.list": lambda p, c: self.projects.table("views_list", p),
@@ -708,7 +710,8 @@ class Bridge:
         # own lifecycle, attach arbitrary executors, or subscribe without owning a subscription.
         names = ("project.create", "project.open", "project.list", "project.recent", "project.forget", "project.close", "project.snapshot",
                  "project.catalog", "project.table.read",
-                 "project.apply", "project.preview", "project.sweep.plan", "project.history", "project.backup", "project.upgrade", "project.undo", "project.redo",
+                 "project.apply", "project.edit_operations.apply_once", "project.edit_operations.get",
+                 "project.preview", "project.sweep.plan", "project.history", "project.backup", "project.upgrade", "project.undo", "project.redo",
                  "project.table.views.list", "project.table.views.get", "project.table.query", "project.table.paste.plan",
                  "project.table.objects.list_candidates", "project.table.objects.resolve", "project.table.objects.preview", "project.table.objects.thumbnail", "project.table.csv.preview",
                  "project.table.io.preview", "project.table.io.import", "project.table.io.export",
@@ -925,6 +928,13 @@ class Bridge:
         result = self.projects.apply(params)
         context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
                                                             "revision": result["revision"]}))
+        return result
+
+    def apply_project_edit_operation(self, params, context):
+        result = self.projects.edit_operations("apply_once", params)
+        if not result["replayed"]:
+            context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
+                                                                "revision": result["receipt"]["applied_revision"]}))
         return result
 
     def apply_project_draft(self, params, context):

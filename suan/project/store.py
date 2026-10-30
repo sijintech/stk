@@ -12,6 +12,7 @@ import math
 import os
 from pathlib import Path
 import sqlite3
+import stat
 from uuid import UUID, uuid4
 
 from .evaluation import dependencies, evaluate
@@ -20,7 +21,7 @@ from .journal import Capture, restore
 
 
 APPLICATION_ID = 0x53544B50  # STKP
-FORMAT_VERSION = 14
+FORMAT_VERSION = 15
 DATABASE_NAME = "project.sqlite3"
 MAX_PREVIEW_BYTES = 128 * 1024 * 1024
 from .field_types import FIELD_TYPES, CORE_TYPES
@@ -208,6 +209,18 @@ _DDL_V14 = (
         name TEXT NOT NULL, definition TEXT NOT NULL)""",
 )
 
+_DDL_V15 = (
+    """CREATE TABLE project_edit_operations (
+        scope TEXT NOT NULL, operation_id TEXT NOT NULL,
+        project_id TEXT NOT NULL REFERENCES project(id),
+        base_revision INTEGER NOT NULL CHECK(base_revision >= 0),
+        applied_revision INTEGER NOT NULL UNIQUE REFERENCES changes(revision),
+        request_sha256 TEXT NOT NULL, request TEXT NOT NULL,
+        receipt TEXT NOT NULL, sha256 TEXT NOT NULL, created_at TEXT NOT NULL,
+        PRIMARY KEY(scope, operation_id),
+        CHECK(applied_revision = base_revision + 1))""",
+)
+
 
 class ProjectError(ValueError):
     """Invalid project, unsupported format or rejected mutation."""
@@ -282,6 +295,44 @@ def _version(db):
     return db.execute("PRAGMA user_version").fetchone()[0]
 
 
+def _recovery_identity(path):
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)
+            or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+        raise ProjectError("Cannot recover an unfinished transaction in a non-ordinary project database")
+    return info.st_dev, info.st_ino
+
+
+def _recovery_header(path):
+    """Pin and check only SQLite's bounded header before permitting native recovery.
+
+    A hot rollback journal can require a writable connection before SQLite can read
+    the application ID. Do not offer that recovery to an arbitrary SQLite file.
+    SQLite's 100-byte header stores application_id at offset 68, big endian.
+    """
+    identity = _recovery_identity(path)
+    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_NONBLOCK", 0))
+    fd = os.open(path, flags)
+    try:
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or (before.st_dev, before.st_ino) != identity
+                or getattr(before, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+            raise ProjectError("Project database changed before checking its recovery header")
+        header = os.read(fd, 100)
+        after = os.fstat(fd)
+        # Compare timestamps only within fstat; Windows ctime differs across APIs.
+        stamp = lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        if stamp(before) != stamp(after) or _recovery_identity(path) != identity:
+            raise ProjectError("Project database changed while checking its recovery header")
+        if (len(header) != 100 or header[:16] != b"SQLite format 3\0"
+                or int.from_bytes(header[68:72], "big") != APPLICATION_ID):
+            raise ProjectError("Unfinished transaction recovery requires an ordinary STK database header")
+        return identity
+    finally:
+        os.close(fd)
+
+
 class ProjectStore:
     """Open an existing project directory; use create() to initialize one explicitly."""
 
@@ -312,7 +363,7 @@ class ProjectStore:
             try:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
-                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6, *_DDL_V7, *_DDL_V8, *_DDL_V9, *_DDL_V10, *_DDL_V11, *_DDL_V12, *_DDL_V13, *_DDL_V14):
+                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6, *_DDL_V7, *_DDL_V8, *_DDL_V9, *_DDL_V10, *_DDL_V11, *_DDL_V12, *_DDL_V13, *_DDL_V14, *_DDL_V15):
                         db.execute(statement)
                     db.execute(f"PRAGMA application_id={APPLICATION_ID}")
                     db.execute(f"PRAGMA user_version={FORMAT_VERSION}")
@@ -326,32 +377,88 @@ class ProjectStore:
             raise
         return cls(directory)
 
-    @contextmanager
-    def _connect(self, *, write=False):
+    def _check_database(self, db, application_id):
+        if application_id != APPLICATION_ID:
+            raise ProjectError("Not an STK project database")
+        version = _version(db)
+        if not 1 <= version <= FORMAT_VERSION:
+            raise UnsupportedProjectFormat(f"Unsupported project format {version}; supported: 1–{FORMAT_VERSION}")
+        if self._project_id is not None:
+            row = db.execute("SELECT id FROM project").fetchone()
+            if row is None or row[0] != self._project_id:
+                raise ProjectError("Project database was replaced; close and reopen it")
+
+    def _recover_readonly_database(self):
+        """Let SQLite roll back a verified STK hot journal; never perform an edit.
+
+        This is called only for SQLITE_READONLY_ROLLBACK before a read connection
+        reaches its caller. query_only prevents application SQL mutations while
+        allowing SQLite's own physical transaction recovery. The recovery
+        connection is closed before the original read restarts in mode=ro.
+        """
         db = None
         try:
-            # URI mode avoids silently creating a database when a path is misspelled.
-            db = sqlite3.connect(self.path.as_uri() + ("?mode=rw" if write else "?mode=ro"),
-                                 uri=True, timeout=10, isolation_level=None)
+            identity = _recovery_header(self.path)
+            if _recovery_identity(self.path) != identity:
+                raise ProjectError("Project database changed before native transaction recovery")
+            db = sqlite3.connect(self.path.as_uri() + "?mode=rw", uri=True, timeout=10, isolation_level=None)
             db.row_factory = sqlite3.Row
+            if _recovery_identity(self.path) != identity:
+                raise ProjectError("Project database changed before native transaction recovery")
+            db.execute("PRAGMA query_only=ON")
             db.execute("PRAGMA foreign_keys=ON")
-            db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
-            if db.execute("PRAGMA application_id").fetchone()[0] != APPLICATION_ID:
-                raise ProjectError("Not an STK project database")
-            version = _version(db)
-            if not 1 <= version <= FORMAT_VERSION:
-                raise UnsupportedProjectFormat(f"Unsupported project format {version}; supported: 1–{FORMAT_VERSION}")
-            if self._project_id is not None:
-                row = db.execute("SELECT id FROM project").fetchone()
-                if row is None or row[0] != self._project_id:
-                    raise ProjectError("Project database was replaced; close and reopen it")
-            yield db
-            db.commit()
-        except sqlite3.Error as exc:
-            raise ProjectError(f"Cannot access project database: {exc}") from None
+            db.execute("BEGIN")
+            if _recovery_identity(self.path) != identity:
+                raise ProjectError("Project database changed before native transaction recovery")
+            self._check_database(db, db.execute("PRAGMA application_id").fetchone()[0])
+            if _recovery_identity(self.path) != identity:
+                raise ProjectError("Project database changed during native transaction recovery")
+            db.close()
+            db = None
+            if _recovery_identity(self.path) != identity:
+                raise ProjectError("Project database changed after native transaction recovery")
+        except (sqlite3.Error, OSError) as exc:
+            raise ProjectError("Cannot recover the unfinished project transaction; writable database/directory "
+                               f"access and a recovery lock are required: {exc}") from None
         finally:
             if db is not None:
-                db.close()  # Also rolls back uncommitted mutations on any exception.
+                db.close()
+
+    @contextmanager
+    def _connect(self, *, write=False):
+        recovered = False
+        while True:
+            db = None
+            checking_identity = True
+            try:
+                # URI mode avoids silently creating a database when a path is misspelled.
+                db = sqlite3.connect(self.path.as_uri() + ("?mode=rw" if write else "?mode=ro"),
+                                     uri=True, timeout=10, isolation_level=None)
+                db.row_factory = sqlite3.Row
+                db.execute("PRAGMA foreign_keys=ON")
+                db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+                application_id = db.execute("PRAGMA application_id").fetchone()[0]
+                checking_identity = False
+                self._check_database(db, application_id)
+                yield db
+                db.commit()
+                return
+            except sqlite3.Error as exc:
+                # SQLite extended code 776 means that a hot journal needs physical
+                # rollback but this connection is read-only. Do not generalize this
+                # to permission, corruption, open, or caller/commit errors.
+                if (not write and not recovered and checking_identity
+                        and getattr(exc, "sqlite_errorcode", None) == 776):
+                    if db is not None:
+                        db.close()
+                        db = None
+                    self._recover_readonly_database()
+                    recovered = True
+                    continue
+                raise ProjectError(f"Cannot access project database: {exc}") from None
+            finally:
+                if db is not None:
+                    db.close()  # Also rolls back uncommitted mutations on any exception.
 
     def info(self):
         """Read project identity/revision without loading all records or values."""
@@ -372,6 +479,11 @@ class ProjectStore:
     def table(self):
         from .table_workbench import TableWorkbench
         return TableWorkbench(self)
+
+    @property
+    def edit_operations(self):
+        from .edit_operations import EditOperations
+        return EditOperations(self)
 
     @property
     def files(self):
@@ -520,7 +632,7 @@ class ProjectStore:
             for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3), (3, _DDL_V4), (4, _DDL_V5),
                                                (5, _DDL_V6), (6, _DDL_V7), (7, _DDL_V8), (8, _DDL_V9),
                                                (9, _DDL_V10), (10, _DDL_V11), (11, _DDL_V12),
-                                               (12, _DDL_V13), (13, _DDL_V14)):
+                                               (12, _DDL_V13), (13, _DDL_V14), (14, _DDL_V15)):
                 if version <= source_version:
                     for statement in statements:
                         db.execute(statement)

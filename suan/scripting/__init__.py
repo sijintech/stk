@@ -67,6 +67,10 @@ class Project:
         return self._call("project.apply", {"handle": self.handle, "commands": commands,
                                             "expected_revision": expected_revision})
 
+    @property
+    def edit_operations(self):
+        return ProjectEditOperations(self._call, self.handle)
+
     def sweep(self, table_id, axes, *, expected_revision, base_record_id=None, mode="product", dry_run=False):
         """Add one row per combination of axis values (see ``suan.project.sweep``) in one revision.
 
@@ -436,6 +440,23 @@ class ProjectDiscussion:
         if draft_id is not None:
             params["draft_id"] = draft_id
         return self._call("project.discussion.proposals", params)
+
+
+class ProjectEditOperations:
+    """Explicit operation identities with permanent, transaction-bound project edit receipts."""
+
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def apply_once(self, commands, *, operation_id, expected_revision):
+        """Retain the UUID and original request; an uncertain reply is never retried automatically."""
+        return self._call("project.edit_operations.apply_once", {"handle": self.handle, "commands": commands,
+            "operation_id": operation_id, "expected_revision": expected_revision})
+
+    def get(self, operation_id):
+        """Read the original receipt without applying, replaying or retargeting an edit."""
+        return self._call("project.edit_operations.get", {"handle": self.handle,
+                                                        "operation_id": operation_id})["receipt"]
 
 
 class ProjectDrafts:
@@ -1171,4 +1192,4 @@ class API:
         print(json.dumps(catalog, ensure_ascii=False, indent=2))
 
 
-__all__ = ["API", "Connections", "Desktop", "Graph", "Materials", "Project", "ProjectContexts", "ProjectCSV", "ProjectDiscussion", "ProjectDrafts", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "ProjectRequests", "Projects", "Runtime", "ScriptError", "Skills", "Transfers", "Viewer"]
+__all__ = ["API", "Connections", "Desktop", "Graph", "Materials", "Project", "ProjectContexts", "ProjectCSV", "ProjectDiscussion", "ProjectDrafts", "ProjectEditOperations", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "ProjectRequests", "Projects", "Runtime", "ScriptError", "Skills", "Transfers", "Viewer"]

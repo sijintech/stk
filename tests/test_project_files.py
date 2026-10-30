@@ -215,6 +215,7 @@ def test_format_two_keeps_existing_operations_but_requires_explicit_upgrade_for_
         db.execute("DROP TABLE project_snapshots")
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=2")
     with pytest.raises(ProjectError, match="Upgrade"):
         store.files.index([str(inside)], expected_revision=0)

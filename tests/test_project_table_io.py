@@ -384,6 +384,7 @@ def test_core_json_import_into_format13_requires_no_implicit_upgrade(store, tmp_
     other = ProjectStore.create(tmp_path / "legacy", "Legacy")
     with sqlite3.connect(other.path) as db:
         db.execute("DROP TABLE field_options"); db.execute("DROP TABLE table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=13")
     result = TableIO(other).import_file(json_path, format="json", name="Core copy", expected_revision=0)
     assert other.info()["format_version"] == 13 and matrix(other, result["table_id"]) == [[7]]

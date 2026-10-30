@@ -95,8 +95,8 @@ def create(s, **kwargs):
                                expected_revision=revision(s), **kwargs)
 
 
-@pytest.mark.parametrize("version,accepted", [(12, False), (13, True), (14, True), (15, False)])
-def test_study_project_gate_keeps_format13_and_accepts_format14_only(version, accepted):
+@pytest.mark.parametrize("version,accepted", [(12, False), (13, True), (14, True), (15, True), (16, False)])
+def test_study_project_gate_keeps_old_formats_and_rejects_future_version(version, accepted):
     class SavedProject:
         def snapshot(self):
             return {"format_version": version}
@@ -106,7 +106,7 @@ def test_study_project_gate_keeps_format13_and_accepts_format14_only(version, ac
     if accepted:
         assert service._project(project) == (project, {"format_version": version})
     else:
-        with pytest.raises(ProjectError, match="format 13 or 14"):
+        with pytest.raises(ProjectError, match="format 13, 14 or 15"):
             service._project(project)
 
 
@@ -117,6 +117,7 @@ def test_existing_format13_study_create_still_does_not_upgrade_or_execute(study)
     with sqlite3.connect(store.path) as db:
         db.execute("DROP TABLE field_options")
         db.execute("DROP TABLE table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=13")
     made = create(s)
     assert made["status"] == "prepared" and s["calls"] == []

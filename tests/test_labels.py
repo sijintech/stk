@@ -61,6 +61,7 @@ def test_older_projects_label_nothing_until_upgraded(tmp_path):
         db.execute("DROP TABLE project_labels")
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=11")
     assert store.labels.list() == {"items": []} and not store.labels.is_public("table", table)
     with pytest.raises(UnsupportedProjectFormat):
@@ -118,6 +119,7 @@ def test_upgrading_to_format_13_keeps_every_label(setup):
         db.executemany("INSERT INTO project_labels VALUES (?,?,?,?,?,?)", rows)
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=12")
     with pytest.raises(UnsupportedProjectFormat, match="format 13"):
         store.labels.set([{"kind": "table", "id": ids["cases"]}], label="structure")

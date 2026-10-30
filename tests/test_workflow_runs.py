@@ -204,6 +204,7 @@ def test_older_projects_need_an_explicit_upgrade(project):
             db.execute(f"DROP TABLE {table}")
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=9")
     with pytest.raises(UnsupportedProjectFormat, match="format 10"):
         prepare(store, ids)

@@ -309,7 +309,7 @@ TEST_F(ProjectPagingPython, IndependentPageReadKeepsSharedSelectionAndCache)
 TEST_F(TableWorkbenchPython, QueriesTypedValuesAndFieldOptionsWithoutEditingOrOpeningViewer)
 {
   const auto revision = project().project()->revision;
-  ASSERT_EQ(project().project()->format_version, 14);
+  ASSERT_EQ(project().project()->format_version, 15);
   ASSERT_EQ(project().table()->fields.back().options.at("choices").at(0).at("id"), dry);
   ASSERT_TRUE(table->load_views());
   ASSERT_TRUE(table->query());

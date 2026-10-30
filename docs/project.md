@@ -21,6 +21,8 @@ Python 接口支持 Linux/macOS/Windows，不需要启动 Runtime 或安装科�
 格式 12 增加[数据标注](design/model-gateway.md)：数据默认私有，只有人工标注为公开的参数表与文件可以发往外部模型端点；标注不推进修订、不进入撤销。
 格式 13 增加[智能体会话](design/agent-harness.md)（冻结的会话头、哈希链事件与对象登记），并为参数表加入“结构公开”标注（结构可外发、数值仍私有）。
 格式 14 增加字段选项与命名视图，支持十种字段类型；旧项目读取不自动升级，新功能需明确“备份并升级”。
+格式 15 增加[永久编辑回执](specs/project-edit-operations-1.md)：调用者明确保留操作 UUID 和原请求，
+编辑、修订与回执同事务提交；丢失回复后按原身份查询，不自动重放或换修订。原有 `apply` 返回形状和行为不变。
 
 表格超出面板宽度时，可以拖动底部横向滚动条、使用触控板横向滚动，或按住 Shift 滚动鼠标滚轮。
 列标题和数据一起移动；滚动后仍可点击列标题排序或拖动列边界调整宽度。
@@ -226,7 +228,8 @@ assert store.snapshot()["tables"][0]["records"][0]["values"][derived] == 310
 
 ## 数据库备份与显式升级
 
-新建项目使用格式 14；格式 1 仍可执行原有字面量命令，格式 2 仍可使用引用/公式，格式 3 保留撤销，不会因为打开而迁移。
+新建项目使用格式 15；格式 1–14 读取不升级，支持到格式 14 的旧客户端不能读取格式 15。
+格式 1 仍可执行原有字面量命令，格式 2 仍可使用引用/公式，格式 3 保留撤销，不会因为打开而迁移。
 引用、公式、清除和删除命令需要至少格式 2，持久撤销/重做需要格式 3；桌面删除入口要求格式 3。
 格式 4 增加只追加的[输入快照](project-snapshots.md)，内容副本按 SHA-256 保存在项目内。格式 5 增加[运行方案与状态](project-runs.md)。
 格式 6 增加[持久修改草案及应用回执](project-drafts.md)，保存和放弃草案不提升编辑修订。
@@ -236,6 +239,7 @@ assert store.snapshot()["tables"][0]["records"][0]["values"][derived] == 310
 格式 10 增加工作流运行计划与按（步骤、行）编号的尝试记录，同样不提升编辑修订或进入撤销栈。
 格式 11 增加对象归档记录，归档与恢复不提升编辑修订或进入撤销栈。
 格式 12/13 的数据标注、智能体会话和结构公开继续保留；格式 14 增加字段选项与命名视图。
+格式 15 的编辑回执与原命令历史一起保留，普通表格撤销不删除回执或恢复操作可执行性。
 桌面提供“备份并升级项目”；CLI 使用 `project upgrade`，
 Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(expected_revision=...)`。
 
@@ -249,7 +253,7 @@ Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(ex
 
 ## 实验格式与事务边界
 
-目录中的 `project.sqlite3` 使用 SQLite application ID `STKP`，当前 `user_version=14`。
+目录中的 `project.sqlite3` 使用 SQLite application ID `STKP`，当前 `user_version=15`。
 原物理表为 `project`、`tables`、`fields`、`records`、`cells`、`changes`；格式 2 新增
 `definitions` 和可重建的 `evaluations`，格式 3 增加 `edit_journal`，格式 4 增加 `project_snapshots`，格式 5 增加 `run_plans` / `run_observations`，格式 6 增加 `project_drafts`。
 格式 7 增加 `project_contexts`、`project_messages` 和 `project_proposals`；消息关联不可变上下文，提案关联消息与同一基础修订的草案。
@@ -258,19 +262,32 @@ Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(ex
 格式 10 增加 `workflow_run_plans` 和 `workflow_run_events`；计划冻结工作流、所选行与所用参数值、被引用的分析与快照，事件是带哈希链的运行与尝试记录。
 格式 11 增加 `project_archive`：每次归档或恢复追加一行（类别、对象、是否归档、时间、备注），对象的当前状态取最后一行；与上述记录不同，不带哈希链（记录的是收起与否，不是结果）。
 格式 12/13 增加数据标注与智能体记录；格式 14 增加 `field_options` 和 `table_views`，保留原 `fields` 五列及旧撤销行形状。
+格式 15 增加只追加的 `project_edit_operations`；原始请求、实际命令和回执同编辑一起原子保存，不进入撤销恢复。
 字面量与定义分开。每次有效编辑批次在一个
 `BEGIN IMMEDIATE` 事务中校验修订、写值/定义、更新受影响缓存、提升一次修订并保存命令历史。
 并发修改同一修订时仅一个批次能成功；读取快照在单一读事务中完成。
+若进程中断留下 SQLite 热回滚日志，打开项目可能需要先由 SQLite 恢复最后一次已提交状态。
+普通读取仍使用只读连接；只有首次检查遇精确的热日志恢复错误时，核对项目文件头和身份，
+以禁止应用 SQL 写入的连接完成一次物理恢复，再重新只读打开。它不重放命令、不增加修订、
+不生成回执或升级格式；没有可写访问或恢复锁时明确失败，程序不手工删除日志。
 `history` 保留已发生的编辑、升级、撤销/重做和输入捕获事件，不是模拟运行快照。
 
 显式创建不会覆盖已有数据库；普通打开不会隐式初始化。打开检查 application ID、格式版本、
 SQLite 完整性与外键关系。陌生、损坏或不支持版本的文件报告错误，不自动重建或降级。
-当前提供格式 1–13 → 14 的显式、备份优先迁移；更新的未知格式仍拒绝打开，不自动降级。
+当前提供格式 1–14 → 15 的显式、备份优先迁移；更新的未知格式仍拒绝打开，不自动降级。
 数据库之外的输入、程序与资源仍可存为普通文件；文件索引与输入副本已实现，一致性项目打包备份尚待实现。
 
 格式 14 表格扩展的公开接口见[契约](specs/project-tables-14.md)，不改变 `stk.graph/1`，也不把内部 SQL 布局作为直接写入接口。
 业务修改通过 `ProjectStore.apply/undo/redo`，不要让后续编辑器各自写 SQL。
 打开的 store 会记住项目 UUID；同一路径被另一项目替换后，旧 store 拒绝读写，需要明确重新打开。
+
+格式 15 可用 `store.edit_operations.apply_once(commands, operation_id=..., expected_revision=...)`
+明确提交带永久身份的普通编辑，`store.edit_operations.get(operation_id)` 只读回执。
+操作 UUID、原命令和原基础修订应在调用前保留；相同请求复用已提交回执，换修订或换内容仍为冲突。
+核心请求规范 UTF-8 JSON 最多 256 KiB，完整回执最多 512 KiB；永久保留最多 10000 次、请求与回执合计 64 MiB，
+达到上限时整次新编辑回滚，不删除旧回执来放行。回执命令含实际生成 UUID，记录的是当时成功，不证明当前数据仍相同。
+数据库备份或副本只保留它创建时的回执；恢复旧库或创建另一副本后，不能据此声称跨数据库代次全局恰好一次。
+未来网络适配还须绑定所有端、经过认证的调用者和数据库代次；本地 `scope` 不是网络权限。
 
 ## 本机桌面桥接口
 

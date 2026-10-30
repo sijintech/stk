@@ -142,6 +142,7 @@ def test_format_four_upgrade_keeps_snapshots_and_preupgrade_backup(model):
         db.execute("DROP TABLE run_plans")
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=4")
     assert store.snapshots.get(snapshot["id"]) == snapshot
     with pytest.raises(ProjectError, match="format 5"):

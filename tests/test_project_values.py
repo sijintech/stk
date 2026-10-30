@@ -168,6 +168,7 @@ def legacy(store):
         db.execute("DROP TABLE definitions")
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=1")
     return ProjectStore(store.directory)
 

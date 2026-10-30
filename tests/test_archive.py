@@ -90,6 +90,7 @@ def test_older_projects_have_nothing_archived_until_upgraded(tmp_path):
         db.execute("DROP TABLE project_archive")
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=10")
     assert store.archive.list() == {"items": [], "counts": {kind: 0 for kind in store.archive.list()["counts"]}}
     assert not store.archive.is_archived("workflow", str(uuid4())) and store.archive.ids("draft") == set()

@@ -281,6 +281,7 @@ def legacy_five(store):
         db.execute("DROP TABLE project_drafts")
         db.execute("DROP TABLE IF EXISTS field_options")
         db.execute("DROP TABLE IF EXISTS table_views")
+        db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=5")
 
 

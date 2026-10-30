@@ -12,6 +12,7 @@ from uuid import uuid4
 from suan.project import ProjectError, ProjectStore, RevisionConflict
 from suan.project.store import DATABASE_NAME, UnsupportedProjectFormat
 from suan.project.analyses import AnalysisNotFound
+from suan.project.edit_operations import OperationNotFound
 from suan.project.reports import ReportNotFound
 from suan.project.skills import ProjectSkillNotFound
 from suan.project.analysis_runs import AnalysisRunNotFound
@@ -76,7 +77,7 @@ class ProjectSessions:
             yield
         except (RevisionConflict, Archived, PolicyDenied) as exc:
             raise BridgeError("conflict", str(exc)) from None
-        except (AnalysisNotFound, AnalysisRunNotFound, WorkflowNotFound, WorkflowRunNotFound, AgentSessionNotFound, ProjectSkillNotFound, ReportNotFound) as exc:
+        except (AnalysisNotFound, AnalysisRunNotFound, WorkflowNotFound, WorkflowRunNotFound, AgentSessionNotFound, ProjectSkillNotFound, ReportNotFound, OperationNotFound) as exc:
             raise BridgeError("not_found", str(exc)) from None
         except AgentBusy as exc:
             raise BridgeError("busy", str(exc)) from None
@@ -177,6 +178,14 @@ class ProjectSessions:
         with self._operation():
             store = self._get(params["handle"])
             return store.apply(params["commands"], expected_revision=params["expected_revision"])
+
+    def edit_operations(self, action, params):
+        with self._operation():
+            operations = self._get(params["handle"]).edit_operations
+            if action == "get":
+                return {"receipt": operations.get(params["operation_id"], scope="local")}
+            return operations.apply_once(params["commands"], operation_id=params["operation_id"],
+                                         expected_revision=params["expected_revision"], scope="local")
 
     def table(self, action, params):
         with self._operation():

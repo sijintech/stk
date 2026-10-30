@@ -2662,6 +2662,86 @@
           ]
         }
       },
+      "project.edit_operations.apply_once": {
+        "description": "Explicit format-15 edit identity with an atomic permanent receipt. Keep the original operation UUID, commands and base revision; never automatically retry an uncertain response. The canonical full core request is at most 256 KiB and its receipt at most 512 KiB. Scope is fixed to local by this trusted bridge.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "commands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectCommand"
+              },
+              "minItems": 1,
+              "maxItems": 1000
+            }
+          },
+          "required": [
+            "handle",
+            "operation_id",
+            "expected_revision",
+            "commands"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "receipt": {
+              "$ref": "#/$defs/projectEditReceipt"
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "receipt",
+            "replayed"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.edit_operations.get": {
+        "description": "Read a format-15 edit receipt at its original operation UUID in the trusted bridge's local scope. Does not apply or replay an edit, advance a revision, or emit project.changed.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "operation_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "receipt": {
+              "$ref": "#/$defs/projectEditReceipt"
+            }
+          },
+          "required": [
+            "receipt"
+          ],
+          "additionalProperties": false
+        }
+      },
       "project.history": {
         "description": "Read committed edit batches to inspect revisions and recover an uncertain edit response.",
         "params": {
@@ -2718,7 +2798,8 @@
                                 10,
                                 11,
                                 12,
-                                13
+                                13,
+                                14
                               ]
                             },
                             "to_version": {
@@ -2735,7 +2816,8 @@
                                 11,
                                 12,
                                 13,
-                                14
+                                14,
+                                15
                               ]
                             }
                           },
@@ -13280,6 +13362,64 @@
     "projectUuid": {
       "type": "string",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "projectEditReceipt": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.project-edit-receipt/1"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "scope": {
+          "type": "string",
+          "pattern": "^[!-~]{1,256}$"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "request_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "base_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "applied_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectCommand"
+          },
+          "minItems": 1,
+          "maxItems": 1000
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "format",
+        "project_id",
+        "scope",
+        "operation_id",
+        "request_sha256",
+        "base_revision",
+        "applied_revision",
+        "commands",
+        "created_at",
+        "sha256"
+      ],
+      "additionalProperties": false
     },
     "projectInfo": {
       "type": "object",
