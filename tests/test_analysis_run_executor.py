@@ -342,30 +342,83 @@ def test_worker_loss_settles_unknown_and_start_cannot_retry(tmp_path):
 from test_desktop_graph_worker import worker_command  # noqa: E402,F401
 
 
-def test_queued_attempt_watchdog_does_not_kill_an_unrelated_active_graph(tmp_path,worker_command,monkeypatch):
+@pytest.fixture
+def watchdog_clock(monkeypatch):
+    # Replace this module's clock object, never the shared time module used by
+    # GraphWorker, process I/O or the test's bounded waits. Keep the one-second
+    # fixture budget but advance it only after the target phase is observed.
+    class Clock:
+        def __init__(self):
+            self.started=threading.Event();self._lock=threading.Lock();self._now=0.0
+        def monotonic(self):
+            with self._lock: now=self._now
+            self.started.set()
+            return now
+        def advance(self,seconds):
+            with self._lock: self._now+=seconds
+    clock=Clock()
     monkeypatch.setattr(module,'MAX_SECONDS',1)
+    monkeypatch.setattr(module,'time',clock)
+    return clock
+
+
+def test_queued_attempt_watchdog_does_not_kill_an_unrelated_active_graph(
+        tmp_path,worker_command,monkeypatch,watchdog_clock):
     store,run,_=prepared(tmp_path);worker=GraphWorker(tmp_path/'cache',command=worker_command)
     outside_cancel,entered,queued=threading.Event(),threading.Event(),threading.Event()
-    evaluate=worker.evaluate
-    def tracked(identity,*args):
-        if identity.startswith('analysis-'):queued.set()
-        return evaluate(identity,*args)
-    monkeypatch.setattr(worker,'evaluate',tracked)
+    lane=worker._lane
+    class ObservedLane:
+        def acquire(self,*,timeout):
+            acquired=lane.acquire(timeout=timeout)
+            if not acquired: queued.set()
+            return acquired
+        def release(self): lane.release()
+    monkeypatch.setattr(worker,'_lane',ObservedLane())
     executor=AnalysisRunExecutor(worker,tmp_path/'cache/blobs')
+    staged,release_stage=threading.Event(),threading.Event();original_stage=executor._stage
+    def held_stage(job):
+        result=original_stage(job);staged.set();assert release_stage.wait(5);return result
+    monkeypatch.setattr(executor,'_stage',held_stage)
     try:
         with ThreadPoolExecutor(1) as pool:
             active=pool.submit(worker.evaluate,'unrelated',{'request':{'parameters':{'mode':'block'}}},outside_cancel,lambda event:entered.set())
             try:
                 assert entered.wait(5);child=worker._child
-                executor.start(store,run['id']);assert queued.wait(2)
+                executor.start(store,run['id'])
+                assert staged.wait(2) and watchdog_clock.started.wait(2)
+                assert not queued.is_set() and not active.done()
+                release_stage.set();assert queued.wait(2)
+                # A failed acquire proves the analysis is really queued behind
+                # the live unrelated child, rather than merely entering evaluate.
+                assert child.process.poll() is None and worker._child is child
+                watchdog_clock.advance(1)
                 final=settled(executor,store,run)
                 assert final['status']=='failed' and final['error']['code']=='time_budget_exceeded'
                 assert child.process.poll() is None and not active.done() and worker._child is child
             finally:
+                release_stage.set()
                 outside_cancel.set()
                 with pytest.raises(BridgeError) as exc:active.result(5)
                 assert exc.value.code=='cancelled'
     finally:executor.shutdown(wait=True);worker.close()
+
+
+def test_watchdog_budget_includes_staging_before_the_worker_is_queued(tmp_path,monkeypatch,watchdog_clock):
+    store,run,_=prepared(tmp_path);worker=Worker();executor=AnalysisRunExecutor(worker,tmp_path/'cache')
+    staged,release=threading.Event(),threading.Event();jobs=[];original_stage=executor._stage
+    def held_stage(job):
+        result=original_stage(job);jobs.append(job);staged.set();assert release.wait(5);return result
+    monkeypatch.setattr(executor,'_stage',held_stage)
+    try:
+        executor.start(store,run['id'])
+        assert staged.wait(2) and watchdog_clock.started.wait(2)
+        watchdog_clock.advance(1)
+        assert jobs[0].cancel.wait(2) and jobs[0].timed_out
+        release.set()
+        final=settled(executor,store,run)
+        assert final['status']=='failed' and final['error']['code']=='time_budget_exceeded'
+        assert not worker.calls
+    finally:release.set();executor.shutdown(wait=True)
 
 
 def test_start_reply_cannot_mutate_the_frozen_job(tmp_path,monkeypatch):

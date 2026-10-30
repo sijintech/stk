@@ -15,6 +15,12 @@ namespace stk::reports_native_test {
  */
 class NativeInput {
  public:
+#ifdef __APPLE__
+  // Request activation separately from key delivery, then observe it after the
+  // caller pumps the real UI loop. Neither method sends keyboard input.
+  bool request_window_activation(wm::NativeWindowHandle parent, std::string &error);
+  bool window_is_active(wm::NativeWindowHandle parent, std::string &error);
+#endif
   bool click_document(wm::NativeWindowHandle parent, document_preview::ViewBounds viewport,
                       int framebuffer_width, int framebuffer_height,
                       double normalized_x, double normalized_y,

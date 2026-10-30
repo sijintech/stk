@@ -90,6 +90,53 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install ".[peer,test]"
       - run: python -m pytest -q tests/test_peer_authority.py tests/test_peer_protocol.py tests/test_peer_projects.py
+  # The application stays free of Flower; only the explicit algorithm process
+  # uses its independently installed, pinned environment.
+  federation-isolated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      STK_TOKEN_PLAN_API_KEY: ''
+      FLWR_TELEMETRY_ENABLED: '0'
+      FLWR_TELEMETRY_LOGGING: '0'
+      FLWR_DISABLE_UPDATE_CHECK: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build base application without algorithm dependencies
+        run: |
+          python -m pip install ".[test]" build
+          python -m build --wheel
+          python -c "import importlib.util; assert importlib.util.find_spec('flwr') is None"
+      - name: Install isolated algorithm candidate
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/stk-flower"
+          "$RUNNER_TEMP/stk-flower/bin/python" -m pip install dist/*.whl -r suan/federation/requirements-flower.txt
+          "$RUNNER_TEMP/stk-flower/bin/python" -m pip check
+      - name: Require actual aggregation and authorization checks
+        shell: bash
+        run: |
+          env -u STK_TOKEN_PLAN_MODEL STK_FEDERATION_TEST_PYTHON="$RUNNER_TEMP/stk-flower/bin/python" \
+            python -m pytest -q tests/test_federation_updates.py tests/test_federation_consent.py \
+              tests/test_federation_flower.py --junitxml=federation.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          cases = list(ET.parse('federation.xml').iter('testcase'))
+          actual = [case for case in cases if case.get('name', '').startswith('test_real_isolated_flower_')]
+          expected = {'test_real_isolated_flower_aggregates_exact_admitted_deltas[f32]',
+                      'test_real_isolated_flower_aggregates_exact_admitted_deltas[f64]'}
+          assert len(actual) == 2 and {case.get('name') for case in actual} == expected
+          assert not any(case.find('skipped') is not None for case in cases)
+          PY
+          python -c "import importlib.util; assert importlib.util.find_spec('flwr') is None"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: federation-isolated
+          path: federation.xml
   desktop:
     runs-on: ubuntu-latest
     env:

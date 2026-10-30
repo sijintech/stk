@@ -1,4 +1,5 @@
 """Real signatures and persistent authority invariants; no model or network service."""
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -185,7 +186,7 @@ def test_authority_registry_replacement_invalidates_live_contexts(setup, tmp_pat
     authority, key, peer, *_ = setup
     original = login(authority, key, peer)
     copy = tmp_path / "replacement.sqlite3"
-    with sqlite3.connect(authority.path) as source, sqlite3.connect(copy) as target:
+    with closing(sqlite3.connect(authority.path)) as source, closing(sqlite3.connect(copy)) as target:
         source.backup(target)
     os.replace(copy, authority.path)
     before = authority.path.read_bytes()

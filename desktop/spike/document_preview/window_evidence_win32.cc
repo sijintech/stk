@@ -16,6 +16,7 @@
 #include "window_capture_geometry.hh"
 #include "stk/io/json.hh"
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cwchar>
 #include <iterator>
@@ -261,6 +262,7 @@ class Capture final : public WindowEvidenceCapture {
       winrt::check_hresult(interop->CreateForWindow(window_, winrt::guid_of<GraphicsCaptureItem>(),
                                                    winrt::put_abi(item_)));
       const auto size = item_.Size();
+      pool_width_ = size.Width; pool_height_ = size.Height;
       SetLastError(ERROR_SUCCESS);
       const bool got_window_rect = GetWindowRect(window_, &window_rect_) != FALSE;
       const DWORD window_rect_error = got_window_rect ? ERROR_SUCCESS : GetLastError();
@@ -338,6 +340,7 @@ class Capture final : public WindowEvidenceCapture {
   }
   std::optional<WindowEvidence> poll() override
   {
+    ++polls_;
     WindowEvidence out;
     out.backend = backend_;
     if (!error_.empty()) { out.error = error_; return out; }
@@ -359,9 +362,40 @@ class Capture final : public WindowEvidenceCapture {
       }
       frame = pool_.TryGetNextFrame();
       if (!frame) { return std::nullopt; }
+      ++frames_;
       const auto size = frame.ContentSize();
-      if (size.Width != item_.Size().Width || size.Height != item_.Size().Height) {
-        throw std::runtime_error("STK capture geometry changed");
+      const auto current_item = item_.Size();
+      if (size.Width != current_item.Width || size.Height != current_item.Height) {
+        // Keep rejecting the mismatch. Record only this window's numeric
+        // geometry so a later target-platform run can distinguish stale frames,
+        // content extents and pool extents without guessing a border offset.
+        io::Json texture_details = {{"available", false}};
+        try {
+          const auto access = frame.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+          winrt::com_ptr<ID3D11Texture2D> texture;
+          winrt::check_hresult(access->GetInterface(__uuidof(ID3D11Texture2D), texture.put_void()));
+          D3D11_TEXTURE2D_DESC desc{};
+          texture->GetDesc(&desc);
+          texture_details = {{"available", true}, {"size", {desc.Width, desc.Height}},
+                             {"format", unsigned(desc.Format)}};
+        }
+        catch (...) { /* Diagnostics must preserve the original rejected condition. */ }
+        const io::Json details = {
+            {"pool_initial_size", {pool_width_, pool_height_}},
+            {"item_size", {current_item.Width, current_item.Height}},
+            {"frame_content_size", {size.Width, size.Height}},
+            {"content_minus_item", {int64_t(size.Width) - current_item.Width,
+                                     int64_t(size.Height) - current_item.Height}},
+            {"texture", std::move(texture_details)},
+            {"crop", {geometry_.left, geometry_.top, geometry_.right, geometry_.bottom}},
+            {"window_rect", {current_window.left, current_window.top, current_window.right, current_window.bottom}},
+            {"dwm_outer", {current_outer.left, current_outer.top, current_outer.right, current_outer.bottom}},
+            {"client_screen", {current_client.left, current_client.top, current_client.right, current_client.bottom}},
+            {"dpi", current_dpi.dpi}, {"thread_dpi_awareness", current_dpi.thread_awareness},
+            {"window_dpi_awareness", current_dpi.window_awareness}, {"polls", polls_}, {"frames", frames_},
+            {"elapsed_ms", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started_).count()}};
+        throw std::runtime_error("STK capture geometry changed; " + details.dump());
       }
       const auto access = frame.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
       winrt::com_ptr<ID3D11Texture2D> texture;
@@ -416,6 +450,9 @@ class Capture final : public WindowEvidenceCapture {
   HWND window_ = nullptr;
   RECT client_{}, outer_{}, window_rect_{};
   DpiState dpi_{};
+  int32_t pool_width_ = 0, pool_height_ = 0;
+  uint64_t polls_ = 0, frames_ = 0;
+  std::chrono::steady_clock::time_point started_ = std::chrono::steady_clock::now();
   capture_geometry::Geometry geometry_{};
   std::string error_;
   std::string backend_ = "windows-graphics-capture-window-client";

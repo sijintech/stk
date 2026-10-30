@@ -341,6 +341,20 @@ class Exercise {
     write(directory_ / "result.json", result_.dump(2));
   }
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+#  ifdef __APPLE__
+  void activate_native_window()
+  {
+    std::string error;
+    require(native_input_.request_window_activation(window_.native_window_handle(), error), error);
+    wait([&] {
+      const bool active = native_input_.window_is_active(window_.native_window_handle(), error);
+      require(error.empty(), error);
+      return active;
+    }, "Explicit own-window activation before native media inputs", 5);
+    result_["native_window_activation"] = "Explicit request, then UI-loop observation of active application and exact key window; no key sent";
+    save();
+  }
+#  endif
   Media media(const std::string &session)
   {
     auto reply = std::make_shared<std::optional<document_preview::test::MediaProbeResult>>();
@@ -424,6 +438,61 @@ class Exercise {
     result_["native_media_inputs"].push_back({{"cycle", cycle}, {"phase", phase}, {"action", "key"},
         {"key", name}, {"delivery", delivery}, {"before", media_json(before)}});
     save(); process();
+  }
+  Media fit_decoded_media(app::EditorArea &area, const std::string &session, Media observed)
+  {
+    // A decoded HTML video can be taller than its preload=none placeholder.
+    // Resize the actual report/Viewer divider while paused; keep the renderer,
+    // document bytes and complete-element pixel criterion unchanged.
+    const auto original = observed;
+    for (int attempt = 0; attempt <= 3; ++attempt) {
+      if (observed.rect_x >= -0.5 && observed.rect_y >= -0.5 &&
+          observed.rect_x + observed.rect_width <= observed.viewport_width + 0.5 &&
+          observed.rect_y + observed.rect_height <= observed.viewport_height + 0.5) { return observed; }
+      require(attempt < 3, "Complete decoded media did not fit after bounded real layout drags");
+      require(observed.paused && observed.ready_state >= 2 && observed.rect_width >= 100 &&
+          observed.rect_height >= 75 && observed.viewport_width > 0 && observed.rect_x >= 0,
+          "Only a decoded, paused media element can guide a real layout drag");
+      const double available_height = observed.viewport_height - observed.rect_y - 2.0;
+      const double video_width = std::floor(available_height * observed.rect_width / observed.rect_height);
+      require(available_height >= 75 && video_width >= 100,
+          "Actual client is too short to contain the full decoded video");
+      const double target_width = 2 * observed.rect_x + video_width;
+      const auto *viewport = widget("reports_document_viewport");
+      require(viewport && target_width < observed.viewport_width,
+          "Decoded media needs a narrower actual report viewport");
+      const double pixels_per_css = viewport->rect.w / observed.viewport_width;
+      const int shrink = int(std::ceil((observed.viewport_width - target_width) * pixels_per_css));
+      auto *row = area.node() ? area.node()->parent : nullptr;
+      require(row && row->dir == wm::SplitDir::Horizontal && row->children.size() == 2 &&
+          row->children[0].get() == area.node(), "Expected report beside retained Viewer");
+      const auto splitter = std::find_if(screen_.splitters().begin(), screen_.splitters().end(),
+          [row](const wm::Splitter &s) { return s.node == row && s.index == 0; });
+      require(splitter != screen_.splitters().end(), "Report/Viewer divider must exist");
+      const auto before = area.rect();
+      const int from_x = (splitter->rect.xmin + splitter->rect.xmax) / 2;
+      const int y = (splitter->rect.ymin + splitter->rect.ymax) / 2;
+      wm::Event e; e.x = from_x; e.y = y; e.type = wm::EventType::MouseMove; event(e);
+      e.type = wm::EventType::MouseDown; e.button = wm::MouseButton::Left; event(e); frame();
+      require(screen_.capture() == wm::Screen::Capture::Splitter, "Mouse must capture report/Viewer divider");
+      e.type = wm::EventType::MouseMove; e.x -= shrink; event(e); frame();
+      e.type = wm::EventType::MouseUp; event(e); frame();
+      ++layout_drags;
+      require(screen_.capture() == wm::Screen::Capture::None && area.rect().width() < before.width(),
+          "Actual divider drag must narrow the report and release capture");
+      result_["decoded_media_layout_drags"].push_back({{"before", media_json(observed)},
+          {"shrink_framebuffer_pixels", shrink}, {"requested_viewport_css_width", target_width},
+          {"report_width_before", before.width()}, {"report_width_after", area.rect().width()}});
+      save();
+      wait([&] { const auto *focus = widget("reports_document_focus");
+        return focus && focus->enabled && widget("reports_document_viewport"); }, "Native viewport after real divider drag");
+      observed = media(session);
+      require(observed.paused && !observed.ended && !observed.seeking &&
+          observed.navigation_generation == original.navigation_generation &&
+          std::abs(observed.current_time - original.current_time) <= 0.10,
+          "Layout resizing must preserve this paused navigation and playback time");
+    }
+    throw std::runtime_error("Complete decoded media did not fit after bounded real layout drags");
   }
   ui::Rect media_rectangle(ui::Rect bounds, const Media &observed) const
   {
@@ -736,6 +805,9 @@ raise SystemExit(main())
   ui::Rect final_media_rectangle;
   Media final_media_observed;
   if (video) {
+#ifdef __APPLE__
+    ui.activate_native_window();
+#endif
     result["media_fixture"] = {{"size", media_bytes.size()}, {"sha256", kMediaSha256},
         {"container", "MP4"}, {"video_codec", "H264 Baseline"}, {"audio_codec", "AAC"},
         {"duration_seconds", 6}, {"live_source_deleted_before_prepare", true}};
@@ -824,13 +896,15 @@ raise SystemExit(main())
       require(initial.paused && !initial.ended && initial.current_time <= 0.10,
           "Initial or explicitly reprepared video must never autoplay");
       ui.held_media(cycle, "initial-no-autoplay", session, initial, 0.50);
-      const auto bounds = ui.widget("reports_document_viewport")->rect;
+      auto bounds = ui.widget("reports_document_viewport")->rect;
       play(cycle, "explicit-play", session, bounds);
       ui.click("reports_document_pause", *area);
       auto red = paused(session, "Explicit Pause button");
       require(red.current_time > 0.05 && red.current_time < 2.6 && !red.ended,
           "Explicit pause must stop actual playback before the blue/ended segment");
       ui.held_media(cycle, "explicit-pause", session, red, 0.25);
+      red = ui.fit_decoded_media(*area, session, red);
+      bounds = ui.widget("reports_document_viewport")->rect;
       auto rectangle = ui.media_rectangle(bounds, red);
       ui.media_capture(cycle, "played-red-paused", 1, rectangle, red, session);
       // Observe a natural red-to-blue transition after explicit Play, before any seek.

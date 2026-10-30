@@ -1,0 +1,4 @@
+# Install only in the separate Linux algorithm environment, alongside base STK.
+# Public hub/control environments must not install these requirements.
+flwr==1.42.0
+numpy==2.5.4

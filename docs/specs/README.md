@@ -32,6 +32,11 @@ are not existing graph-v1 or bridge-v1 capabilities; their schema and protocol e
 | [project-edit-operations-1.md](project-edit-operations-1.md) | Format-15 permanent receipts for explicitly identified project edits, original-request replay, transaction and database-continuity limits | `desktop-bridge-1` methods `project.edit_operations.apply_once/get`; receipt validation in `suan/project/edit_operations.py` |
 | [stk-peer-1.md](stk-peer-1.md) | Independent `stk.peer/1` control messages, mutual channel-bound authentication, capability negotiation and explicitly authorized project operations; current backend prototype and acceptance limits | Bounded handwritten validator in `suan/peer/protocol.py`; authority, endpoint and shared-project adapter in `suan/peer/`; shared command/page/receipt types reuse `desktop-bridge-1` |
 
+The [federation foundation](stk-federation-1.md) specifies bounded model/delta bundles,
+strict update/quorum admission, node-owned consent/audit and isolated Flower aggregation.
+Its handwritten implementation is in `suan/federation/`; it adds no `load_schema` ID.
+STK outbound transport and training integration remain pending; see the [guide](../federation.md).
+
 The peer entry describes the implemented backend prototype, not completed cross-platform S4 acceptance.
 It adds no new `load_schema` ID. See the [peer build and integration guide](../peer.md) for explicit
 helper/runtime-library setup, trusted identity inputs and recovery after an uncertain write.

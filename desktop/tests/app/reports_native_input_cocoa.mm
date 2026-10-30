@@ -107,6 +107,36 @@ bool key_spec(wm::Key key, unsigned short &code, NSString *__strong &characters,
 }
 }  // namespace
 
+bool NativeInput::request_window_activation(wm::NativeWindowHandle handle, std::string &error)
+{
+  error.clear();
+  if (![NSThread isMainThread] || handle.kind != wm::NativeWindowKind::Cocoa || !handle.value) {
+    error = "Invalid Cocoa activation target/thread"; return false;
+  }
+  NSWindow *parent = (__bridge NSWindow *)handle.value;
+  if (![NSApp.windows containsObject:parent] || !parent.visible || parent.miniaturized) {
+    error = "Activation requires this application's visible window"; return false;
+  }
+  // Direct view mouseDown:/mouseUp: calls do not perform the normal window
+  // activation that precedes a physical click. Make that test setup explicit.
+  [NSApp activateIgnoringOtherApps:YES];
+  [parent makeKeyAndOrderFront:nil];
+  return true; // Request only; window_is_active must independently confirm it.
+}
+
+bool NativeInput::window_is_active(wm::NativeWindowHandle handle, std::string &error)
+{
+  error.clear();
+  if (![NSThread isMainThread] || handle.kind != wm::NativeWindowKind::Cocoa || !handle.value) {
+    error = "Invalid Cocoa activation observation target/thread"; return false;
+  }
+  NSWindow *parent = (__bridge NSWindow *)handle.value;
+  if (![NSApp.windows containsObject:parent] || !parent.visible || parent.miniaturized) {
+    error = "Activation observation lost this application's visible window"; return false;
+  }
+  return NSApp.active && parent.keyWindow && NSApp.keyWindow == parent;
+}
+
 bool NativeInput::click_document(wm::NativeWindowHandle handle, document_preview::ViewBounds bounds,
                                 int width, int height, double nx, double ny,
                                 std::string &delivery, std::string &error)

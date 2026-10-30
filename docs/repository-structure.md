@@ -37,6 +37,12 @@
 构建、可信签名回调、批准/授权及一次性连接接入见 [peer 指南](peer.md)，契约见
 [stk.peer/1](specs/stk-peer-1.md)。当前验收限于 Linux 本机两端，多 Python 版本不等于多操作系统。
 
+`suan/federation/`负责模型更新的标准库校验、本机逐run/数据集授权与审计outbox，
+以及明确启动的独立Flower聚合进程，不把flwr加入hub或STK基础依赖。
+它不提供出站传输、Runtime训练调度或桌面授权UI；后续复用既有Runtime与认证通道，
+准备、训练、发送和模型登记保持分离，不能据此标记S4完成。
+接口与界限见[联邦后端指南](federation.md)及[契约](specs/stk-federation-1.md)。
+
 ## 原生编辑器的独立模块
 
 `desktop/engine/lib/stk_app/editor_modules.cmake` 将 Viewer、分析图、项目流程、表格、文件树、Python、
