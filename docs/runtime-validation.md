@@ -3,7 +3,84 @@
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
-## 2026-10-30：源码提交、Windows有效ContentSize修正与本批闭环
+## 2026-10-31：待办转交核验
+
+本次按所有者要求停止扩展实现，只整理交接和必要AOCI资产，没有新增代码提交、push、产品测试或CI触发。实查本地main2513c088、ahead远端6126两个提交，暂存为空，六份tracked记录改动保留；06:41 UTC前后官方GET：6126 Desktop41163547328 completed/failure、Runtime41163547349 completed/success，均attempt1，当前代码无新头平台CI。前头终态等待满足不等于P4通过。
+
+交接开始时AOCI已Apply25项、1141条，Observed11 ACK已应用，剩余11候选尚未写；本次四文档变化需重新绑定当前完整候选。最终Verify/Check/Guide、实际文档检查和精确Git/CI快照读 `OWNER_EVIDENCE/handoff-final-20261031/closure.json`，不要沿用旧Plan或提前称aligned；不保存正式认知正文。最新文档包重绑读 `OWNER_EVIDENCE/package-final-docs-02/rebind-summary.json`：沿用下节681wheel/995sdist及22测试字节边界，只有本文件进sdist，不扩大范围、不安装或重跑585。新SHA仅存外部结果，避免自身摘要循环。[handoff](../handoff.md#接手先做的待办)列记录提交/push/新CI及剩余通用路线，PET新专项后置。
+
+## 2026-10-31：稳定源码447/2513及窄补验
+
+本批主链 `447a19ac8199c62ba81be5aef5458b4135b04410`、Apple条件rewind补修 `2513c08817bb9036bc63ffd341503f6d85a29aaf` 已在本地main提交；本节是推送前稳定候选记录，真实远端/新头CI先核Git/Actions。源码与测试稳定，不再把下文05:45未验WIP或旧“仍运行”当现状。所有实际测试KEY空、MODEL unset，无收费模型请求。
+
+- Python完整 `OWNER_EVIDENCE/python-full-02/closure.json`：4716通过、16跳过、2排除，0失败/错误、883.547秒，1010输入稳定；8强制真实算法/训练/网络、peer202/federation407零skip，15旧SIG11案例现实际通过。16skip分类、启动器01失败及真实进程退出保留。
+- 原生 `NATIVE_EVIDENCE/final-native-01/`：all构建exit0、853.949秒，2056/2056零失败/错误/skip、938.419秒，2816输入当时前后一致。Federation24/24；四固定布局Data各13clicks/0文本，完整同意/两次评估准入/独立启用回退/撤回审计各50clicks/9文本/0滚轮，起点两行/各一训练留出，保Viewer/隐藏稿。生产Bridge/Owner加合成候选的CPU事件，不代实际Flower/UI网络或OS/GPU/物性。
+- 全量之后两个差异独立核验：三平台Federation守卫 `NATIVE_EVIDENCE/ci-guard-01/` 已用Linux实际XML及缺组/skip/fail负例验证并进447；Apple补修 `OWNER_EVIDENCE/p4-platform-20261031-02/` 六目标构建exit0/33.628秒、72/72 CPU零skip/2.269秒，529输入前后稳定，JUnit SHA `1b7191c29425fa67d700be957880a87a243436cf2c0d92f74686aa47833bb8a9`。窗口fixture当前SHA `bf5eeda293485d21a3c0abe0bbfb9f6eb7e01ac2aabe1f97c97cdf124671da6d` 与2056时53a525de…差异明确保存；**不是最终2056重跑，Linux不编译Apple条件/Cocoa/Win32**。
+- `OWNER_EVIDENCE/package-03/acceptance-summary.json`：独立安装585/585零skip，8真实必跑，681wheel/995sdist源成员核对，基础前后无flwr；`owner-worker-01`额外实际桥/HTTP owner→Runtime ClientApp1/1、1.76秒、独立梯度误差≤1e-14、明确collect一次/撤回。范围重叠，不累加。
+- 447和2513实际暂存分别1055276bytes/1389bytes，均按.gitleaks.toml脱敏扫描及空白检查exit0后提交，证据 `OWNER_EVIDENCE/delivery-01/staged-code-summary.json`、`delivery-02/staged-p4-summary.json`。每次后续暂存仍须独立扫描。
+
+包文档收尾：四状态文档只有本文件进入既有sdist；其余三份不因重绑而新增进包。最终重绑使用新目录 `OWNER_EVIDENCE/package-final-docs-01/`，要求wheel整包字节等于已测a6e5…、全部681业务成员和22选定测试不变，sdist995源成员匹配且只允许本文件差异。新SHA及精确差异见外部 `rebind-summary.json`，不回写其自身包含文档形成摘要循环；这是来源/文档重绑，非重跑585/安装或新增平台覆盖。若业务/测试漂移则停止该复用、按影响重新验证。
+
+治理收尾：05:44工具为observed_pending；完整审阅native3/Python4/P4四份并核11路径当前SHA后，Baseline确认已应用（事务f8be6acedab1ccffa0410d6f），证据 `delivery-02/observed-review-sha-check.json`、`aoci-observed-ack.json`。ACK不创建Entry；正式语义维护、最终Verify/Check/Guide与记录暂存扫描以 `delivery-02/` 实际机器结果为准，不以读取/确认代替aligned，不在本文件缓存Whole-Index。
+
+平台：05:43 UTC前后官方GET仍6126，Desktop41163547328 completed/failure、Runtime41163547349 completed/success，旧Windows3/6/Mac4/6，当前补修新头必须另验；终态等待满足不等于通过。S4其余/S5/S6/P5-S7及三待决仍在，PET新专项后置。详细源入口、固定起点/结果及后续范围见[handoff](../handoff.md)。
+
+<a id="2026-10-31最终候选验证与转交范围0545-utc"></a>
+
+## 2026-10-31：最终候选验证与转交范围（历史，05:45 UTC）
+
+当前本地main/HEAD `447a19ac8199c62ba81be5aef5458b4135b04410`，43路径代码提交尚未推送；origin/main/官方远端仍6126，暂存空、7份tracked修改保留。[handoff](../handoff.md)列完整证据、文件/哈希、固定起点点击、未验Apple补修及接手顺序。本次快照整理未重跑产品测试/构建、未新增提交/push/触发CI；测试仍须KEY空/MODEL unset。
+
+- `OWNER_EVIDENCE/python-full-02/closure.json`：4716 passed、16 skipped、2 deselected、0失败/错误，exit0、883.547秒，1010输入稳定。8强制真实算法/训练/网络及peer202/federation407零skip；15项旧SIG11案例现实际通过。16skip分类和失败启动器01均保留。
+- `NATIVE_EVIDENCE/final-native-01/`：all构建exit0、853.949秒，完整CTest2056/2056、零失败/错误/skip、938.419秒；2816输入在当时构建/测试窗口一致，JUnit SHA `8bcdaa7aef333125751a2236e020452ae0677e5a792003a78fd91771ac5410c0`。Federation24/24、四布局Data各13clicks/0文本，完整链各50clicks/9文本/0滚轮，起点两行、各一训练留出，保Viewer/隐藏稿；生产Bridge/Owner加合成候选的CPU UI证据，不代Flower/OS/GPU或物性。
+- 回归后 `.github/workflows/desktop.yml` 三平台守卫增量已进447，`NATIVE_EVIDENCE/ci-guard-01/`对实际Linux XML及负例核验。之后唯一源码WIP Apple rewind fixture当前SHA `bf5eeda293485d21a3c0abe0bbfb9f6eb7e01ac2aabe1f97c97cdf124671da6d`，全量测试时为 `53a525de8fb958b02313a127b2a9ebfe99ef1e6af31a4aea2262f013c4a836b8`；**尚未构建/测试，不在2056覆盖内**，目标OS仍待新CI。
+- `OWNER_EVIDENCE/package-03/acceptance-summary.json`：独立安装585/585零skip，8真实必跑，wheel/sdist681/995源成员匹配，基础前后无flwr；`owner-worker-01`额外实际owner→Runtime ClientApp接线1/1、1.76秒、独立梯度误差≤1e-14、单次collect及撤回。范围重叠，不累加总数；包SHA见handoff。当前交接晚于sdist，最终包文档重绑待做，不能称旧包含本交接。
+- 提交447前真实暂存43路径/1055276bytes已过gitleaks/redact及空白检查，证据 `OWNER_EVIDENCE/delivery-01/staged-code-summary.json`；后续暂存须重新扫描。05:43 UTC前后官方GET：6126 Desktop41163547328 completed/failure（04:08:08更新），Runtime41163547349 completed/success（03:29:26更新）；P4 Windows3/6、Mac4/6，新头447未推送/无CI结果。前头终态等待满足不等于平台通过。
+
+正式AOCI治理仍dirty/stale，05:44 Guide blocked/observed_pending、complete=false；native3/Python4完整Observed审阅已有，P4最终审阅及acknowledge/Maintain待接手完成。本次仅转交未完成批次，不提前维护或报告aligned。四文档原版本、Git/7路径SHA/Guide在 `OWNER_EVIDENCE/handoff-20261031T0545Z/`。后续S4/S5/S6/P5-S7及三待决不变，PET新专项后置。
+
+## 2026-10-31：owner 续接验证（历史）
+
+当前代码仍为main上未提交WIP，HEAD6126；以下是实际定向/安装证据，不代表完整计划完成。三Python的桥/owner/契约/agent矩阵各172/172、121输入稳定，属于后续模型CAS预检补修前；补修后三Python后端各112/112、63输入稳定，见 `OWNER_EVIDENCE/bridge-02/matrix-01` 与 `backend-preflight-01/matrix-01`。候选package-03 wheel SHA `a6e5b8bcd8256f511f201787a4d22c1603a8a65c8f5671577837c7f4dc9d9d6b`、sdist SHA `ad9da7b0ffef0cff6269b43987caef91877cb563b815316ab6e092e070d779d6`：681/995源成员匹配；独立安装585/585零失败/错误/跳过，含2聚合、4实际ClientApp、2三节点两轮网络必跑，基础前后无flwr。证据 `OWNER_EVIDENCE/package-03/acceptance-summary.json`；不证明跨站或材料指标。
+
+原生candidate-08构建32.809秒、20/20零跳过，28输入稳定；固定四起点为1440×1200@1英语、1000×1200@1中文、2160×1800@1.5英语、2000×2400@2中文的Federation Data区，项目rev1两行、一特征Temperature[K]/一目标Pressure[Pa]、未选连接/列/角色，保留既有Viewer/相机和隐藏Python稿。各13次实际CPU UI鼠标点击完成读取连接/owner、选表/列/各一训练留出、Freeze及Register；不是OS/GPU截图。candidate-10完整链四布局4/4、4.532秒、31输入稳定，各50点击/0滚轮：授权、两条审计、空阈值明确键入0、两次留出通过及Admit不改active、v1→v2→v1 generation1/2/3、撤回且审计保留，Viewer/隐藏稿均保留。候选来源为合成协调夹具，不是Flower训练；统一2056项回归待结果。candidate-09 GTest同行宏编译失败与修正保留。
+
+P4本地6目标构建32.803秒、72/72CPU零跳过、529输入稳定；之后仅Cocoa零frame回退及Win说明调整，未将这些平台分支记为本机编译，最终hash/差异见 `OWNER_EVIDENCE/p4-platform-20261031-01/closure.json`。同头Windows官方工件实际3/6通过，原始SHA与失败分类在 `p4-windows-read-20261031T0434Z/analysis.json`。所有OS像素、播放/暂停、20轮门保留，新头Mac/Win验收仍待CI。
+
+完整Python首轮 `OWNER_EVIDENCE/python-full-01` 被启动器默认120秒总限终止，未产生JUnit或产品结论；18项原进程身份匹配检查均已结束，没有发送清理信号。失败日志/清理核验保留。新 `python-full-02` 同1010输入、私有Xvfb/llvmpipe及明确1800秒总限，实际 **4716通过/16跳过/2排除、零失败错误、883.547秒**；输入SHA稳定、基础前后无flwr，14算法模块和peer二进制摘要均稳定。8强制聚合/训练/网络、peer202/federation407均零跳过；逐一比对旧SIG11案例名，15/15现已实际通过（render类23项零跳过）。16跳过为Windows专用7、MuFerro opt-in3、PySide6/MCP/未标perf各2；另2已标perf排除，不混算。已核原driver/wrapper/pytest/Xvfb相同进程身份均退出，详见 `closure.json`、`mandatory-cases.json`、`previous-render-skips-now-passed.json`。
+
+额外 `OWNER_EVIDENCE/owner-worker-01` 独立安装接线1/1通过、1.76秒：真实桥/认证HTTP owner登记和固定grant UUID→真实隔离ClientApp Runtime→private delta对独立梯度参考绝对误差≤1e-14→明确collect一次、重复不发送、审计、撤回后拒绝下一轮；普通workspace无原始数据，仅receipt.json公开。该外部用例未改产品或sdist测试，不等于跨站/材料验证。
+
+统一原生all构建exit0、853.949秒、2816输入稳定，完整2056项CTest从05:06:04 UTC开始，尚未终态。全链50次鼠标之外有9次文本提交，各含全选、文本事件和Enter；Data13次点击无文本提交。仅四状态文档在此期间更新，其他Python/Schema/测试及读取指南冻结。最终统一原生、文档/包重绑、AOCI、实际暂存扫描与提交/push仍待完成。
+
+## 2026-10-31：S4 owner 工作树交接实况（历史）
+
+本次仅文档核验，没有新增产品测试/构建/模型请求。04:20:50 UTC官方GET：HEAD/main/origin/main/远端均6126c6a2，暂存为空；40个未提交路径（27 tracked、13 untracked）保留。Desktop41163547328 completed/failure、4成功2失败，04:08:08更新；Runtime41163547349 completed/success。终态等待前提满足，Mac/Windows原生P4未通过；CI只覆盖6126，不覆盖owner WIP。
+
+| 已有运行 | 实际结果与适用范围 |
+|---|---|
+| `OWNER_EVIDENCE/backend-04/summary.json` | 3.11/3.12/3.14各113/113，Runtime core/input-hashes/events/SSH60/60，零fail/error/skip、46输入SHA稳定；定向源码验证。 |
+| `OWNER_EVIDENCE/bridge-01/bridge-before-rejection-tests.xml` | 21/21、零fail/error/skip、3.362秒；已完成JUnit，Root原shell退出状态未闭合。尚无新typed rejection专项和最终源码联合证明。较早312为59/59、311/314各13/13，勿合并充当最终全量。 |
+| `NATIVE_EVIDENCE/candidate-06/` | 构建exit0、31.624秒、15输入SHA稳定；13项8pass/5fail、0skip。raw-null包络1项已触发bridge wrapper修正，4项UI journal完成断言已加只读等待；最新源/Schema未重编重跑。 |
+| 四固定CPU UI布局 | a4最大化Federation Data、项目rev1两行、无选择、隐藏Python草稿及原Viewer：en1440×1200@1、zh1000×1200@1、en2160×1800@1.5、zh2000×2400@2，各实际13点击到Freeze/Register，Viewer/相机/稿保留且script history空。为CPU UI事件、非OS/GPU证据，完整用例仍失败；consent/evaluation/version全链未验收。 |
+
+原生typed rejection绑定及fresh-info/newUUID、本地prepare确定验证失败恢复、bridge新proof反例、additive桥文档、统一最终源码回归/安装/真实worker和AOCI维护仍待完成。旧4589/402证据属于已推送网络基线。本次文档链接/空白及限定doc diff的脱敏gitleaks结果见 `OWNER_EVIDENCE/handoff-20261031T042050Z/closure.json`；外部根与接续命令见 [handoff](../handoff.md)。
+
+## 2026-10-31：首轮交接核验（历史）
+
+所有者要求写待办并交另一Agent，本轮停止实现。交接前 `git status --short --branch` 干净，HEAD/origin/main及真实remote main均 **`6126c6a22cc19270aedd135fb97c09b949c49f9b`**。本次仅四状态文档与必要AOCI托管资产，未提交/push或重触发CI，未运行新的产品回归、模型请求或UI点击验收；没有活动本地worker/编译/监控。
+
+| 核验 | 实际证据与边界 |
+|---|---|
+| 已推送交付 | a5510bfa网络、10b784ba Windows有效Content、b02a51cd视频布局、dd318ce2 Mac测试宿主和6126记录/AOCI；`NETWORK_EVIDENCE/delivery-closure-summary.json`确认push及remote。 |
+| 最终包重绑已完成 | `package-delivery/acceptance-summary.json`：全部682个wheel成员与402项已测候选字节相同，SHA `93734540988d5801ac0a42b016d1b9d500c51b67c7c3debf7b63091e31c75464`；最终sdist SHA `5ca4e6472d6a79ec78bd0cd5fbbe265758ea78e64b0b2510350aa925201dc8a7`，988成员/987源码，仅Hub测试guard和验收文档差异已核。本次交接文档晚于该包；没有重跑402/4589或声称新sdist已测试。 |
+| 已交付AOCI | 24对象按完整11+13批Apply，remaining0；Verify/Check/Guide exit0、aligned、Guide complete/next none，零Observed/未决事务/Recovery。相关compact结果在 `aoci/delivery-*.json`，不重复旧交易；正式治理不替下一Agent自己的完整认知恢复。 |
+| 当前CI快照 | **2026-10-31 03:29:04 UTC**，同head6126、attempt1：Desktop41163547328 **in_progress**、2项成功，Runtime41163547349 **in_progress**、9项成功，Docs41163547325与Secret41163547316 **success**。`ci-6126/handoff-20261031T032904Z.json`；无本头Mac/Windows完整原生验收结果，下一次代码push等待整个Desktop终态。 |
+| 尚未实现 | owner/evaluation/models及专用Runtime路由、bridge/UI仍是设计草案，后端代理确认零修改；独立线性模型不冒充既有Materials曲线模型。P4/S4和S5/S6/P5-S7未整体完成，三待决及PET后置不变。 |
+
+当前四文档、链接/差异核验和本次AOCI收尾结果统一写入 `NETWORK_EVIDENCE/handoff-transfer-20261031/closure.json`。本机外部证据不随clone携带，移交时只复制明确源码/验证产物，不复制凭据或用户配置。最新任务清单见 [handoff.md](../handoff.md)。
+
+## 2026-10-30：源码提交、Windows有效ContentSize修正与本批闭环（历史交付）
 
 当前网络源码 `a5510bfa838e34e5555f0c6beaa4e0e6b04d190a`、Windows修正 `10b784ba262fae7bbd26c5d1f2d39398019f5ec1` 已本地main提交。实际记录提交、最终包差异绑定、24对象AOCI全批维护/Verify/Check/Guide、暂存扫描、push及新头CI统一记录在 `NETWORK_EVIDENCE/delivery-closure-summary.json`；证据根 `/home/mnemora/.local/state/stk-validation/s4-network-20261030`。恢复开发后的源码提交不等于新平台CI通过，旧停止交接段落均保留为历史。
 
@@ -2911,7 +2988,7 @@ GL/Vulkan/Metal 中英文菜单共 **6 张**截图已逐张复核，Linux/macOS 
 
 日志 `/tmp/stk-navigation-python.log`、`/tmp/stk-focus-native-focused.log`、`/tmp/stk-focus-console.log`、
 `/tmp/stk-focus-full.log`；JUnit `/tmp/stk-focus-full.xml`。
-使用见[桌面指南](desktop.md#ai-准备工作区)、[Python 指南](scripting.md)，人工步骤见[工作台验收](workbench-acceptance.md)。
+使用见[桌面指南](desktop.md#ai-助手)、[Python 指南](scripting.md)，人工步骤见[工作台验收](workbench-acceptance.md)。
 
 ## 2026-09-30：AI 多行、多字段上下文选择
 
@@ -2948,7 +3025,7 @@ critical review 分别覆盖纯选择模型、界面异步生命周期、上下�
 各 **1853 passed / 7 skipped / 4 deselected**，Windows Python 3.10/3.12 各 **1442 passed / 59 skipped / 260 deselected**；
 control **24 项**、desktop/MCP **3 项**及 web 构建通过。跳过项仍为可选依赖、平台限定、性能及真实求解器场景，
 不计为已验证。证据存于 `/tmp/stk-scope-ci-36679780190/audit-summary.json`；macOS/Windows 真机输入仍待验收。
-用法见[桌面指南](desktop.md#ai-准备工作区)、[上下文指南](project-contexts.md)；人工步骤见
+用法见[桌面指南](desktop.md#ai-助手)、[上下文指南](project-contexts.md)；人工步骤见
 [工作台验收](workbench-acceptance.md#ai-多行上下文选择)。
 
 ## 2026-09-30：模型参数建议与修改检查
@@ -3060,8 +3137,8 @@ Linux/macOS 安装包与启动检查通过。CI artifact 位于 `/tmp/stk-ai-ci-
 Windows 日志 `/tmp/stk-ai-windows-36667294145.log`。
 
 macOS/Windows 原生真实模型、Windows GPU 真机渲染和实际输入设备验收仍待完成；本轮未调用真实模型，
-不扩大此前 Linux 合成单元格真实账户验收的范围。用法见[桌面指南](desktop.md#ai-准备工作区)，
-人工步骤见[工作台验收](workbench-acceptance.md#ai-准备工作区)。
+不扩大此前 Linux 合成单元格真实账户验收的范围。用法见[桌面指南](desktop.md#ai-助手)，
+人工步骤见[工作台验收](workbench-acceptance.md#ai-助手)。
 
 ## 2026-09-30：Token Plan 本机配置与首次真实文字请求
 

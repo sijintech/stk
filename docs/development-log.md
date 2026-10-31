@@ -2,7 +2,55 @@
 
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
-## 2026-10-30：恢复持续开发，提交网络主链与Windows有效内容裁剪
+## 2026-10-31：按所有者要求保存待办并转交
+
+停止扩展功能，仅整理四状态文档及必要AOCI资产；没有新增代码提交、push、产品测试或CI重触发。实际本地main仍2513c088，ahead远端6126两个提交；六份记录资产未提交、暂存为空。06:41 UTC前后官方GET确认6126 Desktop41163547328失败终态、Runtime41163547349成功，未覆盖447/2513。当前交接列明确待办顺序、源码入口、已测范围/限制、S4/S5/S6/P5-S7和三待决，PET新专项后置。机器收尾、文档检查及最新包来源见 `OWNER_EVIDENCE/handoff-final-20261031/closure.json`、`package-final-docs-02/rebind-summary.json`；未完成前不得把Observed确认或旧批次写入当整体aligned。[handoff](../handoff.md)是接手入口，下节候选收尾为历史。
+
+## 2026-10-31：完成Apple窄补修与交付候选收尾
+
+在05:45交接保存后，持续目标明确恢复。主链447a19ac保留原43路径验证，独立补修提交 `2513c08817bb9036bc63ffd341503f6d85a29aaf`：Apple视频隐藏/重显后的条件rewind改用已有只读AX定位加普通鼠标路径，其他平台保留LeftArrow，追加同导航核对，暂停/时间/像素/20轮门不变。Root完整审阅四份2116行源码，未发现其他已验证缺陷。
+
+`OWNER_EVIDENCE/p4-platform-20261031-02/closure.json`：六目标构建exit0、33.628秒；72/72 CPU、零失败错误跳过、2.269秒，529输入稳定。与完整2056回归的fixture差异明确另记，Linux不证明Apple分支或目标OS运行。Root实际暂存1389bytes补丁SHA `c5834ddcbe02bb169ff9d6be6171f8d79e5bd04c7a6aea03b94f013615828d29`，gitleaks/redact和空白检查exit0后提交2513，证据 `delivery-02/staged-p4-summary.json`。
+
+native3、Python4、P4四份完整Observed审阅与当前11路径SHA匹配后，机器Baseline确认已policy_bound_auto应用，事务f8be6acedab1ccffa0410d6f；不创建Entry，也不单独证明aligned。正式语义批次及最终Verify/Check/Guide结果读 `delivery-02/` 实际机器证据；最终文档包重绑读 `package-final-docs-01/rebind-summary.json`，保持已测wheel不变，历史585与重绑分记。
+
+本节为推送前候选记录，源码447/2513本地已提交；旧6126 Desktop41163547328失败终态、Runtime41163547349成功仅覆盖旧头。新头实际推送/CI以Git和Actions为准；P4/S4不标完成。完整4716/16skip/2排除、2056、585及真实worker1证据与限制见[handoff](../handoff.md)和[验收](runtime-validation.md)。继续完整通用路线，三待决不擅选，PET新专项后置；下文转交/进行中均为历史。
+
+最终文档包 `package-final-docs-01` 已13.326秒完成：已测wheel整包仍a6e5…，新sdist SHA `c213092f48b1b719f7f46170a4f19330f105ffd35ea9425e12c230b0ebd466e1`；995源成员只runtime-validation变化，681wheel源成员/22选定测试及310非状态已测输入不变。未安装/重跑585。新SHA不回写包内runtime-validation，避免自包含摘要循环；外部rebind-summary保留完整实际命令/字节核对。
+
+## 2026-10-31：最终验证后转交（历史，05:45 UTC）
+
+按所有者要求停止实现/构建，native构建窗口释放。实际本地HEAD为未推送 `447a19ac8199c62ba81be5aef5458b4135b04410`，43路径已提交；origin/main及官方远端仍6126，暂存为空、7个tracked修改保留。此次将[handoff](../handoff.md)改写为当前接手入口，前四文档及7路径SHA备份在 `OWNER_EVIDENCE/handoff-20261031T0545Z/`。快照整理未新建提交、push、产品测试或CI重触发。
+
+已闭合Python4716/16skip/2排除（1010输入稳定）、独立安装585/585、额外实际worker1/1、原生候选完整2056/2056零skip（2816输入稳定）；详见[验收最新节](runtime-validation.md#2026-10-31最终候选验证与转交范围0545-utc)。三平台Federation CI守卫后置增量已检查并进447。最后Apple rewind-after-show fixture尚未构建/测试，保留为唯一源码WIP；不借2056为它背书。6126 Desktop失败终态、Runtime成功均只覆盖旧头，新头OS验收待推送。
+
+交付未闭合：窄补修验证/代码提交、四状态最终记录、包文档重绑、P4最终Observed审阅、AOCI acknowledge与Maintain/Verify/Check/Guide、实际暂存扫描与记录提交/push。当前Guide blocked/observed_pending，不伪报aligned；S4其余/S5/S6/P5-S7、三待决及PET后置见handoff。下文旧HEAD/仍运行/未实现描述均保留为历史。
+
+## 2026-10-31：通用 owner 流程续接与最终验证（历史）
+
+持续目标恢复后继续通用路线，PET专项后置。新增桥拒绝证明反例通过；三Python172/172属于活动模型CAS补修前。独立审查修复了已知模型CAS拒绝发生在intent登记后的卡住问题：现在只读预检先于owner保留、实际执行再次校验，后续竞态仍不确定；补修后三Python各112/112、63输入稳定。
+
+candidate-08原生20/20零跳过，四固定布局Data流程各13点击；candidate-10完整授权、两次评估/准入、独立启用/回退和撤回审计四布局4/4、各50点击，均保Viewer/隐藏稿，起点两行/各一训练留出，CPU事件不代OS/GPU。2056项原生统一回归仍待结果。新package-03的681个wheel源成员与995个sdist源成员逐字节匹配，独立安装585/585零跳过、8真实必跑通过，基础前后无Flower；完整Python首轮被启动器120秒限终止，进程清理已核，原失败保留，新python-full-02同1010输入/1800秒总限继续且不改单测门槛。P4修正/诊断及72CPU通过只证本机范围，Windows同头3/6、目标OS候选尚待CI。未stage/commit/push，最终记录与AOCI待源码稳定后闭合；[交接](../handoff.md#当前续接与下一步)优先于下方历史停止状态。
+
+完整Python后续结果已闭合于 `OWNER_EVIDENCE/python-full-02/closure.json`：4716通过、16跳过、2排除、883.55秒、1010输入稳定；15项旧SIG11跳过实际全部通过，peer202/federation407及8强制算法/网络均零跳过。额外独立安装 `owner-worker-01` 真实桥/HTTP owner登记授权→ClientApp Runtime→独立梯度→单次collect/审计/撤回1/1通过。统一原生all构建853.95秒、2816输入稳定，2056项CTest仍运行。前段“完整Python仍运行”为当时快照，不覆盖本段实际终态；剩余交付工作不变。
+
+## 2026-10-31：保存已实现但未闭合的 S4 owner 工作树（历史）
+
+按所有者最新要求停止实现并更新交接，保护40个未提交路径（27 tracked、13 untracked）、空暂存区及原六份交接/AOCI资产。基线 HEAD/main/origin/main/官方远端均6126c6a2；没有新增提交、push、CI触发或产品测试。本次前四文档及精确Git/源码SHA、官方CI与文档核验保存在 `OWNER_EVIDENCE/handoff-20261031T042050Z/`，主入口 [handoff.md](../handoff.md)。本节覆盖此前“后端零修改、尚未实现”的交接描述，下面同日首轮转交保留为历史。
+
+owner/evaluation/models、Runtime认证路由、bridge本地冻结与原操作journal、20个发布Schema方法、独立Federation编辑器已经写入工作树。后端最终三版本各113/113及Runtime60/60零skip；bridge最后21项JUnit全过但typed rejection新专项未写，原生candidate-06为8/13通过、5失败且修正后未重跑。新proof仅在租约内原ID尚未保留且副作用前证明确定拒绝；原生消费proof与local prepare验证错误恢复尚待补全。文档、全量/独立安装、真实worker/network和最终AOCI维护均未闭合，不借用旧4589/402背书。
+
+04:20:50 UTC官方CI核实6126 Desktop41163547328已failure（4/6 jobs成功），Mac/Windows原生仍失败；Runtime41163547349成功。Mac激活门已通过，seek/捕获修正仅候选方向、P4三源未改。终态等待前提满足不等于平台通过；通用路线、三待决和PET后置见handoff。
+
+## 2026-10-31：首轮保存待办并转交（历史）
+
+停止产品实现并确认后端代理零文件修改、零测试/构建/安装/委派，没有活动进程、shell session或CI监控。交接前直接核HEAD、origin/main及真实remote main均 **`6126c6a22cc19270aedd135fb97c09b949c49f9b`**，工作树干净。此前a5510bfa/10b784ba/b02a51cd/dd318ce2和记录/AOCI6126均已推送；最后包逐成员重绑与24对象11+13批维护、Verify/Check/Guide已经闭合。旧历史停止与未提交描述不再代表现状。
+
+只读重查同head/attempt1的CI，03:29:04 UTC：Desktop41163547328仍运行（2项成功，其余编译），Runtime41163547349仍运行（9项成功，3.12打包），Docs41163547325/Secret41163547316成功；未观察到失败或新头完整原生验收结果。保存 `s4-network-20261030/ci-6126/handoff-20261031T032904Z.json`；下一代码push仍等整个Desktop终态。
+
+更新四状态文件，明确owner/evaluation/models只是设计草案，列出固定身份/CAS恢复、数据登记与授权、独立线性评估/准入、bridge/UI及其验收顺序；保留S4其余、S5/S6/P5-S7、三待决和PET后置。没有产品改动或新增产品测试/点击验收，本次文档留工作树，不提交/push或重触发CI；文档核验及本次AOCI维护结果见 `NETWORK_EVIDENCE/handoff-transfer-20261031/closure.json`，接手入口 [handoff.md](../handoff.md)。
+
+## 2026-10-30：恢复持续开发，提交网络主链与Windows有效内容裁剪（历史交付）
 
 所有者重新激活通用目标。源码 `a5510bfa838e34e5555f0c6beaa4e0e6b04d190a` 正式提交已验证的25文件网络主链；仅在核实际暂存SHA与secrets-source-02完全一致、gitleaks零发现后提交，未夹带四状态/AOCI资产。Windows三文件外部候选核preimage后应用，实际merge-check全目标增量构建exit0、6.265秒；相关72/72零fail/error/skip、1.350秒，新三用例实际执行，三源前后稳定。暂存扫描零发现后提交 `10b784ba262fae7bbd26c5d1f2d39398019f5ec1`；证据 `s4-network-20261030/p4-next/candidate-02/`。
 
@@ -1606,7 +1654,7 @@ Linux/macOS 安装包及启动检查通过；八项 Linux 和四项 Metal AI 宽
 CI 证据在 `/tmp/stk-ai-ci-36667294145/`，Windows 日志 `/tmp/stk-ai-windows-36667294145.log`。
 
 后续依次补齐真机使用反馈、流式显示和通过检查/应用流程的结构化修改提案；工具执行、自动模拟流程与
-完整 AI 主页仍属后续计划。用法见[桌面指南](desktop.md#ai-准备工作区)，验收见[工作台清单](workbench-acceptance.md#ai-准备工作区)。
+完整 AI 主页仍属后续计划。用法见[桌面指南](desktop.md#ai-助手)，验收见[工作台清单](workbench-acceptance.md#ai-助手)。
 
 ## 2026-09-30：Token Plan 本机配置与首次真实文字请求
 

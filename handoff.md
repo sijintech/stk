@@ -1,129 +1,162 @@
 # STK 当前交接
 
-更新：2026-10-30（本机日期；后续收尾使用UTC）。**所有者已重新激活持续开发目标：完成主要通用能力，PET新专项后置。** S4网络训练源码已提交 `a5510bfa838e34e5555f0c6beaa4e0e6b04d190a`，Windows有效内容裁剪修正已提交 `10b784ba262fae7bbd26c5d1f2d39398019f5ec1`。视频验收分隔条方向修正已提交 `b02a51cdea47868e4c599fdbc763ed80ddd1e3b7`，Mac激活宿主修正已提交 `dd318ce287bc1d52fd8da324026c321e984dc55c`；本机验证及剩余平台/产品工作见下；整份路线图尚未完成。实际记录提交、push、新CI和AOCI闭环以 `NETWORK_EVIDENCE/delivery-closure-summary.json` 为准，接手先核真实Git/CI。
+更新：**2026-10-31 UTC，按所有者要求转交下一位 Agent**。本次停止扩展产品功能，只整理交接和必要认知资产；没有新增代码提交、push、产品测试或CI重触发。源码和测试现已稳定，整份开发计划仍未完成。本快照按推送前状态记录；接手先核真实Git/同头CI，后续CI不能从旧快照推断。
 
-先读 [AGENTS.md](AGENTS.md)、本文件和开发计划；产品决定见 [项目工作台](docs/design/project-workbench.md) 与 [项目模型](docs/design/project-model.md)，发布契约在 `docs/specs/`。本文是当前快照；旧交接、首轮失败和历史交付查 [开发日志](docs/development-log.md) 与 [运行验收](docs/runtime-validation.md)，不要再把历史“8 个未验证草稿 / Node 尚未创建 / Desktop 仍 queued”当作现状。
+先读 [AGENTS.md](AGENTS.md)、本文件及[开发计划](docs/development-plan.md)。产品决定见[项目工作台](docs/design/project-workbench.md)、[项目模型](docs/design/project-model.md)，发布契约在 `docs/specs/`。继续按**通用能力优先、PET新专项后置**推进。
 
-## 当前 Git 与工作树
+## 接手先做的待办
 
-- 分支 `main`。本批网络源码 `a5510bfa` 与Windows修正 `10b784ba`、视频布局fixture修正 `b02a51cd`、Mac验收宿主修正 `dd318ce2` 已本地提交，未把未完成的桌面授权/准入冒称交付。上一已推送基线为 **`38a9fd433c1924a5bcc068e4bd1643e3f7c82bbf`**，其源码父提交 `11844b257e3a88f0db1e08611624a295e64b13c2`。最终远端/记录提交与新CI在上述closure核实，不从旧WIP快照猜测。
-- 网络提交含25路径：`.github/workflows/runtime.yml`；`docs/federation.md`、`docs/repository-structure.md`、`docs/specs/stk-federation-1.md`；`suan/control/{agent,app,cli,federation,policy,store}.py`；`suan/federation/{client,coordinator,inputs,node,protocol,train_worker,training}.py`；`tests/test_control_federation.py` 与 `tests/test_federation_{client,coordinator,inputs,network,node,protocol,training}.py`。原25文件暂存候选已成为源码提交，不再是未验证8文件草稿。
-- Windows提交仅 `desktop/spike/document_preview/{window_capture_geometry.hh,window_evidence_win32.cc,evidence_pixels_test.cc}`，127行新增/29行删除；旧媒体/20轮标准保留。本批记录/AOCI资产单独收尾，未提交内容须保护，不reset/clean/覆盖。
-- 先前转交时四文档的未提交版本及核验保留在 `NETWORK_EVIDENCE/handoff-transfer-20261030T184019Z/`，当前恢复开发状态以本文件最新内容为准。换机器仅clone不能取得仍未提交文件或本机外部证据；只移交明确的源码/验证产物，不复制凭据、私钥或用户配置。
+1. **保住本地交付。** main上有447a19ac、2513c088两个未推送提交，另有下文六份未提交记录资产；只clone远端6126会遗漏它们。接手同一工作区，或明确转移这两个提交及六份改动；不reset/clean。
+2. **核交接收尾证据。** 本次15项完整批次已Apply、1144条，Verify/Check均对齐、Guide complete=true且next_action=none。最后交接文本同步及最终身份见 `OWNER_EVIDENCE/handoff-final-20261031/closure.json`；接手源码未变时无需重做维护。后续有变更才按新Guide/Plan处理，Observed ACK不代Entry，不沿用旧批次身份。
+3. **核包来源后提交记录。** 最新交接文档重绑在 `OWNER_EVIDENCE/package-final-docs-02/rebind-summary.json`；它不增加产品测试覆盖。实际暂存改动重新跑.gitleaks.toml密钥扫描和空白检查，再在main提交；当前暂存为空，本次未commit/push。
+4. **推送并跟新头CI。** 推送前重查远端第三方变更和上一代码头整个Desktop终态；当前已知6126的Desktop失败结束、Runtime成功。447/2513未推送，尚无新头Mac/Windows验收。记录真实run ID/head/attempt，保留原像素、导航、暂停和20轮/161图门槛。
+5. **继续通用路线。** 先P4/S3平台及S4持久身份、配对、授权不可变文件、helper发行和跨站；再S5文献/检索/共享、S6复现、P5/S7完整交付。下面列源码入口、证据和三项待决定事项；PET新专项后置。
 
-## 当前 S4 网络训练后端（源码 a5510bfa）
+## 当前续接与下一步
 
-固定线性多目标 MSE、FedAvg/FedProx 的真实 Flower ClientApp 已接入私有输入 capsule、隔离 Runtime worker、持久 Node 服务、owner 绑定 Hub run/设备/public-pin 映射、独立 FL CAS/action ACL、出站 NodeAgent/CLI，以及显式持久 coordinator 和有界 HTTP client。协议和操作说明已扩展到 [联邦契约](docs/specs/stk-federation-1.md) 与 [指南](docs/federation.md)。
+- 本地main/HEAD **`2513c08817bb9036bc63ffd341503f6d85a29aaf`**；本批主链 **`447a19ac8199c62ba81be5aef5458b4135b04410`**（43路径）加一文件Apple rewind补修2513。推送前origin/main与官方远端仍 **`6126c6a22cc19270aedd135fb97c09b949c49f9b`**，ahead2；常规工作直接main，不另建PR。
+- 2513提交后暂存为空、6份tracked记录修改：`.aoci/baseline.json`、`aoci.code.txt`及四状态文档。没有未提交产品/测试源码；原13个新模块已在447，最后Apple改动已在2513。保护记录工作，不reset/clean。
+- 完整Python **4716 passed/16 skipped/2 deselected**，独立安装 **585/585**，额外实际owner→worker **1/1**；原生候选完整 **2056/2056零skip**，其后CI守卫补验及Apple补修 **六目标构建、72/72 CPU零skip** 分别有源绑定证据，不能相加或把窄补验称全量重跑。
+- P4四份当前源码已完整复核，最后修正529输入稳定；实际暂存1389bytes密钥扫描/空白检查通过并提交2513。真实Mac/Windows仍待新头CI，不冒称平台/跨站/材料验收。
+- 11份Observed当前SHA已逐项匹配完整模型审阅，`aoci scope acknowledge`已policy_bound_auto应用（事务f8be6acedab1ccffa0410d6f）。随后正式剩余11项加本次四文档共15项完整Apply，1144条，Verify/Check对齐、Guide complete=true/none；最终交接文本同步证明在 `OWNER_EVIDENCE/handoff-final-20261031/`。此前Observed ACK本身不创建Entry，也不证明整体对齐。
+- 最新交接文档包 `package-final-docs-02` 已13.314秒通过重绑：sdist SHA `df2d4fa3cbb177d861cb32dae66a0cff3be6195787b654d401a96672bbc29f40`，wheel整包仍等于已测a6e5…，995源成员只runtime-validation差异、681wheel成员/22选定测试不变。四状态文档仅runtime-validation进sdist，重绑不等于安装或重跑585；本文件之后的最终文字同步不影响该包成员。`package-final-docs-01`的c213…仅保留为上一文档快照。
+- 旧05:45转交备份在 `OWNER_EVIDENCE/handoff-20261031T0545Z/`；本轮继续的代码/扫描/Observed确认在 `delivery-02/`。原生构建已终态、窗口释放，不重启旧运行。后续先核正式交付和新CI，再继续下表完整通用范围。
 
-| 入口 | 职责 / 修改注意 |
+## 已实现的通用 owner 子链
+
+| 范围 | 当前源码入口与行为 |
 |---|---|
-| `suan/federation/protocol.py` | 严格冻结训练 spec/run 与 train/status/collect/cancel DTO；拒绝远端 argv/env/路径/训练参数覆盖，四操作都保留完整 model 绑定。 |
-| `inputs.py`、`training.py`、`train_worker.py` | 私有 x/y 数据、真实数据 SHA 和有序列名绑定，固定线性训练/原始数值参数空间，隔离解释器单次执行；不采用每节点独立归一化后直接平均。 |
-| `node.py` | `(grant_id, round)` 原请求、固定 Runtime spec/key/task 先落盘，再提交；lost reply 只查原身份，重开/status 不重训；只有 collect 显式发送更新。取消先保存意图，再交 Runtime 判断终态。 |
-| `client.py`、`coordinator.py` | 已配对原点，无 proxy/redirect/自动重试；持久原 action 后发 HTTP，未知结果只查询，至少三份批准且实字节校验的更新才能聚合；`aggregate_uncertain` 不自动重放，候选不自动准入。 |
-| `suan/control/federation.py` | owner 指定 coordinator、私有 FL CAS/run/round ACL、不可变上传引用/额度/进程租约/崩溃清理；撤销 run 不冒充 Runtime 任务已停止。 |
-| `suan/control/{agent,app,cli,policy,store}.py` | 出站网络、专用消息和 blob、分角色授权/SSE、普通 snapshot/cache/task/graph/file 出口私有身份隔离。CLI 用 `--federation-python /abs/algo/bin/python` 显式选择算法环境。 |
+| 数据/同意 | `suan/federation/owner.py`、`consent.py`、`node.py`：明确登记节点私有数据、固定grant UUID批准/撤回及更新审计。公开标注、Hub配对、peer grant不等于训练同意。 |
+| 独立评估/版本 | `suan/federation/evaluation.py`、`models.py`：冻结candidate/base/heldout/当前baseline generation，逐目标绝对RMSE和不差baseline门；Admit只登记，Activate/rollback独立明确操作，防版本/generation/ABA。线性bundle与Materials曲线MLP/model.pt分开。 |
+| Runtime | `suan/runtime/{cli,client,common,server,service}.py`：认证 `/v1/federation/owner/{method}`、固定私有root，只用既有direct/SSH；无任意路径/模块/argv，不改产品模型设置。 |
+| Bridge | `suan/desktop_bridge/federation.py`、`server.py`、Schema及`agent/levels.py`：冻结项目数值行、有序字段/单位/修订，HTTP前持久保存原操作及SHA；写入Never重试，丢回复查原身份。只供桌面，不加入脚本目录或S2c。 |
+| 原生 | `desktop/engine/lib/stk_app/include/stk/app/federation_state.hh`、`src/federation_state.cc`、`src/editors/federation_editor.cc`，AppStore/注册/CMake/i18n接线。稳定ID `federation`；每tab独立View，来源/桥/draft/lifetime epoch隔离，保Viewer/相机/隐藏稿。 |
+| 文档/CI | [联邦指南](docs/federation.md)、[联邦契约](docs/specs/stk-federation-1.md)、[桥契约](docs/specs/stk-desktop-bridge-v1.md) additive §17、桌面/模块/结构指南及三平台Federation必跑守卫已进447。机器Schema保留原方法语义，新增20方法。 |
 
-已修且有反例：RuntimeClient 下私有根重叠检查、同 layout 模型替换绕过原 SHA、首次 collect 失败后卡住、查询未知 task 时新 private reservation 出现的竞态、取消标记次序导致 failed，以及 SSE 泄露私有身份。100 历史 job / 50 普通对象的 snapshot 从 20,000 次状态读取降到精确 100 次，无逐 task HTTP；保留 lost-submit 映射并重核新归属。
+接手修改仍须核源码，重点保护：
 
-## 已完成的验证及适用范围
+- 冻结≤1000总行、64特征、16目标、4MiB；训练/留出UUID非空互斥。单位不推断/换算，未知为unspecified；整数须精确表示为f64。行级互斥不等于样品/材料/站点独立。
+- 明确Register会把所选数值capsule经direct/SSH登记到指定私有Runtime owner；raw x/y不进Hub、公共DTO或外部模型。base/delta/private job不进普通Runtime任务输出或普通Hub CAS引用；只公开净化receipt，模型/更新仅在明确动作与授权下经联邦专用通道传送，更新发送须显式collect及同意lease。
+- owner信封绑定原UUID、完整原请求SHA和generation。typed rejection七字段proof仅在租约内确认原ID未保留、INSERT/副作用前签发；已有ID冲突、generic400/409、伪造proof、保留后故障或get null均不证明明确拒绝，不能解锁重发。
+- **仅Bridge** `federation.owner.operations.get` 返回 `{operation,rejection}`；Runtime HTTP/Client仍raw operation或null。local journal状态completed/uncertain/rejected，不返回原数组。原生消费有效proof后要求明确fresh owner info/新UUID；本地prepare确定输入拒绝可修正后明确新建，通信/不可信回复仍保原身份。哈希保留int/float/负零。
+- 已知active CAS拒绝在owner保留前只读preflight，执行时再核；预检后竞态仍uncertain。阈值初始为空，明确由用户填写，不设科学默认值。
+- 读/刷新/重开/restore不训练、发送、恢复或激活；重复旧批准不复活撤权；Admit不改active。无SecAgg/DP或材料精度承诺。
 
-证据根 `NETWORK_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-network-20261030`。下面是已实际执行的结果，不需要为了交接重复全量测试。
+## 最终证据与范围
 
-| 范围 | 结果与证据 |
+以下实际运行均KEY空、MODEL unset；本次交接未重跑产品测试。
+
+| 证据位置 | 已核结果及限制 |
 |---|---|
-| 完整 Python，一次运行 | **4589 passed / 31 skipped / 2 deselected，0 failed/error，824.25 秒**；`python-full/summary.json`、`results.xml`、`pytest.log`。1000 个输入前后 SHA 全同，清单摘要 `7039e8f8b184fe9b8ca1a815f2eaf7e9c226bc5c8f7a99a6761c6387143b38eb`。federation 326、peer 202 均零 skip。 |
-| 跳过与最后测试头修改 | 31 skip 包含 15 项离屏探测 SIG11、平台/可选依赖/真实 MuFerro 与性能 opt-in；本批没有新的离屏补验，不挪用上一批 15/15。完整回归之后仅改 `test_control_federation.py` 的可选依赖 import guard，业务源码未改；另补下方 26 项和缺依赖收集验证，不能称已重跑最终全量。 |
-| 全联邦 + Hub 工作树联合 | **352/352，零 skip，25.99 秒**，`network-joint-01.xml`；含真实聚合、四个 dtype×strategy 训练及两个网络用例。Root/Node/Hub 源码与当时已安装 worker 来源分别记录。 |
-| 真 TCP/WSS 与 Runtime | 三独立 Linux Runtime + 三出站 NodeAgent，FedAvg/FedProx 各两轮，共 **12 次真实 ClientApp 训练**；逐轮独立逐样本梯度参考误差门槛 1e-13，重复 train/collect/重开不重复执行。**同一 Linux 宿主的 loopback，不能当跨站/NAT/TURN验收。** `network-01.xml` 的初始夹具 token 长度失败和修正后的 `network-02.xml` 2/2 均保留。 |
-| 最终独立安装候选 | **402/402，零 skip，41.99 秒**；`package-final/acceptance-summary.json`。15 份原测试从 sdist 提取到无关 cwd，`-I`、PYTHONPATH unset；独立 base/algorithm 环境，8 个 mandatory 真实用例实际执行。677 个 wheel 源成员、987 个 sdist 源成员绑定源码，两环境 677 成员测试前后稳定，base 无 flwr。 |
-| 包身份与后续重包边界 | 已测 wheel SHA `93734540988d5801ac0a42b016d1b9d500c51b67c7c3debf7b63091e31c75464`；sdist SHA `1482643ae7dda2b7fa743261c728815982abb0efc7f20fc818649ac56e51ae03`。该安装测试早于最后可选依赖 guard 和本次四状态更新；交付前需新目录重包/逐成员比较。预计 wheel 业务成员不变，sdist 变化是测试头和 `docs/runtime-validation.md`，须实际核对；其他三状态文件不在包内。 |
-| Hub 三 Python 版本 / Node | `hub/acceptance-summary.json`：3.12 全 control 76、3.11/3.14 新增各26，合计128次零skip；`node/candidate-05/summary.json` 最终实际42/42。candidate05 wheel 未安装；最终全包安装证据以上行 package-final 为准。 |
-| 可选依赖最后补验 | `hub/optional-import-followup.xml` **26/26**；`hub/optional-collection-02/summary.json` 在模拟 fastapi/httpx 缺失时仅跳过整个模块、无 collection error，exit5 表示没有可执行测试。针对 Windows 客户端不装 control 依赖的收集问题，**不是实际 Windows 运行通过**。 |
-| workflow / 审查 | `workflow-review/summary.json`：YAML、三个 shell 块、内联 Python 与352项JUnit的精确 gate通过；CI 基础环境无 flwr，算法环境独立。`review/`、`root-admission-03.xml` 保存独立反例和性能证据。 |
-| 已暂存源码密钥扫描 | `secrets-source-02/summary.json`：25文件、234011 bytes，暂存 diff SHA `ce53a628c145ca942c0b1023c7a307a1a8147e373106bd2dee939ef70e2b9e98`，gitleaks **0 findings / exit0**。包含最后测试头修正；不覆盖之后的文档或未来暂存改动。提交前对实际最终暂存重新扫描。 |
+| `OWNER_EVIDENCE/python-full-02/closure.json` | **4716通过/16跳过/2排除**，零失败错误，exit0，883.547秒，1010输入SHA稳定。8项真实聚合/训练/网络必跑、peer202/federation407零skip；15项旧SIG11渲染跳过逐名核对现全部实际通过。16跳过：Windows专用7、MuFerro opt-in3、PySide6/MCP/未标perf各2；另2标记perf排除。私有Xvfb/llvmpipe不代目标OS。 |
+| `NATIVE_EVIDENCE/final-native-01/` | 全目标构建exit0、853.949秒；完整CTest **2056/2056、零失败/错误/跳过**、938.419秒，2816输入在该构建/测试窗口前后一致。见`source-closure.json`、`build-summary.json`、`test-summary.json`、`native.xml`。**之后CI和Apple fixture两个差异另记，不能说当前全部字节跑过2056。** |
+| 同目录`federation-acceptance.json` | Federation **24/24**（State2/Editor1/Bridge13/Mouse8），8条UI记录。四布局Data各13点击、0文本；完整同意/两次评估准入/独立启用回退/撤回审计各50点击、9文本提交、0滚轮。详情见下文。 |
+| `NATIVE_EVIDENCE/ci-guard-01/` | 完整回归后workflow三平台加入四组Federation regex，已进447。三平台守卫命令在Linux2056 XML验证24项计数，缺组/skip/fail反例均拒绝，YAML/diff通过；仅证守卫逻辑，不是Mac/Win执行。 |
+| `OWNER_EVIDENCE/package-03/acceptance-summary.json` | wheel/sdist的681/995源成员逐字节核对，独立基础/算法环境 **585/585、零skip**，含8真实必跑，基础前后无flwr。wheel SHA `a6e5b8bcd8256f511f201787a4d22c1603a8a65c8f5671577837c7f4dc9d9d6b`，原sdist SHA `ad9da7b0ffef0cff6269b43987caef91877cb563b815316ab6e092e070d779d6`。当前文档来源以`package-final-docs-02`重绑为准，585仍是历史已测业务字节的证据。 |
+| `OWNER_EVIDENCE/owner-worker-01/` | 额外独立安装 **1/1、1.76秒**：实际桥/认证HTTP登记授权→真实隔离ClientApp/Runtime→独立梯度误差≤1e-14→明确collect一次/审计→撤回拒下一轮，普通workspace无raw、仅receipt。外部用例未改源码/sdist测试，不是跨站/物性。 |
+| `OWNER_EVIDENCE/backend-preflight-01/matrix-01/summary.json` | CAS预检修复后三Python3.11/3.12/3.14各112/112、零skip，63输入稳定；较早bridge各172/172发生在此补修之前，不当最终联合矩阵。 |
+| `OWNER_EVIDENCE/delivery-01/staged-code-summary.json` | 447提交前真实暂存43路径、补丁1055276bytes，SHA `42f662cd8eb08699ee2781ef8796de6d493701ec88caa80a4274cd9b5e5598d9`；`.gitleaks.toml`+redact扫描exit0、暂存空白检查通过。后续任何暂存须重新扫描。 |
 
-Windows修正追加验证：`p4-next/candidate-02/summary.json` 实际全目标增量构建exit0，相关72/72零skip，三源稳定；与上述4589/402为不同范围。三文件暂存差异经 `.gitleaks.toml` 扫描零发现后提交10b784ba，扫描证据 `p4-next/candidate-02/secrets-staged/summary.json`。本机Linux不编译Windows分支，不重复跑无关Python全量。
+UI固定起点：英语1440×1200@1、中文1000×1200@1、英语2160×1800@1.5、中文2000×2400@2；最大化a4 Federation Data，项目rev1两行、Temperature[K]一特征/Pressure[Pa]一目标，未选连接/字段/角色，训练/留出各一行。Data13点击完成读取/选择、Freeze/Register；完整50点击进一步覆盖批准、两条审计、明确填阈值0、两次评估及Admit不改active、v1→v2→v1 generation1/2/3、撤回且审计保留。9次文本聚焦点击已计入50；Viewer/结果/相机/隐藏Python稿保留，script history为空。**CPU真实UI事件、生产Bridge/Owner加合成协调候选夹具**，不声称该UI测试运行Flower或OS/GPU/跨站训练。i18n2705/2705、零问题。
 
-视频布局fixture修正 `b02a51cdea47868e4c599fdbc763ed80ddd1e3b7`：实际默认a2 Viewer在左、a3 Reports在右，旧代码却只收Reports左侧并固定负方向拖动。现在传入原Viewer，核两者确为相邻原实例，按实际child index选择±drag，同时要求Reports缩小、Viewer扩大并释放capture；完整element、同navigation/暂停时间和终态Viewer/草稿断言保留。`p4-next/layout-01/summary.json` 实际增量构建exit0（33.882秒，probes开启并重编/链接该fixture），相关72/72零skip（1.326秒），四源前后稳定。单文件17新增/7删除，经暂存gitleaks零发现后提交；Linux不执行Mac/Windows原生视频，仍须新平台CI。Python包排除desktop，这项不改变已测Python业务成员。
+保留失败：`python-full-01`被启动器默认120秒总限终止，无JUnit/产品结论；原18进程身份退出已核、未发清理信号；02使用明确1800秒总限，未改单测门槛。`package-01`缺build模块、`package-02`在CAS补修前；原生candidate-09为GTest同行宏标签编译失败。不要覆盖或合并这些证据。
 
-Mac验收宿主追加修正 `dd318ce287bc1d52fd8da324026c321e984dc55c`：普通未打包test executable先显式设置并核验Regular激活策略，再请求自身窗口激活；原active/key/精确窗口合取与5秒UI观察门保留。失败/超时写固定before/after/final整数/布尔快照和计数，轮询不写盘、不识别外部窗口。`p4-next/macos-activation-01/summary.json`：Linux增量全目标构建exit0、32.146秒，原72CPU用例名称集合相同且72/72零skip、1.309秒，三源SHA稳定，暂存gitleaks零发现后提交。**Linux不编译Cocoa分支、不证明真实激活/OS像素/20轮**；38a未记录policy，不能断言原运行态就是prohibited。未打包程序默认策略与setter返回值依据 [Apple activation policy](https://developer.apple.com/documentation/appkit/nsapplication/activationpolicy-swift.enum/prohibited?language=objc) / [setActivationPolicy](https://developer.apple.com/documentation/appkit/nsapplication/setactivationpolicy(_:)?language=objc)，策略成功仍不替代原激活观察。
+## 已提交补修：Apple rewind-after-show
 
-## 当前 GitHub CI：上一头已结束，平台仍失败
+`desktop/tests/app/reports_native_window.cc`约1055行：隐藏/重显后暂停时间若仍>0.90，Apple改用既有 `native_media_seek(...,0.07)`；其他平台保留LeftArrow。增加捕获navigation_generation相同校验；原paused/!ended/!seeking/time≤0.90、5秒、20轮/161图门均保留。
 
-本次直接重查同一 head `38a9fd43` 的 run，attempt1；未重新触发。结果只覆盖已提交基线，**不覆盖当前网络 WIP**。
+这是源码复核发现的剩余路径缺口，未宣称在新Mac复现。**已提交2513；Linux六目标构建exit0、33.628秒，72/72 CPU零skip、2.269秒，529输入稳定**，证据 `OWNER_EVIDENCE/p4-platform-20261031-02/closure.json`。当前SHA `bf5eeda293485d21a3c0abe0bbfb9f6eb7e01ac2aabe1f97c97cdf124671da6d`，2056测试时SHA `53a525de8fb958b02313a127b2a9ebfe99ef1e6af31a4aea2262f013c4a836b8`。复核前证据 `OWNER_EVIDENCE/delivery-01/observed-p4-before-rewind.json`。
 
-| 工作流 | 当前结果 |
+全部seek/rewind调用点和四份文件已完整复核，`delivery-01/observed-p4-review.json`明确绑定Root审阅及当前SHA；post-full-regression-delta和72CPU范围独立记录。真实暂存扫描及2513提交证据 `delivery-02/staged-p4-summary.json`，补丁SHA `c5834ddcbe02bb169ff9d6be6171f8d79e5bd04c7a6aea03b94f013615828d29`。Linux不编译Apple条件分支，真实Mac/Windows须新CI。
+
+447已含先前四份P4 fixture/input候选：首拖前Mac宿主激活、只读WKWebView AX滑条几何后普通鼠标seek、无效AX frame的Position/Size回退、Win同步消息重入修正、HTML字体fixture及有界输入诊断。原六目标/72CPU见 `OWNER_EVIDENCE/p4-platform-20261031-01/closure.json`，另记之后Cocoa回退差异；不把它算作新WIP已验。
+
+## 官方CI快照
+
+本次06:41 UTC前后官方只读GET再次确认远端main仍6126，以下同head/attempt1；精确快照保存在 `OWNER_EVIDENCE/handoff-final-20261031/ci.json`：
+
+| 工作流 | 终态 |
 |---|---|
-| [Runtime 41097301247](https://github.com/sijintech/stk/actions/runs/41097301247) | **completed/success，10/10 jobs**；独立 Flower 基础230/230零skip，主矩阵仍有环境跳过项。 |
-| [Desktop 41097301277](https://github.com/sijintech/stk/actions/runs/41097301277) | **completed/failure**，2026-10-30 18:06:52 UTC 更新；6 jobs中4成功2失败。前代码头整个Desktop结束的 push 等待条件已满足；P4验收没有通过。 |
-| [Docs 41097301182](https://github.com/sijintech/stk/actions/runs/41097301182)、[Secret 41097301195](https://github.com/sijintech/stk/actions/runs/41097301195) | 已保存 success；Dependency Graph41097311540亦success。 |
+| [Desktop41163547328](https://github.com/sijintech/stk/actions/runs/41163547328) | **completed/failure**，04:08:08 UTC更新，6jobs中4成功2失败。前代码头Desktop结束这个push前提满足，**P4未验收**。 |
+| [Runtime41163547349](https://github.com/sijintech/stk/actions/runs/41163547349) | **completed/success**，03:29:26 UTC更新，不覆盖本地447/2513。 |
+| Docs41163547325/Secret41163547316 | 先前已核成功，本次未重触发，不覆盖447。 |
 
-完整平台证据在 `ci-38a/terminal-1806/terminal-summary-v2.json`、`windows-geometry-analysis-v2.json`，保留日志/工件及官方摘要核验：
+6126实际原生路径Windows **3/6**（Spike/Markdown/PDF20轮过；HTML ink77.8%<80、视频同步消息超时、HTML视频拖动失败），Mac **4/6**（激活门过，seek/视频捕获未过）。证据 `OWNER_EVIDENCE/p4-windows-read-20261031T0434Z/analysis.json`、`NETWORK_EVIDENCE/ci-6126/owner-progress-20261031T040117Z/`。447/2513在本快照写入时尚未推送，**新头平台CI不能由旧头结果推断**；不降低像素/暂停/导航/20轮/161图门。
 
-- macOS CPU **1420/1420**、Metal **254/254** 零skip；原生4/6通过。Markdown/HTML各20轮140图，PDF20轮160图，spike20轮161图，合计 **601 张记录 PNG**，SHA已逐张核验。视频与HTML视频均在自身窗口激活确认门超时，**0完整轮/0图**；现有错误不能区分 active 与 key predicate，不猜改。
-- Windows CPU **1364/1364** 零skip；独立native **0/6、0完整轮/0图**。五项WGC几何失败，一项 Viewer 并排布局门失败。已观察媒体解码状态不能代替最终视频像素/20轮证据。
-- Windows精确观测：WindowRect/item/pool/texture均1040×736，DWM/frame.ContentSize均1026×729；client1024×697，DPI96/awareness2。旧FullWindow原点crop右边超有效Content6px；DWM候选crop完全在界内。**尺寸匹配不证明像素原点正确**，目标平台仍须实测。
+## 接手后的实施顺序
 
-## 后续实施顺序
+1. **核实正式交付。** 新Run按AGENTS建立自己的AOCI认知，再查真实Git/同头CI和closure。本批447/2513源码、完整回归、窄补修及完整Observed审阅均已完成，不重复旧WIP待办；若尚未推送，移交必须含本地提交/记录改动，单clone远端会遗漏。
+2. **核收尾门。** Observed11的Baseline确认及正式Entry维护已完成，本次15项后Verify/Check对齐、Guide complete=true/none；最后交接文本同步和最终身份读 `OWNER_EVIDENCE/handoff-final-20261031/closure.json`。Root/Meta受Guard保护；后续完整候选按新机器批次提交，remaining非零继续，不能缩scope或猜FRAS。记录仍未暂存，提交前必须扫描真实暂存改动。
+3. **核包来源。** 最新交接文档重绑读 `package-final-docs-02/rebind-summary.json`；wheel应逐字节等于已585项验过的a6e5包，sdist只允许包含的状态文档改变。业务/测试变化必须另验，不能称重绑是重跑585，也不覆盖旧环境。
+4. **按main交付/跟CI。** 实际暂存gitleaks及空白检查后记录提交；push前重新核前代码头整个Desktop终态及远端第三方变化。新run记录真实ID/head/attempt和结果，未出结果明确pending；不借6126成功、不把失败终态当通过。后续正常交付更新四状态文档，保护已有未提交记录。
+5. **继续完整通用路线。** 先处理新头P4/S3平台结果及S4其余身份/配对/文件/helper/跨站；再推进S5/S6/P5-S7，见下表。三待决不擅选，PET新专项后置。下一S4方案依据在 `OWNER_EVIDENCE/next-s4/implementation.md`，仅调查，不当已实现契约。
 
-1. **先核本批交付闭环。** 源码a5510bfa/10b784ba，实际记录提交、包重绑、AOCI全批Apply/Verify/Check/Guide、暂存gitleaks和push/新CI在 `NETWORK_EVIDENCE/delivery-closure-summary.json`；逐项核结果与剩余限制。不重做已完成的4589/402等验证；只有新源码/失败才扩大回归，旧全量不冒称覆盖后续源码。
-2. **P4 Windows目标平台复验。** 原外部候选 `p4-next/candidate-01/windows-valid-content.patch`（SHA `030f1014195c5d311efe34426eae356ed3753372ceda19b36d01c4e0405d9ec7`）已应用并提交10b784ba；实际merge-check全目标增量构建成功6.265秒，相关 **72/72、零fail/error/skip、1.350秒**，3个新ContentSize反例均执行且三源前后稳定。证据 `p4-next/candidate-02/{summary.json,build-summary.json,test-summary.json,focused.xml}`。当前按有效ContentSize独立计算crop、分别记录pool/content origin，DPI/嵌套矩形/格式/8192边长/16Mi像素约束不变。**仍未本机编译Windows分支或执行WGC**；尺寸匹配不证明内容像素原点，须新头Windows编译/完整20轮。
-3. **P4其余平台继续取证修复。** Mac测试宿主已显式设置Regular并记录有界active/key状态，待新CI核实际策略和失败谓词；激活/暂停/完整媒体/20轮标准保留；Windows布局fixture的左右方向假设已在b02a51cd修正，目标平台仍须完整复验。平台修复后核真实Mac/Windows完整native结果，Linux CPU不编译Cocoa/Win32，也不证明OS呈现。S3b跨平台及真实GUI/IME/DPI仍按相应完成条件验收。
-4. **S4下一产品链**：桌面本机数据集consent/撤回/逐轮审计、明确发送与显式模型准入；保留候选与活动模型分离，重开/刷新不训练、发送或激活。新UI记录固定起点/点击数/结果，保留Viewer与隐藏草稿。
-5. **S4其余连接能力**：持久设备身份/public-pin核对/配对UI；Mac↔Windows真实端点；可分发helper与运行库/许可；授权不可变文件manifest、断点与整文件SHA；部署信令、网络自检及IPv6→UDP（含端口预测）→TCP→TURN443实际策略/站点验收。现有peer后端与本机loopback训练都不代表这些已完成。
-6. **S5**：本地PDF解析、两层检索和可核对引用，按既定授权陪读/结构化共享；旧Qt仅截PDF文字，不可当RAG。优先公开或自有资料，沿用既定文献许可与加密中继边界。
-7. **S6**：文献设置→冻结工作流→明确运行→数值/曲线对比→带来源报告；保留缺参、失败、来源与不确定度，不伪造复现成功。
-8. **P5/S7**：干净机离线安装/Python环境，文件对话框、IME/DPI/快捷键/恢复/性能，模型更新/回退；toolkits按职责迁入suan并保留兼容导入/wheel/sdist。通用引擎、执行目标及ABACUS按依赖推进。PET新字典、厂内专项、专用训练、长链/气体收敛及材料指标后置，保护已有11段真实软件路径，不声称物性收敛。
+## AOCI与Observed接续
 
-## AOCI 与工具续接
+服务 `0.1.0-rc21`，CLI `/home/mnemora/.local/bin/aoci`。维护前1137条、05:44 Guide blocked/observed_pending均为历史。11份Observed审阅/ACK、原两批25项及本次15项均已完成，正式条目1144；本次15项后的Verify/Check对齐、Guide complete=true/none，missing/stale/unbaselined/Observed待审均0，无Recovery/第三方冲突。最后交接文本同步及最终scope/index身份读当前资产与 `OWNER_EVIDENCE/handoff-final-20261031/closure.json`，不把历史receipt当当前完整认知。
 
-- 新Run先按 [AGENTS.md](AGENTS.md) 与实时 `aoci_rules`/`aoci_overview` 建立认知；压缩恢复声明 `context_compaction`、用新event ID，跟随全部cursor并做一次当前Attestation。**本文件不保存正式Whole-Index、Header、Entry、Chunk、Challenge或Attestation正文；旧收据不替代新Run认知。**
-- 本次服务 `0.1.0-rc21`，CLI `/home/mnemora/.local/bin/aoci`。维护前已完整交付并校验的scope/index为 `10c54ba7e7e8e9ffed303703eee44366b16b79177fe7cf62288dd81ba379b0a3`、1129对象；这是续接身份，不能替代维护后的当前身份或新Run认知。新index、baseline与Apply/Verify/Check/Guide实际结果见delivery-closure与实时Guide。
-- 最后Hub测试可选依赖guard的Observed指纹已完整复核并ack：事务 `e23ffa808f1598ed4d270db9`、baseline `06ee56b8406c12447cac83566c7f859611c299ad73f117f6842575017bad53ef`，证据 `aoci/observed-optional-guard-{review,ack}.json`。随后Guide已核observed_pending0、pending_transactions0、recovery_pendingfalse。b02a51cd的验收fixture已另做精确Observed复核，结果在 `aoci/observed-layout-{review,ack}.json`；Mac三验收文件的最终复核见 `aoci/observed-macos-{review,ack}.json`。此前8个新测试review/ack事务 `03bffe5d064714648856ae35` 及基础17条交易已经闭合，不重复。
-- 本轮正式维护入口为 **8 missing + 16 stale，共24对象**（网络21加Windows3，忽略重复unbaselined/技术skip）。文件最终稳定后按机器签发完整批次创作/Apply，原样回绑候选/摘要/批次；所有remaining清零再Verify/Check/Guide。收尾实际结果在delivery-closure；有Recovery或第三方冲突时按实时Guide处理，不猜写或缩减受管范围，已aligned后不重复维护。
-- Guide：`/home/mnemora/.local/bin/aoci index agent guide --agent codex --json`；Scope：`... scope status --json`。输出先提取必要字段，避免把完整报告灌入上下文。Volumes v1不支持`status --deep`不是版本不匹配。
-- 导航优先限定`rg`和有界读；符号定义/引用需要语义时用Serena并限返回量，配置与实测见 [AI开发指南](docs/ai-development.md)。jscpd/Knip按需，不默认全仓预热或创建第二份仓库记忆。
+本次交接开始时，已有两批共25项原子Apply，索引1141条、scope `3e05a4170924b997f0df2fb7831bc00871ed0f3b1eba369c7c664386b33bb2c6`；剩余11项尚未Apply。交接文档随后也变化，旧Plan不能当新源码的写入授权；最终批次/对齐情况另存 `handoff-final-20261031/closure.json`。没有未决Recovery或第三方冲突的旧状态不能代替重新核验。
 
-## 安全、产品边界和未决事项
+Observed11：native新 `desktop/tests/app/{federation.cmake,federation_test.cc}` 与 `desktop/tests/wm/test_app.cc`；Python新 `tests/test_desktop_bridge_federation.py`、`tests/test_federation_{evaluation,models,owner}.py`；P4改动 `desktop/tests/app/reports_native_input.hh`、`reports_native_input_cocoa.mm`、`reports_native_input_win32.cc`、`reports_native_window.cc`。完整审阅在 `OWNER_EVIDENCE/delivery-01/{observed-native-review.json,observed-python-review.json,observed-p4-review.json}`；本轮实际匹配和ACK在 `delivery-02/observed-review-sha-check.json`、`aoci-observed-ack.json`。精确后续集合以新Guide/Plan为准。
 
-- 不读/打印/保存任何密钥。测试必须 `STK_TOKEN_PLAN_API_KEY=` 且 unset `STK_TOKEN_PLAN_MODEL`；刷新/重开/测试不发收费模型请求。端点、密钥与产品网络策略只经桌面明确操作；私有项目数据不发外部模型。测试token用低熵占位，遵守既有长度门槛。
-- dataset/base/未放行delta/私有job/result不进入普通Runtime inputs/work；公共work仅净化receipt。`outputs`不是访问白名单，普通file/graph/snapshot/cache出口必须继续过滤私有身份。Runtime不是同OS用户安全沙箱。
-- FL CAS/run权限独立于普通Hub blob，授权先于存在性检查；run撤销不自动停止任务或收回已发送字节。设备32hex与公钥指纹64hex分开；owner显式核对映射，管理owner不自动成为coordinator，不宣称此映射已证明私钥持有。
-- Flower只在独立Linux算法环境，精确`flwr==1.42.0`、`numpy==2.5.4`；基础/Hub不装flwr，不启动SuperLink/SuperNode/gRPC，首批无SecAgg/DP承诺。512MiB限制为原始bundle预算，元数据另限，不是整个私有目录总上限。
-- 三项仍待所有者决定：①合作方S3两数据格式及MuPRO电场扫描；②S2c外部规划/智能体准备运行权限；③保存分析修改提案的持久形式。时间经过不构成批准，现有内部capsule不替合作方选择数据格式。公开仓库统一称“合作方”。
+新Agent/压缩后按实时rules与普通完整overview跟随全部cursor、一次确认/Attestation；此文不保存或摘要正式Whole-Index/Header/Entry/Chunk/Challenge/Attestation正文，旧receipt不替代当前认知。限定rg/有界读，符号定义引用按需Serena；不预热全仓/读整份扫描报告，见[AI开发指南](docs/ai-development.md)。
 
-## 本机路径、复验和构建
+## 后续通用开发仍缺什么
+
+| 范围 | 未完成内容 |
+|---|---|
+| P4平台 | 新头Mac/Windows原生文档/视频/混合文档20轮及实际捕获；IME/跨屏DPI/真GPU另验。Linux Unsupported/CPU不代目标OS。 |
+| S3训练 | 本机冻结/迁移/准入/回退/桌面已实现，持续目标平台和真实材料独立评价；合成/行级留出指标不证明科学有效，合作格式待决定。 |
+| S4其余连接 | 持久设备身份/public-pin核对/配对UI，Mac↔Windows真端点，helper/运行库/许可发行，授权不可变文件manifest/续传/整文件SHA，部署信令及IPv6/UDP/TCP/TURN443实际站点策略/许可。loopback不证跨站。 |
+| S5文献/共享 | 版本化授权PDF导入、完整支持页解析/来源、真实本地稀疏+稠密两层检索、可核引用/页段点击、授权陪读/文本及结构化共享，后续语音与窗口画面仍待实现。旧Qt前8000字符截取不是RAG，Hub聊天不是协作；未实现。 |
+| S6复现 | 文献参数来源→冻结工作流→明确运行→数值/曲线对齐、单位/容差/独立参考/敏感性→来源报告，保留缺参数/失败/假设。真实授权MuPRO论文端到端证据缺，PET不作替代。 |
+| P5/S7 | 干净机离线安装/Python环境、平台对话框/IME/缩放/快捷键/恢复/性能、模型更新回退、toolkits按职责迁移及兼容导入/wheel/sdist；ABACUS按依赖安排。 |
+
+S5/S6研究笔记在 `OWNER_EVIDENCE/next-s5-s6/{requirements.md,engineering.md}`，后者25项一手来源，**仅调研，未安装/下载模型或实现接口**。候选隔离PDFium、本地FTS5+固定权重/分词器摘要真实dense encoder、精确引用映射，先验许可/解析偏移/平台包装；不以假向量/两tab称完成。共享边界按[平台设计](docs/design/sijin-platform-2026-10.md)后轮决定，不擅开收费、远程控制或私有外发。
+
+## 三项待所有者决定
+
+1. 合作方S3两数据格式及MuPRO电场扫描。
+2. S2c外部规划/智能体准备运行权限。
+3. 保存分析修改提案的持久形式。
+
+未选前不按任一方案实现；内部capsule/owner UI不构成决定或agent授权。PET新字典、厂内专项、专用训练、长链/气体收敛和材料指标验证后置，保护既有功能/证据。
+
+## 本机工具与复验入口
 
 ```text
+OWNER_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-owner-20261031
+NATIVE_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-owner-desktop-20261031
 NETWORK_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-network-20261030
 FLOWER_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-flower-20261030
 PEER_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-peer-20261030
-主Python=/home/mnemora/opt/stk-venv/bin/python
-另两版=/home/mnemora/opt/stk-venv311/bin/python、/home/mnemora/opt/stk-venv314/bin/python
-已测最终算法Python=NETWORK_EVIDENCE/package-final/algorithm-env/bin/python
-已测最终基础Python=NETWORK_EVIDENCE/package-final/base-env-02/bin/python
-已核验gitleaks=FLOWER_EVIDENCE/tools/gitleaks-8.30.1/gitleaks
-Linux构建目录=/home/mnemora/opt/stk-build/merge-check
-用户sysroot=/home/mnemora/opt/stk-sysroot
+Python3.12=/home/mnemora/opt/stk-venv/bin/python
+Python3.11=/home/mnemora/opt/stk-venv311/bin/python
+Python3.14=/home/mnemora/opt/stk-venv314/bin/python
+native build=/home/mnemora/opt/stk-build/merge-check
+sysroot=/home/mnemora/opt/stk-sysroot
+gitleaks=FLOWER_EVIDENCE/tools/gitleaks-8.30.1/gitleaks
+offline builder=/home/mnemora/.local/state/stk-validation/p4-video-20261029/package-check/build-env/bin/python
 ```
 
-路径仅适用于当前机器。不要覆盖旧证据/候选；旧FLOWER production-adapter环境只含上一批基础，不能当新worker环境。需要复验网络候选时：
+既有native缓存Ninja/RelWithDebInfo、文档候选/原型/探针ON；一次一个构建。离线builder有poetry-core、无build模块；已审阅的 `OWNER_EVIDENCE/final-doc-rebind-plan/rebind.py` 默认inspect，显式rebind要求新的绝对证据目录，直接使用 `poetry.core.masonry.api.build_wheel/build_sdist`、`SOURCE_DATE_EPOCH=1793413645`。不要用package-03的prepare_env.py替代，它会安装环境。Flower只在独立Linux算法环境flwr1.42.0/numpy2.5.4，基础/Hub不装。
+
+以下仅为出现新改动或未决失败时的条件复验参考，**当前2513对应的六目标/72项已完成，不因交接重跑**。需要时由下一Agent审查后在新证据目录使用，保存JUnit/日志/manifest、不覆盖旧结果；本次交接整理未再次运行：
 
 ```bash
+stk_handoff_evidence="$(mktemp -d /home/mnemora/.local/state/stk-validation/s4-owner-20261031/p4-rewind-XXXXXX)"
+
 env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= \
-  STK_FEDERATION_TEST_PYTHON=/home/mnemora/.local/state/stk-validation/s4-network-20261030/package-final/algorithm-env/bin/python \
-  /home/mnemora/opt/stk-venv/bin/python -m pytest -q -p no:cacheprovider \
-  tests/test_federation_*.py tests/test_control_federation.py
-```
+  cmake --build /home/mnemora/opt/stk-build/merge-check --target \
+  stk-reports-native-window stk-document-evidence-tests stk-document-resources-tests \
+  stk-document-media-probe-tests stk-report-document-tests stk-document-preview-spike --parallel 4
 
-原生一次只运行一个编译，成功退出后再测试，避免读取旧二进制；按改动选用目标/测试。基本命令：
-
-```bash
-cmake --build /home/mnemora/opt/stk-build/merge-check --parallel 4
 env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= \
   ctest --test-dir /home/mnemora/opt/stk-build/merge-check \
-  --parallel 4 --timeout 600 --output-on-failure --output-junit /tmp/stk-handoff-ctest.xml
+  -R '^(DocumentEvidence\.|DocumentResources\.|NativeMediaProbe\.|ReportDocumentHost\.|document_preview_memory_|native_evidence_gate$)' \
+  --parallel 4 --output-on-failure --output-junit "$stk_handoff_evidence/cpu.xml"
 ```
 
-Windows/macOS沿用 [desktop/QUICKSTART.md](desktop/QUICKSTART.md) 的 `setup-windows.ps1` / `setup-macos.sh`，不要另造启动链；`--launch-only`不验证新源码，脚本仅构建主程序。新机器按 [desktop/README.md](desktop/README.md) 重配，不照搬CMake缓存。归档目录不进导入/构建/测试。每次实际交付同步四状态文件、按最终源码维护AOCI、扫描最终暂存，再在main提交；push前核前代码头整个Desktop终态，并记录新头实际CI及剩余限制。
+Federation定向目标 `stk-federation-tests`，CTest筛选 `Federation(State|Editor|Bridge|Mouse)`、设置 `STK_BRIDGE_TEST_PYTHON=/home/mnemora/opt/stk-venv/bin/python`；既有24已通过，不因交接机械重跑。Mac/Windows按[QUICKSTART](desktop/QUICKSTART.md)准备自己的工具链，不复制CMake缓存；`--launch-only`不验证新源码。
+
+不读/打印/存密钥、私钥或真实用户配置；测试KEY空/MODEL unset、不发收费请求，端点/密钥/网络策略只经桌面明确修改，私有项目数据不去外部模型。公开文档称“合作方”；archive不入导入/构建/打包/测试。外部证据不随clone迁移，仅移交明确源码和验证产物，不复制私有运行凭据。

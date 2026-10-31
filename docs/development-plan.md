@@ -1,10 +1,56 @@
 # STK 开发计划
 
-更新：2026-10-30。本文是后续开发的主计划；产品约定见[项目工作台设计](design/project-workbench.md)，
+更新：2026-10-31 UTC。本文是后续开发的主计划；产品约定见[项目工作台设计](design/project-workbench.md)，
 存储与求值方案见[项目数据模型](design/project-model.md)。设计目标不代表当前版本已经实现。
 当前模块职责、归档清单与新增代码放置原则见[仓库结构说明](repository-structure.md)。
 
-## 2026-10-30：持续目标已恢复，S4网络及Windows裁剪源码已提交
+## 2026-10-31：通用owner交付候选（源码447/2513）
+
+**当前转交指令：** 所有者要求把待办写入handoff交下一Agent，本次停止扩展实现；本地447/2513未推送，六份记录资产未提交、暂存为空。先依[接手待办](../handoff.md#接手先做的待办)核AOCI最终机器收尾、最新`package-final-docs-02`重绑和实际暂存扫描，再提交记录/push并跟新头平台CI。整份计划仍未完成；本次未新增产品测试或CI触发。后文“持续目标恢复”为本次转交前的历史，不是要求本Agent继续开发。
+
+持续目标已恢复，通用优先、PET新专项后置。主链 `447a19ac8199c62ba81be5aef5458b4135b04410` 和Apple重显后时间滑条补修 `2513c08817bb9036bc63ffd341503f6d85a29aaf` 已在本地main提交，源码/测试稳定。本节为推送前快照；真实远端和新头CI请先核Git/Actions，不沿用下方旧HEAD/WIP/停止状态。完整接手入口见[handoff](../handoff.md)。
+
+Python最终4716通过/16跳过/2排除，安装585/585、额外实际owner→worker1/1；原生候选2056/2056零skip。其后CI守卫增量独立验证、2513六目标构建及72/72 CPU零skip，529输入稳定；Linux不编译Apple/Cocoa/Win32条件分支，新头OS验收仍必要。owner实现不等于P4/S4整体完成。
+
+11份Observed的完整源码审阅和当前SHA匹配已闭合，Baseline确认已应用；正式剩余11项加四文档共15项已Apply，Verify/Check对齐、Guide complete=true/none、1144条。最后交接文字同步及最终身份在 `OWNER_EVIDENCE/handoff-final-20261031/closure.json`，旧Observed/提交扫描在`delivery-02/`（绝对根见handoff）；实际记录暂存扫描仍待下一Agent。ACK本身不创建Entry。最新文档重绑为`package-final-docs-02`，不重跑585、不扩大原sdist范围。
+
+接续仍含新头P4/S3平台、S4持久身份/配对UI/授权文件/helper发行/跨站、S5文献两层检索/可核引用/陪读及文本结构化后续语音窗口共享、S6真实来源复现、P5/S7完整发行及三待决。不得以本批通过缩小八项原路线或宣称材料有效，PET新专项继续后置。
+
+最新交接文档包来源重绑已通过：已测wheel整包a6e5…不变，新sdist SHA `df2d4fa3cbb177d861cb32dae66a0cff3be6195787b654d401a96672bbc29f40`；995源成员仅runtime-validation变化，未安装或重跑585。证据 `OWNER_EVIDENCE/package-final-docs-02/rebind-summary.json`。上一`package-final-docs-01`的c213…仅为此前文档快照；本计划和handoff未被包装进sdist，最后文字同步不影响包成员。
+
+## 2026-10-31：转交点（历史，05:45 UTC）
+
+按所有者要求保存待办并转交另一Agent，实现/构建已停止，native构建窗口释放。当前本地main/HEAD为 `447a19ac8199c62ba81be5aef5458b4135b04410`（43路径owner/bridge/桌面及契约实现），尚未推送；origin/main和官方远端仍6126。暂存为空，7个tracked修改包含四状态文档、两AOCI资产及唯一源码WIP `reports_native_window.cc`。当前状态与接手顺序见[handoff](../handoff.md#接手后的实施顺序)，下文进行中叙述均为历史快照。
+
+最终Python4716通过/16跳过/2排除，独立安装585/585、额外真实owner→worker1/1；原生候选完整2056/2056零跳过、2816输入稳定，均有独立closure。全量后CI守卫增量已验并提交447；之后Apple rewind-after-show fixture补修未构建/测试，不纳入2056结论。官方6126 Desktop41163547328已completed/failure、Runtime41163547349成功；447无新头CI。P4/S4未整体验收。
+
+下一步验证窄Apple补修、记录真实后续代码提交、最终包文档重绑、补P4 Observed复核并按实时Guide闭合AOCI（当前blocked/observed_pending）、最终暂存密钥扫描及main交付。S4其余配对/文件/helper/跨站、S5、S6、P5/S7和三待决仍保留，PET新专项后置。本次仅交接整理，未新增提交/push/产品测试/CI重触发。
+
+## 2026-10-31：通用路线续接（历史）
+
+转交后持续目标已明确要求继续推进，PET 新专项保持后置。owner typed rejection 与本地 prepare 恢复已接入原生页，candidate-08 定向20/20，四布局 Data流程各13clicks；candidate-10完整授权/两轮评估准入/独立启用回退/撤回审计四布局4/4、各50clicks，均保Viewer/隐藏稿，CPU事件不代OS/GPU。统一2056项原生回归仍待结果。审查补修了活动模型 CAS 的登记前只读预检：已知拒绝不留未知 intent，后续竞态仍保持 uncertain；新后端三 Python各112/112。当前新包逐项681/995来源核对、独立安装585/585零跳过，包含8项真实算法/Runtime/网络门；完整 Python首轮启动器120秒限已终止并保留，新python-full-02以1800秒总限和同1010输入运行，不改单测门槛，不提前标完成。
+
+完整Python已闭合：4716通过/16跳过/2排除、零失败错误，1010输入稳定；15项旧SIG11渲染跳过全部实际通过，8项真实算法/网络必跑零跳过。额外桥/认证HTTP owner授权到实际worker、单次collect及撤回接线1/1通过。统一原生全目标构建853.95秒/2816输入稳定，2056项CTest仍运行；不提前标完整原生通过。
+
+P4本地72CPU通过，Windows6126实际3/6，Mac/Win候选尚待新CI。`main`仍6126、全部WIP保留，未stage/commit/push；最终原生结果、四状态记录、AOCI维护及暂存扫描仍在收尾。S4其余范围、S5/S6/P5-S7和三项待决不变，详见[当前交接](../handoff.md#当前续接与下一步)。
+
+## 2026-10-31：S4 owner WIP 转交（历史，04:20）
+
+所有者最新要求保存待办交另一 Agent；已停止实现、构建和测试，本次仅整理四状态文档，未 stage/commit/push。HEAD/main/origin/main 与官方远端仍 `6126c6a22cc19270aedd135fb97c09b949c49f9b`，暂存为空；当前 40 个未提交路径（27 tracked、13 untracked）包含 owner/evaluation/models、Runtime/bridge/Schema、独立 Federation 编辑器和测试。此前“无产品源码、仅草案”不再代表当前状态；完整路径及接续顺序见 [handoff](../handoff.md)。
+
+04:20:50 UTC 官方快照：Desktop41163547328 已 completed/failure（4成功/2失败，04:08:08更新），Runtime41163547349 completed/success。前头 Desktop 终态等待前提满足，P4 未验收。后端三 Python 各113/113、Runtime60/60；bridge 最后 JUnit21/21 尚无 typed rejection 新专项；原生 candidate-06 构建成功，13项8通过/5失败，后续修正未重编复验。旧4589/402覆盖已推送网络基线，不覆盖当前 WIP。
+
+下一步先补原生 typed rejection 的原请求绑定、fresh owner info/new UUID 门与本地 prepare 确定验证失败恢复，再补 bridge/原生反例、最新 Schema 重嵌入及全链点击。随后完成 additive bridge 文档、精确 proof 契约、最终源码回归/独立安装/真实 worker 证明；稳定后才维护 AOCI 和交付。P4 Mac/Windows 当前失败继续取证，S4其余配对/文件/helper/跨站、S5/S6/P5-S7与三项待所有者决定保持，PET新专项后置。证据入口 `OWNER_EVIDENCE/handoff-20261031T042050Z/closure.json`（根路径见handoff）。
+
+## 2026-10-31：首轮转交点（历史，当前见最新首节）
+
+所有者最新要求保存待办并转交；本轮停止产品实现，仅更新四状态文档及必要AOCI托管资产，未提交/push或重触发CI。交接前本地main、origin/main和真实远端均 **`6126c6a22cc19270aedd135fb97c09b949c49f9b`**，工作树干净；网络源码a5510bfa、Windows10b784ba、布局b02a51cd、Mac宿主dd318ce2及记录/AOCI6126均已交付。旧WIP、待重包和待24对象维护描述保留为历史，不再当现状。
+
+03:29:04 UTC快照：Desktop **41163547328 in_progress**，下一次代码push等待整个run终态；Runtime **41163547349 in_progress**、9项成功；Docs41163547325与Secret41163547316成功。均同head6126、attempt1，完整快照 `NETWORK_EVIDENCE/ci-6126/handoff-20261031T032904Z.json`。P4新Mac/Windows原生结果仍未完成，Linux72不替代目标平台。最终包已逐字节重绑：wheel与402项已测包相同，sdist仅测试guard及验收文档差异；未重跑402/4589。本次更新文档晚于该sdist，不能声称已入旧包。
+
+下一实施片段先做S4 owner数据登记/同意/撤回/审计及独立线性评估、显式准入/切换/回退，再接bridge/桌面；**目前只有设计草案，没有owner/evaluation/models新源码或路由**。原请求UUID、固定grant身份、私有root、两capsule部分登记恢复和baseline generation须先闭合。详见 [handoff](../handoff.md#接手后的实施顺序)；剩余仍含S4配对/文件/helper/跨站、S5、S6、P5/S7。PET新专项后置，三待决不擅选，整份计划不标完成。本次文档/AOCI收尾实况见 `NETWORK_EVIDENCE/handoff-transfer-20261031/closure.json`。
+
+## 2026-10-30：持续目标已恢复，S4网络及Windows裁剪源码已提交（历史交付）
 
 所有者重新激活通用开发目标，PET新专项仍后置。S4私有Runtime/出站网络源码 `a5510bfa838e34e5555f0c6beaa4e0e6b04d190a` 已在main本地提交，25个文件、暂存差异gitleaks零发现；Windows WGC有效ContentSize裁剪 `10b784ba262fae7bbd26c5d1f2d39398019f5ec1` 已提交，实际Linux增量全目标构建成功，相关72/72零skip、三个新反例实际执行。仍须新头Windows编译/WGC和完整原生20轮，Mac媒体/Windows布局门继续按证据处理。
 
@@ -103,7 +149,7 @@ PET 新的业务字典、厂内专项部署、专用训练、长链／气体收�
 也不把这些专项验收写成通用平台已完成。通用能力可用公开或合成数据验收，科学结论仍需独立证据。
 
 仍待决定的 S3 合作数据格式和 MuPRO 电场扫描、S2c 权限扩展、分析修改提案的持久形式见
-[当前交接](../handoff.md#待所有者决定决定前不要按某个选项实现)。这次优先级调整不替代这些决定；独立的通用工作继续推进。
+[当前交接](../handoff.md#三项待所有者决定)。这次优先级调整不替代这些决定；独立的通用工作继续推进。
 
 第 1 项已推送 `4f919c7`：既有编辑器修改已构建，本机完整原生 **1592/1592、零跳过**，相关必跑 **164/164**；
 Python 完整 **3025 passed、24 skipped、2 deselected**，3.11／3.14 相关各 **49 passed**。
