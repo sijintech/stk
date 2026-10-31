@@ -1055,10 +1055,16 @@ raise SystemExit(main())
       // Return to the earliest segment before a second explicit Play. Rewinding is
       // itself local input; showing the tab must never provide that playback action.
       if (reshown.current_time > 0.90) {
+        const auto navigation = reshown.navigation_generation;
+#ifdef __APPLE__
+        ui.native_media_seek(cycle, "rewind-after-show", bounds, reshown, 0.07);
+#else
         ui.native_media_key(cycle, "rewind-after-show", bounds, wm::Key::LeftArrow, "LeftArrow", reshown);
-        reshown = ui.media_until(session, [](const Media &m) {
-          return m.paused && !m.ended && !m.seeking && m.current_time <= 0.90;
-        }, "Native LeftArrow rewinds before explicit resume", 5);
+#endif
+        reshown = ui.media_until(session, [navigation](const Media &m) {
+          return m.navigation_generation == navigation && m.paused && !m.ended &&
+              !m.seeking && m.current_time <= 0.90;
+        }, "Native input rewinds before explicit resume", 5);
       }
       play(cycle, "explicit-play-after-show", session, bounds);
       ui.click("reports_document_pause", *area);
