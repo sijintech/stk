@@ -3,7 +3,68 @@
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
-## 2026-10-30：联邦基础最终源码验证（11844b25）
+## 2026-10-30：源码提交、Windows有效ContentSize修正与本批闭环
+
+当前网络源码 `a5510bfa838e34e5555f0c6beaa4e0e6b04d190a`、Windows修正 `10b784ba262fae7bbd26c5d1f2d39398019f5ec1` 已本地main提交。实际记录提交、最终包差异绑定、24对象AOCI全批维护/Verify/Check/Guide、暂存扫描、push及新头CI统一记录在 `NETWORK_EVIDENCE/delivery-closure-summary.json`；证据根 `/home/mnemora/.local/state/stk-validation/s4-network-20261030`。恢复开发后的源码提交不等于新平台CI通过，旧停止交接段落均保留为历史。
+
+| 范围 | 本轮新增实证 |
+|---|---|
+| 网络源码提交 | 25文件3951新增/52删除；实际暂存diff234011bytes、SHA ce53a628c145ca942c0b1023c7a307a1a8147e373106bd2dee939ef70e2b9e98与secrets-source-02同，gitleaks0后提交a5510bfa。4589/31skip/2deselected、安装402/402、最后guard26/26和缺依赖collection证据保持下表原范围，不重写为最终全量。 |
+| Windows源码与构建 | 三文件127新增/29删除，commit10b784ba；实际merge-check all-target增量构建exit0、6.265秒，三源SHA前后稳定，Linux实际重编CPU测试并链接；未编译Win32分支。 |
+| 相关CPU验证 | `p4-next/candidate-02/focused.xml`，**72/72、零fail/error/skip、1.350秒**；含原69及3个新DocumentEvidence.WindowCaptureContent反例。截取实CI坐标、负origin/物理DPI/缩放/无匹配/非稳定/裁剪/溢出和资源上限均验证；非OS像素/20轮验收。 |
+| 裁剪语义及限制 | pool/item/texture1040×736，ContentSize/DWM1026×729，按有效content独立判定origin/crop，避免读取pool padding。DPI/三rect稳定性/格式/嵌套与8192边长/16Mi像素约束保留；尺寸匹配不证明像素原点，等待Windows真实WGC。Mac激活、HTML-video Viewer布局仍未由本修正覆盖。 |
+| 本轮暂存扫描 | 三文件实际暂存diff与gitleaks结果在 `p4-next/candidate-02/secrets-staged/summary.json`，exit0/0findings后提交；四状态/AOCI记录最终暂存另扫。 |
+| Observed闭环 | 完整复核最后Hub测试头及受影响生产/契约后ack，事务e23ffa808f1598ed4d270db9，baseline06ee56b8406c12447cac83566c7f859611c299ad73f117f6842575017bad53ef；Guide零Observed pending、零pending transaction/Recovery。正式语义仍按本轮完整24批次处理，结果见closure。 |
+
+视频原生验收布局fixture另提交 `b02a51cdea47868e4c599fdbc763ed80ddd1e3b7`：Reports右侧却要求左侧并固定负drag的问题已改为按真实左右顺序，传入/保护原Viewer，真divider事件与完整媒体/同导航暂停时间/终态草稿门不变。实际probes-ON增量构建33.882秒、exit0，相关72/72零skip、1.326秒，源码稳定；证据 `NETWORK_EVIDENCE/p4-next/layout-01/summary.json`，实际单文件暂存gitleaks零发现。Linux只证明编译和相关CPU行为，不证明Mac激活或Windows原生视频/完整20轮。此fixture不进入Python包；最后Observed复核与本批24对象维护结果见closure。
+
+Mac验收宿主追加修正 `dd318ce287bc1d52fd8da324026c321e984dc55c`：普通未打包test executable先显式设置并核验Regular激活策略，再请求自身窗口激活；原active/key/精确窗口合取与5秒UI观察门保留。失败/超时写固定before/after/final整数/布尔快照和计数，轮询不写盘、不识别外部窗口。`p4-next/macos-activation-01/summary.json`：Linux增量全目标构建exit0、32.146秒，原72CPU用例名称集合相同且72/72零skip、1.309秒，三源SHA稳定，暂存gitleaks零发现后提交。**Linux不编译Cocoa分支、不证明真实激活/OS像素/20轮**；38a未记录policy，不能断言原运行态就是prohibited。未打包程序默认策略与setter返回值依据 [Apple activation policy](https://developer.apple.com/documentation/appkit/nsapplication/activationpolicy-swift.enum/prohibited?language=objc) / [setActivationPolicy](https://developer.apple.com/documentation/appkit/nsapplication/setactivationpolicy(_:)?language=objc)，策略成功仍不替代原激活观察。
+
+本轮无新增UI点击验收。前头38a9fd43 Desktop41097301277 completed/failure（4成功2失败）、Runtime41097301247 success10/10已直接核验；前头终态push门满足，P4/S4完整产品、跨站、S5/S6/P5-S7和三待决继续，PET新专项后置。
+
+## 2026-10-30：交接核验（历史，当前见最新首节）
+
+所有者要求保存待办并转交另一Agent；本轮仅四状态文档，未重跑产品测试或修改产品。Git HEAD/origin/main/ls-remote均38a9fd433c1924a5bcc068e4bd1643e3f7c82bbf，25个已暂存网络文件保持原样。证据根 `NETWORK_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-network-20261030`，交接前四文档与本轮核验保存在 `handoff-transfer-20261030T184019Z/`；该目录不是正式AOCI正文缓存。
+
+| 范围 | 已核实结果及限制 |
+|---|---|
+| 完整Python | `python-full/summary.json`/`results.xml`：**4589 passed、31 skipped、2 deselected，0 failure/error，824.25秒**；4620个JUnit case。1000输入前后同摘要 `7039e8f8b184fe9b8ca1a815f2eaf7e9c226bc5c8f7a99a6761c6387143b38eb`；peer202、federation326均零skip。31skip包含15离屏SIG11；本批未再补离屏，不挪用旧15/15。 |
+| 独立安装 | `package-final/acceptance-summary.json`：**402/402，零skip，41.99秒**，8mandatory真实用例实际执行。677wheel/987sdist源成员绑定；base-env-02与algorithm-env隔离、base无flwr、两环境677成员前后稳定。首次离线缓存缺vtk9.7.1失败保留，新base以缓存兼容版本安装并pip-check通过。 |
+| 包身份 | 已测wheel SHA `93734540988d5801ac0a42b016d1b9d500c51b67c7c3debf7b63091e31c75464`；sdist SHA `1482643ae7dda2b7fa743261c728815982abb0efc7f20fc818649ac56e51ae03`。全量/安装之后仅改Hub测试可选依赖guard；本次runtime-validation又会改变sdist，交付前新目录重包并核成员差异。不能把这些结果改写为最终源码全量。 |
+| 最后可选依赖补验 | `hub/optional-import-followup.xml` **26/26零skip**；`hub/optional-collection-02/summary.json`模拟fastapi/httpx缺失时整模块一skip/0error，exit5=无测试可执行，仅证明收集行为，不是Windows运行通过。 |
+| 联合及真实网络 | `network-joint-01.xml` **352/352零skip**。三Linux Runtime/三出站NodeAgent、TCP/WSS、FedAvg/FedProx各两轮、12实际ClientApp任务，与独立梯度参考1e-13一致；同机loopback，不代跨站/NAT/TURN。详情和原失败见下方历史记录。 |
+| 暂存密钥扫描 | `secrets-source-02/summary.json`：25文件234011bytes、diff SHA `ce53a628c145ca942c0b1023c7a307a1a8147e373106bd2dee939ef70e2b9e98`，gitleaks exit0/0findings，覆盖可选依赖guard。它不覆盖之后的四文档和未来暂存；提交前实际最终暂存再扫。 |
+| 同head最新CI | 本轮GitHub connector直接GET：Desktop41097301277 **completed/failure**、attempt1、updated18:06:52UTC，6jobs中4成功2失败；Runtime41097301247 **completed/success**、10/10。这些只覆盖38a9fd43，不覆盖网络WIP；前头整个Desktop终态的push等待门已满足。 |
+| P4目标平台 | `ci-38a/terminal-1806/terminal-summary-v2.json`：Mac CPU1420/Metal254零skip，native4/6，成功601张记录PNG SHA逐一核验；两个媒体用例自身窗口激活门失败、0轮0图。WindowsCPU1364零skip，native0/6、0轮0图，五WGC几何/一Viewer布局失败。媒体状态观察不代最终OS像素。 |
+| 外部P4候选 | `p4-next/candidate-01/windows-valid-content.patch` SHA `030f1014195c5d311efe34426eae356ed3753372ceda19b36d01c4e0405d9ec7`，3文件preimage/副本/patch摘要均核实。复制环境C++20/UBSan211检查、完整GTest TU语法及apply-check过；**未应用到仓库、未编译Windows分支或运行WGC**。Content1026×729与DWM相同、pool1040×736与WindowRect相同，不证明候选像素原点。 |
+
+本轮不新增产品UI点击验收。AOCI认知交付和Challenge已核验，但当前Guide因 `tests/test_control_federation.py` 最后指纹变化要求Observed复核，正式语义仍8 missing/13 stale；收尾调用结果保存在transfer目录，不能声称治理已对齐。完整交付、模型准入/桌面授权、P4双平台、S4其他网络产品、S5/S6/P5-S7仍待后续；三待决不擅选，PET专项后置。当前清单见 [handoff.md](../handoff.md)。
+
+## 2026-10-30：S4实际出站网络与Runtime训练（历史进度，当前状态见上）
+
+证据根 `NETWORK_EVIDENCE=/home/mnemora/.local/state/stk-validation/s4-network-20261030`。基线38a9fd43，当前新业务仍未提交/push；测试KEY空/MODELunset，无收费请求、无端点/密钥/网络策略修改。
+
+| 范围 | 实际结果 / 限制 |
+|---|---|
+| 全联邦+Hub联合 | `network-joint-01.xml`，**352/352、零失败/错误/skip，25.99秒**。包含旧230基础、新协议/client/coordinator52、Node/输入/训练42、网络2、Hub26；工作树服务+显式独立安装worker，不冒称最终全包安装。 |
+| 真实出站网络 | 三个独立Linux Runtime、三个出站NodeAgent，经真实TCP/WSS及run-scoped blob完成FedAvg/FedProx各两轮（12任务），原身份重开/重复train/collect不重复，逐轮候选与独立逐样本梯度参考1e-13一致。`network-02.xml`为2/2；首次network-01两失败仅测试token长度，保留原证据。全部同机loopback，不是跨站/NAT/TURN或材料有效性。 |
+| Hub | `hub/acceptance-summary.json`：3.12所有control76，3.11/3.14新增各26，合计128次零skip；TCP WebSocket断线重派/SSE/配额/跨进程锁/崩溃/撤销竞态；8源码摘要稳定。初始SSE ID/冲突码两失败保留。 |
+| Node与worker | `node/candidate-05/summary.json`：实际42/42零skip，三Python便携各33+9另行真实执行；8输入稳定，candidate05 wheel五成员一致但未安装。sourceNode/安装worker来源分开记录，最终全包由package-final补。 |
+| 独立审查 | Root协议/client/coordinator52/52；模型替换、collect失败恢复、aggregate_uncertain不重放、私有cache/graph/read及动态reservation反例通过。review保存优化前100job/50对象20,000次读取；优化后精确100次/零逐task HTTP，lostreply过滤保留。两个最终race/perf用例独立2/2、0.14秒。取消先持久意图再Runtime.cancel，防worker合作退出抢成failed；保留旧失败。 |
+
+仅1项Starlette弃用提示。完整Python回归、最终全包安装/真实worker绑定及本批AOCI/暂存扫描/提交/push仍待完成，旧4467回归不覆盖新增源。独立算法CI要求全部联合零skip，精确4个f32/f64×策略训练与2个network；基础环境前后无flwr。当前同38a9fd43 Desktop41097301277最近18:00:31 UTC为queued/conclusion null，仍非终态，push门未完成。
+
+本批后端无新增产品UI点击，桌面同意/撤回/审计与模型准入仍需UI验收；公共work只含净化回执。512MiB为私有原始bundle总预算，元数据单项/数量另限，不声称整个私有目录总量512MiB。P4目标平台与S4其他产品/跨站能力及后续路线仍未完成；已保存handoff快照继续保留作历史。
+
+## 2026-10-30：转交验证边界（历史，38a9fd43）
+
+本次为所有者要求的handoff，已停止实现/轮询，仅核Git/源码/证据/CI，未运行新测试或产品UI动作，无新增点击验收、提交或push。基础源码11844b25、记录/AOCI头38a9fd43均已推送；本地HEAD、origin/main及真实远端一致。当前8个联邦网络业务文件为未验证WIP，未语法检查、新HTTP/WSS、真实Runtime/隔离安装或端到端多轮测试；旧完整Python4467/31/2、独立230/230、本机pipe六轮和Linux69仅绑定上一批范围。
+
+17:42 UTC直接GET同head/attempt1工作流： [Runtime41097301247](https://github.com/sijintech/stk/actions/runs/41097301247) completed/success、10/10jobs；其独立Flower实际230/230零skip，真实f32/f64通过，Windows3.11/3.12成功。 [Desktop41097301277](https://github.com/sijintech/stk/actions/runs/41097301277)仍in_progress/conclusion=null，前代码头整个Desktop尚未终态，后续代码push等待门不满足。Docs41097301182/Secret41097301195/Dependency41097311540已观察success，均不覆盖WIP。17:35 agent快照和Flower XML证据在 `/home/mnemora/.local/state/stk-validation/s4-network-20261030/ci-38a/`；8文件SHA绑定为该network根的 `handoff-source-snapshot.json`。
+
+接手的文件清单、风险、接口和验收顺序见 [handoff.md当前首节](../handoff.md)。训练身份先持久化、status不重训/collect才发送、私有dataset/base/delta不进入通用Runtime文件树、独立FL CAS无普通CAS旁路、取消和撤销不冒充终态，均须实际验证。AOCI当前dirty/stale，新WIP最终稳定后统一维护；旧Observed8/17条已闭合不重复。本次无新Apply/Recovery。P4/S4及S5–S7仍未完成，不改模型端点/密钥/网络策略，无收费模型请求。
+
+## 2026-10-30：联邦基础最终源码验证（历史，11844b25）
 
 源码 `11844b257e3a88f0db1e08611624a295e64b13c2` 已本地提交。证据根沿用下文 FLOWER_EVIDENCE/PEER_EVIDENCE；本批实际记录提交、AOCI/最终包/push及新CI由 `FLOWER_EVIDENCE/delivery-closure-summary.json` 记录，不从旧交接措辞推定。
 

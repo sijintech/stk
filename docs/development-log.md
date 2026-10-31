@@ -2,7 +2,39 @@
 
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
-## 2026-10-30：恢复通用目标，联邦基础与平台补修（11844b25）
+## 2026-10-30：恢复持续开发，提交网络主链与Windows有效内容裁剪
+
+所有者重新激活通用目标。源码 `a5510bfa838e34e5555f0c6beaa4e0e6b04d190a` 正式提交已验证的25文件网络主链；仅在核实际暂存SHA与secrets-source-02完全一致、gitleaks零发现后提交，未夹带四状态/AOCI资产。Windows三文件外部候选核preimage后应用，实际merge-check全目标增量构建exit0、6.265秒；相关72/72零fail/error/skip、1.350秒，新三用例实际执行，三源前后稳定。暂存扫描零发现后提交 `10b784ba262fae7bbd26c5d1f2d39398019f5ec1`；证据 `s4-network-20261030/p4-next/candidate-02/`。
+
+视频原生验收布局fixture另提交 `b02a51cdea47868e4c599fdbc763ed80ddd1e3b7`：Reports右侧却要求左侧并固定负drag的问题已改为按真实左右顺序，传入/保护原Viewer，真divider事件与完整媒体/同导航暂停时间/终态草稿门不变。实际probes-ON增量构建33.882秒、exit0，相关72/72零skip、1.326秒，源码稳定；证据 `NETWORK_EVIDENCE/p4-next/layout-01/summary.json`，实际单文件暂存gitleaks零发现。Linux只证明编译和相关CPU行为，不证明Mac激活或Windows原生视频/完整20轮。此fixture不进入Python包；最后Observed复核与本批24对象维护结果见closure。
+
+Mac验收宿主追加修正 `dd318ce287bc1d52fd8da324026c321e984dc55c`：普通未打包test executable先显式设置并核验Regular激活策略，再请求自身窗口激活；原active/key/精确窗口合取与5秒UI观察门保留。失败/超时写固定before/after/final整数/布尔快照和计数，轮询不写盘、不识别外部窗口。`p4-next/macos-activation-01/summary.json`：Linux增量全目标构建exit0、32.146秒，原72CPU用例名称集合相同且72/72零skip、1.309秒，三源SHA稳定，暂存gitleaks零发现后提交。**Linux不编译Cocoa分支、不证明真实激活/OS像素/20轮**；38a未记录policy，不能断言原运行态就是prohibited。未打包程序默认策略与setter返回值依据 [Apple activation policy](https://developer.apple.com/documentation/appkit/nsapplication/activationpolicy-swift.enum/prohibited?language=objc) / [setActivationPolicy](https://developer.apple.com/documentation/appkit/nsapplication/setactivationpolicy(_:)?language=objc)，策略成功仍不替代原激活观察。
+
+改为对WGC有效ContentSize与分配pool分别精确判定crop和origin，保留DPI/嵌套矩形/尺寸/格式/像素/20轮标准；Linux未编译Windows代码，目标平台仍待新CI。网络4589/402及最后guard26项证据范围保持原样。本批无产品UI点击变化；桌面授权/审计/模型准入继续。最后Observed测试头已完整review/ack，事务e23ffa808f1598ed4d270db9，Guide确认零pending/Recovery；正式24对象维护及记录/push/新CI见 `NETWORK_EVIDENCE/delivery-closure-summary.json`，不重复旧Observed8或基础17条交易。
+
+## 2026-10-30：整理待办并转交（历史）
+
+按所有者要求停止扩展实现，重写当前handoff为单一快照，保留旧四状态的未提交版本到 `s4-network-20261030/handoff-transfer-20261030T184019Z/before/`；历史事实仍保留在本日志和运行验收。Git直接核实HEAD/origin/main/真实远端均38a9fd43，25个已暂存网络候选保持原样；本轮仅改四状态文件，没有产品修改、测试重跑、提交/push或CI重触发。
+
+完整Python已实际4589通过/31跳过/2排除，1000输入前后稳定；安装候选402/402零skip。全量和安装后仅补可选依赖guard，26/26和缺fastapi/httpx的collection验证分记，不冒称最终全量/实际Windows通过。已暂存25文件234011bytes的gitleaks零发现；文档和未来暂存须另扫。Desktop41097301277直接重查已completed/failure、4成功2失败，Runtime41097301247成功10/10；Mac成功601图、两媒体0轮0图，Windows原生0/6。外部Windows三文件patch仅复制环境211检查与语法/apply-check通过，未应用/编译Windows/运行WGC。
+
+最新handoff写明源码入口、包/测试/CI的独立适用范围、外部证据、精确接手顺序、AOCI一个Observed指纹和8 missing/13 stale债务、三所有者待决及后续通用路线。正式索引仍dirty/stale；收尾工具结果见上述transfer目录。S4/P4、S5/S6/P5-S7未整体完成，PET新专项后置。
+
+## 2026-10-30：恢复S4实际网络/Runtime链（历史进度，当前状态见上）
+
+交接快照保存后，按持续目标恢复。实现owner绑定Hub run/独立FL CAS/action、冻结训练DTO、私有capsule/固定ClientApp worker、持久Node和显式coordinator/client、NodeAgent/CLI接入。真实TCP/WSS+三独立Runtime完成FedAvg/FedProx各两轮，12实际任务、独立逐样本梯度对照；全联邦+Hub352/352、零skip，25.99秒。安装态worker与工作树Node/协调器分记，最终全包安装和完整Python未提前宣称。
+
+独立审查/红绿修复保留了RuntimeClient私有根重叠、模型同layout替换、早collect失败卡住、动态reservation授权竞态、取消次序和snapshot历史规模反例；100job/50普通对象从20,000状态读取降至100，仍重核未知任务当前归属。Hub三版本128次、Node实际42次均零skip；首轮网络夹具token长度、重复collect回执和取消race失败原证据均保留。workflow加入完整联合和精确真实训练/网络门禁。证据位于 `s4-network-20261030/`，详见handoff与runtime-validation。
+
+当前业务未提交或push，基线38a9fd43；Desktop同run未终态、AOCI dirty/stale，最终包/全量/四状态/维护/暂存扫描/main交付继续。本轮无产品UI新增点击；S4/P4与后续主要路线未完成，PET专项后置。
+
+## 2026-10-30：保存网络训练待办并转交（历史）
+
+按所有者最新要求停止实现agent/CI轮询，保护8个未提交联邦网络草稿文件。本次仅核Git、源码差异、已有证据和CI并更新四状态文档，无新实现、测试、提交或push；草稿尚未语法检查，不能使用上一批230/4467等通过数字背书。Node服务/出站NodeAgent/CLI、持久协调轮次、新HTTP/WSS和训练测试及真实网络多轮仍待实现验证，具体接口和风险写入 [handoff.md当前首节](../handoff.md)。
+
+已核HEAD/origin/main/真实远端均38a9fd433c1924a5bcc068e4bd1643e3f7c82bbf，基础源码11844b25及上一批AOCI/记录已推送；Observed8和17条语义收尾不重做。17:42 UTC直接重查Runtime41097301247成功、Desktop41097301277运行中，后续push门尚未满足。新WIP最终稳定后再维护AOCI/暂存扫描/交付；本次没有新Apply/Recovery。S4/P4及后续通用路线未完成，PET新专项后置，三待决未擅选。
+
+## 2026-10-30：恢复通用目标，联邦基础与平台补修（历史，11844b25）
 
 交接保存后继续开发；源码 `11844b257e3a88f0db1e08611624a295e64b13c2` 已本地提交21文件。隔离候选真实 f32/f64 聚合2/2、联合230/230零跳过，六成员与安装/工作树一致；三独立 ClientApp 六轮18份训练更新经过 consent/outbox，生产 FedAvg 与独立 moment-gradient 参考一致，撤回及不确定发送不重放通过。外部首轮脚本在最终审计读取误用分页键，失败保留，修脚本后新目录重验；未归因产品。
 

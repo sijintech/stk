@@ -4,7 +4,39 @@
 存储与求值方案见[项目数据模型](design/project-model.md)。设计目标不代表当前版本已经实现。
 当前模块职责、归档清单与新增代码放置原则见[仓库结构说明](repository-structure.md)。
 
-## 2026-10-30：联邦基础续接（源码11844b25，S4未完成）
+## 2026-10-30：持续目标已恢复，S4网络及Windows裁剪源码已提交
+
+所有者重新激活通用开发目标，PET新专项仍后置。S4私有Runtime/出站网络源码 `a5510bfa838e34e5555f0c6beaa4e0e6b04d190a` 已在main本地提交，25个文件、暂存差异gitleaks零发现；Windows WGC有效ContentSize裁剪 `10b784ba262fae7bbd26c5d1f2d39398019f5ec1` 已提交，实际Linux增量全目标构建成功，相关72/72零skip、三个新反例实际执行。仍须新头Windows编译/WGC和完整原生20轮，Mac媒体/Windows布局门继续按证据处理。
+
+网络完整Python4589/31skip/2deselected、独立安装候选402/402以及最后导入guard26/26分开保留原适用范围；最终包重绑、记录提交/push/新CI和24对象AOCI维护/Verify/Check/Guide结果见 `NETWORK_EVIDENCE/delivery-closure-summary.json`（证据根见handoff）。最后Observed一项已review/ack，Guide核零pending/Recovery；不能把此前维护blocked快照继续当当前门禁。上一已推送38a9fd43的Desktop已终态失败、Runtime成功10/10，push等待门已结束。
+
+视频原生验收布局fixture另提交 `b02a51cdea47868e4c599fdbc763ed80ddd1e3b7`：Reports右侧却要求左侧并固定负drag的问题已改为按真实左右顺序，传入/保护原Viewer，真divider事件与完整媒体/同导航暂停时间/终态草稿门不变。实际probes-ON增量构建33.882秒、exit0，相关72/72零skip、1.326秒，源码稳定；证据 `NETWORK_EVIDENCE/p4-next/layout-01/summary.json`，实际单文件暂存gitleaks零发现。Linux只证明编译和相关CPU行为，不证明Mac激活或Windows原生视频/完整20轮。此fixture不进入Python包；最后Observed复核与本批24对象维护结果见closure。
+
+Mac验收宿主追加修正 `dd318ce287bc1d52fd8da324026c321e984dc55c`：普通未打包test executable先显式设置并核验Regular激活策略，再请求自身窗口激活；原active/key/精确窗口合取与5秒UI观察门保留。失败/超时写固定before/after/final整数/布尔快照和计数，轮询不写盘、不识别外部窗口。`p4-next/macos-activation-01/summary.json`：Linux增量全目标构建exit0、32.146秒，原72CPU用例名称集合相同且72/72零skip、1.309秒，三源SHA稳定，暂存gitleaks零发现后提交。**Linux不编译Cocoa分支、不证明真实激活/OS像素/20轮**；38a未记录policy，不能断言原运行态就是prohibited。未打包程序默认策略与setter返回值依据 [Apple activation policy](https://developer.apple.com/documentation/appkit/nsapplication/activationpolicy-swift.enum/prohibited?language=objc) / [setActivationPolicy](https://developer.apple.com/documentation/appkit/nsapplication/setactivationpolicy(_:)?language=objc)，策略成功仍不替代原激活观察。
+
+本批之后推进S4桌面数据同意/撤回/审计、独立线性候选评估和显式准入，再做配对/文件/helper/跨站网络及S5/S6/P5-S7。联邦线性bundle不能当作现有pe_loop/capacity_fade的MLP权重激活，须按真实模型契约处理；三待决不擅选，整份计划不标完成。当前入口为 [handoff.md](../handoff.md)。
+
+## 2026-10-30：转交检查点（历史，当前以最新首节为准）
+
+所有者最新要求是保存待办并交给另一 Agent；本轮停止扩展实现，仅更新四状态文档，不提交、推送或重触发CI。当前 `main` / `origin/main` / 真实远端均 `38a9fd433c1924a5bcc068e4bd1643e3f7c82bbf`；25个网络业务/测试/契约文件仍已暂存，四状态和AOCI baseline未暂存，必须保留。最新接手入口为 [handoff.md](../handoff.md)，旧交接段落均为历史。
+
+S4实际TCP/WSS与三Runtime训练链已实现：工作树联合352/352；完整Python **4589 passed / 31 skipped / 2 deselected**、1000输入稳定；独立安装候选 **402/402、零skip**。完整/安装后仅改Hub测试的可选依赖guard，另补26/26及缺依赖collection无错误验证；本次状态文档又改变sdist中的runtime-validation，交付前仍需新包逐成员绑定，不能声称最终全量重跑。Desktop41097301277现已 **completed/failure（4成功/2失败）**，Runtime41097301247成功10/10；前头push等待门已结束，P4平台仍未验收。外部Windows ContentSize裁剪候选未应用，缺Windows/WGC实测。AOCI仍因一个Observed指纹待复核而阻塞，8 missing/13 stale的正式语义收尾、最终暂存扫描/main交付均交下一Agent处理；实时结果见交接所列外部收尾目录。
+
+先完成本批收尾与P4目标平台修复，再按下表继续S4桌面consent/审计/模型准入、配对/文件/helper/跨站网络，S5知识库、S6复现闭环、P5/S7离线整合。三待决不擅选，PET新专项后置；没有新增产品UI点击验收，整份计划仍未完成。
+
+## 2026-10-30：S4网络训练纵向链（历史进度，状态以上方转交点为准）
+
+持续通用目标恢复后，已完成owner-bound Hub/独立FL CAS、固定ClientApp的私有Runtime训练、出站NodeAgent、持久Node与显式coordinator/client。三个独立Linux Runtime/三个出站agent经真实loopback TCP/WSS完成FedAvg/FedProx各两轮，独立梯度参考一致；全联邦+Hub联合352/352、零skip，含4个真实dtype×strategy训练和2个真实隔离聚合。私有身份出口、原请求恢复/不重发、模型SHA绑定、取消次序及大型历史查询均有审查反例与修复。
+
+业务尚未提交/push；最终新包安装绑定、完整Python和AOCI收尾待完成，38a9fd43同一Desktop仍未终态。S4桌面授权/审计/模型准入、配对/文件/helper发行及跨站网络验收仍缺；loopback不冒充NAT/TURN或科学有效性。具体证据、剩余顺序见 [handoff.md当前首节](../handoff.md)。P4平台、S5/S6/P5-S7、三待决及PET新专项后置不变。
+
+## 2026-10-30：交接检查点（历史，38a9fd43，新网络草稿未验证）
+
+所有者要求写待办并转交另一 Agent，已停止实现和轮询，保留 8 个联邦网络 WIP 文件；本次仅更新交接/状态记录，不提交或 push。已交付基础源码11844b25及记录/AOCI头38a9fd43均已推送，本地与远端一致。17:42 UTC重查：Runtime41097301247 completed/success（10 jobs，独立Flower230/230零skip），Desktop41097301277仍in_progress，下一次代码push等待门未满足。旧“真实Flower尚未跑、基础尚未push”已是历史。
+
+当前草稿为 Hub run/设备映射、独立FL CAS/action授权、冻结训练协议和私有数值capsule/固定ClientApp worker；**尚未语法检查或测试**，NodeFederationService、NodeAgent/CLI接入、持久coordinator及新测试尚未完成。下一轮先审查草稿与私有数据隔离/训练幂等/撤回边界，再做真实Runtime和三个出站Linux节点多轮STK网络验证、桌面同意审计/模型准入；P4平台结果并行跟进。完整文件清单、接口、测试顺序、证据及AOCI待收尾见 [handoff.md当前首节](../handoff.md)。S4、S5、S6、P5/S7仍未完成，PET新专项后置，三待决保持不变。
+
+## 2026-10-30：联邦基础续接（历史，源码11844b25，S4未完成）
 
 转交检查点后持续目标恢复，源码 `11844b257e3a88f0db1e08611624a295e64b13c2` 已本地提交：严格数组/整轮准入、本机逐数据集逐 run consent/outbox、独立 Flower 聚合和精确依赖/指南、独立算法 CI 门禁；同批 Windows fixture 时序/句柄与原生验收候选补修。完整 Python 首次 4467 通过/31 跳过/2 排除，873 输入稳定；联邦安装联合 230/230 含真实 f32/f64、三 ClientApp 六轮/18 份审计更新及独立数值参考通过，但用的是本机 pipe，不是 S4 的 STK 出站网络。Linux 最终 all/相关69 CPU通过；新 Mac/Windows 修正待目标平台 CI，Windows WGC 只补尺寸诊断，不假定根因或降低门槛。实际记录/push/AOCI/新CI见本批 `FLOWER_EVIDENCE/delivery-closure-summary.json` 与[交接](../handoff.md)；未成功的收尾仍待完成。S4 产品/网络训练、S5、S6、P5/S7 与三待决继续，PET 新专项后置。
 
