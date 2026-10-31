@@ -105,35 +105,76 @@ bool key_spec(wm::Key key, unsigned short &code, NSString *__strong &characters,
   characters = [NSString stringWithCharacters:&character length:1];
   return true;
 }
+
+WindowActivationObservation activation_observation(wm::NativeWindowHandle handle)
+{
+  WindowActivationObservation observed;
+  observed.main_thread = [NSThread isMainThread];
+  observed.valid_target = handle.kind == wm::NativeWindowKind::Cocoa && handle.value;
+  if (!observed.main_thread) { return observed; }
+  observed.policy = NSApp ? static_cast<int>([NSApp activationPolicy]) : -1;
+  observed.app_active = NSApp.active;
+  if (!observed.valid_target) { return observed; }
+  NSWindow *parent = (__bridge NSWindow *)handle.value;
+  observed.own_window = [NSApp.windows containsObject:parent];
+  if (!observed.own_window) { return observed; }
+  observed.window_key = parent.keyWindow;
+  observed.exact_key_window = NSApp.keyWindow == parent;
+  observed.visible = parent.visible;
+  observed.miniaturized = parent.miniaturized;
+  observed.can_become_key = parent.canBecomeKeyWindow;
+  return observed;
+}
 }  // namespace
 
-bool NativeInput::request_window_activation(wm::NativeWindowHandle handle, std::string &error)
+bool NativeInput::request_window_activation(wm::NativeWindowHandle handle,
+                                            WindowActivationRequest &request, std::string &error)
 {
   error.clear();
-  if (![NSThread isMainThread] || handle.kind != wm::NativeWindowKind::Cocoa || !handle.value) {
+  request = {};
+  request.before = activation_observation(handle);
+  request.after = request.before;
+  if (!request.before.main_thread || !request.before.valid_target) {
     error = "Invalid Cocoa activation target/thread"; return false;
   }
-  NSWindow *parent = (__bridge NSWindow *)handle.value;
-  if (![NSApp.windows containsObject:parent] || !parent.visible || parent.miniaturized) {
+  if (!request.before.own_window || !request.before.visible || request.before.miniaturized) {
     error = "Activation requires this application's visible window"; return false;
+  }
+  NSWindow *parent = (__bridge NSWindow *)handle.value;
+  // This unbundled acceptance executable has no app Info.plist. Make its GUI
+  // activation policy explicit before requesting focus; this does not prove focus.
+  request.policy_change_attempted = true;
+  request.policy_change_succeeded = [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+  request.after = activation_observation(handle);
+  request.policy_after_change = request.after.policy;
+  if (!request.policy_change_succeeded ||
+      request.policy_after_change != static_cast<int>(NSApplicationActivationPolicyRegular)) {
+    error = "Cocoa test host could not adopt the regular activation policy"; return false;
+  }
+  if (!request.after.own_window || !request.after.visible || request.after.miniaturized) {
+    error = "Activation policy change lost this application's visible window"; return false;
   }
   // Direct view mouseDown:/mouseUp: calls do not perform the normal window
   // activation that precedes a physical click. Make that test setup explicit.
   [NSApp activateIgnoringOtherApps:YES];
   [parent makeKeyAndOrderFront:nil];
+  request.activation_requested = true;
+  request.after = activation_observation(handle);
   return true; // Request only; window_is_active must independently confirm it.
 }
 
-bool NativeInput::window_is_active(wm::NativeWindowHandle handle, std::string &error)
+bool NativeInput::window_is_active(wm::NativeWindowHandle handle,
+                                  WindowActivationObservation &observation, std::string &error)
 {
   error.clear();
-  if (![NSThread isMainThread] || handle.kind != wm::NativeWindowKind::Cocoa || !handle.value) {
+  observation = activation_observation(handle);
+  if (!observation.main_thread || !observation.valid_target) {
     error = "Invalid Cocoa activation observation target/thread"; return false;
   }
-  NSWindow *parent = (__bridge NSWindow *)handle.value;
-  if (![NSApp.windows containsObject:parent] || !parent.visible || parent.miniaturized) {
+  if (!observation.own_window || !observation.visible || observation.miniaturized) {
     error = "Activation observation lost this application's visible window"; return false;
   }
+  NSWindow *parent = (__bridge NSWindow *)handle.value;
   return NSApp.active && parent.keyWindow && NSApp.keyWindow == parent;
 }
 

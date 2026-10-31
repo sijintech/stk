@@ -66,6 +66,16 @@ Json media_json(const Media &media)
       {"viewport_size_css", {media.viewport_width, media.viewport_height}},
       {"navigation_generation", media.navigation_generation}};
 }
+#  ifdef __APPLE__
+Json activation_json(const reports_native_test::WindowActivationObservation &observed)
+{
+  return {{"policy", observed.policy}, {"main_thread", observed.main_thread},
+      {"valid_target", observed.valid_target}, {"own_window", observed.own_window},
+      {"app_active", observed.app_active}, {"window_key", observed.window_key},
+      {"exact_key_window", observed.exact_key_window}, {"visible", observed.visible},
+      {"miniaturized", observed.miniaturized}, {"can_become_key", observed.can_become_key}};
+}
+#  endif
 #endif
 
 void log_last_observation(const Json &result) noexcept
@@ -345,14 +355,40 @@ class Exercise {
   void activate_native_window()
   {
     std::string error;
-    require(native_input_.request_window_activation(window_.native_window_handle(), error), error);
-    wait([&] {
-      const bool active = native_input_.window_is_active(window_.native_window_handle(), error);
-      require(error.empty(), error);
-      return active;
-    }, "Explicit own-window activation before native media inputs", 5);
+    reports_native_test::WindowActivationRequest request;
+    reports_native_test::WindowActivationObservation last;
+    size_t observations = 0;
+    bool confirmed = false;
+    const auto start = Clock::now();
+    const auto record = [&] {
+      result_["native_window_activation_observation"] = {
+          {"before_request", activation_json(request.before)},
+          {"after_request", activation_json(request.after)},
+          {"final_observation", activation_json(last)},
+          {"policy_change_attempted", request.policy_change_attempted},
+          {"policy_change_succeeded", request.policy_change_succeeded},
+          {"policy_after_change", request.policy_after_change},
+          {"activation_requested", request.activation_requested}, {"confirmed", confirmed},
+          {"observation_count", observations}, {"deadline_seconds", 5},
+          {"elapsed_seconds", std::chrono::duration<double>(Clock::now() - start).count()}};
+      save();
+    };
+    try {
+      const bool requested = native_input_.request_window_activation(
+          window_.native_window_handle(), request, error);
+      last = request.after;
+      require(requested, error);
+      wait([&] {
+        ++observations;
+        const bool active = native_input_.window_is_active(window_.native_window_handle(), last, error);
+        require(error.empty(), error);
+        return active;
+      }, "Explicit own-window activation before native media inputs", 5);
+      confirmed = true;
+    }
+    catch (...) { record(); throw; }
     result_["native_window_activation"] = "Explicit request, then UI-loop observation of active application and exact key window; no key sent";
-    save();
+    record();
   }
 #  endif
   Media media(const std::string &session)
