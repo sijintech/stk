@@ -494,5 +494,70 @@ TEST(DocumentEvidence, WindowCaptureGeometryKeepsExtentAndPixelBudgetsWithoutSig
   EXPECT_FALSE(select(1040, 736, {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX},
       {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX}, {0, 0, 1, 1}, true));
 }
+
+TEST(DocumentEvidence, WindowCaptureContentUsesTheExactSmallerValidExtentWithoutPadding)
+{
+  using namespace capture_geometry;
+  // Observed 38a9fd43 WGC frame: pool/item/texture match WindowRect, while
+  // ContentSize matches DWM. This proves crop arithmetic, not OS pixel origin.
+  const Rect window{-8, 0, 1032, 736}, dwm{-1, 0, 1025, 729}, client{0, 31, 1024, 728};
+  const auto frame = select_frame(1026, 729, 1040, 736, 1040, 736, 1040, 736,
+                                  window, dwm, client, true);
+  ASSERT_TRUE(frame);
+  EXPECT_EQ(frame->pool.origin, Origin::FullWindowRect);
+  EXPECT_EQ(frame->content.origin, Origin::DwmVisibleBounds);
+  EXPECT_EQ(frame->content.left, 1u); EXPECT_EQ(frame->content.top, 31u);
+  EXPECT_EQ(frame->content.right, 1025u); EXPECT_EQ(frame->content.bottom, 728u);
+  EXPECT_EQ(frame->content.right - frame->content.left, 1024u);
+  EXPECT_EQ(frame->content.bottom - frame->content.top, 697u);
+  EXPECT_GT(frame->pool.right, 1026u);  // Allocation crop crosses valid content.
+  EXPECT_LE(frame->content.right, 1026u); EXPECT_LE(frame->content.bottom, 729u);
+  const auto full = select_frame(1040, 736, 1040, 736, 1040, 736, 1040, 736,
+                                 window, dwm, client, true);
+  ASSERT_TRUE(full);
+  EXPECT_EQ(full->content.origin, Origin::FullWindowRect);
+}
+
+TEST(DocumentEvidence, WindowCaptureContentRejectsUnmatchedClippedAndUnstableExtents)
+{
+  using namespace capture_geometry;
+  const Rect window{-8, 0, 1032, 736}, dwm{-1, 0, 1025, 729}, client{0, 31, 1024, 728};
+  EXPECT_FALSE(select_frame(1027, 729, 1040, 736, 1040, 736, 1040, 736, window, dwm, client, true));
+  EXPECT_FALSE(select_frame(1026, 730, 1040, 736, 1040, 736, 1040, 736, window, dwm, client, true));
+  EXPECT_FALSE(select_frame(0, 729, 1040, 736, 1040, 736, 1040, 736, window, dwm, client, true));
+  EXPECT_FALSE(select_frame(-1, 729, 1040, 736, 1040, 736, 1040, 736, window, dwm, client, true));
+  EXPECT_FALSE(select_frame(1026, 729, 1026, 729, 1040, 736, 1040, 736, window, dwm, client, true));
+  EXPECT_FALSE(select_frame(1040, 736, 1026, 729, 1026, 729, 1026, 729, window, dwm, client, true));
+  EXPECT_FALSE(select_frame(1026, 729, 1040, 736, 1040, 736, 1025, 736, window, dwm, client, true));
+  EXPECT_FALSE(select_frame(1026, 729, 1040, 736, 1040, 736, 1040, 728, window, dwm, client, true));
+  EXPECT_FALSE(select_frame(1026, 729, 1040, 736, 1040, 736, 1040, 736, window, dwm, client, false));
+  EXPECT_FALSE(select_frame(1026, 729, 1040, 736, 1040, 736, 1040, 736,
+                            window, dwm, {-2, 31, 1024, 728}, true));
+  EXPECT_FALSE(select_frame(1026, 729, 1040, 736, 1040, 736, 1040, 736,
+                            {-8, 0, 1024, 736}, dwm, client, true));
+}
+
+TEST(DocumentEvidence, WindowCaptureContentKeepsPhysicalNegativeOriginsAndAllocationBudgets)
+{
+  using namespace capture_geometry;
+  const auto negative = select_frame(1026, 729, 1040, 736, 1040, 736, 1040, 736,
+      {-2048, -1000, -1008, -264}, {-2041, -1000, -1015, -271}, {-2040, -969, -1016, -272}, true);
+  ASSERT_TRUE(negative);
+  EXPECT_EQ(negative->content.left, 1u); EXPECT_EQ(negative->content.top, 31u);
+  EXPECT_EQ(negative->content.right - negative->content.left, 1024u);
+  const auto scaled = select_frame(2052, 1458, 2080, 1472, 2080, 1472, 2080, 1472,
+      {-16, 0, 2064, 1472}, {-2, 0, 2050, 1458}, {0, 62, 2048, 1456}, true);
+  ASSERT_TRUE(scaled);
+  EXPECT_EQ(scaled->content.left, 2u); EXPECT_EQ(scaled->content.top, 62u);
+  EXPECT_EQ(scaled->content.right - scaled->content.left, 2048u);
+  const Rect small{0, 0, 10, 10};
+  EXPECT_TRUE(select_frame(10, 10, 10, 10, 10, 10, 8192, 2048, small, small, small, true));
+  EXPECT_FALSE(select_frame(10, 10, 10, 10, 10, 10, 8192, 2049, small, small, small, true));
+  EXPECT_FALSE(select_frame(10, 10, 10, 10, 10, 10, 8193, 10, small, small, small, true));
+  EXPECT_FALSE(select_frame(10, 10, 10, 10, 10, 10, UINT32_MAX, UINT32_MAX, small, small, small, true));
+  EXPECT_FALSE(select_frame(INT32_MAX, INT32_MAX, INT32_MAX, INT32_MAX,
+      INT32_MAX, INT32_MAX, UINT32_MAX, UINT32_MAX,
+      {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX}, small, small, true));
+}
 }  // namespace
 }  // namespace stk::document_preview

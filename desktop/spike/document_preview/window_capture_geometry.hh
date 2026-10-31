@@ -44,4 +44,34 @@ constexpr std::optional<Geometry> select(int item_width, int item_height, Rect w
       uint32_t(int64_t(client.top) - frame.top), uint32_t(int64_t(client.right) - frame.left),
       uint32_t(int64_t(client.bottom) - frame.top)};
 }
+
+struct FrameGeometry {
+  Geometry pool{};
+  Geometry content{};
+};
+// WGC ContentSize describes valid pixels inside the fixed-size pool surface.
+// Select its origin independently from the allocation's origin; no pixel outside
+// ContentSize may be copied, even when the surface's allocation is larger.
+// Extent matching is still only a geometry candidate: OS pixel/cycle acceptance
+// must verify the selected content origin on the target Windows environment.
+constexpr std::optional<FrameGeometry> select_frame(
+    int content_width, int content_height, int item_width, int item_height,
+    int pool_width, int pool_height, uint32_t texture_width, uint32_t texture_height,
+    Rect window, Rect dwm, Rect client, bool physical_coordinates)
+{
+  if (item_width != pool_width || item_height != pool_height ||
+      !contains(window, dwm) || texture_width == 0 || texture_height == 0 ||
+      texture_width > 8192 || texture_height > 8192 ||
+      uint64_t(texture_width) * texture_height > 16 * 1024 * 1024 ||
+      content_width <= 0 || content_height <= 0 ||
+      content_width > pool_width || content_height > pool_height ||
+      uint64_t(content_width) > texture_width || uint64_t(content_height) > texture_height) {
+    return std::nullopt;
+  }
+  const auto pool = select(item_width, item_height, window, dwm, client, physical_coordinates);
+  const auto content = select(content_width, content_height, window, dwm, client, physical_coordinates);
+  if (!pool || !content || content->right > uint32_t(content_width) ||
+      content->bottom > uint32_t(content_height)) return std::nullopt;
+  return FrameGeometry{*pool, *content};
+}
 } // namespace stk::document_preview::capture_geometry

@@ -297,7 +297,7 @@ class Capture final : public WindowEvidenceCapture {
       }
       geometry_ = *geometry;
       backend_ += geometry_.origin == capture_geometry::Origin::FullWindowRect ?
-          ";capture_origin=window_rect" : ";capture_origin=dwm_visible";
+          ";pool_origin=window_rect" : ";pool_origin=dwm_visible";
       backend_ += ";physical_dpi=" + std::to_string(dpi_.dpi);
       // Capture has its own D3D device; the STK rendering backend remains OpenGL.
       // Microsoft supports WARP through this same API. WGC support and actual pixels still
@@ -365,29 +365,39 @@ class Capture final : public WindowEvidenceCapture {
       ++frames_;
       const auto size = frame.ContentSize();
       const auto current_item = item_.Size();
-      if (size.Width != current_item.Width || size.Height != current_item.Height) {
-        // Keep rejecting the mismatch. Record only this window's numeric
-        // geometry so a later target-platform run can distinguish stale frames,
-        // content extents and pool extents without guessing a border offset.
-        io::Json texture_details = {{"available", false}};
-        try {
-          const auto access = frame.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
-          winrt::com_ptr<ID3D11Texture2D> texture;
-          winrt::check_hresult(access->GetInterface(__uuidof(ID3D11Texture2D), texture.put_void()));
-          D3D11_TEXTURE2D_DESC desc{};
-          texture->GetDesc(&desc);
-          texture_details = {{"available", true}, {"size", {desc.Width, desc.Height}},
-                             {"format", unsigned(desc.Format)}};
-        }
-        catch (...) { /* Diagnostics must preserve the original rejected condition. */ }
+      const auto access = frame.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+      winrt::com_ptr<ID3D11Texture2D> texture;
+      winrt::check_hresult(access->GetInterface(__uuidof(ID3D11Texture2D), texture.put_void()));
+      D3D11_TEXTURE2D_DESC desc{};
+      texture->GetDesc(&desc);
+      // A WGC pool surface retains its allocation size. Only ContentSize is
+      // defined when the frame content is smaller; an allocation-origin crop
+      // can otherwise copy undefined padding. Both origins must still match
+      // exact observed physical rectangles, with no guessed border adjustment.
+      const auto geometry = capture_geometry::select_frame(size.Width, size.Height,
+          current_item.Width, current_item.Height, pool_width_, pool_height_, desc.Width, desc.Height,
+          geometry_rect(current_window), geometry_rect(current_outer), geometry_rect(current_client),
+          current_dpi.physical());
+      const auto content = capture_geometry::select(size.Width, size.Height,
+          geometry_rect(current_window), geometry_rect(current_outer), geometry_rect(current_client),
+          current_dpi.physical());
+      const auto origin_name = [](capture_geometry::Origin origin) {
+        return origin == capture_geometry::Origin::FullWindowRect ? "window_rect" : "dwm_visible";
+      };
+      if (desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM || !geometry) {
         const io::Json details = {
             {"pool_initial_size", {pool_width_, pool_height_}},
             {"item_size", {current_item.Width, current_item.Height}},
             {"frame_content_size", {size.Width, size.Height}},
             {"content_minus_item", {int64_t(size.Width) - current_item.Width,
                                      int64_t(size.Height) - current_item.Height}},
-            {"texture", std::move(texture_details)},
-            {"crop", {geometry_.left, geometry_.top, geometry_.right, geometry_.bottom}},
+            {"texture", {{"available", true}, {"size", {desc.Width, desc.Height}},
+                         {"format", unsigned(desc.Format)}}},
+            {"pool_origin", origin_name(geometry_.origin)},
+            {"content_origin", content ? origin_name(content->origin) : "unmatched"},
+            {"pool_crop", {geometry_.left, geometry_.top, geometry_.right, geometry_.bottom}},
+            {"content_crop", content ? io::Json::array({content->left, content->top, content->right, content->bottom}) :
+                                       io::Json(nullptr)},
             {"window_rect", {current_window.left, current_window.top, current_window.right, current_window.bottom}},
             {"dwm_outer", {current_outer.left, current_outer.top, current_outer.right, current_outer.bottom}},
             {"client_screen", {current_client.left, current_client.top, current_client.right, current_client.bottom}},
@@ -395,17 +405,9 @@ class Capture final : public WindowEvidenceCapture {
             {"window_dpi_awareness", current_dpi.window_awareness}, {"polls", polls_}, {"frames", frames_},
             {"elapsed_ms", std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - started_).count()}};
-        throw std::runtime_error("STK capture geometry changed; " + details.dump());
+        throw std::runtime_error("STK capture content geometry or texture is not bounded; " + details.dump());
       }
-      const auto access = frame.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
-      winrt::com_ptr<ID3D11Texture2D> texture;
-      winrt::check_hresult(access->GetInterface(__uuidof(ID3D11Texture2D), texture.put_void()));
-      D3D11_TEXTURE2D_DESC desc{};
-      texture->GetDesc(&desc);
-      if (desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM || desc.Width < UINT(size.Width) ||
-          desc.Height < UINT(size.Height)) {
-        throw std::runtime_error("Windows capture texture format or extent changed");
-      }
+      out.backend += std::string(";content_origin=") + origin_name(geometry->content.origin);
       desc.Width = UINT(client_.right - client_.left);
       desc.Height = UINT(client_.bottom - client_.top);
       desc.MipLevels = 1; desc.ArraySize = 1;
@@ -413,7 +415,8 @@ class Capture final : public WindowEvidenceCapture {
       desc.Usage = D3D11_USAGE_STAGING;
       desc.BindFlags = 0; desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ; desc.MiscFlags = 0;
       winrt::check_hresult(device_->CreateTexture2D(&desc, nullptr, staging.put()));
-      D3D11_BOX box{geometry_.left, geometry_.top, 0, geometry_.right, geometry_.bottom, 1};
+      D3D11_BOX box{geometry->content.left, geometry->content.top, 0,
+                    geometry->content.right, geometry->content.bottom, 1};
       context_->CopySubresourceRegion(staging.get(), 0, 0, 0, 0, texture.get(), 0, &box);
       D3D11_MAPPED_SUBRESOURCE data{};
       winrt::check_hresult(context_->Map(staging.get(), 0, D3D11_MAP_READ, 0, &data));
