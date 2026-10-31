@@ -439,7 +439,8 @@ class Exercise {
         {"key", name}, {"delivery", delivery}, {"before", media_json(before)}});
     save(); process();
   }
-  Media fit_decoded_media(app::EditorArea &area, const std::string &session, Media observed)
+  Media fit_decoded_media(app::EditorArea &area, app::EditorArea &viewer_area,
+                          const std::string &session, Media observed)
   {
     // A decoded HTML video can be taller than its preload=none placeholder.
     // Resize the actual report/Viewer divider while paused; keep the renderer,
@@ -464,24 +465,33 @@ class Exercise {
       const double pixels_per_css = viewport->rect.w / observed.viewport_width;
       const int shrink = int(std::ceil((observed.viewport_width - target_width) * pixels_per_css));
       auto *row = area.node() ? area.node()->parent : nullptr;
-      require(row && row->dir == wm::SplitDir::Horizontal && row->children.size() == 2 &&
-          row->children[0].get() == area.node(), "Expected report beside retained Viewer");
+      require(row && row->dir == wm::SplitDir::Horizontal && row->children.size() == 2,
+          "Expected report and retained Viewer in the same two-child row");
+      const bool report_left = row->children[0].get() == area.node();
+      require(row->children[report_left ? 0 : 1].get() == area.node() &&
+          row->children[report_left ? 1 : 0]->area.get() == &viewer_area &&
+          viewer_area.editor().type().id == app::kEditorViewer,
+          "The report divider must retain the original adjacent Viewer");
       const auto splitter = std::find_if(screen_.splitters().begin(), screen_.splitters().end(),
           [row](const wm::Splitter &s) { return s.node == row && s.index == 0; });
       require(splitter != screen_.splitters().end(), "Report/Viewer divider must exist");
       const auto before = area.rect();
+      const auto viewer_before = viewer_area.rect();
+      const int delta = report_left ? -shrink : shrink;
       const int from_x = (splitter->rect.xmin + splitter->rect.xmax) / 2;
       const int y = (splitter->rect.ymin + splitter->rect.ymax) / 2;
       wm::Event e; e.x = from_x; e.y = y; e.type = wm::EventType::MouseMove; event(e);
       e.type = wm::EventType::MouseDown; e.button = wm::MouseButton::Left; event(e); frame();
       require(screen_.capture() == wm::Screen::Capture::Splitter, "Mouse must capture report/Viewer divider");
-      e.type = wm::EventType::MouseMove; e.x -= shrink; event(e); frame();
+      e.type = wm::EventType::MouseMove; e.x += delta; event(e); frame();
       e.type = wm::EventType::MouseUp; event(e); frame();
       ++layout_drags;
-      require(screen_.capture() == wm::Screen::Capture::None && area.rect().width() < before.width(),
-          "Actual divider drag must narrow the report and release capture");
+      require(screen_.capture() == wm::Screen::Capture::None && area.rect().width() < before.width() &&
+          viewer_area.rect().width() > viewer_before.width(),
+          "Actual divider drag must narrow the report, enlarge the retained Viewer and release capture");
       result_["decoded_media_layout_drags"].push_back({{"before", media_json(observed)},
           {"shrink_framebuffer_pixels", shrink}, {"requested_viewport_css_width", target_width},
+          {"report_child_index", report_left ? 0 : 1}, {"divider_delta_framebuffer_pixels", delta},
           {"report_width_before", before.width()}, {"report_width_after", area.rect().width()}});
       save();
       wait([&] { const auto *focus = widget("reports_document_focus");
@@ -903,7 +913,7 @@ raise SystemExit(main())
       require(red.current_time > 0.05 && red.current_time < 2.6 && !red.ended,
           "Explicit pause must stop actual playback before the blue/ended segment");
       ui.held_media(cycle, "explicit-pause", session, red, 0.25);
-      red = ui.fit_decoded_media(*area, session, red);
+      red = ui.fit_decoded_media(*area, *viewer_area, session, red);
       bounds = ui.widget("reports_document_viewport")->rect;
       auto rectangle = ui.media_rectangle(bounds, red);
       ui.media_capture(cycle, "played-red-paused", 1, rectangle, red, session);
