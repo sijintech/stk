@@ -192,6 +192,8 @@ class Bridge:
         # Materials prediction models (S3): datasets, training on this computer, a registry and prediction.
         from suan.materials.service import MaterialsService
         self.materials = MaterialsService(self.state_dir / "materials")
+        from .federation import FederationOwner
+        self.federation = FederationOwner(self.state_dir, self.projects, self.connections)
         # Optional software modules (engines and modeling tools): detected, or installed from conda-forge (E0b).
         from suan.modules import Modules
         self.modules = Modules(policy=self.projects.models.policy, emit=self.emit)
@@ -440,6 +442,15 @@ class Bridge:
             "ui.detach": lambda p, c: self.ui.detach(p),
             "ui.reply": lambda p, c: self.ui.reply(p),
         }
+        from .federation import READ_METHODS, WRITE_METHODS
+        for action in ("prepare", "get", "list", "register"):
+            self.methods["project.federation." + action] = (
+                lambda p, c, action=action: self.federation_call(action, p))
+        # Raw registration bytes come only from a reviewed private project plan.
+        # Owner actions are desktop-only, outside script_catalog and agent tools.
+        for action in READ_METHODS | (WRITE_METHODS - {"datasets.register"}) | {"operations.local"}:
+            self.methods["federation.owner." + action] = (
+                lambda p, c, action=action: self.federation_call(action, p))
         missing = set(self.methods) ^ set(bridge_schema.method_names())
         if missing:
             self.state_lock.release()
@@ -610,6 +621,11 @@ class Bridge:
         except OSError as exc:
             raise BridgeError("unavailable", f"The modules folder cannot be used: {exc.strerror or type(exc).__name__}",
                               retryable=False) from None
+
+    def federation_call(self, action, params):
+        if self.closing.is_set():
+            raise BridgeError("shutting_down", "The bridge is shutting down")
+        return self.federation.call(action, params)
 
     def materials_call(self, action, params):
         """Materials models (S3, docs/design/materials-models-s3.md); everything runs on this computer."""

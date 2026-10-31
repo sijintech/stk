@@ -198,6 +198,7 @@ inline constexpr const char *kEditorTable = "table";
 inline constexpr const char *kEditorFiles = "files";
 inline constexpr const char *kEditorReports = "reports";
 inline constexpr const char *kEditorMaterials = "materials";
+inline constexpr const char *kEditorFederation = "federation";
 
 /** Registers the built-in desktop editors. */
 void register_builtin_editors(EditorRegistry &registry);

@@ -225,6 +225,31 @@ DESKTOP_ONLY = {"project.agent.decide": ("project_edit", "a person approves a dr
                 "modules.cancel": ("project_edit", "a person installs software on this computer"),
                 "modules.remove": ("project_edit", "a person removes software from this computer")}
 
+# Node-owner authority is separate from Hub pairing and the S2c agent decision.
+# These methods are deliberately absent from the Python script catalog too.
+DESKTOP_ONLY.update({
+    "project.federation.prepare": ("prepare_run", "a person freezes explicit private project-row selections"),
+    "project.federation.get": ("read", "desktop owner plan metadata only; not an agent tool"),
+    "project.federation.list": ("read", "desktop owner plan metadata only; not an agent tool"),
+    "project.federation.register": ("external_network", "a person registers frozen rows with a trusted Runtime owner"),
+    "federation.owner.info": ("external_network", "a person observes the configured Runtime owner authority"),
+    "federation.owner.operations.get": ("external_network", "observes an original owner operation without replay"),
+    "federation.owner.operations.local": ("read", "desktop private intent recovery list; not an agent tool"),
+    "federation.owner.operations.recover": ("external_network", "a person explicitly verifies an uncertain original owner operation"),
+    "federation.owner.datasets.list": ("external_network", "reads registered private dataset metadata as node owner"),
+    "federation.owner.grants.approve": ("external_network", "a person grants exact dataset/run training consent"),
+    "federation.owner.grants.revoke": ("external_network", "a person withdraws node-local consent"),
+    "federation.owner.grants.list": ("external_network", "reads node-owner consent metadata"),
+    "federation.owner.audit.list": ("external_network", "reads exact per-round outgoing update audit"),
+    "federation.owner.candidates.get": ("external_network", "reads an unadmitted linear candidate as node owner"),
+    "federation.owner.evaluations.prepare": ("external_network", "a person freezes held-out evaluation and explicit thresholds"),
+    "federation.owner.evaluations.evaluate": ("submit_run", "a person explicitly evaluates the frozen candidate"),
+    "federation.owner.evaluations.get": ("external_network", "observes a recorded evaluation without computing"),
+    "federation.owner.models.list": ("external_network", "reads the independent linear registry as node owner"),
+    "federation.owner.models.admit": ("external_network", "a person admits a passed frozen candidate"),
+    "federation.owner.models.activate": ("external_network", "a person explicitly activates or rolls back an admitted version"),
+})
+
 # The operations each tool's implementation performs (by their store equivalents); all must be at agent levels.
 TOOL_USES = {
     "project_outline": [],  # its own structure read (no values): see suan/agent/tools.py

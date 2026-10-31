@@ -13,7 +13,7 @@ import uuid
 
 from ..monitor.events import EVENTS_FILE
 from ..monitor.reader import monitor_summary, read_events
-from .common import atomic_json, inside, now, read_json, sha256
+from .common import atomic_json, federation_owner_config, inside, now, read_json, sha256
 from .models import Artifact, TaskSpec, Workspace, TERMINAL, relative_path
 from .store import Store
 
@@ -25,6 +25,15 @@ class RuntimeService:
         self.config = config
         self.store = Store(config["state_dir"])
         self.lock = threading.RLock()
+        self.federation_owner = None
+        roots = federation_owner_config(config)
+        if roots is not None:
+            from suan.federation.node import NodeFederationService
+            from suan.federation.owner import NodeOwnerService
+            # This exact explicit node root must also be used by suan-node.
+            # Constructing the facade does not create directories or start work.
+            node = NodeFederationService(self, roots[0], None, workspace_root=config["workspace_root"])
+            self.federation_owner = NodeOwnerService(node, coordinator_root=roots[1])
 
     def workspace_dir(self, workspace_id):
         self.store.workspace(workspace_id)

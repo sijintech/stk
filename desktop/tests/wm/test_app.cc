@@ -402,7 +402,8 @@ TEST(App, EditorKeysExistInEveryCatalog)
   {
     keys.emplace_back(app::bridge_state_key(st));
   }
-  EXPECT_EQ(f.shell->registry().types().size(), 18u);
+  EXPECT_EQ(f.shell->registry().types().size(), 19u);
+  EXPECT_NE(f.shell->registry().find(app::kEditorFederation), nullptr);
   ASSERT_NE(f.shell->registry().find(app::kEditorReports), nullptr);
   ASSERT_NE(f.shell->registry().find(app::kEditorMaterials), nullptr);
   for (const std::string &k : keys) {

@@ -115,13 +115,44 @@ def require_linux_server():
             "or set STK_RUNTIME_URL and STK_RUNTIME_TOKEN.")
 
 
-def init_config(state_dir, workspace_root=None, port=8765, concurrency=1):
+def federation_owner_config(config):
+    """Resolve only operator-selected roots, never an HTTP request or Hub action."""
+    node, coordinator = config.get("federation_node_root"), config.get("federation_coordinator_root")
+    if node is None:
+        if coordinator is not None:
+            raise ValueError("Federation coordinator root requires an owner node root")
+        return None
+    public = Path(config["workspace_root"]).absolute()
+    result = []
+    for value in (node, coordinator):
+        if value is None:
+            result.append(None)
+            continue
+        if type(value) is not str or not Path(value).is_absolute() or ".." in Path(value).parts or "\0" in value:
+            raise ValueError("Federation owner roots must be fixed absolute private directories")
+        root = Path(value)
+        if root.is_relative_to(public) or public.is_relative_to(root):
+            raise ValueError("Federation owner and Runtime workspace roots must be disjoint")
+        for parent in (root, *root.parents):
+            if parent.is_symlink() or (parent / "project.sqlite3").exists():
+                raise ValueError("Federation owner roots must be outside linked or shared project directories")
+        result.append(str(root))
+    return tuple(result)
+
+
+def init_config(state_dir, workspace_root=None, port=8765, concurrency=1, *,
+                federation_node_root=None, federation_coordinator_root=None):
     require_linux_server()
     state = Path(state_dir).expanduser().resolve()
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     with instance_lock(state / "config.lock"):
         existing = read_json(state / "config.json")
         if existing:
+            requested = {"federation_node_root": federation_node_root,
+                         "federation_coordinator_root": federation_coordinator_root}
+            if any(value is not None and str(Path(value).absolute()) != existing.get(key)
+                   for key, value in requested.items()):
+                raise ValueError("Existing Runtime owner roots require explicit local configuration and service restart")
             return existing
         if not 0 <= port <= 65535 or concurrency < 1:
             raise ValueError("Invalid port or concurrency")
@@ -130,6 +161,11 @@ def init_config(state_dir, workspace_root=None, port=8765, concurrency=1):
         config = {"state_dir": str(state), "workspace_root": str(root), "port": port,
                   "concurrency": concurrency, "poll_interval": 1.0, "scheduler_interval": 10.0,
                   "token": secrets.token_urlsafe(32), "python": sys.executable}
+        for name, value in (("federation_node_root", federation_node_root),
+                            ("federation_coordinator_root", federation_coordinator_root)):
+            if value is not None:
+                config[name] = str(Path(value).expanduser().absolute())
+        federation_owner_config(config)
         atomic_json(state / "config.json", config)
         return config
 

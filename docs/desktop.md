@@ -250,6 +250,19 @@ vLLM 档（GPU 服务器上的不量化模型）目前只评估能否放下，�
 训练记录和模型属于本机后台服务；工作空间保存本地表单稿，不迁移这些任务/权重。合成链路通过不代表真实材料性质有效。
 接口、任务状态和解释边界见[训练契约](specs/materials-training-1.md)，实际平台验证见[运行验收](runtime-validation.md)。
 
+## 联邦协作：节点所有者操作
+
+从区域类型菜单选择 **联邦协作**，明确读取并选择已有直连或 SSH Runtime。节点须先按
+[联邦指南](federation.md)配置固定私有目录；Hub 配对不授予 owner 权限。
+在项目表中选择数值特征、目标和互斥的训练/留出行，冻结并复核数据卡后再明确登记。
+**授权与审计** 页按固定 run、训练定义和公钥身份明确批准或撤回，读取审计不会发送更新。
+
+**评估与版本** 页读取已有候选，选择留出数据并逐目标填写原单位的 RMSE 上限；表单不提供科学默认阈值。
+明确准备和评估后，只有绝对门槛及冻结比较基准均通过才可准入。准入只登记版本，**启用**和回退分别明确执行。
+原始数值不出现在界面回执、普通工作空间或 Hub CAS；线性模型与材料曲线 MLP 分开。
+丢回复后查询原操作，不自动重发；确定拒绝后需重新读取 owner 状态再提交新动作。
+工作空间只保存本地稿，重开不训练、发送或启用模型。实际验证及平台限制见[运行验收](runtime-validation.md)。
+
 ## 安装
 
 桌面程序与 Python 部分分开安装：程序包里**没有** Python（D1 不内置解释器），桥、本地求值和本机 Runtime
@@ -651,6 +664,22 @@ with gaps for missing observations. Admission requires the absolute gate and no 
 baseline; a manual version switch during training is preserved. The Models section supports explicit rollback.
 Workspaces preserve local form drafts, not service-local tasks or model weights. Synthetic data validate the software
 chain only. See the [training contract](specs/materials-training-1.md) and [validation record](runtime-validation.md).
+
+### Federation: node-owner actions
+
+Choose **Federation** from an area's editor-type menu, then explicitly load and select an existing direct or SSH
+Runtime. Its fixed private roots must already be configured as described in the [federation guide](federation.md).
+Hub pairing does not grant owner authority. Select numeric features, targets and disjoint training/held-out rows,
+freeze the inputs, review the data card, then explicitly register it. Consent and audit bind a run, training spec
+and verified public identities; reading audit never sends an update.
+
+Read an existing candidate and supply each target's RMSE limit in its original units; thresholds start empty.
+Explicit evaluation compares the frozen candidate and baseline on the same held-out data. Admission registers
+a passing version; activation and rollback are separate explicit actions. Linear bundles remain separate from
+Materials curve-MLP weights. Lost replies are queried under their original operation identity, never resent
+automatically. After a definite rejection, read fresh owner state before a new action. Workspaces preserve form
+drafts without training, sending or activating on reopen. See the [validation record](runtime-validation.md) for
+the actual test scope and remaining platform limits.
 
 ### Install
 

@@ -3,7 +3,8 @@
 当前有模型／权重差校验、逐数据集逐run本机授权、更新审计和显式单次发送，
 以及固定ClientApp/Runtime训练、STK出站WSS与专用blob、持久协调轮次和独立Flower聚合。
 [契约](specs/stk-federation-1.md)规定字段、额度与恢复。本机三个独立Runtime的真实TCP/WSS多轮
-已验，桌面授权/审计与模型准入、跨站部署和完整S4仍待完成。
+已验。新增Runtime owner管理、独立线性评估/版本库及桌面入口，验证范围见
+[运行验收](runtime-validation.md)；跨平台UI、跨站部署和完整S4须分别验收。
 读取、重开或恢复不会训练、发送或登记模型。
 
 ## 独立算法环境
@@ -13,6 +14,46 @@
 该聚合适配器不需要Torch、Ray或Flower服务，使用两项版本绑定的内部辅助接口；升级须重新验证。
 `FlowerAggregator`接收明确的Python路径，构造不启动；`aggregate`才启动一次有限聚合。
 遥测与更新检查在导入前关闭。结果只是候选，仍须独立评估、明确准入与登记。
+
+## 桌面所有者工作流
+
+“联邦协作”页面复用已经配置的直连或SSH Runtime连接；Hub配对不授予节点owner权限。
+首次配置Linux Runtime时，运维显式选择节点及协调端私有目录，例如：
+
+```bash
+suan server --state-dir /absolute/runtime-state init \
+  --federation-node-root /absolute/node-state/federation \
+  --federation-coordinator-root /absolute/coordinator-state
+```
+
+节点目录必须与 `suan-node run --state-dir /absolute/node-state` 实际使用的 `federation` 子目录相同，
+并位于Runtime工作区、共享项目和链接目录之外。协调端目录应是持久
+`FederationCoordinator` 保存run/round的私有根。已有Runtime不会通过重复init悄悄改变这些根；
+配置更改须由运维在本机明确完成并重启服务。未配置该能力时，health不宣布`federation_owner`。
+远端仍通过现有SSH隧道访问回环API；请求不接收root、路径、模块、argv或模型端点设置。
+
+1. 在已打开项目中选择数值或整数列作为特征与目标，再明确选择非空、互不重叠的训练和留出行。
+   首批合计最多1000行、64特征和16目标。单位保持原标签，未知为`unspecified`，不自动换算。
+2. 点击“准备”只冻结桥私有目录中的精确选择、数值capsule和数据卡；检查字段顺序、单位、
+   数据集/来源SHA及样本数后，再明确登记到所选Runtime。原始x/y不写共享项目、普通workspace、Hub CAS或界面回执。
+   capsule使用f64；不能精确表示为f64的整数被拒绝，不静默舍入。
+3. 所有者核对run、协调方/参与者公钥身份、训练定义和轮数后明确授权；可显式撤回并查看逐轮外发审计。
+   公钥身份为64位小写hex，与Hub的32位设备ID不同。公开数据标记不能替代该授权。
+4. 按固定run/round读取未准入候选，选择已经登记的留出数据，并为每个目标明确输入带原单位的RMSE上限。
+   准备评估冻结候选/base/留出字节、当前活动版本与generation；明确评估才计算，不重新训练。
+5. 逐目标绝对门槛和“不差于冻结比较基准”均通过后，才允许明确准入版本；首次无活动模型时比较基准为本轮base。
+   **准入只登记版本，活动模型保持不变。** 明确“启用”才切换活动版本；回退同样是单独明确操作，generation拒绝ABA。
+
+线性联邦版本库与Materials曲线MLP分离，不能把`candidate.bin`当作`model.pt`使用。
+行UUID互斥只证明该行划分，不证明材料、样品祖先或跨节点的科学独立性。
+本机合成候选通过测试不构成材料模型精度结论。
+
+每个owner写入在HTTP前保存完整原请求、operation UUID与CAS。丢失回复后在原连接查询原ID；
+局部历史列表可在离线时读取，重开不重发。明确恢复只核实原操作，登记中断时可补齐原两份capsule的缺失发布；
+不重新训练、重新发送、重新授权或重新准入。完成回执不会被晚到的uncertain观察覆盖。
+只有经原请求绑定核验的“保留前拒绝”凭据才能解除拒绝状态；普通错误或查不到原ID不证明未执行。
+桥保留最多128个计划、4096个操作和64MiB私有状态；到上限明确拒绝新写入，不自动删除身份以便重用。
+这些桌面操作不进入Python脚本目录或S2c智能体工具集。
 
 ## 本机所有者授权
 

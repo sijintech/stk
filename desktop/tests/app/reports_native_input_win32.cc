@@ -158,8 +158,13 @@ bool send(const Target &target, UINT message, WPARAM wparam, LPARAM lparam, std:
   // This API may return zero without setting LastError. Reset it immediately before the
   // unchanged bounded send, then capture it before any identity/geometry diagnostic API.
   SetLastError(ERROR_SUCCESS);
+  // WebView2's cross-process key handler may synchronously ask its owning STA
+  // to process a message. SMTO_BLOCK prevents that host-side dispatch; this is
+  // a possible cause of the observed timeout with the exact child still attached.
+  // Keep the same 2s deadline and synchronous result, but permit those sent
+  // requests to run (SMTO_NORMAL). This does not post global keyboard input.
   const auto sent = SendMessageTimeoutW(target.child, message, wparam, lparam,
-                                       SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT, 2000, &ignored);
+                                       SMTO_ABORTIFHUNG | SMTO_ERRORONEXIT, 2000, &ignored);
   const DWORD send_error = GetLastError();
   if (!sent) {
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -296,7 +301,7 @@ bool NativeInput::key_document(wm::NativeWindowHandle handle, document_preview::
     return false;
   }
   if (!delivered) { return false; }
-  delivery = "Win32 local SendMessageTimeout WM_KEYDOWN/WM_KEYUP" + identity(target) +
+  delivery = "Win32 local SendMessageTimeout WM_KEYDOWN/WM_KEYUP; sent host requests permitted" + identity(target) +
       "; native_key=" + std::to_string(native_key) + "; key=" + std::to_string(static_cast<int>(key)) +
       "; no global input injection";
   return true;

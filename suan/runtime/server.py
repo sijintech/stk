@@ -57,11 +57,34 @@ class Handler(BaseHTTPRequestHandler):
             raw = self.rfile.read(length)
             if len(raw) != length:
                 raise ValueError("Incomplete request body")
+            url = urlsplit(self.path)
+            parts = [unquote(p) for p in url.path.strip("/").split("/")]
+            if parts[:3] == ["v1", "federation", "owner"]:
+                from suan.federation.owner import OwnerConflict, OwnerRequestRejected, decode_request
+                try:
+                    if (self.command != "POST" or len(parts) != 4 or url.query
+                            or self.server.service.federation_owner is None):
+                        self.respond({"error": "Route not found"}, 404)
+                    else:
+                        # This must precede generic json.loads: duplicate keys,
+                        # nonfinite values and private errors cannot escape here.
+                        result = self.server.service.federation_owner.call(parts[3], decode_request(raw))
+                        self.respond(result)
+                except OwnerRequestRejected as exc:
+                    self.respond({"error": "Federation owner request rejected before reservation",
+                                  "rejection": exc.rejection}, 409)
+                except OwnerConflict:
+                    self.respond({"error": "Federation owner identity or original request conflicts"}, 409)
+                except (ValueError, TypeError):
+                    self.respond({"error": "Invalid federation owner request or unavailable private evidence"}, 400)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                except Exception:
+                    self.respond({"error": "Federation owner operation requires evidence review"}, 500)
+                return
             data = json.loads(raw) if raw and self.command != "PUT" else {}
             if not isinstance(data, dict):
                 raise ValueError("Request JSON must be an object")
-            url = urlsplit(self.path)
-            parts = [unquote(p) for p in url.path.strip("/").split("/")]
             query = parse_qs(url.query)
             value = lambda name, default="": query.get(name, [default])[0]
             service = self.server.service
@@ -71,7 +94,7 @@ class Handler(BaseHTTPRequestHandler):
                 from .models import RESOURCES
                 self.respond({"api_version": 1, "status": "ok", "backends": ["local", "pbs", "slurm"],
                               "resources": sorted(RESOURCES), "argv_tokens": ["{python}", "{ranks}", "{threads_per_rank}", "{nodes}"],
-                              "features": ["events", "input_checksums"],
+                              "features": ["events", "input_checksums"] + (["federation_owner"] if service.federation_owner is not None else []),
                               "supervisor_running": alive(read_json(Path(self.server.config["state_dir"]) / "supervisor.pid"))})
             elif parts == ["v1", "workspaces"] and method in {"GET", "POST"}:
                 self.respond(service.store.workspaces() if method == "GET" else service.create_workspace(data["name"], data.get("idempotency_key")))

@@ -30,9 +30,10 @@ def _download_lock(path):
 
 
 class RuntimeErrorResponse(RuntimeError):
-    def __init__(self, status, message):
+    def __init__(self, status, message, *, body=None):
         super().__init__(message)
         self.status = status
+        self.body = body
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -53,7 +54,7 @@ class RuntimeClient:
     def connection_identity(self):
         return self.url
 
-    def request(self, method, path, data=None, binary=False):
+    def request(self, method, path, data=None, binary=False, max_response_bytes=None):
         body = data if isinstance(data, bytes) else json.dumps(data).encode() if data is not None else None
         request = Request(self.url + "/v1/" + path, data=body, method=method,
                           headers={"Authorization": "Bearer " + self.token,
@@ -62,17 +63,50 @@ class RuntimeClient:
         opener = build_opener(ProxyHandler({}), NoRedirect())
         try:
             with opener.open(request, timeout=self.timeout) as response:
-                result = response.read()
+                result = response.read(max_response_bytes+1) if max_response_bytes is not None else response.read()
+                if max_response_bytes is not None and len(result) > max_response_bytes:
+                    raise RuntimeErrorResponse(502, "Runtime response exceeds its byte budget")
         except HTTPError as exc:
+            document = None
             try:
-                message = json.loads(exc.read())["error"]
-            except (ValueError, KeyError):
+                error_body = exc.read(max_response_bytes+1) if max_response_bytes is not None else exc.read()
+                if max_response_bytes is not None:
+                    from suan.federation.owner import decode_request
+                    document = decode_request(error_body)
+                else:
+                    document = json.loads(error_body)
+                message = document["error"]
+                if type(message) is not str:
+                    raise ValueError
+            except (ValueError, TypeError, KeyError):
+                document = None
                 message = str(exc)
-            raise RuntimeErrorResponse(exc.code, message) from exc
+            raise RuntimeErrorResponse(exc.code, message, body=document) from exc
         return result if binary else json.loads(result)
 
     def health(self):
         return self.request("GET", "health")
+
+    def federation_owner(self, method, params):
+        """Explicit direct/SSH node-owner RPC; no retries or request-selected root."""
+        from suan.federation.owner import (MAX_REQUEST_BYTES, READS, WRITES, OwnerError,
+                                           OwnerRequestRejected, decode_request,
+                                           validate_owner_rejection, validate_owner_result)
+        if type(method) is not str or method not in READS | WRITES:
+            raise ValueError("Unsupported federation owner method")
+        try:
+            raw = self.request("POST", "federation/owner/" + method, params,
+                               binary=True, max_response_bytes=MAX_REQUEST_BYTES)
+        except RuntimeErrorResponse as exc:
+            if (exc.status == 409 and type(exc.body) is dict
+                    and set(exc.body) == {"error", "rejection"} and type(exc.body["error"]) is str):
+                try:
+                    rejection = validate_owner_rejection(method, params, exc.body["rejection"])
+                except OwnerError:
+                    raise RuntimeErrorResponse(409, "Runtime owner rejection could not be verified") from None
+                raise OwnerRequestRejected(rejection) from None
+            raise
+        return validate_owner_result(method, params, decode_request(raw, object_only=False))
 
     def create_workspace(self, name, idempotency_key=None):
         return self.request("POST", "workspaces", {"name": name, "idempotency_key": idempotency_key})

@@ -81,3 +81,7 @@ stk_editor_module(reports
 stk_editor_module(materials
   src/editors/materials_editor.cc
 )
+
+stk_editor_module(federation
+  src/editors/federation_editor.cc
+)

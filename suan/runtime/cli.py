@@ -85,9 +85,15 @@ def server(ctx, state_dir):
 @click.option("--workspace-root", type=click.Path(path_type=Path))
 @click.option("--port", default=8765, type=click.IntRange(0, 65535))
 @click.option("--concurrency", default=1, type=click.IntRange(1))
+@click.option("--federation-node-root", type=click.Path(path_type=Path), default=None,
+              help="Trusted private registry root, exactly the root used by the outbound NodeAgent.")
+@click.option("--federation-coordinator-root", type=click.Path(path_type=Path), default=None,
+              help="Trusted private coordinator root for explicit candidate evaluation.")
 @click.pass_obj
-def init_server(state_dir, workspace_root, port, concurrency):
-    config = init_config(state_dir, workspace_root, port, concurrency)
+def init_server(state_dir, workspace_root, port, concurrency, federation_node_root, federation_coordinator_root):
+    config = init_config(state_dir, workspace_root, port, concurrency,
+                         federation_node_root=federation_node_root,
+                         federation_coordinator_root=federation_coordinator_root)
     dump({k: v for k, v in config.items() if k != "token"})
     click.echo(f"Private token: {state_dir / 'config.json'} (not printed)")
 

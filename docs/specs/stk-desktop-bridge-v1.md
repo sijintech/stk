@@ -1842,3 +1842,100 @@ Report source review uses the existing typed `projectReportSource` descriptors a
 execution or remote refresh. `project.reports.create.expected_sources_sha256` is an optional
 compare-and-swap guard over the exact ordered frozen sources array; a differing lifecycle
 observation conflicts before reads of assets or writes. See [report format](report-1.md).
+
+## 17. Federation owner actions (additive extension)
+
+These twenty methods are desktop-only. They are absent from the Python script
+operation catalog and agent tools. They do not expand S2c permissions or change
+Materials curve-model contracts. Discover support before calling them; the
+[published schema](../../suan/contracts/schemas/desktop-bridge-1.schema.json)
+defines all closed parameter and result objects.
+
+| Method | Explicit action or passive observation |
+|---|---|
+| `project.federation.prepare` | Freeze selected numeric project cells into a bridge-private plan. |
+| `project.federation.get` / `list` | Read an existing plan card or page of cards. |
+| `project.federation.register` | Send a reviewed frozen plan to the selected Runtime owner service. |
+| `federation.owner.info` | Read the current owner UUID and global generation. |
+| `federation.owner.operations.get` | Observe the original operation and any locally retained rejection. |
+| `federation.owner.operations.local` | Read local intent history without contacting the Runtime. |
+| `federation.owner.operations.recover` | Explicitly reconcile one original retained operation. |
+| `federation.owner.datasets.list` | Page owner-registered dataset metadata. |
+| `federation.owner.grants.approve` / `revoke` / `list` | Explicitly grant or withdraw training consent, or read its current metadata. |
+| `federation.owner.audit.list` | Page update audit metadata without sending updates. |
+| `federation.owner.candidates.get` | Read metadata of an already aggregated run/round candidate. |
+| `federation.owner.evaluations.prepare` / `evaluate` / `get` | Freeze evaluation inputs, explicitly compute held-out metrics, or read the retained evaluation. |
+| `federation.owner.models.list` / `admit` / `activate` | Read versions, explicitly register a passing candidate, or separately switch the active version. |
+
+Preparation requires exactly `handle,expected_revision,plan_id,training_dataset_id,
+holdout_dataset_id,table_id,feature_ids,target_ids,training_rows,holdout_rows`.
+The row selections must be nonempty and disjoint, with at most 1000 rows in total,
+64 features and 16 targets. Columns must be numeric or integer fields in the named
+table. The bridge projects selected cells and their scalar dependencies within one
+revision-checked read transaction; it does not load a whole-project snapshot.
+Every selected value must be finite and exactly representable in f64. Ordered
+field UUID/name/unit descriptors and row UUIDs remain part of the frozen source.
+Units are labels, with unknown units retained as `unspecified`; no conversion is
+implicit. This internal capsule does not choose the pending partner data format.
+
+The result is `{plan}`. A `stk.federation-owner-plan/1` card contains
+`format,plan_id,source,source_sha256,datasets,registration_sha256,bytes`. Dataset
+items contain role and manifest metadata only. Raw x/y arrays and private paths
+remain in bridge-private storage, outside project databases, shared workspaces
+and Hub CAS. `get` requires `{handle,plan_id}`; `list` requires
+`{handle,offset,limit}` with at most 20 cards per page. Registration requires
+`{handle,expected_revision,plan_id,connection,operation_id,owner_id,expected_generation}`
+and rechecks the source project/revision before using the original capsule.
+
+Owner methods use an existing direct or managed-SSH Runtime `connection`. Hub
+pairing does not grant this authority. Trusted Runtime configuration fixes the
+node/coordinator roots; no request selects a root, path, executable, module,
+credentials or model endpoint. Runtime servers remain Linux-only and loopback
+bound. The [federation contract](stk-federation-1.md) defines the owner method
+requests, receipts, consent, evaluation and independent linear-model registry.
+
+Every remote owner write carries `operation_id,owner_id,expected_generation,request`
+in addition to its bridge connection. Before HTTP, the bridge durably retains the
+full original envelope, method, connection ID and credential-free server-origin
+fingerprint. The request digest preserves integer/float distinctions and signed
+zero. Same-ID changes conflict; an uncertain original intent is never dispatched
+again. A validated completed receipt is cached, and a delayed uncertain observation
+cannot replace it. Recovery uses a new operation identity while preserving and
+checking the target's original origin. None of these writes automatically retries.
+
+Unlike the raw nullable Runtime lookup, bridge `operations.get` always returns
+the object `{operation: ownerOperation|null, rejection: ownerRejection|null}`.
+An absent operation with no verified local proof returns both fields null and
+does not prove that the original request had no effects. `operations.local`
+requires `{connection,offset,limit}` with at most 50 items, and returns
+`{operations,offset,total,next_offset}`. Each item contains
+`operation_id,connection,server_key,method,state,plan_id,receipt,rejection`.
+Its state is `completed`, `uncertain` or `rejected`; the original private request
+is never included in this page. Reading local history does not contact a server.
+
+A validated Runtime pre-reservation proof is persisted before the bridge returns
+an error with `data={operation_id,rejection}` and `retryable=false`. Only a proof
+bound to the complete retained original request can identify a definite rejection.
+Generic errors, forged proofs, post-reservation failures and null lookups leave
+the intent uncertain. Reopening preserves this distinction; choosing a new UUID
+requires a separate explicit fresh owner read and a new user action. Historical
+receipts and rejection generations do not establish current owner or active-model
+state. The bridge retains at most 128 plans, 4096 operations per metadata collection
+and 64 MiB of private JSON state; quota exhaustion does not delete identities.
+
+Evaluation freezes the held-out data, candidate/base bytes, exact ordered training
+spec, per-target RMSE thresholds and current active baseline/generation. Thresholds
+start empty in the desktop form and require explicit values in original units.
+Admission requires every absolute and baseline gate to pass. `models.admit`
+registers a version without changing the active pointer; only an explicit
+`models.activate` changes it. Rollback is another explicit activation guarded by
+the current version and generation, preventing ABA. With no active version, the
+round base supplies the frozen comparison baseline. Linearly encoded candidate
+bundles cannot be used as Materials curve-MLP `model.pt` files.
+
+Construction, refresh, reopen and workspace restoration do not prepare, train,
+send, recover, admit or activate anything. Desktop callbacks are fenced by bridge
+process/epoch, project scope and local draft/selection lifetimes. Workspace state
+contains bounded form drafts and selections, not credentials or live authority.
+Viewer state and hidden drafts remain protected. Row disjointness and synthetic
+software checks do not establish sample/site independence or material accuracy.

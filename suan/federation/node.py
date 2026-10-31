@@ -55,7 +55,8 @@ class NodeFederationService:
         return inputs.capture(self.root / "datasets" / inputs.uuid(dataset_id), dataset_id, x, y,
                               feature_names=feature_names, target_names=target_names)
 
-    def approve(self, spec, dataset_id, *, run_id, coordinator_id, participant_id, max_rounds):
+    def approve(self, spec, dataset_id, *, run_id, coordinator_id, participant_id, max_rounds,
+                grant_id=None):
         self._setup()
         spec, dataset_id = validate_training_spec(spec), inputs.uuid(dataset_id)
         with Lease(self.root / "node.lock", timeout=10):
@@ -70,7 +71,8 @@ class NodeFederationService:
                 if len(list(path.parent.iterdir())) >= 1024:
                     raise NodeFederationError("Frozen trainer specification quota exceeded")
                 inputs.write_json(path, spec)
-            return self.consent.grant(run_id, coordinator_id=coordinator_id, participant_id=participant_id,
+            grant = self.consent.grant if grant_id is None else lambda *a, **kw: self.consent.grant_once(grant_id, *a, **kw)
+            return grant(run_id, coordinator_id=coordinator_id, participant_id=participant_id,
                 dataset_id=dataset_id, dataset_sha256=manifest["dataset_sha256"], spec_sha256=digest,
                 model_layout=model_layout(spec), max_rounds=max_rounds)
 

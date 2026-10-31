@@ -1,6 +1,6 @@
 # 桌面编辑模块与交互成本
 
-2026-10-15。编辑器可组合、可单独构建；所有模块仍随一个原生应用发布。
+2026-10-31。编辑器可组合、可单独构建；所有模块仍随一个原生应用发布。
 当前交付结果及剩余限制以[验收记录](runtime-validation.md)为准。
 
 ## 模块边界
@@ -27,6 +27,8 @@ cmake --build build --target stk_editor_analysis
 | `files` | 独立真实目录页和 `ProjectFileTree` 异步控制器 |
 | `python` | 程序文档、显式保存与运行，`src/editors/python_editor.cc` |
 | `reports` | 冻结报告清单、创建、显式资产读取和导出，`src/editors/reports_editor.cc`；独立文档视口经 `ReportDocumentHost` 承载，原生候选默认关闭 |
+| `materials` | 本机曲线训练、真实损失与留出比较，`src/editors/materials_editor.cc`；执行归共享材料服务 |
+| `federation` | 节点 owner 数据登记、同意/审计及独立线性模型评估/版本，`src/editors/federation_editor.cc`；每 tab 草稿由 `FederationState::View` 隔离 |
 | `project` | 项目管理、复核、讨论与仿真 |
 | `jobs` | Runtime、任务、日志和传输 |
 | `workspace` / `skills` / `ai` | 工作台、技能目录、AI 对话 |
@@ -41,6 +43,10 @@ cmake --build build --target stk_editor_analysis
 格式和边界见[表格交换](project-table-io.md)与[工作空间](design/portable-workspaces.md)。
 Python 服务仍在 `suan/`，目录列举和程序文件读写经同一桌面桥完成。UI 每帧不遍历目录，
 各编辑器不另建数据库、调度器或模型客户端。通用单元格点击能力位于 `stk_ui`，区域交换位于 `stk_wm`。
+
+`FederationState` 通过共享桥访问固定 Runtime owner 服务；原始数值冻结在桥私有目录，
+不进入界面 DTO 或普通工作空间。恢复布局仅恢复有界表单稿和选择，不重发未知操作、读取候选或开始训练。
+准入与启用分别明确执行，所有者授权不进入脚本目录或智能体工具。部署及科学边界见[联邦指南](federation.md)。
 
 文档的纯 CPU 内存资源协议与可选原生适配位于 `desktop/engine/lib/stk_document/`，
 目标分别为 `stk_document_resources` 和 `stk_document_native`；平台实现不在原型和产品间复制。

@@ -201,20 +201,26 @@ class Exercise {
     const int to_y = work->rect.ymin + int(std::ceil(std::max(
         4.0f * screen_.ui()->style().unit, float(work->rect.height()) * 0.12f)));
     require(to_y < from_y, "Actual client is too small to enlarge the report row");
+    result_["layout_preparation"] = {{"action", "one mouse drag of default upper-row/table splitter"},
+        {"client_size", {window_.width(), window_.height()}},
+        {"report_area_before_bottom_left", {before.xmin, before.ymin, before.width(), before.height()}},
+        {"drag_from_bottom_left", {x, from_y}}, {"drag_to_bottom_left", {x, to_y}}};
+    const auto record = [&](const char *phase) {
+      result_["layout_preparation"][phase] = input_state(); save();
+    };
+    record("before_down");
     wm::Event e; e.x = x; e.y = from_y; e.type = wm::EventType::MouseMove; event(e);
-    e.type = wm::EventType::MouseDown; e.button = wm::MouseButton::Left; event(e); frame();
+    e.type = wm::EventType::MouseDown; e.button = wm::MouseButton::Left; event(e);
+    record("after_down"); frame(); record("after_down_frame");
     require(screen_.capture() == wm::Screen::Capture::Splitter, "Mouse must capture the row splitter");
-    e.type = wm::EventType::MouseMove; e.y = to_y; event(e); frame();
-    e.type = wm::EventType::MouseUp; event(e); frame();
+    e.type = wm::EventType::MouseMove; e.y = to_y; event(e); frame(); record("after_move_frame");
+    e.type = wm::EventType::MouseUp; event(e); frame(); record("after_up_frame");
     ++layout_drags;
     require(screen_.capture() == wm::Screen::Capture::None && area.rect().height() > before.height(),
         "Actual row drag must enlarge the report area and release capture");
     const auto after = area.rect();
-    result_["layout_preparation"] = {{"action", "one mouse drag of default upper-row/table splitter"},
-        {"client_size", {window_.width(), window_.height()}},
-        {"report_area_before_bottom_left", {before.xmin, before.ymin, before.width(), before.height()}},
-        {"report_area_after_bottom_left", {after.xmin, after.ymin, after.width(), after.height()}},
-        {"drag_from_bottom_left", {x, from_y}}, {"drag_to_bottom_left", {x, to_y}}};
+    result_["layout_preparation"]["report_area_after_bottom_left"] =
+        {after.xmin, after.ymin, after.width(), after.height()};
     move_pointer({float(after.xmin + after.width() / 2),
         float(window_.height() - 1 - (after.ymin + after.height() / 2))});
     save();
@@ -350,6 +356,14 @@ class Exercise {
     result_["layout_mouse_drags"] = layout_drags; result_["pointer_moves"] = pointer_moves;
     write(directory_ / "result.json", result_.dump(2));
   }
+  Json input_state() const
+  {
+    const auto *context = screen_.ui();
+    return {{"screen_capture", int(screen_.capture())}, {"frames_drawn", window_.frames_drawn()},
+        {"ui_editing", context && context->editing() != 0},
+        {"ui_popup_open", context && context->popup_open()},
+        {"native_interaction_blocked", context && context->native_view_interaction_blocked()}};
+  }
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
 #  ifdef __APPLE__
   void activate_native_window()
@@ -383,7 +397,7 @@ class Exercise {
         const bool active = native_input_.window_is_active(window_.native_window_handle(), last, error);
         require(error.empty(), error);
         return active;
-      }, "Explicit own-window activation before native media inputs", 5);
+      }, "Explicit own-window activation before fixture layout and native media inputs", 5);
       confirmed = true;
     }
     catch (...) { record(); throw; }
@@ -475,6 +489,43 @@ class Exercise {
         {"key", name}, {"delivery", delivery}, {"before", media_json(before)}});
     save(); process();
   }
+#  ifdef __APPLE__
+  void native_media_seek(int cycle, const std::string &phase, ui::Rect bounds, const Media &before,
+                         double fraction)
+  {
+    move_pointer({bounds.cx(), bounds.cy()});
+    require(before.paused && before.duration_known && before.duration > 0 &&
+        before.viewport_width > 0 && before.viewport_height > 0,
+        "Native timeline lookup requires observed paused media geometry and duration");
+    const reports_native_test::TimelineInput input{before.rect_x / before.viewport_width,
+        before.rect_y / before.viewport_height, before.rect_width / before.viewport_width,
+        before.rect_height / before.viewport_height, before.current_time, before.duration, fraction};
+    // A first accessibility read may enable WebKit's tree asynchronously. Repeat
+    // only an empty completed read, never a partially delivered input or a limit
+    // failure. All successful input still has to pass unchanged DOM/OS gates.
+    for (int attempt = 0; attempt < 4; ++attempt) {
+      reports_native_test::TimelineObservation observed;
+      std::string delivery, error;
+      const bool sent = native_input_.seek_document(window_.native_window_handle(), native_bounds(bounds),
+          window_.width(), window_.height(), input, observed, delivery, error);
+      result_["native_media_inputs"].push_back({{"cycle", cycle}, {"phase", phase},
+          {"action", "observed-timeline-click"}, {"lookup_attempt", attempt + 1},
+          {"lookup_complete", observed.lookup_complete}, {"visited_nodes", observed.visited_nodes},
+          {"deepest_node", observed.deepest_node}, {"sliders", observed.sliders},
+          {"time_matched_candidates", observed.candidates},
+          {"slider_screen_points_bottom_left", {observed.screen_x, observed.screen_y,
+              observed.screen_width, observed.screen_height}},
+          {"slider_range_value", {observed.minimum, observed.maximum, observed.value}},
+          {"target_fraction", fraction}, {"viewport_normalized_top_left",
+              {observed.normalized_x, observed.normalized_y}}, {"delivered", sent},
+          {"delivery", delivery}, {"error", error}, {"before", media_json(before)}});
+      save();
+      if (sent) { process(); return; }
+      require(observed.lookup_complete && observed.candidates == 0 && attempt < 3, error);
+      frame();
+    }
+  }
+#  endif
   Media fit_decoded_media(app::EditorArea &area, app::EditorArea &viewer_area,
                           const std::string &session, Media observed)
   {
@@ -516,19 +567,27 @@ class Exercise {
       const int delta = report_left ? -shrink : shrink;
       const int from_x = (splitter->rect.xmin + splitter->rect.xmax) / 2;
       const int y = (splitter->rect.ymin + splitter->rect.ymax) / 2;
+      result_["decoded_media_layout_drags"].push_back({{"before", media_json(observed)},
+          {"shrink_framebuffer_pixels", shrink}, {"requested_viewport_css_width", target_width},
+          {"report_child_index", report_left ? 0 : 1}, {"divider_delta_framebuffer_pixels", delta},
+          {"report_width_before", before.width()}, {"viewer_width_before", viewer_before.width()},
+          {"before_down", input_state()}});
+      const auto record = [&](const char *phase) {
+        auto &item = result_["decoded_media_layout_drags"].back();
+        item[phase] = input_state();
+        item["report_width_after"] = area.rect().width();
+        item["viewer_width_after"] = viewer_area.rect().width(); save();
+      };
       wm::Event e; e.x = from_x; e.y = y; e.type = wm::EventType::MouseMove; event(e);
-      e.type = wm::EventType::MouseDown; e.button = wm::MouseButton::Left; event(e); frame();
+      e.type = wm::EventType::MouseDown; e.button = wm::MouseButton::Left; event(e);
+      record("after_down"); frame(); record("after_down_frame");
       require(screen_.capture() == wm::Screen::Capture::Splitter, "Mouse must capture report/Viewer divider");
-      e.type = wm::EventType::MouseMove; e.x += delta; event(e); frame();
-      e.type = wm::EventType::MouseUp; event(e); frame();
+      e.type = wm::EventType::MouseMove; e.x += delta; event(e); frame(); record("after_move_frame");
+      e.type = wm::EventType::MouseUp; event(e); frame(); record("after_up_frame");
       ++layout_drags;
       require(screen_.capture() == wm::Screen::Capture::None && area.rect().width() < before.width() &&
           viewer_area.rect().width() > viewer_before.width(),
           "Actual divider drag must narrow the report, enlarge the retained Viewer and release capture");
-      result_["decoded_media_layout_drags"].push_back({{"before", media_json(observed)},
-          {"shrink_framebuffer_pixels", shrink}, {"requested_viewport_css_width", target_width},
-          {"report_child_index", report_left ? 0 : 1}, {"divider_delta_framebuffer_pixels", delta},
-          {"report_width_before", before.width()}, {"report_width_after", area.rect().width()}});
       save();
       wait([&] { const auto *focus = widget("reports_document_focus");
         return focus && focus->enabled && widget("reports_document_viewport"); }, "Native viewport after real divider drag");
@@ -679,6 +738,11 @@ void run(const Options &options, Json &result, const fs::path &directory)
   } redraw_timer{*manager, manager->add_timer(50, 50, [window] { window->request_redraw(); })};
   require(redraw_timer.id != 0, "Cannot install bounded-wait redraw timer");
   Exercise ui(*manager, *window, result, directory);
+#if defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES) && defined(__APPLE__)
+  // Confirm activation before the first layout mouseDown, not only after a
+  // video is prepared: an intervening FocusOut cancels Screen pointer capture.
+  ui.activate_native_window();
+#endif
   ui.enlarge_report_row(*area);
   const auto scratch = directory / "public-fixture"; fs::create_directory(scratch);
   const auto trace = scratch / "calls.jsonl";
@@ -775,8 +839,8 @@ raise SystemExit(main())
       "<!doctype html><html><body><video controls preload='none'>"
       "<source src='clip.mp4' type='video/mp4'></video></body></html>" : media_bytes :
       pdf ? document_preview::make_pdf_fixture() : options.source == "html" ?
-      "<!doctype html><html><body><img src='marker.png' alt='Native evidence marker'><pre>" + body_marker +
-      "</pre><h1>Frozen HTML report</h1><p>Public synthetic values: A 300 K; B 325 K.</p></body></html>" :
+      "<!doctype html><html><body><img src='marker.png' alt='Native evidence marker'><pre><code>" + body_marker +
+      "</code></pre><h1>Frozen HTML report</h1><p>Public synthetic values: A 300 K; B 325 K.</p></body></html>" :
       "![Native evidence marker](marker.png)\n\n```text\n" + body_marker +
       "\n```\n\n# Frozen Markdown report\n\n| Sample | Temperature / K |\n| --- | --- |\n| A | 300 |\n| B | 325 |\n";
   write(folder / entry, source_bytes);
@@ -851,9 +915,6 @@ raise SystemExit(main())
   ui::Rect final_media_rectangle;
   Media final_media_observed;
   if (video) {
-#ifdef __APPLE__
-    ui.activate_native_window();
-#endif
     result["media_fixture"] = {{"size", media_bytes.size()}, {"sha256", kMediaSha256},
         {"container", "MP4"}, {"video_codec", "H264 Baseline"}, {"audio_codec", "AAC"},
         {"duration_seconds", 6}, {"live_source_deleted_before_prepare", true}};
@@ -901,6 +962,12 @@ raise SystemExit(main())
         return m.paused && !m.ended && !m.seeking && m.ready_state >= 2 && m.duration_known &&
             (late ? m.current_time >= 3.5 && m.current_time <= 5.65 : m.current_time <= 0.90);
       };
+#ifdef __APPLE__
+      // Use the actual time slider's AX frame/value, not a fraction of the
+      // video or an arrow sent to whichever document control happens to focus.
+      ui.native_media_seek(cycle, phase, bounds, original, late ? 0.80 : 0.07);
+      auto observed = ui.observe_input(session, target);
+#else
       ui.native_media_key(cycle, phase, bounds, late ? wm::Key::RightArrow : wm::Key::LeftArrow,
           late ? "RightArrow" : "LeftArrow", original);
       auto observed = ui.observe_input(session, target);
@@ -912,6 +979,7 @@ raise SystemExit(main())
         ui.native_media_click(cycle, phase + "-timeline", bounds, observed, late ? 0.78 : 0.14, y);
         observed = ui.observe_input(session, target);
       }
+#endif
       if (!observed.paused) { ui.click("reports_document_pause", *area); }
       observed = ui.media_until(session, target, "Native seek reaches the requested clip segment", 5);
       require(observed.navigation_generation == original.navigation_generation &&

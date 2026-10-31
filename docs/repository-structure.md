@@ -41,7 +41,11 @@
 以及固定ClientApp的Runtime训练、持久协调轮次和明确启动的独立Flower聚合进程。
 `suan/control/federation.py`管理owner批准的run映射与独立FL blob/action权限，NodeAgent复用既有出站WSS；
 不把flwr加入hub或STK基础依赖。原始数值与未放行delta不进普通Runtime文件树，
-准备、训练、发送和模型登记保持分离。桌面授权/审计/准入及跨站网络验收尚未完成，不能据此标记S4完成。
+准备、训练、发送和模型登记保持分离。`owner.py` 管理固定 Runtime owner 接口及原请求回执，
+`evaluation.py` / `models.py` 提供独立留出评估和线性版本库；`suan/desktop_bridge/federation.py`
+冻结项目数值选择并保留原操作意图，原生 `FederationState` / `federation_editor.cc` 提供明确的桌面动作。
+这些实现不扩展智能体权限，也不将线性 bundle 当作 Materials 曲线权重。跨平台 UI、配对/文件发行及跨站网络
+仍须分别验收，不能据此标记 S4 完成。
 接口与界限见[联邦后端指南](federation.md)及[契约](specs/stk-federation-1.md)。
 
 ## 原生编辑器的独立模块

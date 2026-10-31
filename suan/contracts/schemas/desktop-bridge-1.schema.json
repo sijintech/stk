@@ -12919,6 +12919,1447 @@
           ],
           "additionalProperties": false
         }
+      },
+      "project.federation.prepare": {
+        "description": "Explicitly freeze selected project numeric rows into bridge-private capsules. Does not train, send or grant consent.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "plan_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "training_dataset_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "holdout_dataset_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "feature_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 64
+            },
+            "target_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            },
+            "training_rows": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 999
+            },
+            "holdout_rows": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 999
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "plan_id",
+            "training_dataset_id",
+            "holdout_dataset_id",
+            "table_id",
+            "feature_ids",
+            "target_ids",
+            "training_rows",
+            "holdout_rows"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "plan": {
+              "$ref": "#/$defs/federationOwnerPlan"
+            }
+          },
+          "required": [
+            "plan"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.federation.get": {
+        "description": "Read an existing private plan card for this project without execution or sending.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "plan_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "plan_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "plan": {
+              "$ref": "#/$defs/federationOwnerPlan"
+            }
+          },
+          "required": [
+            "plan"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.federation.list": {
+        "description": "Read bounded private plan metadata for the open project; no source arrays leave the bridge.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            }
+          },
+          "required": [
+            "handle",
+            "offset",
+            "limit"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "plans": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/federationOwnerPlan"
+              },
+              "minItems": 0,
+              "maxItems": 20
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "next_offset": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "plans",
+            "offset",
+            "total",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.federation.register": {
+        "description": "Explicitly register the reviewed frozen capsules using the direct/SSH Runtime owner authority. Journal before HTTP; never resend a lost reply.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "plan_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "owner_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "expected_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "plan_id",
+            "connection",
+            "operation_id",
+            "owner_id",
+            "expected_generation"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/federationOwnerOperation"
+        }
+      },
+      "federation.owner.info": {
+        "description": "Explicit owner metadata observation over direct/SSH Runtime. No training, sending, approval, recovery or activation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            }
+          },
+          "required": [
+            "connection"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.federation-owner-info/1"
+            },
+            "owner_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "minItems": 0,
+              "maxItems": 32
+            }
+          },
+          "required": [
+            "format",
+            "owner_id",
+            "generation",
+            "capabilities"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "federation.owner.operations.get": {
+        "description": "Explicit owner metadata observation over direct/SSH Runtime. No training, sending, approval, recovery or activation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "connection",
+            "operation_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/federationOwnerOperation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rejection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/federationOwnerRejection"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operation",
+            "rejection"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "federation.owner.datasets.list": {
+        "description": "Explicit owner metadata observation over direct/SSH Runtime. No training, sending, approval, recovery or activation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "required": [
+            "connection",
+            "offset",
+            "limit"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.federation-owner-page/1"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/federationDataset"
+              },
+              "minItems": 0,
+              "maxItems": 50
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "next_offset": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "format",
+            "items",
+            "offset",
+            "total",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "federation.owner.grants.list": {
+        "description": "Explicit owner metadata observation over direct/SSH Runtime. No training, sending, approval, recovery or activation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "required": [
+            "connection",
+            "offset",
+            "limit"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.federation-owner-page/1"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/federationGrant"
+              },
+              "minItems": 0,
+              "maxItems": 50
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "next_offset": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "format",
+            "items",
+            "offset",
+            "total",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "federation.owner.audit.list": {
+        "description": "Explicit owner metadata observation over direct/SSH Runtime. No training, sending, approval, recovery or activation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "required": [
+            "connection",
+            "offset",
+            "limit"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.federation-owner-page/1"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "update_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "grant_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "round": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10000
+                  },
+                  "model_sha256": {
+                    "$ref": "#/$defs/sha256"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "prepared",
+                      "sending",
+                      "delivered",
+                      "uncertain"
+                    ]
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "properties": {
+                      "format": {
+                        "const": "stk.federation-update/1"
+                      },
+                      "run_id": {
+                        "$ref": "#/$defs/projectUuid"
+                      },
+                      "round": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10000
+                      },
+                      "participant_id": {
+                        "$ref": "#/$defs/sha256"
+                      },
+                      "model_sha256": {
+                        "$ref": "#/$defs/sha256"
+                      },
+                      "spec_sha256": {
+                        "$ref": "#/$defs/sha256"
+                      },
+                      "dataset_sha256": {
+                        "$ref": "#/$defs/sha256"
+                      },
+                      "grant_id": {
+                        "$ref": "#/$defs/projectUuid"
+                      },
+                      "update_sha256": {
+                        "$ref": "#/$defs/sha256"
+                      },
+                      "update_bytes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 67108864
+                      },
+                      "num_examples": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000000000
+                      },
+                      "metrics": {
+                        "type": "object",
+                        "maxProperties": 32,
+                        "additionalProperties": {
+                          "type": "number"
+                        }
+                      },
+                      "masked": {
+                        "const": false
+                      }
+                    },
+                    "required": [
+                      "format",
+                      "run_id",
+                      "round",
+                      "participant_id",
+                      "model_sha256",
+                      "spec_sha256",
+                      "dataset_sha256",
+                      "grant_id",
+                      "update_sha256",
+                      "update_bytes",
+                      "num_examples",
+                      "metrics",
+                      "masked"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "layout": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "dtype": {
+                          "type": "string",
+                          "enum": [
+                            "f32",
+                            "f64"
+                          ]
+                        },
+                        "shape": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 67108864
+                          },
+                          "minItems": 1,
+                          "maxItems": 4
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "dtype",
+                        "shape"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "maxItems": 128
+                  }
+                },
+                "required": [
+                  "update_id",
+                  "grant_id",
+                  "round",
+                  "model_sha256",
+                  "state",
+                  "metadata",
+                  "layout"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 50
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "next_offset": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "format",
+            "items",
+            "offset",
+            "total",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "federation.owner.candidates.get": {
+        "description": "Explicit owner metadata observation over direct/SSH Runtime. No training, sending, approval, recovery or activation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "round": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          "required": [
+            "connection",
+            "run_id",
+            "round"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/federationCandidate"
+        }
+      },
+      "federation.owner.evaluations.get": {
+        "description": "Explicit owner metadata observation over direct/SSH Runtime. No training, sending, approval, recovery or activation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "evaluation_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "connection",
+            "evaluation_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/federationEvaluation"
+        }
+      },
+      "federation.owner.models.list": {
+        "description": "Explicit owner metadata observation over direct/SSH Runtime. No training, sending, approval, recovery or activation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "spec_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "connection",
+            "spec_sha256"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/federationModels"
+        }
+      },
+      "federation.owner.grants.approve": {
+        "description": "Explicit desktop owner action. Retain original operation UUID/request/CAS before sending; an uncertain result is queried, never automatically replayed.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "owner_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "expected_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request": {
+              "type": "object",
+              "properties": {
+                "dataset_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "dataset_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "source_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "spec": {
+                  "$ref": "#/$defs/federationTrainingSpec"
+                },
+                "run_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "coordinator_id": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "participant_id": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "max_rounds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000
+                }
+              },
+              "required": [
+                "dataset_id",
+                "dataset_sha256",
+                "source_sha256",
+                "spec",
+                "run_id",
+                "coordinator_id",
+                "participant_id",
+                "max_rounds"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "connection",
+            "operation_id",
+            "owner_id",
+            "expected_generation",
+            "request"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/federationOwnerOperation"
+        }
+      },
+      "federation.owner.grants.revoke": {
+        "description": "Explicit desktop owner action. Retain original operation UUID/request/CAS before sending; an uncertain result is queried, never automatically replayed.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "owner_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "expected_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request": {
+              "type": "object",
+              "properties": {
+                "grant_id": {
+                  "$ref": "#/$defs/projectUuid"
+                }
+              },
+              "required": [
+                "grant_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "connection",
+            "operation_id",
+            "owner_id",
+            "expected_generation",
+            "request"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/federationOwnerOperation"
+        }
+      },
+      "federation.owner.evaluations.prepare": {
+        "description": "Explicit desktop owner action. Retain original operation UUID/request/CAS before sending; an uncertain result is queried, never automatically replayed.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "owner_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "expected_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request": {
+              "type": "object",
+              "properties": {
+                "evaluation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "run_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "round": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000
+                },
+                "dataset_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "dataset_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "candidate_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "base_model_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "spec_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "thresholds": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "unit": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "max_rmse": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "unit",
+                      "max_rmse"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 16
+                },
+                "expected_active_version": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^v[1-9][0-9]{0,7}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expected_active_generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "evaluation_id",
+                "run_id",
+                "round",
+                "dataset_id",
+                "dataset_sha256",
+                "candidate_sha256",
+                "base_model_sha256",
+                "spec_sha256",
+                "thresholds",
+                "expected_active_version",
+                "expected_active_generation"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "connection",
+            "operation_id",
+            "owner_id",
+            "expected_generation",
+            "request"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/federationOwnerOperation"
+        }
+      },
+      "federation.owner.evaluations.evaluate": {
+        "description": "Explicit desktop owner action. Retain original operation UUID/request/CAS before sending; an uncertain result is queried, never automatically replayed.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "owner_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "expected_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request": {
+              "type": "object",
+              "properties": {
+                "evaluation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "plan_sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              },
+              "required": [
+                "evaluation_id",
+                "plan_sha256"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "connection",
+            "operation_id",
+            "owner_id",
+            "expected_generation",
+            "request"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/federationOwnerOperation"
+        }
+      },
+      "federation.owner.models.admit": {
+        "description": "Explicit desktop owner action. Retain original operation UUID/request/CAS before sending; an uncertain result is queried, never automatically replayed.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "owner_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "expected_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request": {
+              "type": "object",
+              "properties": {
+                "evaluation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "receipt_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "expected_active_version": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^v[1-9][0-9]{0,7}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expected_active_generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "evaluation_id",
+                "receipt_sha256",
+                "expected_active_version",
+                "expected_active_generation"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "connection",
+            "operation_id",
+            "owner_id",
+            "expected_generation",
+            "request"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/federationOwnerOperation"
+        }
+      },
+      "federation.owner.models.activate": {
+        "description": "Explicit desktop owner action. Retain original operation UUID/request/CAS before sending; an uncertain result is queried, never automatically replayed.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "owner_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "expected_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request": {
+              "type": "object",
+              "properties": {
+                "spec_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^v[1-9][0-9]{0,7}$"
+                },
+                "expected_active_version": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^v[1-9][0-9]{0,7}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expected_active_generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "spec_sha256",
+                "version",
+                "expected_active_version",
+                "expected_active_generation"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "connection",
+            "operation_id",
+            "owner_id",
+            "expected_generation",
+            "request"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/federationOwnerOperation"
+        }
+      },
+      "federation.owner.operations.recover": {
+        "description": "Explicit desktop owner action. Retain original operation UUID/request/CAS before sending; an uncertain result is queried, never automatically replayed.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "owner_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "expected_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                }
+              },
+              "required": [
+                "operation_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "connection",
+            "operation_id",
+            "owner_id",
+            "expected_generation",
+            "request"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/federationOwnerOperation"
+        }
+      },
+      "federation.owner.operations.local": {
+        "description": "Read locally retained original owner intents while disconnected; no Runtime call or request arrays returned.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "required": [
+            "connection",
+            "offset",
+            "limit"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "connection": {
+                    "$ref": "#/$defs/connectionId"
+                  },
+                  "server_key": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{16}$"
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "datasets.register",
+                      "grants.approve",
+                      "grants.revoke",
+                      "evaluations.prepare",
+                      "evaluations.evaluate",
+                      "models.admit",
+                      "models.activate",
+                      "operations.recover"
+                    ]
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "completed",
+                      "uncertain",
+                      "rejected"
+                    ]
+                  },
+                  "plan_id": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/projectUuid"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "receipt": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/federationOwnerOperation"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "rejection": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/federationOwnerRejection"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "operation_id",
+                  "connection",
+                  "server_key",
+                  "method",
+                  "state",
+                  "plan_id",
+                  "receipt",
+                  "rejection"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 50
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "next_offset": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operations",
+            "offset",
+            "total",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -23960,6 +25401,1186 @@
         "compiler",
         "files",
         "diagnostics"
+      ],
+      "additionalProperties": false
+    },
+    "federationSource": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "table_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "field_id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "unit": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "field_id",
+              "name",
+              "unit"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "field_id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "unit": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "field_id",
+              "name",
+              "unit"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 16
+        },
+        "training_rows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectUuid"
+          },
+          "minItems": 1,
+          "maxItems": 999
+        },
+        "holdout_rows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectUuid"
+          },
+          "minItems": 1,
+          "maxItems": 999
+        }
+      },
+      "required": [
+        "project_id",
+        "revision",
+        "table_id",
+        "features",
+        "targets",
+        "training_rows",
+        "holdout_rows"
+      ],
+      "additionalProperties": false
+    },
+    "federationCapsule": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.federation-local-dataset/1"
+        },
+        "dataset_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "data_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "num_examples": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "feature_names": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "target_names": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 1,
+          "maxItems": 16
+        },
+        "dataset_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "format",
+        "dataset_id",
+        "data_sha256",
+        "bytes",
+        "num_examples",
+        "feature_names",
+        "target_names",
+        "dataset_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "federationDataset": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": [
+            "training",
+            "holdout"
+          ]
+        },
+        "manifest": {
+          "$ref": "#/$defs/federationCapsule"
+        },
+        "source": {
+          "$ref": "#/$defs/federationSource"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "role",
+        "manifest",
+        "source",
+        "source_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "federationOwnerPlan": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.federation-owner-plan/1"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "source": {
+          "$ref": "#/$defs/federationSource"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "datasets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "training",
+                  "holdout"
+                ]
+              },
+              "manifest": {
+                "$ref": "#/$defs/federationCapsule"
+              }
+            },
+            "required": [
+              "role",
+              "manifest"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "registration_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4194304
+        }
+      },
+      "required": [
+        "format",
+        "plan_id",
+        "source",
+        "source_sha256",
+        "datasets",
+        "registration_sha256",
+        "bytes"
+      ],
+      "additionalProperties": false
+    },
+    "federationTrainingSpec": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.federation-training-spec/1"
+        },
+        "trainer": {
+          "const": "linear-regression/1"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "unit": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "name",
+              "unit"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "unit": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "name",
+              "unit"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 16
+        },
+        "dtype": {
+          "type": "string",
+          "enum": [
+            "f32",
+            "f64"
+          ]
+        },
+        "normalization": {
+          "const": "none"
+        },
+        "steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "learning_rate": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "fedavg",
+            "fedprox"
+          ]
+        },
+        "proximal_mu": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "format",
+        "trainer",
+        "features",
+        "targets",
+        "dtype",
+        "normalization",
+        "steps",
+        "learning_rate",
+        "strategy",
+        "proximal_mu"
+      ],
+      "additionalProperties": false
+    },
+    "federationGrant": {
+      "type": "object",
+      "properties": {
+        "grant_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "run_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "coordinator_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "participant_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "dataset_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "dataset_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "spec_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "model_layout": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "dtype": {
+                "type": "string",
+                "enum": [
+                  "f32",
+                  "f64"
+                ]
+              },
+              "shape": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 67108864
+                },
+                "minItems": 1,
+                "maxItems": 4
+              }
+            },
+            "required": [
+              "name",
+              "dtype",
+              "shape"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 128
+        },
+        "max_rounds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "active": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "grant_id",
+        "run_id",
+        "coordinator_id",
+        "participant_id",
+        "dataset_id",
+        "dataset_sha256",
+        "spec_sha256",
+        "model_layout",
+        "max_rounds",
+        "active"
+      ],
+      "additionalProperties": false
+    },
+    "federationBundle": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        }
+      },
+      "required": [
+        "sha256",
+        "bytes"
+      ],
+      "additionalProperties": false
+    },
+    "federationCandidate": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.federation-candidate/1"
+        },
+        "run_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "spec_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "spec": {
+          "$ref": "#/$defs/federationTrainingSpec"
+        },
+        "model": {
+          "$ref": "#/$defs/federationBundle"
+        },
+        "base_model": {
+          "$ref": "#/$defs/federationBundle"
+        },
+        "receipt_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sha256"
+          },
+          "minItems": 3,
+          "maxItems": 20
+        },
+        "num_examples": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20000000000
+        }
+      },
+      "required": [
+        "format",
+        "run_id",
+        "round",
+        "spec_sha256",
+        "spec",
+        "model",
+        "base_model",
+        "receipt_sha256",
+        "participants",
+        "num_examples"
+      ],
+      "additionalProperties": false
+    },
+    "federationEvaluationPlan": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.federation-evaluation-plan/1"
+        },
+        "evaluation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "candidate": {
+          "$ref": "#/$defs/federationCandidate"
+        },
+        "dataset": {
+          "$ref": "#/$defs/federationDataset"
+        },
+        "active": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^v[1-9][0-9]{0,7}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/federationBundle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "version",
+            "generation",
+            "model"
+          ],
+          "additionalProperties": false
+        },
+        "thresholds": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "unit": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "max_rmse": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "name",
+              "unit",
+              "max_rmse"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 16
+        }
+      },
+      "required": [
+        "format",
+        "evaluation_id",
+        "candidate",
+        "dataset",
+        "active",
+        "thresholds"
+      ],
+      "additionalProperties": false
+    },
+    "federationEvaluation": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.federation-evaluation/1"
+        },
+        "evaluation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "prepared",
+            "passed",
+            "failed",
+            "uncertain"
+          ]
+        },
+        "plan_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "plan": {
+          "$ref": "#/$defs/federationEvaluationPlan"
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "candidate": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "unit": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "rmse": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "unit",
+                      "rmse"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 16
+                },
+                "base": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "unit": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "rmse": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "unit",
+                      "rmse"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 16
+                },
+                "baseline": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "unit": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "rmse": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "unit",
+                      "rmse"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 0,
+                  "maxItems": 16
+                }
+              },
+              "required": [
+                "candidate",
+                "base",
+                "baseline"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "unit": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "max_rmse": {
+                    "type": "number"
+                  },
+                  "absolute_ok": {
+                    "type": "boolean"
+                  },
+                  "baseline_ok": {
+                    "type": "boolean"
+                  },
+                  "passed": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "unit",
+                  "max_rmse",
+                  "absolute_ok",
+                  "baseline_ok",
+                  "passed"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 16
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "receipt_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "format",
+        "evaluation_id",
+        "state",
+        "plan_sha256",
+        "plan",
+        "metrics",
+        "gate",
+        "receipt_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "federationModels": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.federation-linear-models/1"
+        },
+        "spec_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "active_version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^v[1-9][0-9]{0,7}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string",
+                "pattern": "^v[1-9][0-9]{0,7}$"
+              },
+              "model": {
+                "$ref": "#/$defs/federationBundle"
+              },
+              "evaluation_id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "evaluation_receipt_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "admission_operation_id": {
+                "$ref": "#/$defs/projectUuid"
+              }
+            },
+            "required": [
+              "version",
+              "model",
+              "evaluation_id",
+              "evaluation_receipt_sha256",
+              "admission_operation_id"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 0,
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "format",
+        "spec_sha256",
+        "active_version",
+        "generation",
+        "versions"
+      ],
+      "additionalProperties": false
+    },
+    "federationOwnerOperation": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.federation-owner-operation/1"
+        },
+        "owner_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "operation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "datasets.register",
+            "grants.approve",
+            "grants.revoke",
+            "evaluations.prepare",
+            "evaluations.evaluate",
+            "models.admit",
+            "models.activate",
+            "operations.recover"
+          ]
+        },
+        "request_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "uncertain"
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "const": "stk.federation-registration-receipt/1"
+                },
+                "source": {
+                  "$ref": "#/$defs/federationSource"
+                },
+                "source_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "datasets": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "role": {
+                        "type": "string",
+                        "enum": [
+                          "training",
+                          "holdout"
+                        ]
+                      },
+                      "manifest": {
+                        "$ref": "#/$defs/federationCapsule"
+                      }
+                    },
+                    "required": [
+                      "role",
+                      "manifest"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              },
+              "required": [
+                "format",
+                "source",
+                "source_sha256",
+                "datasets"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "$ref": "#/$defs/federationGrant"
+            },
+            {
+              "$ref": "#/$defs/federationEvaluation"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "const": "stk.federation-model-admission/1"
+                },
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "spec_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^v[1-9][0-9]{0,7}$"
+                },
+                "model": {
+                  "$ref": "#/$defs/federationBundle"
+                },
+                "evaluation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "receipt_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "active_generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "format",
+                "operation_id",
+                "spec_sha256",
+                "version",
+                "model",
+                "evaluation_id",
+                "receipt_sha256",
+                "active_generation"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "const": "stk.federation-model-activation/1"
+                },
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "spec_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^v[1-9][0-9]{0,7}$"
+                },
+                "generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "model": {
+                  "$ref": "#/$defs/federationBundle"
+                }
+              },
+              "required": [
+                "format",
+                "operation_id",
+                "spec_sha256",
+                "version",
+                "generation",
+                "model"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "const": "stk.federation-owner-recovery/1"
+                },
+                "operation": {
+                  "type": "object",
+                  "properties": {
+                    "owner_id": {
+                      "$ref": "#/$defs/projectUuid"
+                    },
+                    "generation": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "operation_id": {
+                      "$ref": "#/$defs/projectUuid"
+                    },
+                    "method": {
+                      "type": "string",
+                      "enum": [
+                        "datasets.register",
+                        "grants.approve",
+                        "grants.revoke",
+                        "evaluations.prepare",
+                        "evaluations.evaluate",
+                        "models.admit",
+                        "models.activate",
+                        "operations.recover"
+                      ]
+                    },
+                    "request_sha256": {
+                      "$ref": "#/$defs/sha256"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "completed",
+                        "uncertain"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "owner_id",
+                    "generation",
+                    "operation_id",
+                    "method",
+                    "request_sha256",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "format",
+                "operation"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "format",
+        "owner_id",
+        "generation",
+        "operation_id",
+        "method",
+        "request_sha256",
+        "state",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "federationOwnerRejection": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.federation-owner-rejection/1"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "datasets.register",
+            "grants.approve",
+            "grants.revoke",
+            "evaluations.prepare",
+            "evaluations.evaluate",
+            "models.admit",
+            "models.activate",
+            "operations.recover"
+          ]
+        },
+        "request_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "owner_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "stale_owner",
+            "invalid_request"
+          ]
+        }
+      },
+      "required": [
+        "format",
+        "operation_id",
+        "method",
+        "request_sha256",
+        "owner_id",
+        "generation",
+        "reason"
       ],
       "additionalProperties": false
     }

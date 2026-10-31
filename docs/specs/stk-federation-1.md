@@ -2,10 +2,12 @@
 
 This backend adds bounded model/delta bytes, node-owned consent, an explicit
 update outbox, fixed Runtime training, STK outbound WSS/blob transport and explicit
-persistent rounds with separately installed Flower. It is not completed S4
-product or cross-site acceptance and adds no `suan.contracts.load_schema` ID.
-There is no Flower listener, automatic scheduler, desktop consent UI or model
-admission/publication. Loopback network tests do not establish NAT/TURN deployment.
+persistent rounds with separately installed Flower, plus an additive trusted-owner
+management API and independent held-out linear evaluation/version registry.
+It is not completed S4 product or cross-site acceptance and adds no
+`suan.contracts.load_schema` ID. There is no Flower listener or automatic scheduler.
+Desktop owner methods use the published bridge schema; platform acceptance is
+recorded separately. Loopback tests do not establish NAT/TURN deployment.
 Public-data labels and peer project grants do not authorize federation training.
 
 ## Array bundle
@@ -243,12 +245,126 @@ before reuse. An interrupted aggregation remains `aggregate_uncertain` for evide
 review and is never automatically repeated. The next round requires explicit prepare;
 opening a coordinator never trains, sends, advances rounds or admits a model.
 
+## Trusted Runtime owner management (additive extension)
+
+Only a trusted local Runtime configuration may select `federation_node_root` and
+optional `federation_coordinator_root`. The node root is the actual NodeAgent
+registry root, disjoint from Runtime workspaces/shared projects; coordinator reads
+use only canonical run UUID/round beneath its fixed root. No RPC selects a path,
+module, executable or credentials. Existing direct/SSH Runtime Bearer authority
+accesses `POST /v1/federation/owner/{method}`; Hub paired clients cannot proxy it.
+Runtime remains Linux-only and loopback-bound. The optional health feature is
+`federation_owner`; absent configuration preserves the previous health contract.
+
+The closed method set is `info`, `operations.get/recover`, `datasets.register/list`,
+`grants.approve/revoke/list`, `audit.list`, `candidates.get`,
+`evaluations.prepare/evaluate/get`, `models.list/admit/activate`.
+`RuntimeClient.federation_owner` rejects duplicate/nonfinite JSON, private extras,
+foreign operation/method bindings and malformed bounded results independently.
+The request is at most 4MiB, depth 64. No method automatically retries.
+
+Every write has exactly `{operation_id,owner_id,expected_generation,request}`.
+UUIDs are canonical; `owner_id=null,expected_generation=0` is accepted only before
+the first operation reservation. An initial semantic rejection can create owner
+metadata at generation zero without reserving an operation or registering data.
+The complete original request digest and intent are retained before effects.
+The closed `stk.federation-owner-operation/1` reply has exactly
+`format,owner_id,generation,operation_id,method,request_sha256,state,result`.
+`request_sha256` hashes canonical UTF-8 of the complete write envelope, preserving
+integer/float differences. Its generation is the original reserved generation,
+not a fresh observation of the owner's current generation. `state` is
+`completed` or `uncertain`; an uncertain result is null. Same-ID/original requests
+return the original record; changed method/request conflicts. A fresh global CAS
+is obtained through explicit `info`, which is passive before initialization.
+
+`operations.get({operation_id})` returns the retained operation or null, without
+effects. Explicit `operations.recover` uses a new envelope with request
+`{operation_id: original_id}`. Its result is the nonrecursive
+`{format:'stk.federation-owner-recovery/1',operation:{owner_id,generation,operation_id,method,request_sha256,state}}`.
+Query the original ID separately for its full result. Recovery never replays
+training, sending, approval or admission. Partial registration can verify/fill
+only missing publications of the same frozen two-capsule request.
+
+A definitive pre-reservation rejection is HTTP 409 with exactly
+`{error: string, rejection: proof}`. The proof has exactly
+`{format,operation_id,method,request_sha256,owner_id,generation,reason}`;
+`format` is `stk.federation-owner-rejection/1` and `reason` is `stale_owner` or
+`invalid_request`. Under the owner lease, the original operation ID must be absent
+and no operation INSERT or business effect may have occurred. Its owner UUID and
+generation describe that rejection checkpoint; its digest binds the complete
+original write envelope, including its original CAS. The Runtime client and bridge
+validate this binding independently. The bridge persists the verified proof before
+exposing it, so local history can distinguish `rejected` from `uncertain` after a
+reopen. The caller must explicitly read fresh owner information before choosing a
+new operation UUID; the rejected request is never automatically resent.
+
+An existing-ID conflict, generic HTTP error, invalid or foreign proof, missing
+lookup, or failure after reservation is not such a proof. These outcomes cannot
+clear an uncertain intent. A rejected operation is absent from the Runtime
+operation table; the bridge retains its original intent and proof locally.
+
+Known linear evaluation/version refusals are preflighted before the outer owner
+reservation, using the existing linear-registry lease without creating an absent
+registry root. This includes reviewed identities and active-version/generation
+CAS. Execution checks them again after reservation; a subsequent concurrent change
+still produces an uncertain retained operation, never a retroactive rejection.
+
+`stk.federation-registration/1` has exactly `format,source,source_sha256,roles`.
+Source binds `project_id,revision,table_id`, ordered feature/target descriptors
+`{field_id,name,unit}`, and nonempty disjoint `training_rows,holdout_rows` UUIDs.
+At most 1000 total rows, 64 features, 16 targets are admitted. Each role is exactly
+`{manifest,x,y}`, using `stk.federation-local-dataset/1` and the actual f64 array
+SHA; the manifest is published last without overwrite. Integer inputs must be
+exactly representable in f64. This internal numeric capsule does not choose the
+pending partner dataset format. Metadata replies exclude numeric arrays/paths.
+
+Approval binds a registered **training** role, source/dataset SHA, exact ordered
+training spec, run, coordinator/participant 64hex public identities and max rounds.
+Its fixed grant UUID is the operation UUID. The same original grant is retained
+after revocation and never reactivated by replay/recovery. Reading audit does not
+send a prepared update. Owner and registry operation quotas retain identities;
+backup/registry rollback does not establish global exactly-once execution.
+
+## Independent held-out linear evaluation and model versions
+
+The owner reads `stk.federation-candidate/1` metadata only from a fully aggregated
+coordinator round and verifies candidate, base, receipt, spec and actual bytes.
+It does not use the Materials `stk.curve-model/1`/PyTorch MLP registry.
+
+Evaluation preparation binds a registered heldout role, exact row/field/unit
+source, candidate/base SHA, spec SHA, active version/generation and a nonempty
+ordered threshold list `{name,unit,max_rmse}`. Thresholds must be explicitly
+provided, finite and nonnegative; no scientific value is supplied by default.
+`stk.federation-evaluation/1` has exactly
+`format,evaluation_id,state,plan_sha256,plan,metrics,gate,receipt_sha256`.
+States are `prepared,passed,failed,uncertain`; preparation/reads never infer or
+train. An explicit evaluate intent precedes a single bounded local inference.
+Interrupted inference is uncertain and is not automatically repeated.
+
+Candidate/base/frozen baseline metrics report per-target RMSE in unchanged raw
+units. Without an active version the baseline is the round base. Every target
+must satisfy its absolute threshold and not regress against that frozen baseline.
+Numeric failure produces a failed receipt, null metrics and an empty gate.
+The plan/receipt hashes and actual frozen bytes are rechecked at admission.
+
+`models.admit` explicitly registers an immutable version and receipt, without
+changing the active pointer or active generation. `models.activate` alone
+switches or rolls back to an admitted version using exact expected active version
+and generation; every successful switch increments generation, preventing ABA.
+An old admission receipt/recovery cannot reactivate a subsequently changed model.
+Publication intent precedes effects; only a proven exact postimage is recovered,
+and orphan version directories are not silently adopted or overwritten.
+Limits include 128 versions/spec, 1024 evaluations and 256MiB linear registry storage.
+These software/row-identity checks do not establish material accuracy or independent
+specimen/site sampling.
+
 ## Acceptance still required
 
 Loopback acceptance uses three independent Linux Runtimes, three outbound agents,
 actual TCP/WSS and run-scoped blobs for FedAvg/FedProx rounds with an independent
-numerical reference. It does not prove cross-site deployment, NAT traversal, desktop
-dataset consent/per-round audit viewing, or explicit model evaluation/admission.
+numerical reference. Owner/bridge evaluation and desktop tests have separately
+recorded scopes; neither loopback nor CPU UI checks prove cross-site deployment,
+NAT traversal, target-OS input or a complete production collaboration workflow.
 Peer pairing, distributable dependencies, authorized resumable files and network
 stages in `stk-peer-1.md` also remain. Numerical/software acceptance does not establish
 material-model accuracy. Initial Linux nodes, at least three participants per round,

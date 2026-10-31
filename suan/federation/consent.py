@@ -290,11 +290,30 @@ class ConsentRegistry:
     def grant(self, run_id, *, coordinator_id, participant_id, dataset_id,
               dataset_sha256, spec_sha256, model_layout, max_rounds):
         """Explicit owner consent binds exact ordered array names, dtypes and shapes."""
+        return self.grant_once(str(uuid4()), run_id, coordinator_id=coordinator_id,
+                               participant_id=participant_id, dataset_id=dataset_id,
+                               dataset_sha256=dataset_sha256, spec_sha256=spec_sha256,
+                               model_layout=model_layout, max_rounds=max_rounds)
+
+    def grant_once(self, grant_id, run_id, *, coordinator_id, participant_id, dataset_id,
+                   dataset_sha256, spec_sha256, model_layout, max_rounds):
+        """Retain the owner's explicit identity, including after withdrawal.
+
+        The owner adapter persists this identity and original request before
+        calling. Repeating an old approval never reactivates a revoked grant.
+        """
         layout = _json(validate_layout(model_layout))
-        grant = Grant(str(uuid4()), _uuid(run_id), _sha(coordinator_id), _sha(participant_id),
+        grant = Grant(_uuid(grant_id), _uuid(run_id), _sha(coordinator_id), _sha(participant_id),
                       _uuid(dataset_id), _sha(dataset_sha256), _sha(spec_sha256),
                       _freeze(json.loads(layout)), _integer(max_rounds, 1, 10000), True)
         with self._connect(write=True, create=True) as db:
+            old = self._grant(db, grant.grant_id)
+            if old is not None:
+                original, retained = grant.as_dict(), old.as_dict()
+                original.pop("active"), retained.pop("active")
+                if _json(original) != _json(retained):
+                    raise ConsentConflict("Owner grant identity already binds another request")
+                return old
             if db.execute("SELECT count(*) FROM grants").fetchone()[0] >= MAX_GRANTS:
                 raise ConsentQuota("Retained grant quota is exhausted")
             db.execute("INSERT INTO grants VALUES (?,?,?,?,?,?,?,?,?,?,?)",

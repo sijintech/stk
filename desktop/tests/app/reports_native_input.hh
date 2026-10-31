@@ -20,6 +20,18 @@ struct WindowActivationRequest {
   bool policy_change_attempted = false, policy_change_succeeded = false;
   bool activation_requested = false;
 };
+struct TimelineInput {
+  // Video-element bounds normalized to the exact document viewport, top-left.
+  double left = 0, top = 0, width = 0, height = 0;
+  double current_time = 0, duration = 0, target_fraction = 0;
+};
+struct TimelineObservation {
+  bool lookup_complete = false;
+  int visited_nodes = 0, deepest_node = 0, sliders = 0, candidates = 0;
+  double screen_x = 0, screen_y = 0, screen_width = 0, screen_height = 0;
+  double minimum = 0, maximum = 0, value = 0;
+  double normalized_x = 0, normalized_y = 0;
+};
 #endif
 /** Test-only delivery to this application's exact native document child.
  * The viewport is in parent framebuffer pixels with a bottom-left origin;
@@ -37,6 +49,11 @@ class NativeInput {
                                  std::string &error);
   bool window_is_active(wm::NativeWindowHandle parent, WindowActivationObservation &observation,
                         std::string &error);
+  // Read only the verified WKWebView's bounded AX subtree to identify its unique
+  // time slider. Deliver ordinary local mouse events; never set an AX/DOM value.
+  bool seek_document(wm::NativeWindowHandle parent, document_preview::ViewBounds viewport,
+                     int framebuffer_width, int framebuffer_height, const TimelineInput &input,
+                     TimelineObservation &observation, std::string &delivery, std::string &error);
 #endif
   bool click_document(wm::NativeWindowHandle parent, document_preview::ViewBounds viewport,
                       int framebuffer_width, int framebuffer_height,
