@@ -1,10 +1,11 @@
-# Federation admission, consent and local aggregation v1
+# Federation admission, consent and STK training transport v1
 
-This is an implemented backend foundation, not completed S4 network/training
-acceptance. It adds no `suan.contracts.load_schema` ID. It supplies bounded
-model/delta bytes, node-owned consent, an auditable explicit update outbox and
-separately installed Flower aggregation. No listener, STK outbound adapter,
-training scheduler, desktop consent UI or model admission/publication is supplied.
+This backend adds bounded model/delta bytes, node-owned consent, an explicit
+update outbox, fixed Runtime training, STK outbound WSS/blob transport and explicit
+persistent rounds with separately installed Flower. It is not completed S4
+product or cross-site acceptance and adds no `suan.contracts.load_schema` ID.
+There is no Flower listener, automatic scheduler, desktop consent UI or model
+admission/publication. Loopback network tests do not establish NAT/TURN deployment.
 Public-data labels and peer project grants do not authorize federation training.
 
 ## Array bundle
@@ -142,13 +143,114 @@ is an unregistered candidate. Held-out evaluation, model admission, publication
 and rollback remain explicit separate operations. Failure does not install,
 train, send, resume or publish anything.
 
+## Frozen trainer and messages
+
+`stk.federation-training-spec/1` has exactly `format, trainer, features, targets,
+dtype, normalization, steps, learning_rate, strategy, proximal_mu`. The installed
+trainer is `linear-regression/1`; each ordered column has `{name,unit}`, with
+1–64 features and 1–16 targets. Dtype is f32/f64; normalization is exactly `none`.
+Steps are integer 1–1000, learning rate finite (0,1], strategy fedavg/fedprox.
+Proximal mu is finite [0,100], zero for FedAvg and positive for FedProx. Both use
+multi-target mean-squared error; FedProx penalizes distance from the exact round
+base. No per-node fitted normalization changes the shared parameter space.
+Parameters are ordered `weights:[features,targets]`, then `bias:[targets]`.
+Canonical compact sorted-key UTF-8 JSON identifies the complete spec by SHA-256.
+
+`stk.federation-message/1` has exactly `format, operation, run_id, round,
+coordinator_id, participant_id, grant_id, spec_sha256, dataset_sha256, model`.
+Operations train/status/collect/cancel **all** retain the original full binding;
+model is exactly `{sha256,bytes}` of the approved base. Limits are 64KiB JSON,
+canonical UUIDs, 64 lowercase hex fingerprints/hashes and integer round 1–10000.
+No remote task ID, host path, argv, module, interpreter, environment or training
+option override is accepted. Structural validation alone is not authorization.
+
+Node receipts `stk.federation-node-result/1` have exactly `format, run_id, round,
+participant_id, grant_id, state, task_id, update_id, update`. State is prepared,
+queued, running, ready, delivered, failed, cancelled, unknown or uncertain.
+Task ID is null or 32 lowercase hex; update ID is null or a canonical UUID.
+Update is null except an explicitly collected delivered receipt, where it is
+the exact 13-field update metadata above. Ready/delivered require an update ID.
+No full Runtime spec, private path or raw array appears in a receipt.
+
+## Owner-bound Hub relay
+
+Only an authenticated Hub owner registers `stk.federation-run/1` with exact fields
+`format, run_id, coordinator_device_id, coordinator_id, spec_sha256, participants,
+max_rounds`. Participants are 3–20 distinct `{node_id,participant_id,grant_id,
+dataset_sha256}` records. Paired device IDs are **32-hex**, public fingerprints
+**64-hex**. The owner independently verifies this mapping; bearer authentication
+does not prove private-key possession. Only the designated current paired client
+executes coordinator actions. Owner administration does not imply coordinator
+execution or override a node's own dataset consent.
+
+Routes under `/api/v1/federation/runs` are POST registration, GET `/{run_id}`
+and POST `/{run_id}/revoke`. Model routes are PUT/GET/HEAD
+`/{run_id}/rounds/{round}/model/{sha256}`; update routes are PUT/GET/HEAD
+`/{run_id}/rounds/{round}/updates/{participant_id}/{update_id}/{sha256}`.
+PUT requires exact Content-Length and actual bundle SHA/length; its receipt binds
+`run_id,round,kind,participant_id,update_id,sha256,bytes`. Models use empty participant
+and update IDs. The coordinator writes/reads models, approved nodes read them;
+only the corresponding node writes its delta and the coordinator reads it.
+Authorization precedes existence checks. Bytes live in a separate federation CAS,
+outside ordinary blobs/upload/import/GC, with retained original refs and bounded
+space/concurrency. Interrupted uploads retain their identity and space reservation;
+cross-process leases serialize each upload identity. No automatic GC resets them.
+
+`POST /api/v1/actions` kind `fl.message` uses existing durable actions and outbound
+NodeAgent WSS. The Hub checks all run/device pins, target and already-published
+round model before queueing and again before dispatch. Model proposals cannot
+submit FL actions. Action reads/events are scoped; oversized FL results fail
+instead of entering the ordinary client-readable blob CAS. Revoke stops future
+action/blob authorization, not already accepted Runtime work or departed bytes;
+the response explicitly reports `tasks_stopped:false`. Run audit remains readable
+to its owner/coordinator, and re-registration does not reactivate a revoked run.
+
+## Private Runtime training and coordinator lifecycle
+
+Trusted local owner code registers numeric x/y data and approves the frozen spec
+with `NodeFederationService`. The internal dataset identity binds its full manifest,
+including column names and actual data SHA; this does not decide the cooperative
+`stk.dataset/1` format. Raw datasets, base/delta bundles, jobs and results stay in
+private node state disjoint from Runtime workspaces and shared projects. Runtime
+`outputs` is not an access-control list. The fixed worker's public work contains
+only a sanitized terminal receipt; ordinary NodeAgent snapshots, cached actions,
+graph/task/file routes must exclude or reject retained private identities.
+Identity snapshots traverse retained state once; unknown task lookups recheck
+current reservations after Runtime observation before allowing an ordinary action.
+
+Before dispatch, a persistent `(grant_id,round)` original binds the private job,
+fixed installed `python -I` command, workspace and Runtime idempotency key. Changed
+base/spec/data conflicts. Lost replies resolve the original task; reopen/status
+never submit or retrain. The worker's single-attempt marker prevents replay and
+current consent is checked before training and before publishing private results.
+The environment is allowlisted, product key empty/model absent and Flower state
+private; telemetry/update checks are disabled before imports. Socket audit is
+defence in depth, not a same-user OS sandbox. Cancel intent is persisted before
+Runtime cancellation; Runtime remains authority for the process-tree terminal state.
+Only collect calls the consent outbox publisher under its durable sending intent
+and lease. Unknown sends never replay. Raw bundle storage is capped at 512MiB;
+metadata has separate 256KiB/file and retained-object limits, not a 512MiB total
+private-directory guarantee.
+
+`FederationCoordinator.create/prepare_round` freezes local originals without
+network side effects. Explicit train publishes the model and submits each retained
+original action once. Recover only queries those actions; observe uses fresh status
+actions after prior observations finish. Explicit collect can recheck a definitively
+failed action while the node outbox still forbids duplicate sends. Aggregate requires
+at least three distinct approved delivered updates and verifies actual bytes with
+the independent aggregator. Initial/previous candidate/round base hashes are checked
+before reuse. An interrupted aggregation remains `aggregate_uncertain` for evidence
+review and is never automatically repeated. The next round requires explicit prepare;
+opening a coordinator never trains, sends, advances rounds or admits a model.
+
 ## Acceptance still required
 
-Authenticated STK outbound transport, persistent coordinator lifecycle, Linux
-Runtime training integration, desktop dataset consent and per-round audit viewing,
-and actual three-node network operation remain to be integrated. Peer pairing,
-file transfer and network stages in `stk-peer-1.md` also remain. Local processes,
-pipes and mathematical convergence do not replace those requirements or establish
-material-model accuracy. Initial Linux nodes, three participants each round,
-independent Flower, disabled telemetry/update checks and no initial SecAgg+
-remain the approved direction.
+Loopback acceptance uses three independent Linux Runtimes, three outbound agents,
+actual TCP/WSS and run-scoped blobs for FedAvg/FedProx rounds with an independent
+numerical reference. It does not prove cross-site deployment, NAT traversal, desktop
+dataset consent/per-round audit viewing, or explicit model evaluation/admission.
+Peer pairing, distributable dependencies, authorized resumable files and network
+stages in `stk-peer-1.md` also remain. Numerical/software acceptance does not establish
+material-model accuracy. Initial Linux nodes, at least three participants per round,
+independent Flower, disabled telemetry/update checks and no initial SecAgg+ remain
+the approved direction.

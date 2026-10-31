@@ -36,7 +36,7 @@ from .limits import ACTION_REQUEST_BYTES, IMPORT_MAX_FILES, IMPORT_REQUEST_BYTES
 
 KINDS = {"workspace.create", "task.submit", "task.cancel", "task.logs", "task.artifacts",
          "file.read", "view.build", "view.probe", "graph.evaluate", "graph.meta", "task.events",
-         "workspace.files", "workspace.import", "graph.cancel"}
+         "workspace.files", "workspace.import", "graph.cancel", "fl.message"}
 # Reads the hub may forward to a node without an action row (POST /api/v1/nodes/{id}/read).
 READ_KINDS = frozenset({"task.logs", "task.events", "task.artifacts", "file.read", "workspace.files"})
 TASK_ID = re.compile(r"[a-f0-9]{32}")
@@ -66,6 +66,8 @@ PAYLOAD_KEYS = {
     "graph.cancel": ({"action_id"}, set()),
     "workspace.import": ({"workspace_id", "files"}, set()),
     "task.submit": (set(), {"spec", "template"}),
+    "fl.message": ({"format", "operation", "run_id", "round", "coordinator_id", "participant_id", "grant_id",
+                    "spec_sha256", "dataset_sha256", "model"}, set()),
 }
 
 
@@ -133,6 +135,10 @@ def validate_action(body, templates, *, desktop_bytes=None):
     if size > limit:
         raise RequestTooLarge(f"{kind} requests are limited to {limit} bytes of JSON (this one has {size})")
     check_keys(kind, p)
+    if kind == "fl.message":
+        from suan.federation.protocol import validate_message
+        validate_message(p)
+        return ""  # Hub run bindings and node-owned consent are independent authorization gates.
     if kind == "workspace.create":
         if not isinstance(p["name"], str) or not 1 <= len(p["name"].strip()) <= 200:
             raise ValueError("Workspace name is required")

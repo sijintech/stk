@@ -1,8 +1,9 @@
-# 联邦后端基础：授权、审计与隔离聚合
+# 联邦后端：授权、节点训练与隔离聚合
 
 当前有模型／权重差校验、逐数据集逐run本机授权、更新审计和显式单次发送，
-以及独立环境中的Flower聚合。[契约](specs/stk-federation-1.md)规定字段、额度与恢复。
-STK出站WSS、Runtime训练、桌面授权界面和完整三节点网络验收仍待完成。
+以及固定ClientApp/Runtime训练、STK出站WSS与专用blob、持久协调轮次和独立Flower聚合。
+[契约](specs/stk-federation-1.md)规定字段、额度与恢复。本机三个独立Runtime的真实TCP/WSS多轮
+已验，桌面授权/审计与模型准入、跨站部署和完整S4仍待完成。
 读取、重开或恢复不会训练、发送或登记模型。
 
 ## 独立算法环境
@@ -57,7 +58,7 @@ audit = registry.get_update(record.update_id, include_payload=True)
 ## 显式发送与撤回
 
 ```python
-# 此回调需由后续已认证STK传输提供，并设置有限超时；本页没有网络适配器。
+# 回调由已配对Hub的FederationClient提供，必须核对run/round/recipient并使用有限超时。
 sent = registry.send_update(record.update_id, coordinator_id=verified_coordinator,
                             deliver=publish_to_pinned_coordinator)
 registry.revoke(grant.grant_id)
@@ -82,6 +83,34 @@ updates是`(metadata,payload)`序列；approved参与方来自可信授权，至
 布局、基础模型、run与轮次，拒绝整批中的坏更新。combined输入最多256MiB；指标键一致，
 `num-examples`为权重保留名。返回模型与receipt可独立核对，未登记为活动模型。
 
-测试入口：`tests/test_federation_updates.py`、`test_federation_consent.py`、`test_federation_flower.py`。
+## STK 节点与持久协调
+
+本机所有者使用 `NodeFederationService(runtime, private_root, explicit_flower_python,
+workspace_root=trusted_runtime_workspace_root)` 登记数值x/y数据并明确approve。
+私有根必须与Runtime工作区、共享项目分离；数据摘要绑定完整manifest、列名与实际数据字节。
+这是内部线性训练适配，不替合作方决定待讨论的数据格式。各节点共享固定字段/单位/参数布局，
+不各自拟合归一化再平均。支持FedAvg/FedProx，不任意导入远端训练代码。
+
+节点部署在已有配对状态上显式选择算法环境：
+
+```bash
+suan-node run --state-dir NODE_STATE --federation-python /absolute/algorithm-env/bin/python
+```
+
+省略解释器可继续观察旧任务与保护私有身份，但不能新训练；不自动安装环境。owner先在Hub登记
+已核对的run、指定paired client与三个以上节点映射；32位设备ID不能当作64位公钥指纹。
+Hub可信转发授权不等于私钥持有证明，本机数据同意仍独立生效。
+数据/base/delta不进普通Runtime inputs/work，公共work只有净化回执。普通任务/文件/图接口
+不能绕过FL私有身份；Runtime本身仍不是同OS用户之间的沙箱。
+
+协调方用已有配对凭据构造 `FederationClient`，再创建 `FederationCoordinator(private_root,
+client, FlowerAggregator(explicit_flower_python))`。先 `create(manifest,spec,model_bundle)`，
+明确 `prepare_round(run_id)`、`train(run_id,round)`，用 `recover` 只读回查原action，
+`observe` 产生新的状态观察，`collect` 才允许节点外发，`aggregate` 只生成未准入候选。
+下一轮必须再次明确prepare；重开不训练、不发送、不自动聚合。失败/未知保原身份，
+未知发送不重放，聚合中断保留证据供人工核对。取消意图不冒充Runtime终态，run撤销不召回字节。
+
+训练/节点/协议/client/coordinator及真实网络测试位于 `tests/test_federation_*.py`，
+Hub ACL/上传/断线测试为 `tests/test_control_federation.py`。
 明确设置`STK_FEDERATION_TEST_PYTHON`才启用实际隔离算法验收；缺依赖skip不算通过。
 测试清空`STK_TOKEN_PLAN_API_KEY`并取消`STK_TOKEN_PLAN_MODEL`。

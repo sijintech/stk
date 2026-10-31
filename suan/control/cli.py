@@ -171,13 +171,18 @@ def pair_node(control_url, code, name, runtime_state_dir, state_dir):
 @click.option("--state-dir", type=click.Path(path_type=Path, exists=True), required=True)
 @click.option("--graph-workers", default=1, show_default=True, type=click.IntRange(1, 2),
               help="Graph evaluations run at the same time (other actions never wait for them).")
-def run_node(state_dir, graph_workers):
+@click.option("--federation-python", type=click.Path(path_type=Path, exists=True, dir_okay=False), default=None,
+              help="Explicit installed independent Flower interpreter; absent disables new federation training.")
+def run_node(state_dir, graph_workers, federation_python):
     linux_server()
     data = json.loads((state_dir / "node.json").read_text(encoding="utf-8"))
     runtime = load_config(data["runtime_state_dir"])
     client = RuntimeClient(f"http://127.0.0.1:{runtime['port']}", runtime["token"])
+    from suan.federation.node import NodeFederationService
+    federation = NodeFederationService(client,state_dir / "federation",federation_python,
+                                       workspace_root=runtime["workspace_root"])
     try:
-        agent = NodeAgent(client, state_dir / "cache", graph_workers=graph_workers)
+        agent = NodeAgent(client, state_dir / "cache", graph_workers=graph_workers,federation=federation)
         asyncio.run(agent.run(data["control_url"], data["token"]))
     except KeyboardInterrupt:
         pass

@@ -214,8 +214,11 @@ def _graph_error(exc):
 
 
 class NodeAgent:
-    def __init__(self, runtime, cache_dir, *, blob_sink=None, blob_source=None, graph_workers=1):
+    def __init__(self, runtime, cache_dir, *, blob_sink=None, blob_source=None, graph_workers=1,
+                 federation=None, federation_transport=None):
         self.runtime = runtime
+        self.federation = federation
+        self.federation_transport = federation_transport
         self.blob_source = blob_source  # workspace.import: blob_source(action_id, sha256, target, size)
         self._graph_tokens = {}         # graph.evaluate action id -> CancelToken while it evaluates
         self._cancel_lock = threading.Lock()
@@ -235,18 +238,67 @@ class NodeAgent:
     def snapshot(self):
         import psutil
         tasks = self.runtime.tasks()
+        workspaces = self.runtime.workspaces()
+        # Fetch public objects before reservations: every FL reservation is
+        # persisted before its Runtime object can appear, including lost replies.
+        identities = self._private_identities()
         # Credentials and arbitrary environment variables never leave the node.
         tasks = [{k: v for k, v in t.items() if k != "spec"} | {"name": t["spec"]["name"],
-                  "workspace_id": t["spec"]["workspace_id"]} for t in tasks[:200]]
-        return {"health": self.runtime.health(), "workspaces": self.runtime.workspaces(), "tasks": tasks,
+                  "workspace_id": t["spec"]["workspace_id"]} for t in tasks
+                 if t["id"] not in identities["tasks"] and t["spec"]["workspace_id"] not in identities["workspaces"]][:200]
+        workspaces = [w for w in workspaces if w["id"] not in identities["workspaces"]]
+        return {"health": self.runtime.health(), "workspaces": workspaces, "tasks": tasks,
                 "cpu_percent": psutil.cpu_percent(), "memory_percent": psutil.virtual_memory().percent,
-                "features": FEATURES}
+                "features": FEATURES + (["fl.message"] if self.federation is not None else [])}
+
+    def _private_identities(self):
+        return self.federation.private_identities() if self.federation is not None else {"tasks":set(),"workspaces":set()}
+
+    def _check_private(self, payload):
+        # Includes Runtime graph bindings and nested submit specs, before cache hits.
+        pending, visited = [payload], 0
+        identities = self._private_identities()
+        task_ids, workspace_ids = set(), set()
+        while pending:
+            item = pending.pop()
+            visited += 1
+            if visited > 10000:
+                raise ValueError("Node request is too complex")
+            if isinstance(item, dict):
+                task_id = item.get("task_id")
+                workspace_id = item.get("workspace_id")
+                if ((task_id is not None and type(task_id) is not str)
+                        or (workspace_id is not None and type(workspace_id) is not str)):
+                    raise ValueError("Invalid Runtime object identity")
+                if (task_id in identities["tasks"] or item.get("workspace_id") in identities["workspaces"]):
+                    raise ValueError("This Runtime object belongs to a private federation task")
+                if task_id is not None:
+                    task_ids.add(task_id)
+                if workspace_id is not None:
+                    workspace_ids.add(workspace_id)
+                pending.extend(item.values())
+            elif isinstance(item, list):
+                pending.extend(item)
+        if self.federation is not None and (task_ids or workspace_ids):
+            # A lost response can leave a task ID absent from its original state.
+            # Query each unknown task once, then re-read reservations after all
+            # Runtime observations. A concurrently published private reservation
+            # must not be judged against the stale first set.
+            workspace_ids.update(self.runtime.task(task_id)["spec"]["workspace_id"] for task_id in task_ids)
+            latest = self._private_identities()
+            if task_ids & latest["tasks"] or workspace_ids & latest["workspaces"]:
+                raise ValueError("This Runtime object belongs to a private federation task")
 
     def execute(self, action):
         identity = action["id"]
         if len(identity) != 32 or any(c not in "0123456789abcdef" for c in identity):
             raise ValueError("Invalid action ID")
         kind, p = action["kind"], action["payload"]
+        if kind == "fl.message":
+            from suan.federation.protocol import validate_message
+            validate_message(p)
+        else:
+            self._check_private(p)
         cacheable = kind not in UNCACHED
         if cacheable:
             cached = read_json(self.cache / (identity + ".json"))
@@ -254,7 +306,7 @@ class NodeAgent:
                 if cached["request"] != action:
                     raise ValueError("Action ID reused with a different request")
                 return cached["result"]
-        result = self._operation(identity, kind, p)
+        result = self._operation(identity, kind, p, _checked=True)
         if cacheable:
             atomic_json(self.cache / (identity + ".json"), {"request": action, "result": result})
         return result
@@ -267,7 +319,19 @@ class NodeAgent:
         validate_action({"id": "0" * 32, "node_id": "0" * 32, "kind": kind, "payload": payload}, {})  # as the hub did
         return self._operation(None, kind, payload)
 
-    def _operation(self, identity, kind, p):
+    def _operation(self, identity, kind, p, *, _checked=False):
+        if kind != "fl.message" and not _checked:
+            self._check_private(p)
+        if kind == "fl.message":
+            from suan.federation.protocol import validate_message, validate_node_result
+            request = validate_message(p)
+            if self.federation is None or self.federation_transport is None:
+                raise ValueError("This node has no configured federation adapter")
+            result = self.federation.execute(request,
+                fetch_model=lambda descriptor: self.federation_transport.fetch_model(request),
+                publish_update=lambda update_id,metadata,raw: self.federation_transport.publish_update(
+                    request,update_id,metadata,raw))
+            return validate_node_result(result,message=request)
         if kind == "workspace.create":
             result = self.runtime.create_workspace(p["name"], identity)
         elif kind == "task.submit":
@@ -589,6 +653,9 @@ class NodeAgent:
     async def run(self, control_url, token):
         from websockets.asyncio.client import connect
         url = endpoint(control_url, websocket=True)
+        if self.federation is not None and self.federation_transport is None:
+            from suan.federation.client import FederationClient
+            self.federation_transport = FederationClient(control_url,token)
         if self.blob_sink is None:
             self.blob_sink = BlobUploader(control_url, token)
         if self.blob_source is None:

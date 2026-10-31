@@ -167,11 +167,13 @@ class ControlStore:
             db.executemany("INSERT OR IGNORE INTO import_refs(action_id,sha256) VALUES(?,?)",
                            [(request["id"], item["sha256"]) for item in request["payload"]["files"]])
 
-    def create_action(self, request, review_reason="", submitted_by=""):
+    def create_action(self, request, review_reason="", submitted_by="", *, authorize=None):
         identity = request["id"]
         body = encode(request)
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
+            if authorize is not None:
+                authorize(db)
             old = db.execute("SELECT request FROM actions WHERE id=?", (identity,)).fetchone()
             if old and old[0] != body:
                 raise ValueError("Action ID already used for a different request")
@@ -331,11 +333,14 @@ class ControlStore:
     def complete(self, identity, node_id, result=None, error=""):
         body = encode_result(result)
         with self.db() as db:
-            row = db.execute("SELECT state,node_id FROM actions WHERE id=?", (identity,)).fetchone()
+            row = db.execute("SELECT state,node_id,request FROM actions WHERE id=?", (identity,)).fetchone()
             if not row or row["node_id"] != node_id or row["state"] != "queued":
                 return
             data = body.encode("utf-8")
             reference = None
+            if json.loads(row["request"]).get("kind") == "fl.message" and len(data) > RESULT_INLINE_LIMIT:
+                # Federation results must never enter the general, client-readable blob CAS.
+                body, data, error = "null", b"null", "Federation result exceeds the inline receipt limit"
             if len(data) > RESULT_INLINE_LIMIT:
                 # Large results (views, catalogs) move out of the row; listings stay cheap.
                 reference, body = self.blobs.put(data), None

@@ -22,7 +22,7 @@ from .uploads import (CHUNK_MAX, DEFAULT_MIN_FREE_BYTES, DEFAULT_QUOTA_BYTES, DE
 
 # Advertised in GET /api/v1/health so agents and clients can detect additive hub features.
 FEATURES = ["blobs", "graph", "task.events", "desktop.profile", "graph.cancel", "node.read", "uploads",
-            "workspace.import"]
+            "workspace.import", "federation", "fl.message"]
 READ_INFLIGHT = 16
 BLOB_HEADERS = {"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff",
                 "Content-Security-Policy": "default-src 'none'; sandbox"}
@@ -101,8 +101,19 @@ async def json_body(request, limit):
         data += part
         if len(data) > limit:
             raise HTTPException(413, f"The request body is limited to {limit} bytes")
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate JSON key")
+            result[key] = value
+        return result
+
+    def constant(_):
+        raise ValueError("Nonfinite JSON constant")
+
     try:
-        return json.loads(bytes(data))
+        return json.loads(bytes(data), object_pairs_hook=unique, parse_constant=constant)
     except (ValueError, RecursionError) as exc:
         raise HTTPException(400, "The request body is not JSON") from exc
 
@@ -179,6 +190,9 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
     def any_device(authorization: str = Header(default="")):
         return identity(authorization)
 
+    from .federation import install_federation_routes, _http as federation_error
+    federation = install_federation_routes(app, store, any_device, json_body)
+
     def blob_path(sha256):
         try:
             return blobs.path(sha256)
@@ -202,8 +216,8 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
     def prepare_action(body, who=None):
         if not isinstance(body, dict):
             raise HTTPException(400, "An action is a JSON object")
-        if who is None and body.get("kind") == "graph.cancel":
-            raise HTTPException(400, "graph.cancel is a client request")  # never a model proposal
+        if who is None and body.get("kind") in {"graph.cancel", "fl.message"}:
+            raise HTTPException(400, "This operation requires an explicit authenticated client request")
         try:
             if (body.get("kind") == "task.submit" and isinstance(body.get("payload"), dict)
                     and "spec" not in body["payload"]):
@@ -240,10 +254,14 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
         request, reason = prepare_action(body, who)
         submitted_by = who["id"] if who else ""
         try:
+            if request["kind"] == "fl.message":
+                return federation.create_action(request, who)
             if request["kind"] == "graph.cancel":
                 return store.create_cancel(request, submitted_by)
             return store.create_action(request, reason, submitted_by)
         except ValueError as exc:
+            if request["kind"] == "fl.message":
+                raise federation_error(exc) from None
             raise HTTPException(400, str(exc)) from exc
 
     def upload_error(exc):
@@ -283,7 +301,7 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
 
     @app.get("/api/v1/devices", dependencies=[Depends(client)])
     def devices():
-        return store.devices()
+        return [{**device, "snapshot": federation.public_snapshot(device["snapshot"])} for device in store.devices()]
 
     @app.delete("/api/v1/devices/{device_id}", dependencies=[Depends(owner)])
     async def revoke(device_id: str):
@@ -315,21 +333,27 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
         body = await json_body(request, ACTION_BODY_BYTES)
         return await asyncio.to_thread(action, body, who)
 
-    @app.get("/api/v1/actions", dependencies=[Depends(client)])
-    def actions():
+    @app.get("/api/v1/actions")
+    def actions(who=Depends(client)):
         # Results, especially geometry, are loaded separately on demand.
-        return [{k: v for k, v in a.items() if k != "result"} for a in store.actions()]
+        return [{k: v for k, v in a.items() if k != "result"} for a in store.actions()
+                if federation.visible_action(a["request"], who)]
 
-    @app.get("/api/v1/actions/{action_id}", dependencies=[Depends(client)])
-    def get_action(action_id: str):
+    @app.get("/api/v1/actions/{action_id}")
+    def get_action(action_id: str, who=Depends(client)):
         try:
-            return store.action(action_id)
+            record = store.action(action_id)
+            if not federation.visible_action(record["request"], who):
+                raise KeyError(action_id)
+            return record
         except KeyError as exc:
             raise HTTPException(404, "Action not found") from exc
 
     @app.post("/api/v1/actions/{action_id}/review")
     def review(action_id: str, body: Review, who=Depends(client)):
         try:
+            if not federation.visible_action(store.action(action_id)["request"], who):
+                raise KeyError(action_id)
             if body.approved and review_policy != "any" and who["role"] != "owner":
                 # Rejections are always allowed (a device may withdraw its own action).
                 if review_policy == "owner":
@@ -530,8 +554,8 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
     def graph_presets():
         return graph_document("presets")
 
-    @app.get("/api/v1/events", dependencies=[Depends(client)])
-    async def events(request: Request, after: int = 0, last_event_id: str = Header(default="")):
+    @app.get("/api/v1/events")
+    async def events(request: Request, after: int = 0, last_event_id: str = Header(default=""), who=Depends(client)):
         try:
             cursor = max(0, int(last_event_id or after))
         except ValueError as exc:
@@ -540,10 +564,12 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
         async def stream():
             nonlocal cursor
             while not await request.is_disconnected():
-                identity(request.headers.get("authorization", ""))
+                current = identity(request.headers.get("authorization", ""))
                 rows = store.events(cursor)
                 for row in rows:
                     cursor = row["id"]
+                    if not federation.visible_event(row, current):
+                        continue
                     yield f'id: {cursor}\nevent: {row["kind"]}\ndata: {encode(row["payload"])}\n\n'
                 if not rows:
                     yield ": heartbeat\n\n"
@@ -586,7 +612,7 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
                                          "workspaces": [{k: w.get(k) for k in ("id", "name")}
                                                         for w in d["snapshot"].get("workspaces", [])],
                                          "tasks": [{k: t.get(k) for k in ("id", "name", "state", "workspace_id")}
-                                                   for t in d["snapshot"].get("tasks", [])]} for d in store.devices() if d["role"] == "node"],
+                                                   for t in d["snapshot"].get("tasks", [])]} for d in devices() if d["role"] == "node"],
                            "templates": list(templates)}
                 try:
                     response = await model.reply(store.session(session_id)["messages"][-12:], context)
@@ -639,6 +665,11 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
                 identity(ws.headers.get("authorization", ""))
                 for item in reversed(store.actions(node_id, pending=True)):
                     if item["id"] not in sent:
+                        if not federation.dispatchable(item["request"]):
+                            store.fail(item["id"], "Federation run or mapped device is no longer authorized",
+                                       states=("queued",))
+                            sent.add(item["id"])
+                            continue
                         try:
                             text = frame({"type": "action", "action": item["request"]})
                             size = len(text.encode("utf-8"))
@@ -658,7 +689,7 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
             while True:
                 data = await asyncio.wait_for(ws.receive_json(), timeout=30)
                 if data.get("type") == "snapshot" and isinstance(data.get("snapshot"), dict):
-                    store.heartbeat(node_id, data["snapshot"])
+                    store.heartbeat(node_id, federation.public_snapshot(data["snapshot"]))
                 elif data.get("type") == "result":
                     store.complete(data.get("id"), node_id, data.get("result"), str(data.get("error", "")))
                 elif data.get("type") == "read_result":

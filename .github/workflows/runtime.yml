@@ -107,7 +107,7 @@ jobs:
           python-version: '3.12'
       - name: Build base application without algorithm dependencies
         run: |
-          python -m pip install ".[test]" build
+          python -m pip install ".[test,control]" build "numpy==2.5.4"
           python -m build --wheel
           python -c "import importlib.util; assert importlib.util.find_spec('flwr') is None"
       - name: Install isolated algorithm candidate
@@ -120,8 +120,7 @@ jobs:
         shell: bash
         run: |
           env -u STK_TOKEN_PLAN_MODEL STK_FEDERATION_TEST_PYTHON="$RUNNER_TEMP/stk-flower/bin/python" \
-            python -m pytest -q tests/test_federation_updates.py tests/test_federation_consent.py \
-              tests/test_federation_flower.py --junitxml=federation.xml
+            python -m pytest -q tests/test_federation_*.py tests/test_control_federation.py --junitxml=federation.xml
           python - <<'PY'
           import xml.etree.ElementTree as ET
           cases = list(ET.parse('federation.xml').iter('testcase'))
@@ -129,6 +128,16 @@ jobs:
           expected = {'test_real_isolated_flower_aggregates_exact_admitted_deltas[f32]',
                       'test_real_isolated_flower_aggregates_exact_admitted_deltas[f64]'}
           assert len(actual) == 2 and {case.get('name') for case in actual} == expected
+          training = [case for case in cases if case.get('name', '').startswith('test_real_installed_clientapp_runtime_and_private_outputs[')]
+          network = [case for case in cases if case.get('name', '').startswith('test_three_outbound_nodes_two_real_rounds_with_original_receipts[')]
+          assert len(training) == 4 and {case.get('name') for case in training} == {
+              'test_real_installed_clientapp_runtime_and_private_outputs[fedavg-f32]',
+              'test_real_installed_clientapp_runtime_and_private_outputs[fedavg-f64]',
+              'test_real_installed_clientapp_runtime_and_private_outputs[fedprox-f32]',
+              'test_real_installed_clientapp_runtime_and_private_outputs[fedprox-f64]'}
+          assert {case.get('name') for case in network} == {
+              'test_three_outbound_nodes_two_real_rounds_with_original_receipts[fedavg]',
+              'test_three_outbound_nodes_two_real_rounds_with_original_receipts[fedprox]'}
           assert not any(case.find('skipped') is not None for case in cases)
           PY
           python -c "import importlib.util; assert importlib.util.find_spec('flwr') is None"

@@ -38,9 +38,10 @@
 [stk.peer/1](specs/stk-peer-1.md)。当前验收限于 Linux 本机两端，多 Python 版本不等于多操作系统。
 
 `suan/federation/`负责模型更新的标准库校验、本机逐run/数据集授权与审计outbox，
-以及明确启动的独立Flower聚合进程，不把flwr加入hub或STK基础依赖。
-它不提供出站传输、Runtime训练调度或桌面授权UI；后续复用既有Runtime与认证通道，
-准备、训练、发送和模型登记保持分离，不能据此标记S4完成。
+以及固定ClientApp的Runtime训练、持久协调轮次和明确启动的独立Flower聚合进程。
+`suan/control/federation.py`管理owner批准的run映射与独立FL blob/action权限，NodeAgent复用既有出站WSS；
+不把flwr加入hub或STK基础依赖。原始数值与未放行delta不进普通Runtime文件树，
+准备、训练、发送和模型登记保持分离。桌面授权/审计/准入及跨站网络验收尚未完成，不能据此标记S4完成。
 接口与界限见[联邦后端指南](federation.md)及[契约](specs/stk-federation-1.md)。
 
 ## 原生编辑器的独立模块
