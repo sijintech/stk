@@ -245,8 +245,28 @@ class HubBackend:
                  if workspace_id is None or t.get("workspace_id") == workspace_id]
         return {"tasks": tasks}
 
-    def task(self, task_id):
-        found = next((t for t in self.snapshot().get("tasks") or [] if t.get("id") == task_id), None)
+    def task(self, task_id, *, require_live=False):
+        task_id = _check_task_id(task_id)
+        device = self.device()
+        snapshot = device.get("snapshot") or {}
+        if {"read", "task.get"}.issubset(snapshot.get("features") or []):
+            try:
+                policy = self.policy()
+            except BridgeError as exc:
+                if exc.code not in {"not_found", "unsupported"}:
+                    raise
+                policy = {}  # An older hub may not have the policy endpoint.
+            if "task.get" in (policy.get("read_kinds") or []):
+                if not device.get("online"):
+                    raise BridgeError("unavailable", "The execution node is offline; its task state is not current",
+                                      retryable=True)
+                # Capability gating replaces the generic read-action fallback;
+                # this exact query must never create an action row.
+                return {"task": self.call(self.hub.read, self.node_id, "task.get", {"task_id": task_id})}
+        if require_live:
+            raise BridgeError("unsupported", "Exact task lookup requires task.get on both the hub and node; "
+                              "upgrade them. The heartbeat task list is only a bounded snapshot")
+        found = next((t for t in snapshot.get("tasks") or [] if t.get("id") == task_id), None)
         if found is None:
             raise BridgeError("not_found", "Task not found in the node's latest snapshot")
         return {"task": found}

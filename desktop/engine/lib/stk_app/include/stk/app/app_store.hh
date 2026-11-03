@@ -38,6 +38,7 @@ class ModelSettings;
 class ModuleSettings;
 class MaterialsState;
 class FederationState;
+class PeerState;
 
 /**
  * A request to show a result in the Viewer (raised by the Jobs editor, "Open in viewer"; consumed
@@ -166,6 +167,8 @@ class AppStore {
   MaterialsState &materials();
   /** Owner-only federation data, authorization, evaluation and explicit version actions. */
   FederationState &federation();
+  /** Explicit peer identity, connection, sharing and durable original-action observation. */
+  PeerState &peers();
 
   /** Queues a request for the Viewer (replaces an unconsumed one) and calls #changed. */
   void request_open_result(OpenResultRequest request);
@@ -224,6 +227,7 @@ class AppStore {
   std::unique_ptr<ModuleSettings> modules_;
   std::unique_ptr<MaterialsState> materials_;
   std::unique_ptr<FederationState> federation_;
+  std::unique_ptr<PeerState> peers_;
   ui::LogBuffer app_log_{20000};
   ui::LogBuffer bridge_log_{20000};
   uint64_t version_ = 0;

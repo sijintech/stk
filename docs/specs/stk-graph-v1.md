@@ -661,6 +661,30 @@ Label each point with the nearest reference direction (docs/specs/domain-classif
 | `film_epsilon` | number (>=0) | `1e-06` | data |
 | `output` | string (pattern) | `"domain"` | data |
 
+#### `stk.analysis.reproduction_compare@1` — Reproduction comparison / 复现数值对比
+
+Compare explicitly selected Table columns with declared units, statuses, tolerances and domain; source metadata is not authenticated.
+
+- stage `analysis`, cache `disk`, time_dependent `false`
+- inputs: `reference`: table (required), `actual`: table (required)
+- outputs: `comparison`: value<json>, `errors`: table
+
+| param | type | default | stage |
+|---|---|---|---|
+| `kind` | enum "scalar" \| "curve" | **required** | data |
+| `reference_value` | string | **required** | data |
+| `actual_value` | string | **required** | data |
+| `reference_status` | enum "succeeded" \| "failed" \| "missing" | **required** | data |
+| `actual_status` | enum "succeeded" \| "failed" \| "missing" | **required** | data |
+| `absolute` | number (>=0) | **required** | data |
+| `relative` | number (>=0) | **required** | data |
+| `alignment` | enum "exact" \| "linear" | **required** | data |
+| `domain` | null \| number[2] | `null` | data |
+| `reference_x` | string \| null | `null` | data |
+| `actual_x` | string \| null | `null` | data |
+| `reference_row_status` | string \| null | `null` | data |
+| `actual_row_status` | string \| null | `null` | data |
+
 #### `stk.analysis.statistics@1` — Statistics / 统计
 
 Per field and component: count, nan_count, min, max, mean, std (and magnitude).
@@ -1423,3 +1447,23 @@ of layer bounds.
   order with physical extents; label fields use their palette and a legend instead of a colour bar.
 - `histogram`: finite values of the selected field/column; `range` null → data range.
 - `bar`: one bar per row of `x`, grouped by `y` columns; colours from `color_column` when given.
+
+### Additive S6 reproduction comparison
+
+`stk.analysis.reproduction_compare@1` compares two explicitly selected Tables;
+its full semantics and frozen document are defined by
+[reproduction-comparison-1.md](reproduction-comparison-1.md). Required source
+statuses and tolerances have no defaults. Units come from selected field labels,
+without conversion. Curves require a declared domain and exact or explicit linear
+alignment; incomplete overlap, unknown units and missing/failed points cannot pass.
+NaN is normalized only as unavailable evidence with original markers retained;
+infinity and malformed input are errors. Failed rows are preserved.
+
+The `comparison` JSON output freezes original selected columns/descriptors,
+untrusted Table provenance/attrs and all point outcomes. The typed `errors` Table
+supports ordinary line plots, retains exact original JSON values/interpolation
+endpoints, and marks lossy float plotting fields. Numeric comparison is not proof
+of a paper, an approved assumption, a successful solver run or scientific validity.
+It never prepares/starts/retries a workflow, performs external inference, or changes
+existing report, project, Bridge or agent permission contracts. Implementation
+version 1 binds these semantics for graph caching; semantic changes require a bump.

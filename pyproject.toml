@@ -23,6 +23,7 @@ include = [
     { path = "docs/hub.md", format = "sdist" },
     { path = "docs/project.md", format = "sdist" },
     { path = "docs/project-reports.md", format = "sdist" },
+    { path = "docs/reproduction-comparison.md", format = "sdist" },
     { path = "docs/latex-workflows.md", format = "sdist" },
     { path = "docs/project-table-io.md", format = "sdist" },
     { path = "docs/design/portable-workspaces.md", format = "sdist" },
@@ -35,6 +36,7 @@ include = [
     { path = "docs/federation.md", format = "sdist" },
     { path = "docs/specs", format = "sdist" },
     { path = "examples/runtime", format = "sdist" },
+    { path = "examples/reproduction_comparison", format = "sdist" },
     { path = "examples/pet_model", format = "sdist" },
     { path = "examples/pet_data", format = "sdist" },
     { path = "examples/pet_study", format = "sdist" },
@@ -78,6 +80,7 @@ uvicorn = { version = ">=0.34,<1", optional = true }
 httpx = { version = ">=0.28,<1", optional = true }
 websockets = { version = "==15.0.1", optional = true }
 cryptography = { version = ">=50.0.2,<51", optional = true }
+pypdfium2 = { version = "==5.14.0", optional = true }
 
 [tool.poetry.extras]
 server = []
@@ -91,6 +94,7 @@ control = ["fastapi", "uvicorn", "httpx", "websockets"]
 visualization = ["numpy", "vtk", "h5py", "Pillow"]
 documents = ["markdown", "nh3"]
 peer = ["cryptography"]
+literature = ["pypdfium2"]
 
 # 添加 PyTorch 官方源
 [[tool.poetry.source]]

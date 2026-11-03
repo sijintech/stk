@@ -567,23 +567,70 @@ class Exercise {
       const int delta = report_left ? -shrink : shrink;
       const int from_x = (splitter->rect.xmin + splitter->rect.xmax) / 2;
       const int y = (splitter->rect.ymin + splitter->rect.ymax) / 2;
+      struct DragEvents {
+        Json events = Json::array();
+        std::string phase = "before_down";
+        size_t omitted = 0;
+      };
+      const auto native_events = std::make_shared<DragEvents>();
+      // Observe only this window's normal event route. Keep every original
+      // handler/event/frame: these diagnostics do not filter or synthesize input.
+      const auto window_alive = std::make_shared<bool>(true);
+      window_.add_close_listener([weak = std::weak_ptr<bool>(window_alive)](wm::Window &) {
+        if (const auto alive = weak.lock()) { *alive = false; }
+      });
+      struct RestoreEventHandler {
+        wm::Window &window;
+        std::function<bool(const wm::Event &)> previous;
+        std::shared_ptr<bool> alive;
+        ~RestoreEventHandler() { if (*alive) { window.on_event = std::move(previous); } }
+      } restore{window_, window_.on_event, window_alive};
+      window_.on_event = [&, previous = restore.previous, native_events](const wm::Event &e) {
+        const char *kind = e.type == wm::EventType::MouseMove ? "mouse_move" :
+            e.type == wm::EventType::MouseDown ? "mouse_down" :
+            e.type == wm::EventType::MouseUp ? "mouse_up" :
+            e.type == wm::EventType::FocusIn ? "focus_in" :
+            e.type == wm::EventType::FocusOut ? "focus_out" :
+            e.type == wm::EventType::Resize ? "resize" : nullptr;
+        if (kind) {
+          if (native_events->events.size() < 32) {
+            native_events->events.push_back({{"event", kind}, {"phase", native_events->phase},
+                {"position_bottom_left", {e.x, e.y}}, {"time_ms", e.time_ms},
+                {"frames_drawn", window_.frames_drawn()}, {"screen_capture_before_routing", int(screen_.capture())},
+                {"report_width_before_routing", area.rect().width()},
+                {"viewer_width_before_routing", viewer_area.rect().width()}});
+          }
+          else { ++native_events->omitted; }
+        }
+        return previous ? previous(e) : false;
+      };
       result_["decoded_media_layout_drags"].push_back({{"before", media_json(observed)},
           {"shrink_framebuffer_pixels", shrink}, {"requested_viewport_css_width", target_width},
           {"report_child_index", report_left ? 0 : 1}, {"divider_delta_framebuffer_pixels", delta},
+          {"requested_drag_from_bottom_left", {from_x, y}},
+          {"requested_drag_to_bottom_left", {from_x + delta, y}},
+          {"report_min_width", area.min_width(window_.ui_scale())},
+          {"viewer_min_width", viewer_area.min_width(window_.ui_scale())},
           {"report_width_before", before.width()}, {"viewer_width_before", viewer_before.width()},
           {"before_down", input_state()}});
       const auto record = [&](const char *phase) {
         auto &item = result_["decoded_media_layout_drags"].back();
-        item[phase] = input_state();
+        auto state = input_state();
+        state["report_width"] = area.rect().width();
+        state["viewer_width"] = viewer_area.rect().width();
+        item[phase] = std::move(state);
+        item["native_events"] = native_events->events;
+        item["native_events_omitted"] = native_events->omitted;
         item["report_width_after"] = area.rect().width();
         item["viewer_width_after"] = viewer_area.rect().width(); save();
+        native_events->phase = phase;
       };
       wm::Event e; e.x = from_x; e.y = y; e.type = wm::EventType::MouseMove; event(e);
       e.type = wm::EventType::MouseDown; e.button = wm::MouseButton::Left; event(e);
       record("after_down"); frame(); record("after_down_frame");
       require(screen_.capture() == wm::Screen::Capture::Splitter, "Mouse must capture report/Viewer divider");
-      e.type = wm::EventType::MouseMove; e.x += delta; event(e); frame(); record("after_move_frame");
-      e.type = wm::EventType::MouseUp; event(e); frame(); record("after_up_frame");
+      e.type = wm::EventType::MouseMove; e.x += delta; event(e); record("after_move"); frame(); record("after_move_frame");
+      e.type = wm::EventType::MouseUp; event(e); record("after_up"); frame(); record("after_up_frame");
       ++layout_drags;
       require(screen_.capture() == wm::Screen::Capture::None && area.rect().width() < before.width() &&
           viewer_area.rect().width() > viewer_before.width(),

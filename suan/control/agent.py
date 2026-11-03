@@ -40,12 +40,12 @@ from .limits import FRAME_LIMIT, READ_QUEUE, READ_TIMEOUT
 MUPRO_FRAME = re.compile(r"(?:^|/)([A-Za-z][A-Za-z0-9_]{0,7})\.(\d{8})\.dat$")
 # Operations this agent implements beyond the first release (advertised in the snapshot).
 FEATURES = ["graph.evaluate", "graph.meta", "task.events", "graph.cancel", "read", "workspace.files",
-            "workspace.import"]
+            "workspace.import", "task.get"]
 # Pure reads: re-running them is harmless, so their results are not kept in the action cache.
-UNCACHED = {"task.events", "graph.meta", "graph.cancel", "workspace.files"}
+UNCACHED = {"task.get", "task.events", "graph.meta", "graph.cancel", "workspace.files"}
 GRAPH_KINDS = {"graph.evaluate"}
 # Kinds the hub may send as reads (no action row); the hub checks them with the action policy first.
-READ_KINDS = {"task.logs", "task.events", "task.artifacts", "file.read", "workspace.files"}
+READ_KINDS = {"task.get", "task.logs", "task.events", "task.artifacts", "file.read", "workspace.files"}
 RESULT_LIMIT = 12 * 1024 * 1024
 FAST_LANE = 4
 READ_LANE = 4
@@ -243,8 +243,7 @@ class NodeAgent:
         # persisted before its Runtime object can appear, including lost replies.
         identities = self._private_identities()
         # Credentials and arbitrary environment variables never leave the node.
-        tasks = [{k: v for k, v in t.items() if k != "spec"} | {"name": t["spec"]["name"],
-                  "workspace_id": t["spec"]["workspace_id"]} for t in tasks
+        tasks = [self._public_task(t) for t in tasks
                  if t["id"] not in identities["tasks"] and t["spec"]["workspace_id"] not in identities["workspaces"]][:200]
         workspaces = [w for w in workspaces if w["id"] not in identities["workspaces"]]
         return {"health": self.runtime.health(), "workspaces": workspaces, "tasks": tasks,
@@ -253,6 +252,12 @@ class NodeAgent:
 
     def _private_identities(self):
         return self.federation.private_identities() if self.federation is not None else {"tasks":set(),"workspaces":set()}
+
+    @staticmethod
+    def _public_task(task):
+        """The heartbeat projection: never publish argv, environment or private input paths."""
+        return {k: v for k, v in task.items() if k != "spec"} | {
+            "name": task["spec"]["name"], "workspace_id": task["spec"]["workspace_id"]}
 
     def _check_private(self, payload):
         # Includes Runtime graph bindings and nested submit specs, before cache hits.
@@ -339,6 +344,12 @@ class NodeAgent:
             if spec["argv"][0] == "@python":
                 spec["argv"][0] = sys.executable
             result = self.runtime.submit(spec, identity)
+        elif kind == "task.get":
+            task = self.runtime.task(p["task_id"])
+            # Reservations may have changed during the Runtime request. Check
+            # the observed workspace as well as the task before publishing it.
+            self._check_private({"task_id": task["id"], "workspace_id": task["spec"]["workspace_id"]})
+            result = self._public_task(task)
         elif kind == "task.cancel":
             result = self.runtime.cancel(p["task_id"])
         elif kind == "task.logs":

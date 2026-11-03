@@ -9,6 +9,8 @@ import math
 import re
 from uuid import UUID
 
+from .file_protocol import FILE_METHODS, FileProtocolError, validate_file_params, validate_file_result
+
 
 FORMAT = "stk.peer/1"
 PROTOCOL_VERSION = 1
@@ -18,8 +20,12 @@ MAX_JSON_DEPTH = 64
 MAX_COMMANDS = 1000
 MAX_REQUEST_BYTES = 256 * 1024
 MAX_RECEIPT_BYTES = 512 * 1024
-METHODS = frozenset(("peer.hello", "project.catalog", "project.table.read",
-                     "project.edit_operations.apply_once", "project.edit_operations.get"))
+BASE_METHODS = frozenset(("peer.hello", "project.catalog", "project.table.read",
+                          "project.edit_operations.apply_once", "project.edit_operations.get"))
+# Preserve the existing endpoint's default requested set. Knowing an optional
+# codec must not advertise or request an uninstalled file adapter.
+METHODS = BASE_METHODS
+SUPPORTED_METHODS = BASE_METHODS | FILE_METHODS
 ERROR_CODES = frozenset(("invalid_request", "invalid_params", "unsupported", "unauthorized", "forbidden",
                          "not_found", "conflict", "busy", "unavailable", "limit_exceeded", "internal_error"))
 _METHOD = re.compile(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*\Z")
@@ -214,10 +220,15 @@ def _request(message):
         _fail("unsupported", "Unsupported peer protocol format")
     _uuid(message["id"])
     method = message["method"]
-    if type(method) is not str or method not in METHODS:
+    if type(method) is not str or method not in SUPPORTED_METHODS:
         _fail("unsupported", "Peer method is not supported")
     if method == "peer.hello":
         _hello_params(message["params"])
+    elif method in FILE_METHODS:
+        try:
+            validate_file_params(method, message["params"])
+        except FileProtocolError as exc:
+            _fail(exc.code, exc.message)
     else:
         _project_params(method, message["params"])
 
@@ -227,7 +238,7 @@ def _hello_result(result):
     if type(result["protocol"]) is not int or result["protocol"] not in SUPPORTED_PROTOCOLS:
         _fail()
     _capabilities(result["capabilities"])
-    if not result["capabilities"].keys() <= METHODS or any(v != 1 for v in result["capabilities"].values()):
+    if not result["capabilities"].keys() <= SUPPORTED_METHODS or any(v != 1 for v in result["capabilities"].values()):
         _fail()
     unavailable = result["unavailable"]
     if type(unavailable) is not list or len(unavailable) > 64 or any(type(item) is not str for item in unavailable):
@@ -241,7 +252,7 @@ def _hello_result(result):
         _fail()
 
 
-def _response(message, method=None):
+def _response(message, method=None, *, request_params=None, file_manifest=None):
     if type(message) is not dict or ("result" in message) == ("error" in message):
         _fail()
     _fields(message, ("format", "id", "result" if "result" in message else "error"))
@@ -260,8 +271,14 @@ def _response(message, method=None):
     elif method == "peer.hello":
         _hello_result(message["result"])
     elif method is not None:
-        if type(method) is not str or method not in METHODS:
+        if type(method) is not str or method not in SUPPORTED_METHODS:
             _fail("unsupported", "Peer method is not supported")
+        if method in FILE_METHODS:
+            try:
+                validate_file_result(method, message["result"], params=request_params, manifest=file_manifest)
+            except FileProtocolError as exc:
+                _fail(exc.code, exc.message)
+            return
         from suan.desktop_bridge.schema import validate_outgoing
         if validate_outgoing({"id": 1, "result": message["result"]}, method):
             _fail("invalid_params", "Result does not match the peer method contract")
@@ -291,14 +308,14 @@ def validate_request(message):
     return detached
 
 
-def validate_response(message, *, method=None):
+def validate_response(message, *, method=None, request_params=None, file_manifest=None):
     """Validate an envelope; pass the original method to also validate its result contract."""
     detached = _decode(_encode(message))
-    _response(detached, method)
+    _response(detached, method, request_params=request_params, file_manifest=file_manifest)
     return detached
 
 
-def decode_message(raw, *, method=None):
+def decode_message(raw, *, method=None, request_params=None, file_manifest=None):
     """Decode one length-bounded JSON document, independent of transport framing.
 
     For replies, ``method`` is the retained original request's method. It is not
@@ -308,17 +325,17 @@ def decode_message(raw, *, method=None):
     if type(message) is dict and "method" in message:
         _request(message)
     else:
-        _response(message, method)
+        _response(message, method, request_params=request_params, file_manifest=file_manifest)
     return message
 
 
-def encode_message(message, *, method=None):
+def encode_message(message, *, method=None, request_params=None, file_manifest=None):
     """Encode a validated control message without adding stream delimiters."""
     detached = _decode(_encode(message))
     if type(detached) is dict and "method" in detached:
         _request(detached)
     else:
-        _response(detached, method)
+        _response(detached, method, request_params=request_params, file_manifest=file_manifest)
     return _encode(detached)
 
 
@@ -335,7 +352,7 @@ def negotiate_hello(params, *, capabilities=None):
         _fail("unsupported", "No common peer protocol version")
     available = {"peer.hello": 1} if capabilities is None else _decode(_encode(capabilities))
     _capabilities(available)
-    if not available.keys() <= METHODS or any(version != 1 for version in available.values()):
+    if not available.keys() <= SUPPORTED_METHODS or any(version != 1 for version in available.values()):
         _fail("unsupported", "Endpoint capability is not implemented by this peer protocol")
     selected = {name: version for name, version in sorted(params["capabilities"].items())
                 if available.get(name) == version}
@@ -349,6 +366,7 @@ def negotiate_hello(params, *, capabilities=None):
 
 
 __all__ = ["FORMAT", "PROTOCOL_VERSION", "SUPPORTED_PROTOCOLS", "MAX_MESSAGE_BYTES", "MAX_JSON_DEPTH",
-           "MAX_COMMANDS", "MAX_REQUEST_BYTES", "MAX_RECEIPT_BYTES", "METHODS", "ERROR_CODES",
+           "MAX_COMMANDS", "MAX_REQUEST_BYTES", "MAX_RECEIPT_BYTES", "METHODS", "BASE_METHODS", "FILE_METHODS",
+           "SUPPORTED_METHODS", "ERROR_CODES",
            "PeerProtocolError", "decode_message", "encode_message", "validate_request", "validate_response",
            "negotiate_hello"]

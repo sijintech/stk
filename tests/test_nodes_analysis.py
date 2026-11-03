@@ -10,7 +10,7 @@ np = pytest.importorskip("numpy")
 
 from suan.data.model import Category, ImageData, PolyData, Provenance, Table  # noqa: E402
 from suan.graph.catalog import build_registry, compare_catalog  # noqa: E402
-from suan.graph.nodes import analysis  # noqa: E402
+from suan.graph.nodes import analysis, reproduction  # noqa: E402
 from suan.graph.registry import Budget, CancelToken, NodeExecutionError, Registry  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,7 +78,7 @@ def film():
 def test_declarations_equal_the_frozen_catalog():
     live = build_registry(entry_points=False).catalog()
     assert compare_catalog(live, SPEC, families={"analysis"}) == []
-    assert {t.id for t in Registry([analysis])} == {n["id"] for n in SPEC["nodes"]
+    assert {t.id for t in Registry([analysis, reproduction])} == {n["id"] for n in SPEC["nodes"]
                                                     if n["id"].startswith("stk.analysis.")}
 
 

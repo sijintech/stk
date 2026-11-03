@@ -11,8 +11,10 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <locale>
 #include <map>
 #include <set>
+#include <sstream>
 
 namespace stk::app {
 namespace {
@@ -24,8 +26,13 @@ std::string short_id(const std::string &value)
 }
 std::optional<double> number(const std::string &text, double low, double high)
 {
-  double value = 0; const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
-  return parsed.ec == std::errc() && parsed.ptr == text.data() + text.size() && std::isfinite(value) && value >= low && value <= high ?
+  // Apple libc++ does not provide floating-point from_chars on every supported toolchain.
+  // Keep decimal parsing independent of the process locale and consume the full draft.
+  if (text.empty() || text.front() == '+') { return std::nullopt; }
+  std::istringstream input(text);
+  input.imbue(std::locale::classic());
+  double value = 0; input >> std::noskipws >> value;
+  return !input.fail() && input.eof() && std::isfinite(value) && value >= low && value <= high ?
       std::optional<double>(value) : std::nullopt;
 }
 std::optional<int64_t> integer(const std::string &text, int64_t low, int64_t high)

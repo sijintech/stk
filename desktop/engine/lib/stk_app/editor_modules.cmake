@@ -85,3 +85,7 @@ stk_editor_module(materials
 stk_editor_module(federation
   src/editors/federation_editor.cc
 )
+
+stk_editor_module(peers
+  src/editors/peers_editor.cc
+)

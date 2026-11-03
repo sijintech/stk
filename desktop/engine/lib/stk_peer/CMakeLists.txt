@@ -21,7 +21,18 @@ if(MSVC)
 else()
   target_compile_options(stk-peer-transport PRIVATE -Wall -Wextra -Wpedantic)
 endif()
-# No install rule: top-level packaging must opt in and carry all dependency notices.
+option(STK_PEER_INSTALL "Install the standalone helper (dependency packaging is separate)" OFF)
+if(STK_PEER_INSTALL)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "Relocatable helper installation is currently implemented for Linux only")
+  endif()
+  # Old dtags deliberately cover the transitive bundled ELF dependency closure.
+  target_link_options(stk-peer-transport PRIVATE "LINKER:--disable-new-dtags")
+  set_target_properties(stk-peer-transport PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../lib" INSTALL_RPATH_USE_LINK_PATH FALSE)
+  install(TARGETS stk-peer-transport RUNTIME DESTINATION bin COMPONENT PeerHelper)
+  install(FILES LICENSE DESTINATION licenses/stk-peer-helper COMPONENT PeerHelper)
+endif()
 
 option(STK_PEER_BUILD_TEST_PEER "Build the uninstalled adversarial partial-frame test peer" OFF)
 if(STK_PEER_BUILD_TEST_PEER)

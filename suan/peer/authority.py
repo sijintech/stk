@@ -51,12 +51,27 @@ class PeerOutcomeUncertain(RuntimeError):
     """An accepted project edit may have committed before authority cleanup failed."""
 
 
+class _BoundProjectStore(ProjectStore):
+    """Owner observation must fail closed instead of recovering a hot journal."""
+    def _recover_readonly_database(self):
+        raise PeerDenied("Bound project requires explicit local recovery")
+
+
 class PeerContext:
     """Opaque process-local handle, issued only after signature verification."""
     __slots__ = ()
 
     def __repr__(self):
         return "<PeerContext>"
+
+
+@dataclass(frozen=True)
+class PeerLease:
+    """Authenticated identity only; does not grant project, file or training access."""
+    owner_id: str
+    registry_id: str
+    peer_id: str
+    peer_epoch: int
 
 
 @dataclass(frozen=True)
@@ -142,26 +157,30 @@ class PeerAuthority:
     instances/processes. Already accepted edits finish before a waiting revocation;
     every subsequent access revalidates the grant and database generation.
     """
-    def __init__(self, directory, *, owner_id, clock=time.monotonic):
+    def __init__(self, directory, *, owner_id, clock=time.monotonic, create=True):
         self.owner_id = _uuid(owner_id)
         self.directory = Path(directory).expanduser().resolve()
-        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if type(create) is not bool:
+            raise PeerDenied("Invalid peer authority open mode")
+        if create:
+            self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path = self.directory / "peer-authority.sqlite3"
         self._lock = threading.RLock()
         self._clock = clock
         self._challenges = {}
         self._contexts = {}
         created = False
-        try:
-            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            os.close(fd)
-            created = True
-        except FileExistsError:
-            pass
+        if create:
+            try:
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                os.close(fd)
+                created = True
+            except FileExistsError:
+                pass
         self._identity = _file_identity(self.path)
         if not created:
             _registry_header(self.path, self._identity)
-        db = sqlite3.connect(self.path.as_uri() + "?mode=rw", uri=True,
+        db = sqlite3.connect(self.path.as_uri() + ("?mode=rw" if create else "?mode=ro"), uri=True,
                              isolation_level=None, timeout=10)
         try:
             if created:
@@ -342,6 +361,19 @@ class PeerAuthority:
                 result.update(values)
             return frozenset(result)
 
+    @contextmanager
+    def peer_access(self, context):
+        """Lease a current authenticated identity for one bounded acceptance.
+
+        The existing authority lock/transaction remains held until exit so peer
+        revocation serializes with the accepted operation. No project is opened
+        and no project capability is inferred. Never wait for network I/O here.
+        """
+        with self._transaction() as db:
+            peer_id = self._peer(db, context)
+            epoch = db.execute("SELECT epoch FROM peers WHERE peer_id=?", (peer_id,)).fetchone()[0]
+            yield PeerLease(self.owner_id, self._registry_id, peer_id, epoch)
+
     def _local_project(self, directory):
         directory = Path(directory).expanduser().resolve()
         if self.directory == directory or self.directory.is_relative_to(directory):
@@ -369,6 +401,49 @@ class PeerAuthority:
             db.execute("INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?, 1)",
                        (info["id"], str(store.directory), generation, *identity, info["revision"]))
             return {"project_id": info["id"], "database_generation": generation}
+
+    def bound_project(self, project_id, database_generation):
+        """Read a registered owner target without granting project access to a peer.
+
+        Inside an existing peer/session lease, the caller's Authority transaction
+        prevents rebind across this observation and its accepted bounded action.
+        Otherwise this is only a current observation, never a lifetime guarantee.
+        This method takes no second writable transaction and performs no recovery.
+        """
+        project_id, generation = _uuid(project_id), _uuid(database_generation)
+        with self._lock:
+            db = None
+            try:
+                if _file_identity(self.path) != self._identity:
+                    raise PeerDenied("Peer authority database was replaced")
+                _registry_header(self.path, self._identity)
+                db = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True, isolation_level=None, timeout=10)
+                db.row_factory = sqlite3.Row
+                db.execute("BEGIN")
+                self._validate(db)
+                row = db.execute("SELECT * FROM projects WHERE project_id=? AND generation=? AND active=1",
+                                 (project_id, generation)).fetchone()
+                if row is None:
+                    raise PeerDenied("Bound project generation is unavailable")
+                expected = (row["device"], row["inode"])
+                path = Path(row["directory"]) / "project.sqlite3"
+                if _file_identity(path) != expected:
+                    raise PeerDenied("Bound project identity changed")
+                cache = self.__dict__.setdefault("_bound_owner_stores", {})
+                key = (generation, expected, row["directory"])
+                cached = cache.get(project_id)
+                store = cached[1] if cached is not None and cached[0] == key else _BoundProjectStore(row["directory"])
+                info = store.info()
+                if (info["id"] != project_id or info["revision"] < row["revision"]
+                        or _file_identity(store.path) != expected or _file_identity(self.path) != self._identity):
+                    raise PeerDenied("Bound project identity changed")
+                cache[project_id] = (key, store)
+                return store
+            except (sqlite3.Error, OSError, ValueError):
+                raise PeerDenied("Bound project is unavailable") from None
+            finally:
+                if db is not None:
+                    db.close()
 
     def grant(self, peer_id, project_id, capabilities):
         peer_id, project_id = _hex(peer_id), _uuid(project_id)
@@ -479,4 +554,4 @@ class PeerAuthority:
                     raise
 
 
-__all__ = ["PeerAuthority", "PeerContext", "PeerDenied", "PeerOutcomeUncertain", "ProjectLease", "auth_message", "peer_id_for"]
+__all__ = ["PeerAuthority", "PeerContext", "PeerDenied", "PeerOutcomeUncertain", "PeerLease", "ProjectLease", "auth_message", "peer_id_for"]

@@ -88,7 +88,10 @@ The endpoint supplies its actual, currently authorized capability subset to
 
 `capabilities` is the exact compatible intersection. `unavailable` is the sorted,
 unique list of requested methods absent from it, including version mismatches.
-Only implemented version-1 methods from the following allowlist may be advertised.
+Only implemented version-1 base methods or explicitly implemented optional
+extension methods may be advertised. The [file extension](stk-peer-files-1.md)
+defines six separate `files.*:1` method capabilities. A known pure codec alone
+does not install an adapter or add these to the default endpoint capability set.
 Hello does not infer a grant from a method name, authenticate an asserted owner,
 write state, open projects, resume transfers, start models, execute tasks or control
 a desktop. Its closed result contains no PID, directory, local handle or claim of
@@ -96,8 +99,10 @@ successful authentication. The client must not use a missing capability.
 
 ## Explicit project method subset
 
-Version 1 permits exactly five method names: pure `peer.hello` and the four project
-methods below. There is no general call forwarding, `project.open(directory)`,
+The base version-1 subset permits exactly five method names: pure `peer.hello` and
+the four project methods below. Optional file controls are specified separately
+in [stk-peer-files/1](stk-peer-files-1.md); their session and file grants do not
+inherit project authority. There is no general call forwarding, `project.open(directory)`,
 ordinary `project.apply`, script execution, model setup, task submission or UI method.
 
 Every business request requires three canonical UUIDs:

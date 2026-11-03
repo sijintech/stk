@@ -28,11 +28,11 @@ import importlib
 __all__ = ["BUILTIN_MODULES", "MODULE_FAMILIES", "builtin_modules", "catalog", "missing_modules", "register_builtin"]
 
 BUILTIN_MODULES = ("sources", "filters", "analysis", "render", "view", "output", "plot", "pet_study_sources",
-                   "lammps_structure", "molecule_render")
+                   "lammps_structure", "molecule_render", "reproduction")
 # Node family (middle segment of the type id) declared by each module.
 MODULE_FAMILIES = {"sources": "source", "filters": "filter", "analysis": "analysis", "render": "render",
                    "view": "view", "output": "output", "plot": "plot", "pet_study_sources": "source",
-                   "lammps_structure": "source", "molecule_render": "render"}
+                   "lammps_structure": "source", "molecule_render": "render", "reproduction": "analysis"}
 
 
 def _import(name):

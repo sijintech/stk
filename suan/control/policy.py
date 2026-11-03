@@ -34,11 +34,11 @@ from suan.runtime.models import TaskSpec, layout, relative_path
 
 from .limits import ACTION_REQUEST_BYTES, IMPORT_MAX_FILES, IMPORT_REQUEST_BYTES, encoded_size
 
-KINDS = {"workspace.create", "task.submit", "task.cancel", "task.logs", "task.artifacts",
+KINDS = {"workspace.create", "task.submit", "task.get", "task.cancel", "task.logs", "task.artifacts",
          "file.read", "view.build", "view.probe", "graph.evaluate", "graph.meta", "task.events",
          "workspace.files", "workspace.import", "graph.cancel", "fl.message"}
 # Reads the hub may forward to a node without an action row (POST /api/v1/nodes/{id}/read).
-READ_KINDS = frozenset({"task.logs", "task.events", "task.artifacts", "file.read", "workspace.files"})
+READ_KINDS = frozenset({"task.get", "task.logs", "task.events", "task.artifacts", "file.read", "workspace.files"})
 TASK_ID = re.compile(r"[a-f0-9]{32}")
 SHA256 = re.compile(r"[a-f0-9]{64}")
 MIB = 1024 * 1024
@@ -54,6 +54,7 @@ LOG_STREAMS = ("stdout", "stderr", "scheduler.out", "scheduler.err", "wrapper")
 # (task_id or workspace_id) are checked by their own rules below.
 PAYLOAD_KEYS = {
     "workspace.create": ({"name"}, set()),
+    "task.get": ({"task_id"}, set()),
     "task.cancel": ({"task_id"}, set()),
     "task.logs": ({"task_id"}, {"stream", "offset"}),
     "task.artifacts": ({"task_id"}, set()),
@@ -142,7 +143,7 @@ def validate_action(body, templates, *, desktop_bytes=None):
     if kind == "workspace.create":
         if not isinstance(p["name"], str) or not 1 <= len(p["name"].strip()) <= 200:
             raise ValueError("Workspace name is required")
-    if kind in {"task.cancel", "task.logs", "task.artifacts", "view.build", "view.probe"}:
+    if kind in {"task.get", "task.cancel", "task.logs", "task.artifacts", "view.build", "view.probe"}:
         if not re.fullmatch(r"[a-f0-9]{32}", str(p.get("task_id", ""))):
             raise ValueError("Task ID required")
     if kind == "task.logs":

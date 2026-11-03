@@ -447,10 +447,12 @@ def test_malformed_requests_get_stable_errors(inproc):
 
 def test_serve_handles_oversized_lines_and_eof(bridge_env):
     output = io.BytesIO()
+    limit = 16 * 1024
     lines = [b'{"id": 1, "method": "hello", "params": {"protocol": 1}}\n',
-             b'{"id": 2, "pad": "' + b"x" * 10000 + b'"}\n', b'{"id": 3, "method": "connections.list"}\n']
-    # The limit leaves room for hello's reply (its method list and Windows' long temporary paths), not the 10 KB line.
-    bridge = Bridge(bridge_env / "bridge", writer=output, strict=True, max_line=8192)
+             b'{"id": 2, "pad": "' + b"x" * (limit + 1) + b'"}\n', b'{"id": 3, "method": "connections.list"}\n']
+    # Leave room for the expanded capability list and Windows temporary paths,
+    # while keeping the malformed second request strictly above the test limit.
+    bridge = Bridge(bridge_env / "bridge", writer=output, strict=True, max_line=limit)
     bridge.serve(io.BytesIO(b"".join(lines)))  # EOF: returns after a graceful shutdown
     assert bridge.closed.is_set()
     deadline = time.monotonic() + 10

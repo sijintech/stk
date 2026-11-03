@@ -735,6 +735,191 @@
    "cache": "disk"
   },
   {
+   "id": "stk.analysis.reproduction_compare@1",
+   "type": "stk.analysis.reproduction_compare",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "analysis",
+   "category": "analysis",
+   "title": {
+    "en": "Reproduction comparison",
+    "zh": "复现数值对比"
+   },
+   "description": {
+    "en": "Compare explicitly selected Table columns with declared units, statuses, tolerances and domain; source metadata is not authenticated."
+   },
+   "inputs": [
+    {
+     "name": "reference",
+     "type": "table",
+     "required": true,
+     "multi": false
+    },
+    {
+     "name": "actual",
+     "type": "table",
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "comparison",
+     "type": "value",
+     "value_type": "json"
+    },
+    {
+     "name": "errors",
+     "type": "table"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "kind": {
+      "enum": [
+       "scalar",
+       "curve"
+      ],
+      "x-stk-stage": "data"
+     },
+     "reference_value": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-stk-stage": "data"
+     },
+     "actual_value": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-stk-stage": "data"
+     },
+     "reference_status": {
+      "enum": [
+       "succeeded",
+       "failed",
+       "missing"
+      ],
+      "x-stk-stage": "data"
+     },
+     "actual_status": {
+      "enum": [
+       "succeeded",
+       "failed",
+       "missing"
+      ],
+      "x-stk-stage": "data"
+     },
+     "absolute": {
+      "type": "number",
+      "minimum": 0,
+      "x-stk-stage": "data"
+     },
+     "relative": {
+      "type": "number",
+      "minimum": 0,
+      "x-stk-stage": "data"
+     },
+     "alignment": {
+      "enum": [
+       "exact",
+       "linear"
+      ],
+      "x-stk-stage": "data"
+     },
+     "domain": {
+      "anyOf": [
+       {
+        "type": "null"
+       },
+       {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 2,
+        "maxItems": 2
+       }
+      ],
+      "x-stk-widget": "json",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "reference_x": {
+      "anyOf": [
+       {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "actual_x": {
+      "anyOf": [
+       {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "reference_row_status": {
+      "anyOf": [
+       {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "actual_row_status": {
+      "anyOf": [
+       {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [
+     "kind",
+     "reference_value",
+     "actual_value",
+     "reference_status",
+     "actual_status",
+     "absolute",
+     "relative",
+     "alignment"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "disk"
+  },
+  {
    "id": "stk.analysis.statistics@1",
    "type": "stk.analysis.statistics",
    "version": 1,

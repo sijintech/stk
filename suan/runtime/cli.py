@@ -1,10 +1,11 @@
-"""CLI adapters. Task operations always go through RuntimeClient."""
+"""CLI adapters over the Runtime client and the paired Hub backend."""
 
 from pathlib import Path
 import codecs
 import json
 import os
 import re
+import tempfile
 import time
 import uuid
 
@@ -13,6 +14,7 @@ import click
 from .client import RuntimeClient
 from .common import atomic_json, init_config, load_config, read_json
 from .models import TaskSpec
+from suan.desktop_bridge.protocol import BridgeError
 
 
 def default_state():
@@ -25,6 +27,121 @@ def profiles_path():
             "STK_PROFILES_FILE", str(Path.home() / ".stk" / "connections.json")
         )
     )
+
+
+def default_hub_state():
+    """Separate from the running desktop bridge's writable connection state."""
+    return str(Path.home() / ".stk" / "client")
+
+
+class HubCLIClient:
+    """A thin CLI adapter over the existing paired Hub backend, with no desktop server."""
+
+    def __init__(self, name, node, state_dir):
+        from suan.desktop_bridge.connections import ConnectionStore
+        self.store = ConnectionStore(state_dir)
+        try:
+            self.backend = self.store.backend("hub:" + name, node)
+        except Exception:
+            self.store.close()
+            raise
+        self.backend.wait = 0  # Submission acknowledges the action, never waits for execution/review.
+
+    @staticmethod
+    def _public_task(task):
+        if "spec" not in task:
+            return task
+        return {k: v for k, v in task.items() if k != "spec"} | {
+            "name": task["spec"]["name"], "workspace_id": task["spec"]["workspace_id"]}
+
+    def _operation(self, kind, key, operation):
+        from suan.desktop_bridge.backends import action_id
+        identity = action_id(kind, self.backend.node_id, key)
+        click.echo(f"Hub action: {identity}", err=True)
+        try:
+            result = operation()
+        except BridgeError as exc:
+            if exc.data and exc.data.get("action") and (
+                    exc.code == "timeout" or exc.data["action"]["state"] in {"failed", "rejected"}):
+                result = {"action": exc.data["action"]}
+            elif exc.code == "unavailable":
+                # The hub may have accepted the request before its reply was lost.
+                # Only the original key/action can resolve that uncertainty.
+                dump({"outcome": "unknown", "key": key,
+                      "action": {"id": identity, "node_id": self.backend.node_id, "kind": kind},
+                      "error": exc.to_json()})
+                raise click.exceptions.Exit(1) from None
+            else:
+                raise
+        if "task" in result:
+            result["task"] = self._public_task(result["task"])
+        result["key"] = key
+        state = result["action"]["state"]
+        result["outcome"] = {"review": "pending_review", "succeeded": "accepted"}.get(state, state)
+        if state in {"failed", "rejected"}:
+            dump(result)
+            raise click.exceptions.Exit(1)
+        return result
+
+    def submit(self, spec, key, *, template=None, workspace_id=None):
+        return self._operation("task.submit", key, lambda: self.backend.submit(
+            spec.to_dict() if isinstance(spec, TaskSpec) else spec, key,
+            template=template, workspace_id=workspace_id))
+
+    def cancel(self, task_id, key):
+        return self._operation("task.cancel", key, lambda: self.backend.cancel(task_id, key))
+
+    def tasks(self, workspace_id=None):
+        device = self.backend.device()
+        tasks = (device.get("snapshot") or {}).get("tasks") or []
+        return {"tasks": [t for t in tasks if workspace_id is None or t.get("workspace_id") == workspace_id],
+                "observation": "heartbeat_snapshot", "online": bool(device.get("online")),
+                "limit": 200}
+
+    def task(self, task_id):
+        return self.backend.task(task_id, require_live=True)["task"]
+
+    def action(self, identity):
+        from suan.desktop_bridge.backends import summary
+        if not re.fullmatch(r"[a-f0-9]{32}", identity):
+            raise click.UsageError("An action ID is 32 lowercase hexadecimal characters")
+        record = self.backend.call(self.backend.hub.action, identity)
+        if record["node_id"] != self.backend.node_id or record["request"]["kind"] not in {"task.submit", "task.cancel"}:
+            raise click.ClickException("This is not a task action for the selected node")
+        out = {"action": summary(record)}
+        if record["state"] == "succeeded":
+            out["task"] = self._public_task(record["result"])
+        return out
+
+    def logs(self, task_id, stream, offset):
+        chunk = self.backend.logs(task_id, stream, offset, 1024 * 1024)
+        return {**chunk, "bytes": chunk["data"]}
+
+    def events(self, task_id, offset):
+        return self.backend.events(task_id, offset)
+
+    def artifacts(self, task_id):
+        return self.backend.artifacts(task_id)["artifacts"]
+
+    def download(self, task_id, remote_path, destination):
+        from suan.desktop_bridge.transfers import TransferManager
+        # Per-command journals cannot interrupt another CLI process's transfer.
+        # The existing .part + sha256 metadata beside the destination permit retries.
+        with tempfile.TemporaryDirectory(prefix="stk-cli-transfer-") as journal:
+            manager = TransferManager(journal, lambda *args: None, lambda *args: self.backend)
+            try:
+                transfer = manager.start_download(self.backend.connection_id, "task", task_id, remote_path,
+                                                  Path(destination).absolute(), node=self.backend.node_id)
+                while True:
+                    record = manager.load(transfer["id"])
+                    if record["state"] == "completed":
+                        return Path(record["local"])
+                    if record["state"] in {"failed", "cancelled", "interrupted"}:
+                        error = record.get("error") or {}
+                        raise BridgeError(error.get("code", "remote_error"), error.get("message", "Download interrupted"))
+                    time.sleep(0.05)
+            finally:
+                manager.stop(timeout=35)
 
 
 def get_client(profile=None, state_dir=None):
@@ -69,7 +186,7 @@ class FriendlyGroup(click.Group):
             return super().invoke(ctx)
         except (click.exceptions.Exit, click.Abort):
             raise  # Click's control-flow exceptions also inherit RuntimeError.
-        except (ValueError, RuntimeError, OSError, KeyError) as exc:
+        except (ValueError, RuntimeError, OSError, KeyError, BridgeError) as exc:
             raise click.ClickException(str(exc)) from exc
 
 
@@ -215,7 +332,42 @@ def stop_server(state_dir, supervisor):
 
 @click.group(cls=FriendlyGroup)
 def connect():
-    """Save loopback endpoints (including SSH-forwarded server endpoints)."""
+    """Save Runtime endpoints or pair a client with a control hub."""
+
+
+@connect.command("hub-pair")
+@click.argument("name")
+@click.option("--url", required=True)
+@click.option("--device-name", required=True)
+@click.option("--hub-state-dir", default=default_hub_state, type=click.Path(path_type=Path), show_default=True)
+def pair_hub(name, url, device_name, hub_state_dir):
+    """Claim an owner-issued client pairing code (entered without echo)."""
+    from suan.desktop_bridge.connections import ConnectionStore
+    code = click.prompt("Client pairing code", hide_input=True)
+    store = ConnectionStore(hub_state_dir)
+    try:
+        dump(store.pair_hub(name, url, code, device_name))
+    finally:
+        store.close()
+
+
+@connect.command("hub-nodes")
+@click.argument("name")
+@click.option("--hub-state-dir", default=default_hub_state, type=click.Path(path_type=Path), show_default=True)
+def hub_nodes(name, hub_state_dir):
+    """List the paired hub's node identities, availability and advertised capabilities."""
+    from suan.desktop_bridge.connections import ConnectionStore
+    from suan.desktop_bridge.backends import HubBackend
+    store = ConnectionStore(hub_state_dir)
+    try:
+        hub = store.hub_client("hub:" + name)
+        devices = HubBackend("hub:" + name, hub, "").call(hub.devices)
+        dump([{"id": device["id"], "name": device["name"], "online": bool(device.get("online")),
+               "features": (device.get("snapshot") or {}).get("features") or [],
+               "health": (device.get("snapshot") or {}).get("health") or {}}
+              for device in devices if device["role"] == "node"])
+    finally:
+        store.close()
 
 
 @connect.command("add")
@@ -308,6 +460,14 @@ def client_options(function):
     )
 
 
+def hub_job_options(function):
+    function = client_options(function)
+    function = click.option("--hub", help="Paired hub name; select its execution node with --node")(function)
+    function = click.option("--node", help="Exact execution node device ID (see connect hub-nodes)")(function)
+    return click.option("--hub-state-dir", default=default_hub_state,
+                        type=click.Path(path_type=Path), show_default=True)(function)
+
+
 @click.group(cls=FriendlyGroup)
 @client_options
 @click.pass_context
@@ -359,16 +519,27 @@ def upload(client, workspace_id, source, remote_path):
 
 
 @click.group(cls=FriendlyGroup)
-@client_options
+@hub_job_options
 @click.pass_context
-def jobs(ctx, profile, state_dir):
+def jobs(ctx, profile, state_dir, hub, node, hub_state_dir):
     """Submit, reconnect to, inspect and cancel persistent tasks."""
-    ctx.obj = LazyClient(profile, state_dir)
+    if hub:
+        if profile or state_dir:
+            raise click.UsageError("--hub cannot be combined with --profile or --state-dir")
+        if not node:
+            raise click.UsageError("--hub requires --node; use connect hub-nodes NAME to select one")
+        ctx.obj = HubCLIClient(hub, node, hub_state_dir)
+        ctx.call_on_close(ctx.obj.store.close)
+    else:
+        if node:
+            raise click.UsageError("--node requires --hub")
+        ctx.obj = LazyClient(profile, state_dir)
 
 
 @jobs.command("submit", context_settings={"ignore_unknown_options": True})
 @click.option("--spec", "spec_file", type=click.Path(exists=True, path_type=Path))
 @click.option("--workspace", "workspace_id")
+@click.option("--template", help="Registered Hub template name (requires --hub and --workspace)")
 @click.option(
     "--backend", type=click.Choice(["local", "pbs", "slurm"]), default="local"
 )
@@ -376,8 +547,14 @@ def jobs(ctx, profile, state_dir):
 @click.option("--key", help="Reuse when retrying after a lost submission response")
 @click.argument("argv", nargs=-1, type=click.UNPROCESSED)
 @click.pass_obj
-def submit(client, spec_file, workspace_id, backend, name, key, argv):
-    if spec_file:
+def submit(client, spec_file, workspace_id, template, backend, name, key, argv):
+    if template:
+        if not isinstance(client, HubCLIClient) or not workspace_id or spec_file or argv:
+            raise click.UsageError("--template requires --hub and --workspace, without --spec or an argv command")
+        if name or backend != "local":
+            raise click.UsageError("--template uses the registered name/backend; omit --name and --backend")
+        spec = None
+    elif spec_file:
         if argv:
             raise click.UsageError("Use either --spec or an argv command")
         spec = TaskSpec(**json.loads(spec_file.read_text(encoding="utf-8")))
@@ -389,7 +566,10 @@ def submit(client, spec_file, workspace_id, backend, name, key, argv):
         spec = TaskSpec(workspace_id, list(argv), backend=backend, name=name)
     key = key or uuid.uuid4().hex
     click.echo(f"Idempotency key: {key}", err=True)
-    dump(client.submit(spec, key))
+    if template:
+        dump(client.submit(None, key, template=template, workspace_id=workspace_id))
+    else:
+        dump(client.submit(spec, key))
 
 
 @jobs.command("list")
@@ -408,9 +588,64 @@ def show_job(client, task_id):
 
 @jobs.command("cancel")
 @click.argument("task_id")
+@click.option("--key", help="Hub cancellation key; reuse it after a lost response")
 @click.pass_obj
-def cancel_job(client, task_id):
-    dump(client.cancel(task_id))
+def cancel_job(client, task_id, key):
+    if isinstance(client, HubCLIClient):
+        key = key or uuid.uuid4().hex
+        click.echo(f"Idempotency key: {key}", err=True)
+        dump(client.cancel(task_id, key))
+    else:
+        if key:
+            raise click.UsageError("--key on cancel is only used with --hub")
+        dump(client.cancel(task_id))
+
+
+@jobs.command("action")
+@click.argument("action_id")
+@click.pass_obj
+def show_action(client, action_id):
+    """Resolve a pending/unknown Hub submission by its original action ID."""
+    if not isinstance(client, HubCLIClient):
+        raise click.UsageError("jobs action requires --hub and --node")
+    result = client.action(action_id)
+    dump(result)
+    if result["action"]["state"] in {"failed", "rejected"}:
+        raise click.exceptions.Exit(1)
+
+
+@jobs.command("watch")
+@click.argument("task_id")
+@click.option("--interval", default=1.0, type=click.FloatRange(0.1), show_default=True)
+@click.option("--timeout", default=0.0, type=click.FloatRange(0), help="Stop after this many seconds; 0 waits indefinitely")
+@click.pass_obj
+def watch_job(client, task_id, interval, timeout):
+    """Print JSON observations until terminal; disconnection never changes task state."""
+    from .models import TERMINAL
+    deadline = time.monotonic() + timeout if timeout else None
+    previous, last_state = None, None
+    while True:
+        try:
+            task = client.task(task_id)
+            observation = {"task_id": task_id, "observation": "current", "task": task}
+            last_state = task["state"]
+        except BridgeError as exc:
+            if not exc.retryable:
+                raise
+            observation = {"task_id": task_id, "observation": "unavailable", "last_state": last_state,
+                           "error": exc.to_json()}
+        encoded = json.dumps(observation, ensure_ascii=False, sort_keys=True)
+        if encoded != previous:
+            click.echo(encoded)
+            previous = encoded
+        if observation["observation"] == "current" and last_state in TERMINAL | {"unknown"}:
+            if last_state != "succeeded":
+                raise click.exceptions.Exit(1)
+            return
+        if deadline is not None and time.monotonic() >= deadline:
+            click.echo(json.dumps({"task_id": task_id, "observation": "timeout", "last_state": last_state}))
+            raise click.exceptions.Exit(1)
+        time.sleep(interval if deadline is None else min(interval, max(0, deadline - time.monotonic())))
 
 
 @jobs.command("logs")
@@ -424,18 +659,32 @@ def cancel_job(client, task_id):
 )
 @click.option("--offset", default=0, type=click.IntRange(0))
 @click.option("--follow", is_flag=True)
+@click.option("--show-offset", is_flag=True, help="Print the next byte offset on stderr, including on interruption")
 @click.pass_obj
-def logs(client, task_id, stream, offset, follow):
+def logs(client, task_id, stream, offset, follow, show_offset):
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
-    while True:
-        chunk = client.logs(task_id, stream, offset)
-        click.echo(decoder.decode(chunk["bytes"]), nl=False)
-        offset = chunk["next_offset"]
-        if not follow or (chunk["terminal"] and not chunk["bytes"]):
-            click.echo(decoder.decode(b"", final=True), nl=False)
-            break
-        if not chunk["bytes"]:
-            time.sleep(0.5)
+    try:
+        while True:
+            chunk = client.logs(task_id, stream, offset)
+            click.echo(decoder.decode(chunk["bytes"]), nl=False)
+            offset = chunk["next_offset"]
+            if not follow or (chunk["terminal"] and not chunk["bytes"]):
+                click.echo(decoder.decode(b"", final=True), nl=False)
+                break
+            if not chunk["bytes"]:
+                time.sleep(0.5)
+    finally:
+        if show_offset:
+            click.echo(f"Next offset: {offset}", err=True)
+
+
+@jobs.command("events")
+@click.argument("task_id")
+@click.option("--offset", default=0, type=click.IntRange(0))
+@click.pass_obj
+def events(client, task_id, offset):
+    """Read persistent monitoring events, returning the server's next cursor."""
+    dump(client.events(task_id, offset))
 
 
 @jobs.command("artifacts")

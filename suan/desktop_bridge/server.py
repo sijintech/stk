@@ -156,7 +156,7 @@ def _poll_seconds():
 
 class Bridge:
     def __init__(self, state_dir=None, cache_dir=None, *, writer, strict=False, max_line=MAX_LINE_BYTES,
-                 on_exit=None):
+                 on_exit=None, literature_parser_python=None, literature_encoder_python=None):
         self.state_dir = Path(state_dir) if state_dir else default_state_dir()
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.state_lock = StateDirLock(self.state_dir)  # before anything reads or rewrites journals
@@ -190,10 +190,18 @@ class Bridge:
         self.scripts = ScriptSessions(self.emit, self.script_call)
         self.transfers = TransferManager(self.state_dir, self.emit, self.connections.backend)
         # Materials prediction models (S3): datasets, training on this computer, a registry and prediction.
-        from suan.materials.service import MaterialsService
-        self.materials = MaterialsService(self.state_dir / "materials")
+        self._materials = None
+        self._materials_lock = threading.RLock()
+        # Trusted host configuration only: no RPC, script or stdio setting can
+        # choose an executable. Construction and hello never probe these paths.
+        self._literature = None
+        self._literature_lock = threading.RLock()
+        self._literature_parser_python = literature_parser_python
+        self._literature_encoder_python = literature_encoder_python
         from .federation import FederationOwner
         self.federation = FederationOwner(self.state_dir, self.projects, self.connections)
+        from .peer import PeerService
+        self.peers = PeerService(self.state_dir, self.projects)
         # Optional software modules (engines and modeling tools): detected, or installed from conda-forge (E0b).
         from suan.modules import Modules
         self.modules = Modules(policy=self.projects.models.policy, emit=self.emit)
@@ -451,6 +459,14 @@ class Bridge:
         for action in READ_METHODS | (WRITE_METHODS - {"datasets.register"}) | {"operations.local"}:
             self.methods["federation.owner." + action] = (
                 lambda p, c, action=action: self.federation_call(action, p))
+        from .peer import METHODS as PEER_METHODS
+        for action in PEER_METHODS:
+            name = "project.peer.files.prepare" if action == "files.prepare" else "peer." + action
+            self.methods[name] = lambda p, c, action=action: self.peers.call(action, p)
+        from .literature import METHODS as LITERATURE_METHODS
+        for action in LITERATURE_METHODS:
+            self.methods["literature." + action] = (
+                lambda p, c, action=action: self.literature_call(action, p))
         missing = set(self.methods) ^ set(bridge_schema.method_names())
         if missing:
             self.state_lock.release()
@@ -627,12 +643,47 @@ class Bridge:
             raise BridgeError("shutting_down", "The bridge is shutting down")
         return self.federation.call(action, params)
 
-    def materials_call(self, action, params):
-        """Materials models (S3, docs/design/materials-models-s3.md); everything runs on this computer."""
-        from suan.materials import datasets, service, training
+    @property
+    def literature(self):
+        """One lazy local service; reads do not create a corpus or start a worker."""
+        with self._literature_lock:
+            if self._literature is None:
+                if self.closing.is_set():
+                    raise BridgeError("shutting_down", "The bridge is shutting down")
+                from .literature import LiteratureService
+                self._literature = LiteratureService(self.state_dir, python=sys.executable,
+                    parser_python=self._literature_parser_python,
+                    encoder_python=self._literature_encoder_python)
+            return self._literature
+
+    def literature_call(self, action, params):
         if self.closing.is_set():
             raise BridgeError("shutting_down", "The bridge is shutting down")
-        materials = self.materials
+        return self.literature.call(action, params)
+
+    @property
+    def materials(self):
+        # Scientific extras are optional for core/peer startup. Construct at most
+        # one real service, only when an explicit materials action needs it.
+        with self._materials_lock:
+            if self._materials is None:
+                if self.closing.is_set():
+                    raise BridgeError("shutting_down", "The bridge is shutting down")
+                from suan.materials.service import MaterialsService
+                self._materials = MaterialsService(self.state_dir / "materials")
+            return self._materials
+
+    def materials_call(self, action, params):
+        """Materials models (S3, docs/design/materials-models-s3.md); everything runs on this computer."""
+        if self.closing.is_set():
+            raise BridgeError("shutting_down", "The bridge is shutting down")
+        try:
+            from suan.materials import datasets, service, training
+            materials = self.materials
+        except ModuleNotFoundError as exc:
+            if exc.name != "numpy":
+                raise
+            raise BridgeError("unsupported", "Materials tools require the optional scientific dependencies", retryable=False) from None
         try:
             if action == "synthetic":
                 return {"card": datasets.write_synthetic(_absolute(params["directory"]), params["kind"], params["samples"],
@@ -682,7 +733,13 @@ class Bridge:
         if self.closed.is_set():
             return
         self.closing.set()
-        self.materials.shutdown()
+        self.peers.shutdown()
+        with self._literature_lock:
+            if self._literature is not None:
+                self._literature.shutdown()
+        with self._materials_lock:
+            if self._materials is not None:
+                self._materials.shutdown()
         self.modules.shutdown()
         self.workflow_executor.shutdown(wait=False)
         self.analysis_executor.shutdown(wait=False)

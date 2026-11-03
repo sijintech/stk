@@ -1,6 +1,6 @@
-# 控制服务（hub）：图谱计算、结果 blob 与监控事件
+# 控制服务（hub）：节点任务、图谱计算与结果追踪
 
-里程碑 1 中，控制服务 `suan-control` 是自托管的 hub：客户端（网页／手机 PWA、桌面程序 `stk-desktop`）向它
+里程碑 1 中，控制服务 `suan-control` 是自托管的 hub：客户端（CLI、网页／手机 PWA、桌面程序 `stk-desktop`）向它
 提交操作，执行节点代理 `suan-node` 主动连入并在数据所在的机器上执行。M1 在原有任务操作之外增加三类
 操作 `graph.evaluate`、`graph.meta`、`task.events`，一个内容寻址的 blob 存储，以及节点目录和预设两个
 只读路由。桌面程序（WP11）又增加了桌面配置（`profile: "desktop"`）的自动执行额度、客户端上传与
@@ -13,7 +13,7 @@
 
 ```mermaid
 flowchart LR
-  Client[网页 / 桌面程序 / 手机] -->|HTTPS：操作、SSE、GET blob| Hub[控制服务 suan-control]
+  Client[CLI / 网页 / 桌面程序 / 手机] -->|HTTPS：操作、SSE、GET blob| Hub[控制服务 suan-control]
   Hub <-->|WSS：action / result / snapshot| Node[节点代理 suan-node]
   Node -->|HTTPS：HEAD / PUT blob| Hub
   Node <-->|回环 HTTP| Runtime[STK Runtime]
@@ -58,12 +58,58 @@ suan-node run --state-dir /path/node [--graph-workers 1]
   Matplotlib）；离屏 PNG 另需 EGL／OSMesa 或 `STK_RENDER_PYTHON`（见
   [可视化指南](visualization.md#渲染数据包与显示端)）。控制服务校验图时不导入 NumPy 或 VTK。
 
+## CLI 经已配对的 hub 执行任务
+
+CLI 可以作为普通客户端，经 hub 选择已有的 Linux 执行节点。安装客户端包即可，不启动桌面桥，
+也不需要 Qt、VTK 或 NumPy。节点、Runtime 和控制服务仍只支持 Linux；Windows / macOS 节点在后续计划中。
+
+```bash
+# 所有者先在 hub 签发 --role client 配对码；下条命令以隐藏输入读取配对码
+suan connect hub-pair lab --url https://hub.example.org --device-name laptop
+suan connect hub-nodes lab
+# NODE_ID 来自上一条结果；WORKSPACE_ID 是节点上已经存在的工作区
+suan jobs --hub lab --node NODE_ID submit --workspace WORKSPACE_ID --template echo --key experiment-1
+suan jobs --hub lab --node NODE_ID action ACTION_ID
+suan jobs --hub lab --node NODE_ID show TASK_ID
+suan jobs --hub lab --node NODE_ID watch TASK_ID --timeout 600
+suan jobs --hub lab --node NODE_ID logs TASK_ID --follow --show-offset
+suan jobs --hub lab --node NODE_ID events TASK_ID --offset 0
+suan jobs --hub lab --node NODE_ID artifacts TASK_ID
+suan jobs --hub lab --node NODE_ID download TASK_ID out.txt ./out.txt
+suan jobs --hub lab --node NODE_ID cancel TASK_ID --key cancel-experiment-1
+```
+
+默认凭据保存在私有文件 `~/.stk/client/hubs.json`，使用既有 ConnectionStore 格式。所有相关命令都可用
+`--hub-state-dir DIR` 指定另一目录；例如只读使用桌面桥目录中的既有配对。不要同时让 CLI 配对命令和
+桌面桥修改同一个文件。CLI 不生成所有者令牌、不自行授予 desktop 配置，也不替用户批准操作。
+`jobs --hub` 与 `--profile` / `--state-dir` 互斥，`--node` 必须是明确的节点设备 ID。
+
+提交和取消在请求前向 stderr 打印原始幂等键和确定的 action ID。JSON 的 `outcome` 为 `queued`（已入队）、
+`pending_review`（待复核）或 `accepted`（节点已处理操作）；这些都不代表计算已成功。传输失败可能发生在 hub
+收下操作之后，此时输出 `unknown` 并以 1 退出。用打印的 action ID 查询，或用**同一个键和同一份请求**重试，
+不会创建第二个任务。不要换键猜测重提。操作失败或被拒绝时，输出真实的 `failed` / `rejected` 并以 1 退出。
+新命令、资源超额与模板变更仍按现有策略复核；CLI 无审批子命令。
+`--template` 使用 hub 已注册模板；也可像直连一样使用 `--spec` 或 `--workspace ID -- PROGRAM ARG...`。
+此增量不增加 CLI 经 hub 的工作区创建或输入上传；这些仍使用已有桌面功能或 Runtime 工作区命令。
+
+`jobs list` 明确标记为最多 200 条的 `heartbeat_snapshot`，不能用于断定老任务不存在。
+`show` / `watch` 使用新增只读 `task.get`：负载严格为 `{"task_id":"32位十六进制ID"}`，返回任务公开字段，
+不返回 TaskSpec 的命令、环境和输入配置。必须同时看到节点 `features` 和 hub 的 `policy.read_kinds` 声明
+`task.get` 才使用；旧版本明确提示升级。该查询直接按持久任务 ID 读取，不受心跳 200 条上限影响，不写 action
+记录，也不缓存任务状态。私有 federation 任务和工作区继续由节点拒绝访问。
+
+`watch` 输出逐行 JSON；断线只产生 `observation: unavailable` 和最后一次任务状态，不把任务标为失败。
+恢复连接后继续读取；任务成功退出 0，任务失败、取消、状态为 `unknown` 或达到 `--timeout` 退出 1，
+不改写 Runtime 中的任务状态。`logs --show-offset` 在 stderr 输出下一字节偏移，
+中断后用 `--offset` 继续；`events` 返回持久事件的下一游标。产物下载复用现有校验与 `.part` 续传，
+大小和 SHA-256 通过后才替换目标文件。日志、事件和产物均从节点读取，不把任意本地文件作为产物上传。
+
 ## 功能探测
 
 | 位置 | 字段 | M1 取值 |
 |---|---|---|
 | 控制服务 `GET /api/v1/health` | `features` | `["blobs", "graph", "task.events"]`；WP11 另加 `desktop.profile`、`graph.cancel`、`node.read`、`uploads`、`workspace.import` |
-| 节点快照（设备列表中的 `snapshot`） | `features` | `["graph.evaluate", "graph.meta", "task.events"]`；WP11 另加 `graph.cancel`、`read`、`workspace.files`、`workspace.import` |
+| 节点快照（设备列表中的 `snapshot`） | `features` | `["graph.evaluate", "graph.meta", "task.events"]`；WP11 另加 `graph.cancel`、`read`、`workspace.files`、`workspace.import`；CLI 增量另加 `task.get` |
 | Runtime `GET /v1/health` | `features` | `["events"]` |
 
 节点代理每次连接前读取控制服务的 `features`：控制服务没有 `blobs` 时，`graph.evaluate` 以
@@ -253,7 +299,7 @@ SSE `GET /api/v1/events` 与节点 WebSocket `/api/v1/nodes/connect` 的形式�
 ### 读路径（WP11）
 
 `POST /api/v1/nodes/{node_id}/read {kind, payload}` 让客户端直接读取节点上的只读数据，`kind` 为
-`task.logs`、`task.events`、`task.artifacts`、`file.read`、`workspace.files`，负载规则与同名操作相同。控制服务经
+`task.get`、`task.logs`、`task.events`、`task.artifacts`、`file.read`、`workspace.files`，负载规则与同名操作相同。控制服务经
 已打开的节点 WebSocket 发送 `{"type": "read", id, kind, payload}`，节点代理在读通道（最多同时 4 个）执行后回复
 `{"type": "read_result", id, result | error}`，控制服务再把 `{result}` 返回给客户端。**不写操作记录、不产生
 `actions.changed` 事件**，所以桌面程序每 2 秒轮询日志、事件和下载分块时，操作表和事件流不再随之增长。

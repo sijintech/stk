@@ -9,10 +9,11 @@ from .protocol import BridgeError, MAX_LINE_BYTES, decode_line
 
 
 class WorkerProcess:
-    def __init__(self, command, *, cwd=None, max_line=MAX_LINE_BYTES):
+    def __init__(self, command, *, cwd=None, max_line=MAX_LINE_BYTES, env=None):
         self.max_line = max_line
+        options = {} if env is None else {"env": env}
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=None, close_fds=True, cwd=cwd)
+                                        stderr=None, close_fds=True, cwd=cwd, **options)
         try:
             self.tree = psutil.Process(self.process.pid)
         except psutil.NoSuchProcess:

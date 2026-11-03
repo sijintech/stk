@@ -14360,6 +14360,2093 @@
           ],
           "additionalProperties": false
         }
+      },
+      "peer.info": {
+        "description": "Observe this device public identity and in-memory connections. Does not initialize identity, create Authority, start a helper, authenticate or send.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "connections": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/peerConnection"
+              },
+              "minItems": 0,
+              "maxItems": 8
+            },
+            "identity": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/peerIdentityInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "connections",
+            "identity"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.operations.get": {
+        "description": "Read the retained original desktop peer action without replay. A running action after process loss is uncertain.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "operation_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/peerServiceOperation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.operations.list": {
+        "description": "Page retained original desktop peer actions without replay or automatic recovery.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/peerServiceOperation"
+              },
+              "minItems": 0,
+              "maxItems": 50
+            }
+          },
+          "required": [
+            "operations"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.identity.initialize": {
+        "description": "Explicitly initialize this device persistent local signer and Authority, retaining the original operation UUID.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "display_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "operation_id",
+            "display_name"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.identity.rotate": {
+        "description": "Explicitly rotate the current device generation and close current peer connections; historical receipts do not reactivate a signer.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_generation": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "operation_id",
+            "expected_generation"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.identity.revoke": {
+        "description": "Explicitly revoke the current device generation and close connections without regenerating lost or corrupt private key material.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_generation": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "operation_id",
+            "expected_generation"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.pins.list": {
+        "description": "Page public full-pin verification history; a pin is not a sharing session, project permission, file grant or training consent.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "pins": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/peerPin"
+              },
+              "minItems": 0,
+              "maxItems": 50
+            }
+          },
+          "required": [
+            "pins"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.pins.verify": {
+        "description": "Explicitly record separately verified owner UUID, peer fingerprint and complete public key as one device pin.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "card": {
+              "$ref": "#/$defs/peerDeviceCard"
+            },
+            "expected_peer_id": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "operation_id",
+            "card",
+            "expected_peer_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.pins.revoke": {
+        "description": "Explicitly revoke a full pin and its current Authority peer epoch, then close that peer connections.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "peer_id": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "operation_id",
+            "peer_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.connections.open": {
+        "description": "Explicitly start one installed native helper for a verified peer. Manual ephemeral signaling follows; ready transport alone is not device authentication.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "helper_prefix": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "peer_id": {
+              "$ref": "#/$defs/sha256"
+            },
+            "offerer": {
+              "type": "boolean"
+            },
+            "route": {
+              "type": "string",
+              "enum": [
+                "all",
+                "udp",
+                "tcp",
+                "ipv6"
+              ]
+            }
+          },
+          "required": [
+            "operation_id",
+            "helper_prefix",
+            "peer_id",
+            "offerer",
+            "route"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.connections.list": {
+        "description": "Observe bounded in-memory connection metadata; reopening never restarts a helper or reconstructs a connection.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "connections": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/peerConnection"
+              },
+              "minItems": 0,
+              "maxItems": 8
+            }
+          },
+          "required": [
+            "connections"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.connections.signals": {
+        "description": "Explicitly take one ephemeral manual signal from transport memory. Signaling is not logged or retained in the operation journal.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "connection_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "signal_text": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 400000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "signal_text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.connections.push_signal": {
+        "description": "Explicitly supply one bounded opaque manual signal. Only its digest enters the original-intent journal; it is never replayed.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "connection_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "signal_text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 400000
+            }
+          },
+          "required": [
+            "operation_id",
+            "connection_id",
+            "signal_text"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.connections.authenticate": {
+        "description": "Explicitly start mutual signed authentication on this exact native channel and retain the asynchronous original action.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "connection_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "operation_id",
+            "connection_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.connections.close": {
+        "description": "Explicitly close one native peer endpoint or signaling transport. Does not recall bytes already accepted by the recipient.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "connection_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "operation_id",
+            "connection_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.sessions.list": {
+        "description": "Page logical sharing approval history. context_bound is always false in the historical projection and grants no live permission.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "sessions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/peerSession"
+              },
+              "minItems": 0,
+              "maxItems": 50
+            }
+          },
+          "required": [
+            "sessions"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.sessions.host": {
+        "description": "Explicitly approve the current authenticated connection as Host for a bounded lifetime, or reapprove the same session with a new operation and epoch.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "connection_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "lifetime": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "session_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operation_id",
+            "connection_id",
+            "lifetime",
+            "session_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.sessions.revoke": {
+        "description": "Explicitly revoke a logical sharing session; it does not promise rollback or byte recall.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "operation_id",
+            "session_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.peer.files.prepare": {
+        "description": "Explicitly freeze selected files from an open project snapshot and bind its database generation. Does not open a helper, send, accept or change data labels.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "snapshot_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true
+            },
+            "names": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "propertyNames": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "maxProperties": 64,
+                  "additionalProperties": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "media_types": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "propertyNames": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "maxProperties": 64,
+                  "additionalProperties": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 127,
+                    "pattern": "^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operation_id",
+            "handle",
+            "expected_revision",
+            "snapshot_id",
+            "record_ids"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.files.list": {
+        "description": "Page local historical sender or recipient transfer metadata without sending, accepting, resuming or publishing.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "sender",
+                "receiver"
+              ]
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "required": [
+            "role"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "transfers": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/peerFileStatus"
+                  },
+                  {
+                    "$ref": "#/$defs/peerFileSenderStatus"
+                  }
+                ]
+              },
+              "minItems": 0,
+              "maxItems": 50
+            }
+          },
+          "required": [
+            "transfers"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.files.get": {
+        "description": "Read one local historical sender or recipient transfer without sending, accepting, resuming or publishing.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "sender",
+                "receiver"
+              ]
+            },
+            "transfer_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "role",
+            "transfer_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "transfer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/peerFileStatus"
+                },
+                {
+                  "$ref": "#/$defs/peerFileSenderStatus"
+                }
+              ]
+            },
+            "manifest": {
+              "$ref": "#/$defs/peerFileManifest"
+            },
+            "offer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/peerFileOfferReview"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "transfer",
+            "manifest",
+            "offer"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.files.offer": {
+        "description": "Explicitly offer one immutable selected manifest and current Host sharing offer to the exact approved connection. Does not send file bytes.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "connection_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "plan_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "database_generation": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "transfer_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operation_id",
+            "connection_id",
+            "plan_id",
+            "database_generation",
+            "session_id",
+            "transfer_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.files.accept": {
+        "description": "Explicit local recipient acceptance of the exact pending offer and locally chosen absent directory. Session approval and exact-file grant remain separate.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "connection_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "transfer_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "offer_operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "target": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "operation_id",
+            "connection_id",
+            "transfer_id",
+            "offer_operation_id",
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.files.send": {
+        "description": "Explicitly start or resume one retained file transfer asynchronously; each DATA intent precedes a single network send and waits for its durable application receipt.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "connection_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "transfer_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "grant_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "resume": {
+              "type": "boolean"
+            },
+            "timeout": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 3600
+            }
+          },
+          "required": [
+            "operation_id",
+            "connection_id",
+            "transfer_id",
+            "grant_id",
+            "resume",
+            "timeout"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.files.query": {
+        "description": "Explicitly observe the original remote transfer or mutation receipt on the authenticated connection. Null never proves that a prior operation had no effect.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "connection_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "transfer_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "original_operation_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operation_id",
+            "connection_id",
+            "transfer_id",
+            "original_operation_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.files.recover": {
+        "description": "Explicitly adopt only a validated exact original completion proof for a retained send. Never resends DATA, republishes or reauthorizes.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "connection_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "send_operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "operation_id",
+            "connection_id",
+            "send_operation_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.files.cancel": {
+        "description": "Explicitly withdraw locally and attempt one original remote cancellation. Does not promise recall of accepted bytes or rollback.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "connection_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "transfer_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "grant_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operation_id",
+            "connection_id",
+            "transfer_id",
+            "grant_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.files.revoke": {
+        "description": "Explicitly withdraw a local sender approval or recipient exact-file grant without sending or deleting accepted bytes.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "role": {
+              "type": "string",
+              "enum": [
+                "sender",
+                "receiver"
+              ]
+            },
+            "transfer_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "operation_id",
+            "role",
+            "transfer_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "peer.identity.recover": {
+        "description": "Explicitly adopt one retained exact initialize, rotate or revoke receipt under the current public identity generation. May repair only missing never-used Authority metadata for that original initialization; never generates keys, repeats lifecycle actions or restores grants.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "original_operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "operation_id",
+            "original_operation_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/peerServiceOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.info": {
+        "description": "Desktop-only local literature observation; never dispatches or resumes work.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "corpora": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "corpus_id": {
+                    "$ref": "#/$defs/literatureCorpusId"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "database_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "create_operation": {
+                    "$ref": "#/$defs/projectUuid"
+                  }
+                },
+                "required": [
+                  "corpus_id",
+                  "name",
+                  "database_id",
+                  "create_operation"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 8
+            },
+            "encoder_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "encoder_configured": {
+              "type": "boolean"
+            },
+            "active_jobs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2
+            }
+          },
+          "required": [
+            "corpora",
+            "encoder_generation",
+            "encoder_configured",
+            "active_jobs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.corpora.list": {
+        "description": "Desktop-only local literature observation; never dispatches or resumes work.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "corpora": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "corpus_id": {
+                    "$ref": "#/$defs/literatureCorpusId"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "database_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "create_operation": {
+                    "$ref": "#/$defs/projectUuid"
+                  }
+                },
+                "required": [
+                  "corpus_id",
+                  "name",
+                  "database_id",
+                  "create_operation"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 8
+            },
+            "encoder_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "encoder_configured": {
+              "type": "boolean"
+            },
+            "active_jobs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2
+            }
+          },
+          "required": [
+            "corpora",
+            "encoder_generation",
+            "encoder_configured",
+            "active_jobs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.corpora.info": {
+        "description": "Desktop-only local literature observation; never dispatches or resumes work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "corpus_id": {
+              "$ref": "#/$defs/literatureCorpusId"
+            }
+          },
+          "required": [
+            "corpus_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "corpus_id": {
+              "$ref": "#/$defs/literatureCorpusId"
+            },
+            "database_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "dense_generation": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/sha256"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "dense_source_generation": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "dense_encoder_fingerprint": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/sha256"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "corpus_id",
+            "database_id",
+            "generation",
+            "dense_generation",
+            "dense_source_generation",
+            "dense_encoder_fingerprint"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.encoder.info": {
+        "description": "Desktop-only local literature observation; never dispatches or resumes work.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "selection": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "assets_sha256": {
+                      "$ref": "#/$defs/sha256"
+                    },
+                    "fingerprint": {
+                      "$ref": "#/$defs/sha256"
+                    },
+                    "review_id": {
+                      "$ref": "#/$defs/projectUuid"
+                    }
+                  },
+                  "required": [
+                    "assets_sha256",
+                    "fingerprint",
+                    "review_id"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "generation",
+            "selection"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.corpora.create": {
+        "description": "Explicit desktop-only local literature action. Retain the caller operation UUID; repeated original requests only observe admission.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "operation_id",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/literatureOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.encoder.review": {
+        "description": "Explicit desktop-only local literature action. Retain the caller operation UUID; repeated original requests only observe admission.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "assets": {
+              "$ref": "#/$defs/literaturePath"
+            },
+            "python": {
+              "$ref": "#/$defs/literaturePath"
+            }
+          },
+          "required": [
+            "operation_id",
+            "assets"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/literatureOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.encoder.select": {
+        "description": "Explicit desktop-only local literature action. Retain the caller operation UUID; repeated original requests only observe admission.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "review_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "review_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "expected_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "operation_id",
+            "review_id",
+            "review_sha256",
+            "expected_generation"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/literatureOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.import.review": {
+        "description": "Explicit desktop-only local literature action. Retain the caller operation UUID; repeated original requests only observe admission.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "corpus_id": {
+              "$ref": "#/$defs/literatureCorpusId"
+            },
+            "source": {
+              "$ref": "#/$defs/literaturePath"
+            },
+            "document_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorization": {
+              "$ref": "#/$defs/literatureAuthorization"
+            }
+          },
+          "required": [
+            "operation_id",
+            "corpus_id",
+            "source",
+            "document_id",
+            "title",
+            "authorization"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/literatureOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.import.commit": {
+        "description": "Explicit desktop-only local literature action. Retain the caller operation UUID; repeated original requests only observe admission.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "review_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "review_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "operation_id",
+            "review_id",
+            "review_sha256"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/literatureOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.import.recover": {
+        "description": "Explicit desktop-only local literature action. Retain the caller operation UUID; repeated original requests only observe admission.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "corpus_id": {
+              "$ref": "#/$defs/literatureCorpusId"
+            },
+            "original_operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "operation_id",
+            "corpus_id",
+            "original_operation_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/literatureOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.versions.list": {
+        "description": "Desktop-only local literature observation; never dispatches or resumes work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "corpus_id": {
+              "$ref": "#/$defs/literatureCorpusId"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "required": [
+            "corpus_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "versions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "version_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "document_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "source_sha256": {
+                    "$ref": "#/$defs/sha256"
+                  },
+                  "source_bytes": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 33554432
+                  },
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "authorization": {
+                    "$ref": "#/$defs/literatureAuthorization"
+                  },
+                  "extraction_id": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/sha256"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "version_id",
+                  "document_id",
+                  "title",
+                  "source_sha256",
+                  "source_bytes",
+                  "active",
+                  "authorization",
+                  "extraction_id"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 20
+            }
+          },
+          "required": [
+            "versions"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.versions.revoke": {
+        "description": "Explicit desktop-only local literature action. Retain the caller operation UUID; repeated original requests only observe admission.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "corpus_id": {
+              "$ref": "#/$defs/literatureCorpusId"
+            },
+            "version_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "operation_id",
+            "corpus_id",
+            "version_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/literatureOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.index.start": {
+        "description": "Explicit desktop-only local literature action. Retain the caller operation UUID; repeated original requests only observe admission.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "corpus_id": {
+              "$ref": "#/$defs/literatureCorpusId"
+            },
+            "version_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "operation_id",
+            "corpus_id",
+            "version_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/literatureOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.dense.build": {
+        "description": "Explicit desktop-only local literature action. Retain the caller operation UUID; repeated original requests only observe admission.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "corpus_id": {
+              "$ref": "#/$defs/literatureCorpusId"
+            },
+            "expected_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "encoder_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "timeout": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            }
+          },
+          "required": [
+            "operation_id",
+            "corpus_id",
+            "expected_generation",
+            "encoder_generation"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/literatureOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.search": {
+        "description": "Explicit desktop-only local literature action. Retain the caller operation UUID; repeated original requests only observe admission.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "scopes": {
+              "$ref": "#/$defs/literatureScopes"
+            },
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "encoder_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            }
+          },
+          "required": [
+            "operation_id",
+            "scopes",
+            "query",
+            "encoder_generation"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/literatureOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.citations.resolve": {
+        "description": "Explicit desktop-only local literature action. Retain the caller operation UUID; repeated original requests only observe admission.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "scopes": {
+              "$ref": "#/$defs/literatureScopes"
+            },
+            "citation": {
+              "$ref": "#/$defs/literatureCitation"
+            }
+          },
+          "required": [
+            "operation_id",
+            "scopes",
+            "citation"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/literatureOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.pages.render": {
+        "description": "Explicit desktop-only local literature action. Retain the caller operation UUID; repeated original requests only observe admission.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "scopes": {
+              "$ref": "#/$defs/literatureScopes"
+            },
+            "citation": {
+              "$ref": "#/$defs/literatureCitation"
+            },
+            "long_edge": {
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 2048
+            }
+          },
+          "required": [
+            "operation_id",
+            "scopes",
+            "citation"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/literatureOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.operations.get": {
+        "description": "Desktop-only local literature observation; never dispatches or resumes work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "operation_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/literatureOperation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.operations.list": {
+        "description": "Desktop-only local literature observation; never dispatches or resumes work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/literatureOperation"
+              },
+              "minItems": 0,
+              "maxItems": 50
+            }
+          },
+          "required": [
+            "operations"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "literature.operations.result": {
+        "description": "Desktop-only local literature observation; never dispatches or resumes work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_request_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "operation_id",
+            "expected_request_sha256"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/literatureOperationResult"
+        }
       }
     },
     "events": {
@@ -26583,6 +28670,3068 @@
         "reason"
       ],
       "additionalProperties": false
+    },
+    "peerDeviceCard": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.peer-device/1"
+        },
+        "owner_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "peer_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "public_key": {
+          "$ref": "#/$defs/sha256"
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "format",
+        "owner_id",
+        "peer_id",
+        "public_key",
+        "display_name"
+      ],
+      "additionalProperties": false
+    },
+    "peerIdentityInfo": {
+      "type": "object",
+      "properties": {
+        "card": {
+          "$ref": "#/$defs/peerDeviceCard"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "active": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "card",
+        "generation",
+        "active"
+      ],
+      "additionalProperties": false
+    },
+    "peerIdentityReceipt": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.peer-device-operation/1"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "initialize",
+            "rotate",
+            "revoke"
+          ]
+        },
+        "request_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "result": {
+          "$ref": "#/$defs/peerIdentityInfo"
+        }
+      },
+      "required": [
+        "format",
+        "operation_id",
+        "kind",
+        "request_sha256",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "peerPin": {
+      "type": "object",
+      "properties": {
+        "card": {
+          "$ref": "#/$defs/peerDeviceCard"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "active": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "card",
+        "epoch",
+        "active"
+      ],
+      "additionalProperties": false
+    },
+    "peerPinRevocation": {
+      "type": "object",
+      "properties": {
+        "peer_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "active": {
+          "const": false
+        }
+      },
+      "required": [
+        "peer_id",
+        "epoch",
+        "active"
+      ],
+      "additionalProperties": false
+    },
+    "peerSessionOffer": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.peer-sharing-session/1"
+        },
+        "session_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "session_epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "host": {
+          "$ref": "#/$defs/peerDeviceCard"
+        },
+        "recipient": {
+          "$ref": "#/$defs/peerDeviceCard"
+        },
+        "expires_at": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "format",
+        "session_id",
+        "session_epoch",
+        "host",
+        "recipient",
+        "expires_at"
+      ],
+      "additionalProperties": false
+    },
+    "peerSessionApproval": {
+      "type": "object",
+      "properties": {
+        "offer": {
+          "$ref": "#/$defs/peerSessionOffer"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "host",
+            "recipient"
+          ]
+        }
+      },
+      "required": [
+        "offer",
+        "role"
+      ],
+      "additionalProperties": false
+    },
+    "peerSessionRevocation": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "session_epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "active": {
+          "const": false
+        }
+      },
+      "required": [
+        "session_id",
+        "session_epoch",
+        "active"
+      ],
+      "additionalProperties": false
+    },
+    "peerSession": {
+      "type": "object",
+      "properties": {
+        "offer": {
+          "$ref": "#/$defs/peerSessionOffer"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "host",
+            "recipient"
+          ]
+        },
+        "identity_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "pin_epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "context_bound": {
+          "const": false
+        }
+      },
+      "required": [
+        "offer",
+        "role",
+        "identity_generation",
+        "pin_epoch",
+        "active",
+        "context_bound"
+      ],
+      "additionalProperties": false
+    },
+    "peerPairingReceipt": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.peer-pairing-operation/1"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "kind": {
+              "const": "verify_pin"
+            },
+            "request_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "result": {
+              "$ref": "#/$defs/peerPin"
+            }
+          },
+          "required": [
+            "format",
+            "operation_id",
+            "kind",
+            "request_sha256",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.peer-pairing-operation/1"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "kind": {
+              "const": "revoke_pin"
+            },
+            "request_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "result": {
+              "$ref": "#/$defs/peerPinRevocation"
+            }
+          },
+          "required": [
+            "format",
+            "operation_id",
+            "kind",
+            "request_sha256",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.peer-pairing-operation/1"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "kind": {
+              "const": "host_session"
+            },
+            "request_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "result": {
+              "$ref": "#/$defs/peerSessionApproval"
+            }
+          },
+          "required": [
+            "format",
+            "operation_id",
+            "kind",
+            "request_sha256",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.peer-pairing-operation/1"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "kind": {
+              "const": "revoke_session"
+            },
+            "request_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "result": {
+              "$ref": "#/$defs/peerSessionRevocation"
+            }
+          },
+          "required": [
+            "format",
+            "operation_id",
+            "kind",
+            "request_sha256",
+            "result"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "peerActionError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "const": "unavailable"
+        },
+        "message": {
+          "const": "Peer action did not produce a confirmed result"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "peerConnection": {
+      "type": "object",
+      "properties": {
+        "connection_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "peer_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "signaling",
+            "authenticating",
+            "ready",
+            "failed",
+            "closed"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/peerActionError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "connection_id",
+        "peer_id",
+        "state",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "peerFileManifestEntry": {
+      "type": "object",
+      "properties": {
+        "file_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741824
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 127,
+          "pattern": "^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$"
+        }
+      },
+      "required": [
+        "file_id",
+        "name",
+        "bytes",
+        "sha256",
+        "media_type"
+      ],
+      "additionalProperties": false
+    },
+    "peerFileManifest": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.peer-files-manifest/1"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "snapshot_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "snapshot_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/peerFileManifestEntry"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "format",
+        "project_id",
+        "source_revision",
+        "snapshot_id",
+        "snapshot_sha256",
+        "files"
+      ],
+      "additionalProperties": false
+    },
+    "peerFileProgress": {
+      "type": "object",
+      "properties": {
+        "file_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741824
+        },
+        "committed_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741824
+        },
+        "next_sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 17477
+        },
+        "verified_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "file_id",
+        "bytes",
+        "committed_bytes",
+        "next_sequence",
+        "verified_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "peerFileCompletionEntry": {
+      "type": "object",
+      "properties": {
+        "file_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741824
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "file_id",
+        "bytes",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "peerFileCompletion": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.peer-files-receipt/1"
+        },
+        "transfer_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/peerFileCompletionEntry"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "format",
+        "transfer_id",
+        "manifest_sha256",
+        "files"
+      ],
+      "additionalProperties": false
+    },
+    "peerFileOperation": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "files.offer",
+            "files.start",
+            "files.cancel",
+            "files.complete",
+            "files.resume"
+          ]
+        },
+        "request_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "uncertain"
+          ]
+        }
+      },
+      "required": [
+        "operation_id",
+        "method",
+        "request_sha256",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "peerFileStatus": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "transfer_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "offered",
+            "accepted",
+            "receiving",
+            "interrupted",
+            "complete",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "grant_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/peerFileProgress"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/peerFileOperation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/peerFileCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "transfer_id",
+        "manifest_sha256",
+        "state",
+        "grant_id",
+        "files",
+        "operation",
+        "completion"
+      ],
+      "additionalProperties": false
+    },
+    "peerFileSenderStatus": {
+      "type": "object",
+      "properties": {
+        "transfer_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "session_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "offered",
+            "sending",
+            "interrupted",
+            "complete",
+            "cancelled"
+          ]
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "progress": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/peerFileProgress"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/peerFileCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "transfer_id",
+        "session_id",
+        "manifest_sha256",
+        "state",
+        "active",
+        "progress",
+        "completion"
+      ],
+      "additionalProperties": false
+    },
+    "peerFilePlan": {
+      "type": "object",
+      "properties": {
+        "plan_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "manifest": {
+          "$ref": "#/$defs/peerFileManifest"
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "database_generation": {
+          "$ref": "#/$defs/projectUuid"
+        }
+      },
+      "required": [
+        "plan_id",
+        "manifest",
+        "manifest_sha256",
+        "database_generation"
+      ],
+      "additionalProperties": false
+    },
+    "peerFileLocalReceipt": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "request_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "result": {
+          "$ref": "#/$defs/peerFileStatus"
+        }
+      },
+      "required": [
+        "operation_id",
+        "request_sha256",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "peerFileSenderRevocation": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "transfer_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "active": {
+          "const": false
+        }
+      },
+      "required": [
+        "operation_id",
+        "transfer_id",
+        "active"
+      ],
+      "additionalProperties": false
+    },
+    "peerFileRecovery": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "send_operation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "transfer_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "recovered": {
+          "type": "boolean"
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/peerFileStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "operation_id",
+        "send_operation_id",
+        "transfer_id",
+        "recovered",
+        "completion"
+      ],
+      "additionalProperties": false
+    },
+    "peerSignalApplied": {
+      "type": "object",
+      "properties": {
+        "applied": {
+          "const": true
+        }
+      },
+      "required": [
+        "applied"
+      ],
+      "additionalProperties": false
+    },
+    "peerServiceOperation": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "info",
+            "operations.get",
+            "operations.list",
+            "identity.initialize",
+            "identity.rotate",
+            "identity.revoke",
+            "pins.list",
+            "pins.verify",
+            "pins.revoke",
+            "connections.open",
+            "connections.list",
+            "connections.signals",
+            "connections.push_signal",
+            "connections.authenticate",
+            "connections.close",
+            "sessions.list",
+            "sessions.host",
+            "sessions.revoke",
+            "files.prepare",
+            "files.list",
+            "files.get",
+            "files.offer",
+            "files.accept",
+            "files.send",
+            "files.query",
+            "files.recover",
+            "files.cancel",
+            "files.revoke",
+            "identity.recover"
+          ]
+        },
+        "request_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "running",
+            "completed",
+            "uncertain"
+          ]
+        },
+        "connection_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transfer_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/peerIdentityReceipt"
+            },
+            {
+              "$ref": "#/$defs/peerPairingReceipt"
+            },
+            {
+              "$ref": "#/$defs/peerConnection"
+            },
+            {
+              "$ref": "#/$defs/peerFilePlan"
+            },
+            {
+              "$ref": "#/$defs/peerFileStatus"
+            },
+            {
+              "$ref": "#/$defs/peerFileLocalReceipt"
+            },
+            {
+              "$ref": "#/$defs/peerFileSenderRevocation"
+            },
+            {
+              "$ref": "#/$defs/peerFileRecovery"
+            },
+            {
+              "$ref": "#/$defs/peerSignalApplied"
+            },
+            {
+              "$ref": "#/$defs/peerIdentityRecovery"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/peerActionError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "operation_id",
+        "action",
+        "request_sha256",
+        "state",
+        "connection_id",
+        "transfer_id",
+        "result",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "peerFileOfferReview": {
+      "type": "object",
+      "properties": {
+        "offer_operation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "session_offer": {
+          "$ref": "#/$defs/peerSessionOffer"
+        },
+        "manifest": {
+          "$ref": "#/$defs/peerFileManifest"
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "transfer_id": {
+          "$ref": "#/$defs/projectUuid"
+        }
+      },
+      "required": [
+        "offer_operation_id",
+        "session_offer",
+        "manifest",
+        "manifest_sha256",
+        "transfer_id"
+      ],
+      "additionalProperties": false
+    },
+    "peerIdentityRecovery": {
+      "type": "object",
+      "properties": {
+        "original_operation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "identity": {
+          "$ref": "#/$defs/peerIdentityInfo"
+        },
+        "recovered": {
+          "const": true
+        }
+      },
+      "required": [
+        "original_operation_id",
+        "identity",
+        "recovered"
+      ],
+      "additionalProperties": false
+    },
+    "literatureCorpusId": {
+      "type": "string",
+      "pattern": "^local_[0-9a-f]{32}$"
+    },
+    "literaturePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?:/|[A-Za-z]:[\\\\/]|\\\\\\\\)[^\\u0000]*$"
+    },
+    "literatureAuthorization": {
+      "type": "object",
+      "properties": {
+        "basis": {
+          "enum": [
+            "open_access",
+            "self_authored"
+          ]
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "approved_by": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "basis",
+        "evidence",
+        "approved_by"
+      ],
+      "additionalProperties": false
+    },
+    "literatureBaseCitation": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.literature-citation/1"
+        },
+        "version_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "extraction_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "paragraph_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "text_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "page_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 250000
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 250000
+        }
+      },
+      "required": [
+        "format",
+        "version_id",
+        "source_sha256",
+        "extraction_id",
+        "paragraph_id",
+        "text_sha256",
+        "page_index",
+        "start",
+        "end"
+      ],
+      "additionalProperties": false
+    },
+    "literatureDenseCitation": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.literature-dense-citation/1"
+        },
+        "generation": {
+          "$ref": "#/$defs/sha256"
+        },
+        "window_key": {
+          "$ref": "#/$defs/sha256"
+        },
+        "base": {
+          "$ref": "#/$defs/literatureBaseCitation"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2048
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2048
+        },
+        "text_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "format",
+        "generation",
+        "window_key",
+        "base",
+        "start",
+        "end",
+        "text_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "literatureCitation": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.literature-collection-citation/1"
+        },
+        "corpus_id": {
+          "$ref": "#/$defs/literatureCorpusId"
+        },
+        "database_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "corpus_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "dense_generation": {
+          "$ref": "#/$defs/sha256"
+        },
+        "inner": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/literatureBaseCitation"
+            },
+            {
+              "$ref": "#/$defs/literatureDenseCitation"
+            }
+          ]
+        },
+        "evidence_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "format",
+        "corpus_id",
+        "database_id",
+        "corpus_generation",
+        "dense_generation",
+        "inner",
+        "evidence_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "literatureParagraphCitation": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.literature-collection-citation/1"
+        },
+        "corpus_id": {
+          "$ref": "#/$defs/literatureCorpusId"
+        },
+        "database_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "corpus_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "dense_generation": {
+          "$ref": "#/$defs/sha256"
+        },
+        "inner": {
+          "$ref": "#/$defs/literatureBaseCitation"
+        },
+        "evidence_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "format",
+        "corpus_id",
+        "database_id",
+        "corpus_generation",
+        "dense_generation",
+        "inner",
+        "evidence_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "literatureWindowCitation": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.literature-collection-citation/1"
+        },
+        "corpus_id": {
+          "$ref": "#/$defs/literatureCorpusId"
+        },
+        "database_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "corpus_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "dense_generation": {
+          "$ref": "#/$defs/sha256"
+        },
+        "inner": {
+          "$ref": "#/$defs/literatureDenseCitation"
+        },
+        "evidence_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "format",
+        "corpus_id",
+        "database_id",
+        "corpus_generation",
+        "dense_generation",
+        "inner",
+        "evidence_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "literatureScopes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/literatureCorpusId"
+      },
+      "minItems": 1,
+      "maxItems": 8,
+      "uniqueItems": true
+    },
+    "literatureOperation": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "action": {
+          "enum": [
+            "corpora.create",
+            "encoder.review",
+            "encoder.select",
+            "import.review",
+            "import.commit",
+            "import.recover",
+            "versions.revoke",
+            "index.start",
+            "dense.build",
+            "search",
+            "citations.resolve",
+            "pages.render"
+          ]
+        },
+        "request_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "result_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "enum": [
+            "running",
+            "completed",
+            "uncertain"
+          ]
+        }
+      },
+      "required": [
+        "operation_id",
+        "action",
+        "request_sha256",
+        "result_sha256",
+        "error",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "literatureEncoderRecipe": {
+      "type": "object",
+      "properties": {
+        "encoder": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "query_prefix": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "pooling": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "normalization": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "device": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "dtype": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "windows": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "passage_prefix": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256
+        },
+        "dimensions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "threads": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        }
+      },
+      "required": [
+        "encoder",
+        "revision",
+        "query_prefix",
+        "pooling",
+        "normalization",
+        "device",
+        "dtype",
+        "windows",
+        "passage_prefix",
+        "dimensions",
+        "tokens",
+        "threads"
+      ],
+      "additionalProperties": false
+    },
+    "literatureEncoderRuntime": {
+      "type": "object",
+      "properties": {
+        "python": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "platform": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "machine": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "packages": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 512,
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "record_sha256": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/sha256"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "version",
+              "record_sha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "worker_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "python",
+        "platform",
+        "machine",
+        "packages",
+        "worker_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "literatureEncoderReview": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.literature-encoder-review/1"
+        },
+        "assets": {
+          "$ref": "#/$defs/literaturePath"
+        },
+        "assets_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "python": {
+          "$ref": "#/$defs/literaturePath"
+        },
+        "identity": {
+          "type": "object",
+          "properties": {
+            "assets_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "recipe": {
+              "$ref": "#/$defs/literatureEncoderRecipe"
+            },
+            "runtime": {
+              "$ref": "#/$defs/literatureEncoderRuntime"
+            }
+          },
+          "required": [
+            "assets_sha256",
+            "recipe",
+            "runtime"
+          ],
+          "additionalProperties": false
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "format",
+        "assets",
+        "assets_sha256",
+        "python",
+        "identity",
+        "fingerprint"
+      ],
+      "additionalProperties": false
+    },
+    "literatureImportReview": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.literature-import-review/1"
+        },
+        "corpus_id": {
+          "$ref": "#/$defs/literatureCorpusId"
+        },
+        "database_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "corpus_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "source": {
+          "$ref": "#/$defs/literaturePath"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "source_bytes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 33554432
+        },
+        "document_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "authorization": {
+          "$ref": "#/$defs/literatureAuthorization"
+        }
+      },
+      "required": [
+        "format",
+        "corpus_id",
+        "database_id",
+        "corpus_generation",
+        "source",
+        "source_sha256",
+        "source_bytes",
+        "document_id",
+        "title",
+        "authorization"
+      ],
+      "additionalProperties": false
+    },
+    "literatureImportReceipt": {
+      "type": "object",
+      "properties": {
+        "version_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "document_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "source_bytes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 33554432
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [
+        "version_id",
+        "document_id",
+        "source_sha256",
+        "source_bytes",
+        "generation"
+      ],
+      "additionalProperties": false
+    },
+    "literatureHit": {
+      "type": "object",
+      "properties": {
+        "corpus_id": {
+          "$ref": "#/$defs/literatureCorpusId"
+        },
+        "database_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "corpus_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "dense_generation": {
+          "$ref": "#/$defs/sha256"
+        },
+        "encoder_fingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "score": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 0.03278688524590164
+        },
+        "dense_score": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -1.0001,
+              "maximum": 1.0001
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dense_rank": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lexical_rank": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "text_status": {
+          "enum": [
+            "mapped",
+            "incomplete"
+          ]
+        },
+        "structure_status": {
+          "const": "unreviewed"
+        },
+        "citation": {
+          "$ref": "#/$defs/literatureParagraphCitation"
+        },
+        "dense_window": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/literatureWindowCitation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "corpus_id",
+        "database_id",
+        "corpus_generation",
+        "dense_generation",
+        "encoder_fingerprint",
+        "score",
+        "dense_score",
+        "dense_rank",
+        "lexical_rank",
+        "text",
+        "text_status",
+        "structure_status",
+        "citation",
+        "dense_window"
+      ],
+      "additionalProperties": false
+    },
+    "literatureSearchResult": {
+      "type": "object",
+      "properties": {
+        "retriever": {
+          "enum": [
+            "local_collection_fts5_e5_rrf",
+            "local_collection_fts5_qwen3_rrf"
+          ]
+        },
+        "recipe": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.local-collection-ranking/1"
+            },
+            "dense": {
+              "const": "global_exact_cosine_top20_windows_then_distinct_paragraphs"
+            },
+            "lexical": {
+              "const": "literal_fts5_top20_each_global_order_local_rank_corpus_database_citation"
+            },
+            "lexical_global_limit": {
+              "const": 20
+            },
+            "dense_global_window_limit": {
+              "const": 20
+            },
+            "fusion": {
+              "const": "reciprocal_rank"
+            },
+            "constant": {
+              "const": 60
+            },
+            "weights": {
+              "const": [
+                1,
+                1
+              ]
+            },
+            "maximum_scopes": {
+              "const": 8
+            }
+          },
+          "required": [
+            "format",
+            "dense",
+            "lexical",
+            "lexical_global_limit",
+            "dense_global_window_limit",
+            "fusion",
+            "constant",
+            "weights",
+            "maximum_scopes"
+          ],
+          "additionalProperties": false
+        },
+        "query_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "corpus_id": {
+                "$ref": "#/$defs/literatureCorpusId"
+              },
+              "database_id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "corpus_generation": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              },
+              "dense_generation": {
+                "$ref": "#/$defs/sha256"
+              },
+              "encoder_fingerprint": {
+                "$ref": "#/$defs/sha256"
+              }
+            },
+            "required": [
+              "corpus_id",
+              "database_id",
+              "corpus_generation",
+              "dense_generation",
+              "encoder_fingerprint"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 8
+        },
+        "hits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/literatureHit"
+          },
+          "minItems": 0,
+          "maxItems": 20
+        }
+      },
+      "required": [
+        "retriever",
+        "recipe",
+        "query_sha256",
+        "scopes",
+        "hits"
+      ],
+      "additionalProperties": false
+    },
+    "literaturePage": {
+      "type": "object",
+      "properties": {
+        "page_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        },
+        "page_box": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": -100000,
+            "maximum": 100000
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "rotation": {
+          "enum": [
+            0,
+            90,
+            180,
+            270
+          ]
+        },
+        "status": {
+          "enum": [
+            "mapped",
+            "needs_review",
+            "needs_ocr_or_blank"
+          ]
+        }
+      },
+      "required": [
+        "page_index",
+        "width",
+        "height",
+        "page_box",
+        "rotation",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "literatureParser": {
+      "type": "object",
+      "properties": {
+        "adapter": {
+          "const": "stk.pdfium-character-stream/1"
+        },
+        "pypdfium2": {
+          "const": "5.14.0"
+        },
+        "pdfium": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "binary_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "worker_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "reading_order": {
+          "const": "pdfium_stream_unreviewed"
+        },
+        "paragraphs": {
+          "const": "line_hypotheses_split_at_2048"
+        },
+        "normalization": {
+          "const": "none"
+        },
+        "text_positions": {
+          "const": "unicode_scalar"
+        },
+        "unicode_mapping": {
+          "const": "pdfium_codepoints_and_utf16_surrogate_pairs"
+        }
+      },
+      "required": [
+        "adapter",
+        "pypdfium2",
+        "pdfium",
+        "binary_sha256",
+        "worker_sha256",
+        "reading_order",
+        "paragraphs",
+        "normalization",
+        "text_positions",
+        "unicode_mapping"
+      ],
+      "additionalProperties": false
+    },
+    "literatureCharacter": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 250000
+        },
+        "text_start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 250000
+        },
+        "text_end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 250000
+        },
+        "scalar": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1114111
+        },
+        "unicode": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "generated": {
+          "type": "boolean"
+        },
+        "mapping_error": {
+          "type": "boolean"
+        },
+        "box": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 4,
+              "maxItems": 4
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "index",
+        "text_start",
+        "text_end",
+        "scalar",
+        "unicode",
+        "generated",
+        "mapping_error",
+        "box"
+      ],
+      "additionalProperties": false
+    },
+    "literatureResolvedCitation": {
+      "type": "object",
+      "properties": {
+        "citation": {
+          "$ref": "#/$defs/literatureCitation"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "parser": {
+          "$ref": "#/$defs/literatureParser"
+        },
+        "text_status": {
+          "enum": [
+            "mapped",
+            "incomplete"
+          ]
+        },
+        "structure_status": {
+          "const": "unreviewed"
+        },
+        "page": {
+          "$ref": "#/$defs/literaturePage"
+        },
+        "characters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/literatureCharacter"
+          },
+          "minItems": 0,
+          "maxItems": 250000
+        },
+        "corpus_id": {
+          "$ref": "#/$defs/literatureCorpusId"
+        },
+        "database_id": {
+          "$ref": "#/$defs/projectUuid"
+        }
+      },
+      "required": [
+        "citation",
+        "text",
+        "parser",
+        "text_status",
+        "structure_status",
+        "page",
+        "characters",
+        "corpus_id",
+        "database_id"
+      ],
+      "additionalProperties": false
+    },
+    "literatureRenderedPage": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.literature-page/1"
+        },
+        "citation": {
+          "$ref": "#/$defs/literatureCitation"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "page": {
+          "$ref": "#/$defs/literaturePage"
+        },
+        "text_status": {
+          "enum": [
+            "mapped",
+            "incomplete"
+          ]
+        },
+        "structure_status": {
+          "const": "unreviewed"
+        },
+        "renderer": {
+          "type": "object",
+          "properties": {
+            "adapter": {
+              "const": "stk.pdfium-citation-page/1"
+            },
+            "pypdfium2": {
+              "const": "5.14.0"
+            },
+            "binary_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "worker_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "adapter",
+            "pypdfium2",
+            "binary_sha256",
+            "worker_sha256"
+          ],
+          "additionalProperties": false
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "mime": {
+              "const": "image/png"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4194304
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2048
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2048
+            },
+            "data_base64": {
+              "type": "string",
+              "minLength": 4,
+              "maxLength": 5592408,
+              "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+            }
+          },
+          "required": [
+            "mime",
+            "bytes",
+            "sha256",
+            "width",
+            "height",
+            "data_base64"
+          ],
+          "additionalProperties": false
+        },
+        "pdf_to_pixel": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": -1000000000.0,
+            "maximum": 1000000000.0
+          },
+          "minItems": 6,
+          "maxItems": 6
+        },
+        "highlights": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 250000
+              },
+              "text_start": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 250000
+              },
+              "text_end": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 250000
+              },
+              "quad": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "minItems": 4,
+                "maxItems": 4
+              }
+            },
+            "required": [
+              "index",
+              "text_start",
+              "text_end",
+              "quad"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 0,
+          "maxItems": 250000
+        },
+        "geometry_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "format",
+        "citation",
+        "source_sha256",
+        "page",
+        "text_status",
+        "structure_status",
+        "renderer",
+        "image",
+        "pdf_to_pixel",
+        "highlights",
+        "geometry_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "literatureOperationResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "action": {
+                  "const": "corpora.create"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "result_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "error": {
+                  "type": "null"
+                },
+                "state": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "operation_id",
+                "action",
+                "request_sha256",
+                "result_sha256",
+                "error",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "corpus_id": {
+                  "$ref": "#/$defs/literatureCorpusId"
+                },
+                "database_id": {
+                  "$ref": "#/$defs/projectUuid"
+                }
+              },
+              "required": [
+                "corpus_id",
+                "database_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "action": {
+                  "const": "encoder.review"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "result_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "error": {
+                  "type": "null"
+                },
+                "state": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "operation_id",
+                "action",
+                "request_sha256",
+                "result_sha256",
+                "error",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "result": {
+              "$ref": "#/$defs/literatureEncoderReview"
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "action": {
+                  "const": "encoder.select"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "result_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "error": {
+                  "type": "null"
+                },
+                "state": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "operation_id",
+                "action",
+                "request_sha256",
+                "result_sha256",
+                "error",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "encoder_generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9223372036854775807
+                },
+                "fingerprint": {
+                  "$ref": "#/$defs/sha256"
+                }
+              },
+              "required": [
+                "encoder_generation",
+                "fingerprint"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "action": {
+                  "const": "import.review"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "result_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "error": {
+                  "type": "null"
+                },
+                "state": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "operation_id",
+                "action",
+                "request_sha256",
+                "result_sha256",
+                "error",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "result": {
+              "$ref": "#/$defs/literatureImportReview"
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "action": {
+                  "const": "import.commit"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "result_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "error": {
+                  "type": "null"
+                },
+                "state": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "operation_id",
+                "action",
+                "request_sha256",
+                "result_sha256",
+                "error",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "kind": {
+                  "const": "import"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "state": {
+                  "const": "completed"
+                },
+                "receipt": {
+                  "$ref": "#/$defs/literatureImportReceipt"
+                }
+              },
+              "required": [
+                "operation_id",
+                "kind",
+                "request_sha256",
+                "state",
+                "receipt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "action": {
+                  "const": "import.recover"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "result_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "error": {
+                  "type": "null"
+                },
+                "state": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "operation_id",
+                "action",
+                "request_sha256",
+                "result_sha256",
+                "error",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "kind": {
+                  "const": "recover_import"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "state": {
+                  "const": "completed"
+                },
+                "receipt": {
+                  "type": "object",
+                  "properties": {
+                    "original_operation_id": {
+                      "$ref": "#/$defs/projectUuid"
+                    },
+                    "import": {
+                      "$ref": "#/$defs/literatureImportReceipt"
+                    }
+                  },
+                  "required": [
+                    "original_operation_id",
+                    "import"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "operation_id",
+                "kind",
+                "request_sha256",
+                "state",
+                "receipt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "action": {
+                  "const": "versions.revoke"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "result_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "error": {
+                  "type": "null"
+                },
+                "state": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "operation_id",
+                "action",
+                "request_sha256",
+                "result_sha256",
+                "error",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "kind": {
+                  "const": "revoke"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "state": {
+                  "const": "completed"
+                },
+                "receipt": {
+                  "type": "object",
+                  "properties": {
+                    "version_id": {
+                      "$ref": "#/$defs/projectUuid"
+                    },
+                    "active": {
+                      "const": false
+                    },
+                    "generation": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9223372036854775807
+                    }
+                  },
+                  "required": [
+                    "version_id",
+                    "active",
+                    "generation"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "operation_id",
+                "kind",
+                "request_sha256",
+                "state",
+                "receipt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "action": {
+                  "const": "index.start"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "result_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "error": {
+                  "type": "null"
+                },
+                "state": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "operation_id",
+                "action",
+                "request_sha256",
+                "result_sha256",
+                "error",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "kind": {
+                  "const": "index"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "state": {
+                  "const": "completed"
+                },
+                "receipt": {
+                  "type": "object",
+                  "properties": {
+                    "version_id": {
+                      "$ref": "#/$defs/projectUuid"
+                    },
+                    "source_sha256": {
+                      "$ref": "#/$defs/sha256"
+                    },
+                    "extraction_id": {
+                      "$ref": "#/$defs/sha256"
+                    },
+                    "page_count": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 256
+                    },
+                    "character_count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4000000
+                    },
+                    "text_status": {
+                      "enum": [
+                        "mapped",
+                        "incomplete"
+                      ]
+                    },
+                    "structure_status": {
+                      "const": "unreviewed"
+                    },
+                    "generation": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9223372036854775807
+                    }
+                  },
+                  "required": [
+                    "version_id",
+                    "source_sha256",
+                    "extraction_id",
+                    "page_count",
+                    "character_count",
+                    "text_status",
+                    "structure_status",
+                    "generation"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "operation_id",
+                "kind",
+                "request_sha256",
+                "state",
+                "receipt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "action": {
+                  "const": "dense.build"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "result_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "error": {
+                  "type": "null"
+                },
+                "state": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "operation_id",
+                "action",
+                "request_sha256",
+                "result_sha256",
+                "error",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "kind": {
+                  "const": "dense_build"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "state": {
+                  "const": "completed"
+                },
+                "receipt": {
+                  "type": "object",
+                  "properties": {
+                    "generation": {
+                      "$ref": "#/$defs/sha256"
+                    },
+                    "corpus_generation": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9223372036854775807
+                    },
+                    "encoder_fingerprint": {
+                      "$ref": "#/$defs/sha256"
+                    },
+                    "paragraphs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000
+                    },
+                    "windows": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 20000
+                    }
+                  },
+                  "required": [
+                    "generation",
+                    "corpus_generation",
+                    "encoder_fingerprint",
+                    "paragraphs",
+                    "windows"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "operation_id",
+                "kind",
+                "request_sha256",
+                "state",
+                "receipt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "action": {
+                  "const": "search"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "result_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "error": {
+                  "type": "null"
+                },
+                "state": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "operation_id",
+                "action",
+                "request_sha256",
+                "result_sha256",
+                "error",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "result": {
+              "$ref": "#/$defs/literatureSearchResult"
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "action": {
+                  "const": "citations.resolve"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "result_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "error": {
+                  "type": "null"
+                },
+                "state": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "operation_id",
+                "action",
+                "request_sha256",
+                "result_sha256",
+                "error",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "result": {
+              "$ref": "#/$defs/literatureResolvedCitation"
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "object",
+              "properties": {
+                "operation_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "action": {
+                  "const": "pages.render"
+                },
+                "request_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "result_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "error": {
+                  "type": "null"
+                },
+                "state": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "operation_id",
+                "action",
+                "request_sha256",
+                "result_sha256",
+                "error",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "result": {
+              "$ref": "#/$defs/literatureRenderedPage"
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }

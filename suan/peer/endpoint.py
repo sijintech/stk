@@ -22,12 +22,17 @@ from .projects import PeerProjects
 from .protocol import (FORMAT, METHODS, PeerProtocolError, decode_message,
                        encode_message, negotiate_hello, validate_request,
                        validate_response)
+from .file_protocol import (DATA, RECEIPT, FILE_METHODS, FILE_MUTATIONS, FileFrame,
+                            FileProtocolError, decode_frame, encode_frame,
+                            validate_operation_receipt, validate_receipt)
+from .manifests import FileManifestError, manifest_sha256, validate_manifest
 
 
 AUTH_FORMAT = "stk.peer-auth-channel/1"
 MAX_AUTH_BYTES = 4096
 MAX_AUTH_DEPTH = 8
 MAX_CONNECTION_REQUESTS = 4096
+MAX_FILE_INFLIGHT = 2
 _HEX = re.compile(r"[0-9a-f]{64}")
 _SIGNATURE = re.compile(r"[0-9a-f]{128}")
 _APPLY = "project.edit_operations.apply_once"
@@ -46,6 +51,23 @@ class PeerCallUncertain(PeerProtocolError):
         self.expected_revision = expected_revision
         self.uncertain = True
         super().__init__("unavailable", "Peer write outcome is uncertain; query the original receipt")
+
+
+class PeerFileCallUncertain(PeerProtocolError):
+    """Retain the complete original file intent; a generic error proves no rejection."""
+    def __init__(self, operation_id, transfer_id, manifest_sha256):
+        self.operation_id, self.transfer_id = operation_id, transfer_id
+        self.manifest_sha256, self.uncertain = manifest_sha256, True
+        super().__init__("unavailable", "Peer file outcome is uncertain; query the original operation")
+
+
+class PeerFileDataUncertain(PeerProtocolError):
+    """A DATA block may be durable; reconcile the original journal, never auto-resend."""
+    def __init__(self, frame):
+        self.transfer_id, self.file_id = frame.transfer_id, frame.file_id
+        self.sequence, self.offset, self.length = frame.sequence, frame.offset, frame.length
+        self.sha256, self.uncertain = frame.sha256, True
+        super().__init__("unavailable", "Peer file block outcome is uncertain; check durable status")
 
 
 class _RemoteFailure(PeerProtocolError):
@@ -134,8 +156,19 @@ def _auth_encode(kind, **values):
 @dataclass
 class _Pending:
     method: str
+    params: object = None
+    file_manifest: object = None
+    file_operation: object = None
     event: threading.Event = field(default_factory=threading.Event)
     response: object = None
+    error: object = None
+
+
+@dataclass
+class _FilePending:
+    data: FileFrame
+    event: threading.Event = field(default_factory=threading.Event)
+    receipt: object = None
     error: object = None
 
 
@@ -149,7 +182,8 @@ class PeerEndpoint:
     """
 
     def __init__(self, transport, authority, *, public_key, sign,
-                 remote_peer_id, remote_owner_id, max_inflight=8, max_workers=4):
+                 remote_peer_id, remote_owner_id, max_inflight=8, max_workers=4,
+                 file_adapter=None):
         own_peer = peer_id_for(public_key)
         if (type(remote_peer_id) is not str or not _HEX.fullmatch(remote_peer_id)
                 or remote_peer_id == own_peer or not _uuid(remote_owner_id) or not callable(sign)):
@@ -157,19 +191,26 @@ class PeerEndpoint:
         if (type(max_inflight) is not int or not 1 <= max_inflight <= 8
                 or type(max_workers) is not int or not 1 <= max_workers <= 4):
             raise _error("invalid_params", "Peer concurrency limit is invalid")
+        if file_adapter is not None and any(not callable(getattr(file_adapter, name, None))
+                                            for name in ("capabilities", "call", "receive_frame")):
+            raise _error("invalid_params", "Peer file adapter is invalid")
         self._transport, self._authority = transport, authority
         self._sign = sign
         self._own_peer, self._remote_peer = own_peer, remote_peer_id
         self._remote_owner = remote_owner_id
         self._projects = PeerProjects(authority)
+        self._file_adapter = file_adapter
         self._max_inflight, self._max_workers = max_inflight, max_workers
         self._lock, self._send_lock = threading.RLock(), threading.Lock()
         self._workers = threading.BoundedSemaphore(max_workers)
+        self._file_workers = threading.BoundedSemaphore(MAX_FILE_INFLIGHT)
         self._ready, self._closed, self._cleaned = threading.Event(), threading.Event(), threading.Event()
         self._pending, self._seen = {}, set()
+        self._file_pending = {}
         self._request_count = 0
         self._started = False
         self._context = self._reader = self._pool = None
+        self._file_reader = self._file_pool = None
         self._remote_capabilities = {}
         self._inbound_capabilities = None
         self._hello_inflight = False
@@ -177,13 +218,14 @@ class PeerEndpoint:
     def __repr__(self):
         return "<PeerEndpoint closed>" if self._closed.is_set() else "<PeerEndpoint>"
 
-    def _send(self, raw, deadline):
+    def _send(self, raw, deadline, *, blob=False):
         if not self._send_lock.acquire(timeout=_remaining(deadline)):
             raise TimeoutError("Peer send timed out")
         try:
             if self._closed.is_set():
                 raise _error()
-            self._transport.send_control(raw, timeout=_remaining(deadline))
+            send = self._transport.send_blob_chunk if blob else self._transport.send_control
+            send(raw, timeout=_remaining(deadline))
         finally:
             self._send_lock.release()
 
@@ -233,12 +275,14 @@ class PeerEndpoint:
                 self._pool = ThreadPoolExecutor(max_workers=self._max_workers, thread_name_prefix="stk-peer-call")
                 self._reader = threading.Thread(target=self._read_loop, name="stk-peer-reader", daemon=True)
                 self._reader.start()
-            result = self._exchange("peer.hello", {"protocols": [1], "capabilities": {name: 1 for name in METHODS}}, deadline)
+            requested = METHODS | FILE_METHODS if self._file_adapter is not None else METHODS
+            result = self._exchange("peer.hello", {"protocols": [1], "capabilities": {name: 1 for name in requested}}, deadline)
             with self._lock:
                 if self._closed.is_set():
                     raise PeerDenied
                 self._remote_capabilities = result["capabilities"]
                 self._ready.set()
+                self._ensure_file_reader()
             return self
         except Exception:
             self._abort()
@@ -259,6 +303,14 @@ class PeerEndpoint:
         return self.capabilities
 
     @property
+    def authenticated_context(self):
+        """Exact opaque connection identity for a trusted local adapter; no new grant."""
+        with self._lock:
+            if not self._ready.is_set() or self._closed.is_set() or self._context is None:
+                raise _error()
+            return self._context
+
+    @property
     def capabilities(self):
         """Detached remote negotiated methods; current grants are still checked per request."""
         with self._lock:
@@ -266,31 +318,75 @@ class PeerEndpoint:
                 raise _error()
             return dict(self._remote_capabilities)
 
-    def request(self, method, params, *, timeout=30):
+    def request(self, method, params, *, timeout=30, file_manifest=None, file_operation=None):
         """Make exactly one attempt. Transport failure of apply_once raises PeerCallUncertain."""
         deadline = time.monotonic() + _timeout(timeout)
         request = validate_request({"format": FORMAT, "id": str(uuid4()), "method": method, "params": params})
+        frozen = None
+        if method in FILE_METHODS:
+            try:
+                frozen = validate_manifest(request["params"]["manifest"] if method == "files.offer"
+                                           and file_manifest is None else file_manifest)
+                if manifest_sha256(frozen) != request["params"]["manifest_sha256"]:
+                    raise FileManifestError()
+                if method == "files.status" and request["params"]["operation_id"] is not None:
+                    if type(file_operation) is not tuple or len(file_operation) != 2:
+                        raise FileManifestError()
+                    original_method, original_params = file_operation
+                    original = validate_request({"format": FORMAT, "id": request["id"],
+                                                 "method": original_method, "params": original_params})
+                    if (original_method not in FILE_MUTATIONS
+                            or any(original["params"][key] != request["params"][key]
+                                   for key in ("operation_id", "transfer_id", "manifest_sha256"))):
+                        raise FileManifestError()
+                    file_operation = (original_method, original["params"])
+                elif file_operation is not None:
+                    raise FileManifestError()
+            except (FileManifestError, FileProtocolError):
+                raise _error("invalid_params", "Original file manifest or operation binding is invalid") from None
+        elif file_manifest is not None or file_operation is not None:
+            raise _error("invalid_params", "File binding is only valid for peer file methods")
         with self._lock:
             if not self._ready.is_set() or self._closed.is_set():
                 raise _error()
             if method != "peer.hello" and method not in self._remote_capabilities:
                 raise _error("unsupported", "Peer capability was not negotiated")
         try:
-            result = self._exchange(method, request["params"], deadline, request=request)
+            result = self._exchange(method, request["params"], deadline, request=request,
+                                    file_manifest=frozen, file_operation=file_operation)
         except PeerProtocolError as error:
             if (method == _APPLY and error.code in {"unavailable", "internal_error", "limit_exceeded"}
                     and (self._closed.is_set() or isinstance(error, _RemoteFailure))):
                 raise PeerCallUncertain(request["params"]["operation_id"], request["params"]["expected_revision"]) from None
+            if method in FILE_MUTATIONS and (self._closed.is_set() or isinstance(error, _RemoteFailure)):
+                raise PeerFileCallUncertain(request["params"]["operation_id"], request["params"]["transfer_id"],
+                                            request["params"]["manifest_sha256"]) from None
             raise
         if method == "peer.hello":
             with self._lock:
                 self._remote_capabilities = result["capabilities"]
+                self._ensure_file_reader()
         return result
 
-    def _exchange(self, method, params, deadline, *, request=None):
+    def _ensure_file_reader(self):
+        # Explicit later hello may add a newly authorized optional capability.
+        # Construction and an empty/base-only negotiation remain passive.
+        with self._lock:
+            if (self._file_reader is not None or self._file_adapter is None
+                    or self._closed.is_set() or not self._ready.is_set()
+                    or not FILE_METHODS & (self._remote_capabilities.keys()
+                                          | (self._inbound_capabilities or {}).keys())):
+                return
+            self._file_pool = ThreadPoolExecutor(max_workers=MAX_FILE_INFLIGHT,
+                                                 thread_name_prefix="stk-peer-file")
+            self._file_reader = threading.Thread(target=self._file_read_loop,
+                                                 name="stk-peer-file-reader", daemon=True)
+            self._file_reader.start()
+
+    def _exchange(self, method, params, deadline, *, request=None, file_manifest=None, file_operation=None):
         request = request or {"format": FORMAT, "id": str(uuid4()), "method": method, "params": params}
         raw = encode_message(request)
-        pending = _Pending(method)
+        pending = _Pending(method, params, file_manifest, file_operation)
         with self._lock:
             if self._closed.is_set():
                 raise _error()
@@ -325,6 +421,12 @@ class PeerEndpoint:
             methods.update({method: 1 for method in _READ_METHODS})
         if "project.edit" in capabilities:
             methods[_APPLY] = 1
+        if self._file_adapter is not None:
+            files = self._file_adapter.capabilities(self._context)
+            if (type(files) is not dict or not files.keys() <= FILE_METHODS
+                    or any(type(version) is not int or version != 1 for version in files.values())):
+                raise _error("internal_error", "Peer file capabilities are invalid")
+            methods.update(files)
         return methods
 
     def _read_loop(self):
@@ -340,7 +442,14 @@ class PeerEndpoint:
                         pending = self._pending.get(message["id"])
                         if pending is None or pending.event.is_set():
                             raise _error("invalid_request", "Peer response has no pending request")
-                        pending.response = validate_response(message, method=pending.method)
+                        pending.response = validate_response(message, method=pending.method,
+                                                             request_params=pending.params,
+                                                             file_manifest=pending.file_manifest)
+                        if (pending.file_operation is not None and "result" in pending.response
+                                and pending.response["result"]["operation"] is not None):
+                            validate_operation_receipt(pending.response["result"]["operation"],
+                                                       method=pending.file_operation[0],
+                                                       params=pending.file_operation[1])
                         pending.event.set()
                     continue
                 with self._lock:
@@ -391,10 +500,13 @@ class PeerEndpoint:
 
     def _serve(self, message):
         method, params = message["method"], message["params"]
+        frozen = None
         try:
             if method == "peer.hello":
                 result = negotiate_hello(params, capabilities=self._available())
-                self._inbound_capabilities = result["capabilities"]
+                with self._lock:
+                    self._inbound_capabilities = result["capabilities"]
+                    self._ensure_file_reader()
             elif method == "project.catalog":
                 result = self._projects.catalog(self._context, **params)
             elif method == "project.table.read":
@@ -403,10 +515,17 @@ class PeerEndpoint:
                 result = self._projects.apply_once(self._context, **params)
             elif method == "project.edit_operations.get":
                 result = {"receipt": self._projects.get(self._context, **params)}
+            elif method in FILE_METHODS and self._file_adapter is not None:
+                reply = self._file_adapter.call(self._context, method, params)
+                if type(reply) is not tuple or len(reply) != 2:
+                    raise _error("internal_error", "Peer file response could not be encoded")
+                result, frozen = reply
+                frozen = validate_manifest(frozen)
             else:
                 raise _error("unsupported", "Peer method is not supported")
             try:
-                raw = encode_message({"format": FORMAT, "id": message["id"], "result": result}, method=method)
+                raw = encode_message({"format": FORMAT, "id": message["id"], "result": result}, method=method,
+                                     request_params=params, file_manifest=frozen)
             except Exception:
                 # Requests have already been validated. A broken result DTO is
                 # a server failure, and an edit may already have committed.
@@ -440,6 +559,87 @@ class PeerEndpoint:
                                   "error": {"code": code, "message": description}}, method=message["method"]),
                    time.monotonic() + 30)
 
+    def send_file_data(self, data, *, timeout=30):
+        """Send one previously journaled DATA intent; ACK never triggers a retry.
+
+        The trusted sender retains current session/file authorization and durable
+        intent outside this network wait. The receiver adapter authorizes each
+        bounded commit independently. A missing receipt leaves the block unknown.
+        """
+        deadline = time.monotonic() + _timeout(timeout)
+        try:
+            raw = encode_frame(data)
+            if data.kind != DATA:
+                raise FileProtocolError()
+        except FileProtocolError:
+            raise _error("invalid_params", "A valid peer file DATA frame is required") from None
+        pending = _FilePending(data)
+        with self._lock:
+            if (self._closed.is_set() or not self._ready.is_set() or self._file_reader is None
+                    or not {"files.start", "files.resume"} & self._remote_capabilities.keys()):
+                raise _error()
+            if len(self._file_pending) >= MAX_FILE_INFLIGHT or data.transfer_id in self._file_pending:
+                raise _error("busy", "Peer file block capacity is exhausted")
+            self._file_pending[data.transfer_id] = pending
+        try:
+            try:
+                self._send(raw, deadline, blob=True)
+                if not pending.event.wait(_remaining(deadline)):
+                    raise TimeoutError("Peer file durability receipt timed out")
+                if pending.error is not None:
+                    raise pending.error
+                return validate_receipt(pending.receipt, data)
+            except Exception:
+                self._abort()
+                raise PeerFileDataUncertain(data) from None
+        finally:
+            with self._lock:
+                self._file_pending.pop(data.transfer_id, None)
+
+    def _file_read_loop(self):
+        try:
+            while not self._closed.is_set():
+                try:
+                    frame = decode_frame(self._transport.recv_blob_chunk(timeout=.2))
+                except TimeoutError:
+                    continue
+                if frame.kind == RECEIPT:
+                    with self._lock:
+                        pending = self._file_pending.get(frame.transfer_id)
+                        if pending is None or pending.event.is_set():
+                            raise FileProtocolError()
+                        pending.receipt = validate_receipt(frame, pending.data)
+                        pending.event.set()
+                    continue
+                with self._lock:
+                    if (self._file_adapter is None or self._inbound_capabilities is None
+                            or not {"files.start", "files.resume"} & self._inbound_capabilities.keys()
+                            or not self._file_workers.acquire(blocking=False)):
+                        raise FileProtocolError()
+                    context = self._context
+                    try:
+                        self._file_pool.submit(self._serve_file_frame, context, frame)
+                    except Exception:
+                        self._file_workers.release()
+                        raise
+        except Exception:
+            self._abort()
+
+    def _serve_file_frame(self, context, data):
+        try:
+            if self._closed.is_set():
+                return
+            receipt = self._file_adapter.receive_frame(context, data)
+            if type(receipt) is bytes:
+                receipt = decode_frame(receipt)
+            validate_receipt(receipt, data)
+            if not self._closed.is_set():
+                self._send(encode_frame(receipt), time.monotonic() + 30, blob=True)
+        except Exception:
+            self._abort()
+        finally:
+            self._file_workers.release()
+
     def _abort(self):
         with self._lock:
             if self._closed.is_set():
@@ -450,8 +650,14 @@ class PeerEndpoint:
                 if not pending.event.is_set():
                     pending.error = _error()
                     pending.event.set()
+            for pending in self._file_pending.values():
+                if not pending.event.is_set():
+                    pending.error = _error()
+                    pending.event.set()
             if self._pool is not None:
                 self._pool.shutdown(wait=False, cancel_futures=True)
+            if self._file_pool is not None:
+                self._file_pool.shutdown(wait=False, cancel_futures=True)
         # A store operation already holding its lease may finish after disconnect.
         # Cleanup must not block request timeout delivery on that accepted commit.
         def cleanup():
@@ -470,6 +676,8 @@ class PeerEndpoint:
         self._cleaned.wait(timeout=3)
         if self._reader is not None and self._reader is not threading.current_thread():
             self._reader.join(timeout=.3)
+        if self._file_reader is not None and self._file_reader is not threading.current_thread():
+            self._file_reader.join(timeout=.3)
 
     def __enter__(self):
         return self
@@ -478,5 +686,5 @@ class PeerEndpoint:
         self.close()
 
 
-__all__ = ["PeerEndpoint", "PeerCallUncertain", "AUTH_FORMAT", "MAX_AUTH_BYTES", "MAX_AUTH_DEPTH",
-           "MAX_CONNECTION_REQUESTS"]
+__all__ = ["PeerEndpoint", "PeerCallUncertain", "PeerFileCallUncertain", "PeerFileDataUncertain",
+           "AUTH_FORMAT", "MAX_AUTH_BYTES", "MAX_AUTH_DEPTH", "MAX_CONNECTION_REQUESTS", "MAX_FILE_INFLIGHT"]

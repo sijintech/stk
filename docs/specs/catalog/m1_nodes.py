@@ -447,6 +447,28 @@ def lammps_diffusion(ctx, inputs, params):
     _todo()
 
 
+# Additive S6 comparison core: docs/specs/reproduction-comparison-1.md
+
+@node("stk.analysis.reproduction_compare", impl_version=1,
+      title={"en": "Reproduction comparison", "zh": "复现数值对比"},
+      description={"en": "Compare explicitly selected Table columns with declared units, statuses, tolerances and domain; source metadata is not authenticated."},
+      inputs=[Port("reference", "table"), Port("actual", "table")],
+      outputs=[Port("comparison", "value", value_type="json"), Port("errors", "table")],
+      params={
+          "kind": enum(["scalar", "curve"]),
+          "reference_value": string(min_length=1, max_length=128), "actual_value": string(min_length=1, max_length=128),
+          "reference_status": enum(["succeeded", "failed", "missing"]), "actual_status": enum(["succeeded", "failed", "missing"]),
+          "absolute": number(minimum=0), "relative": number(minimum=0), "alignment": enum(["exact", "linear"]),
+          "domain": json_param({"anyOf": [{"type": "null"}, {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}]}, None),
+          "reference_x": string(None, nullable=True, min_length=1, max_length=128),
+          "actual_x": string(None, nullable=True, min_length=1, max_length=128),
+          "reference_row_status": string(None, nullable=True, min_length=1, max_length=128),
+          "actual_row_status": string(None, nullable=True, min_length=1, max_length=128),
+      }, cache="disk")
+def reproduction_compare(ctx, inputs, params):
+    _todo()
+
+
 # ---------------------------------------------------------------------------
 # Render (representation)
 

@@ -15,7 +15,7 @@ import pytest
 from suan.control.policy import GRAPH_REVIEW, validate_action
 
 AGENT_FEATURES = ["graph.evaluate", "graph.meta", "task.events", "graph.cancel", "read", "workspace.files",
-                  "workspace.import"]
+                  "workspace.import", "task.get"]
 
 OWNER = "test-owner-credential-" + "x" * 32
 AUTH = {"Authorization": "Bearer " + OWNER}

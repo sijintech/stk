@@ -40,6 +40,122 @@ jobs:
         with:
           name: runtime-${{ matrix.python }}
           path: dist/*
+  # Actual pinned PDFium extraction and local citations run separately from base
+  # imports. No model, external document or shared-data endpoint is used.
+  literature-local:
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.14']
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STK_TOKEN_PLAN_API_KEY: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install ".[literature,test]"
+      - name: Require complete-page parsing, permission and exact citation proofs
+        shell: bash
+        run: |
+          unset STK_TOKEN_PLAN_MODEL
+          python -m venv --without-pip "$RUNNER_TEMP/stk-literature-empty"
+          export STK_LITERATURE_EMPTY_PYTHON="$RUNNER_TEMP/stk-literature-empty/bin/python"
+          export STK_LITERATURE_TEST_PYTHON="$(python -c 'import sys; print(sys.executable)')"
+          python -m pytest -q tests/test_literature_pdf.py tests/test_literature_store.py --junitxml=literature.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('literature.xml').getroot()
+          cases = list(root.iter('testcase'))
+          required = {
+              'tests.test_literature_pdf': {
+                  'test_every_page_beyond_old_100000_character_cutoff_retains_exact_mapping',
+                  'test_cjk_greek_supplementary_unicode_uses_pdfium_character_indices',
+                  'test_rotated_cropped_page_and_no_text_are_not_silent_complete_success',
+                  'test_missing_pinned_parser_does_not_install_or_fallback',
+              },
+              'tests.test_literature_store': {
+                  'test_public_text_and_authorization_guards_fail_safely_before_capture[search-\\ud800]',
+                  'test_public_text_and_authorization_guards_fail_safely_before_capture[title-\\udfff]',
+                  'test_public_text_and_authorization_guards_fail_safely_before_capture[evidence-\\ud800]',
+                  'test_public_text_and_authorization_guards_fail_safely_before_capture[approved_by-\\udfff]',
+                  'test_public_text_and_authorization_guards_fail_safely_before_capture[basis-value4]',
+                  'test_public_text_and_authorization_guards_fail_safely_before_capture[basis-value5]',
+                  'test_public_text_and_authorization_guards_fail_safely_before_capture[basis-value6]',
+                  'test_public_text_and_authorization_guards_fail_safely_before_capture[basis-None]',
+                  'test_foreign_hot_journal_is_refused_without_mutating_originals',
+                  'test_legitimate_hot_journal_recovers_exact_preimage_before_explicit_import_recovery',
+                  'test_library_transaction_keeps_sqlite_write_lock_against_real_process',
+                  'test_recovery_refuses_torn_pair_and_concurrent_journal_change[database_copy]',
+                  'test_recovery_refuses_torn_pair_and_concurrent_journal_change[journal_copy]',
+                  'test_recovery_refuses_torn_pair_and_concurrent_journal_change[original_journal]',
+                  'test_unsafe_journal_families_and_aliases_are_refused_before_sqlite_open[wal]',
+                  'test_unsafe_journal_families_and_aliases_are_refused_before_sqlite_open[journal_symlink]',
+                  'test_unsafe_journal_families_and_aliases_are_refused_before_sqlite_open[super_journal]',
+                  'test_unsafe_journal_families_and_aliases_are_refused_before_sqlite_open[hardlink]',
+                  'test_only_complete_recognized_dense_schema_extension_reopens[complete]',
+                  'test_only_complete_recognized_dense_schema_extension_reopens[partial]',
+                  'test_only_complete_recognized_dense_schema_extension_reopens[mismatch]',
+                  'test_only_complete_recognized_dense_schema_extension_reopens[extra]',
+                  'test_sqlite_like_prefix_is_not_trusted_internal_schema[sqliteXtable]',
+                  'test_sqlite_like_prefix_is_not_trusted_internal_schema[sqliteXtrigger]',
+                  'test_sqlite_like_prefix_is_not_trusted_internal_schema[SqliteXtrigger]',
+                  'test_same_process_library_instances_serialize_connection_lifetimes',
+                  'test_recovery_open_rechecks_exact_pair_after_private_preflight_returns',
+                  'test_physical_recovery_without_supported_exclusive_lease_fails_closed',
+                  'test_recovery_copy_holds_cross_process_lease_without_sqlite_connection',
+                  "test_schema_tokens_preserve_quoted_literal_and_identifier_contents[value TEXT DEFAULT '{value}']",
+                  'test_schema_tokens_preserve_quoted_literal_and_identifier_contents["{value}" TEXT]',
+                  'test_database_id_is_persistent_opaque_and_distinguishes_identical_local_corpora',
+                  'test_database_and_recovery_copy_byte_budgets_precede_sqlite_open[database]',
+                  'test_database_and_recovery_copy_byte_budgets_precede_sqlite_open[journal]',
+                  'test_unrecognized_database_is_refused_without_changing_bytes_or_permissions[unmarked]',
+                  'test_unrecognized_database_is_refused_without_changing_bytes_or_permissions[empty]',
+                  'test_unrecognized_database_is_refused_without_changing_bytes_or_permissions[future_version]',
+                  'test_unrecognized_database_is_refused_without_changing_bytes_or_permissions[foreign_schema]',
+                  'test_known_library_refuses_database_replacement_or_reset[replace]',
+                  'test_known_library_refuses_database_replacement_or_reset[delete]',
+                  'test_known_library_refuses_database_replacement_or_reset[in_place]',
+                  'test_recovered_import_receipt_stays_exact_when_original_process_finishes',
+                  'test_real_index_search_exact_citation_and_reopen_keep_last_page_and_geometry',
+                  'test_withdrawal_blocks_search_prior_citation_and_inflight_index_publication',
+                  'test_resolve_many_matches_single_geometry_order_duplicates_and_distinct_hashes',
+                  'test_resolve_many_rechecks_withdrawal_after_actual_hash_without_database_lease',
+                  'test_resolve_many_rechecks_original_database_after_actual_hash[replace]',
+                  'test_resolve_many_rechecks_original_database_after_actual_hash[in_place]',
+                  'test_resolve_many_rejects_changed_frozen_source_for_whole_batch',
+                  'test_resolve_many_rejects_corrupted_shared_page_for_whole_batch',
+                  'test_resolve_many_retains_exact_citations_after_unrelated_generation_advances',
+                  'test_resolve_many_closed_input_guards_precede_any_storage[none]',
+                  'test_resolve_many_closed_input_guards_precede_any_storage[tuple]',
+                  'test_resolve_many_closed_input_guards_precede_any_storage[count]',
+                  'test_resolve_many_closed_input_guards_precede_any_storage[deep]',
+                  'test_resolve_many_closed_input_guards_precede_any_storage[surrogate]',
+                  'test_resolve_many_closed_input_guards_precede_any_storage[boolean]',
+                  'test_resolve_many_closed_input_guards_precede_any_storage[extra]',
+                  'test_resolve_many_closed_input_guards_precede_any_storage[dict_subclass]',
+                  'test_resolve_many_closed_input_guards_precede_any_storage[list_subclass]',
+                  'test_resolve_many_aggregate_budgets_precede_hashing_and_preserve_state[characters]',
+                  'test_resolve_many_aggregate_budgets_precede_hashing_and_preserve_state[response_bytes]',
+                  'test_resolve_many_aggregate_budgets_precede_hashing_and_preserve_state[evidence_bytes]',
+                  'test_resolve_many_empty_is_passive_and_later_permission_is_not_cached',
+              },
+          }
+          identities = [(c.get('classname'), c.get('name')) for c in cases]
+          if len(cases) != 92 or len(set(identities)) != 92 or any(c.find(tag) is not None for c in cases for tag in ('failure', 'error', 'skipped')):
+              raise SystemExit('All 92 actual literature checks must execute once and pass without skips')
+          if any(identities.count((module, name)) != 1 for module, names in required.items() for name in names):
+              raise SystemExit('A mandatory parser, permission, database identity or recovery proof is absent')
+          print('Literature: 92 executed once, zero skips, mandatory parser and Store proofs present')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: literature-${{ matrix.python }}
+          path: literature.xml
+          if-no-files-found: error
   # Windows is client-only: CLI, RuntimeClient and science tools against a Linux runtime.
   client-windows:
     strategy:
@@ -76,8 +192,9 @@ jobs:
           out=$(suan-control init --state-dir "$RUNNER_TEMP/stk-control" 2>&1) && exit 1
           echo "$out" | grep -q 'Linux only'
           test ! -e "$RUNNER_TEMP/stk-control"
-  # Peer authorization and shared project semantics are cross-platform and do
-  # not start the Linux Runtime or require the optional native WebRTC helper.
+  # Peer identity, authorization and immutable file storage are cross-platform.
+  # This job tests actual Darwin filesystem operations without a native helper;
+  # it does not claim WebRTC, Windows DPAPI/reparse or cross-site acceptance.
   peer-macos:
     runs-on: macos-latest
     timeout-minutes: 10
@@ -89,7 +206,109 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install ".[peer,test]"
-      - run: python -m pytest -q tests/test_peer_authority.py tests/test_peer_protocol.py tests/test_peer_projects.py
+      - name: Require peer identity, session, file codec and durable storage checks
+        shell: bash
+        run: |
+          env -u STK_TOKEN_PLAN_MODEL -u STK_PEER_TEST_HELPER -u STK_PEER_TEST_ATTACKER STK_TOKEN_PLAN_API_KEY= \
+            python -m pytest -q tests/test_peer_authority.py tests/test_peer_protocol.py tests/test_peer_projects.py \
+              tests/test_peer_identity.py tests/test_peer_pairing.py tests/test_peer_manifests.py \
+              tests/test_peer_file_io.py tests/test_peer_file_protocol.py tests/test_peer_file_store.py \
+              tests/test_peer_files.py tests/test_peer_file_recovery.py \
+              -k 'not native' --junitxml=peer-macos.xml
+          env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= python - <<'PY'
+          import xml.etree.ElementTree as ET
+          required = {
+              'test_peer_authority': {
+                  'test_valid_proof_is_single_use_and_context_is_not_a_wire_credential',
+                  'test_authority_registry_replacement_invalidates_live_contexts'},
+              'test_peer_protocol': {
+                  'test_pure_hello_cannot_spawn_resume_open_or_connect_in_a_fresh_interpreter',
+                  'test_byte_limits_count_utf8_and_leave_room_for_existing_eight_megabyte_pages'},
+              'test_peer_projects': {
+                  'test_lost_reply_reconnect_and_authority_restart_keep_original_receipt_and_scope',
+                  'test_revoke_ack_waits_for_the_whole_authorized_store_call'},
+              'test_peer_identity': {
+                  'test_public_reads_are_passive_and_do_not_select_private_columns',
+                  'test_real_signature_survives_new_interpreter_without_returning_key',
+                  'test_private_modes_and_linked_state_are_rejected',
+                  'test_corrupt_key_does_not_prevent_explicit_revoke_or_regenerate'},
+              'test_peer_pairing': {
+                  'test_full_pin_owner_cannot_be_substituted_even_with_identical_public_key',
+                  'test_two_party_host_approval_and_recipient_accept_yield_bound_primitive_leases',
+                  'test_old_approval_receipts_do_not_bind_new_context_and_resume_needs_new_host_epoch',
+                  'test_session_revoke_waits_for_an_accepted_lease_across_authority_instances'},
+              'test_peer_manifests': {
+                  'test_content_digest_is_detached_and_independent_of_json_key_order',
+                  'test_prepare_reads_frozen_selected_objects_and_never_discloses_source_paths',
+                  'test_prepare_rejects_corrupt_selected_bytes_without_repair_or_writes'},
+              'test_peer_file_io': {
+                  'test_private_staging_publishes_complete_directory_without_overwrite',
+                  'test_existing_empty_or_nonempty_target_is_never_replaced',
+                  'test_create_file_is_exclusive_and_open_does_not_truncate',
+                  'test_staged_directory_replacement_or_wrong_identity_blocks_publication',
+                  'test_moved_parent_is_rejected_before_creating_a_file',
+                  'test_linked_parent_final_file_and_fifo_never_escape_or_block'},
+              'test_peer_file_protocol': {
+                  'test_binary_pinned_vector_and_network_endian_integer_fields',
+                  'test_binary_application_receipt_has_empty_body_and_echoes_logical_data_length',
+                  'test_complete_requires_retained_manifest_and_exact_frozen_order_size_and_whole_hashes',
+                  'test_reapproval_changes_original_offer_request_hash_without_changing_content_identity'},
+              'test_peer_file_store': {
+                  'test_real_chunks_fsync_receipts_full_sha_and_absent_directory_publication',
+                  'test_data_after_session_revoke_rejected_without_next_byte',
+                  'test_reopen_reads_original_status_but_does_not_start_or_publish',
+                  'test_reoffer_requires_explicit_accept_new_grant_and_resume_preserving_prefix',
+                  'test_resume_scan_releases_authority_and_file_journal_before_revoke',
+                  'test_identical_controls_recheck_original_operation_after_final_lease_race[files.start]',
+                  'test_identical_controls_recheck_original_operation_after_final_lease_race[files.resume]',
+                  'test_identical_controls_recheck_original_operation_after_final_lease_race[files.complete]',
+                  'test_identical_controls_recheck_original_operation_after_final_lease_race[files.cancel]'},
+              'test_peer_files': {
+                  'test_preparation_and_reopen_are_passive_and_public_receipts_have_no_source_paths',
+                  'test_real_production_multifile_full_hash_publication_and_old_send_never_replays',
+                  'test_lost_offer_preserves_original_id_and_queries_cannot_send_or_accept',
+                  'test_uncertain_send_reopens_read_only_then_explicit_resume_reconciles_prefix[start]',
+                  'test_uncertain_send_reopens_read_only_then_explicit_resume_reconciles_prefix[data]',
+                  'test_revoke_during_receipt_wait_allows_current_block_but_denies_next',
+                  'test_source_replacement_after_first_receipt_never_sends_replaced_private_bytes',
+                  'test_wrong_receipt_stays_pending_and_no_false_progress',
+                  'test_approved_context_cannot_drive_another_connection_even_to_same_peer',
+                  'test_project_rebind_during_wait_denies_next_block_without_project_read_grant',
+                  'test_explicit_remote_cancel_withdraws_locally_and_never_resends_old_operation',
+                  'test_new_host_approval_cannot_implicitly_renew_an_already_running_send'},
+              'test_peer_file_recovery': {
+                  'test_lost_completion_is_adopted_only_explicitly_without_republish_or_regrant',
+                  'test_completed_control_with_lost_local_send_commit_recovers_without_any_network',
+                  'test_unknown_publication_does_not_become_complete_from_visible_files',
+                  'test_mismatched_original_completion_proof_cannot_be_adopted'},
+          }
+          allowed_skips = {
+              ('test_peer_identity', 'test_windows_real_dpapi_roundtrip_and_corruption_refusal'),
+              ('test_peer_file_io', 'test_windows_junction_descendant_is_not_followed'),
+          }
+          cases = list(ET.parse('peer-macos.xml').iter('testcase'))
+          seen, skipped = {}, set()
+          for case in cases:
+              key = (case.get('classname', '').rsplit('.', 1)[-1], case.get('name', ''))
+              assert 'native' not in key[1], f'Unbuilt native helper case was selected: {key}'
+              assert key not in seen, f'Duplicate peer result: {key}'
+              seen[key] = case
+              assert case.find('failure') is None and case.find('error') is None, f'Failed peer case: {key}'
+              if case.find('skipped') is not None:
+                  skipped.add(key)
+          assert skipped == allowed_skips, f'Unexpected or missing platform skips: {skipped ^ allowed_skips}'
+          for group, names in required.items():
+              for name in names:
+                  key = (group, name)
+                  assert key in seen and key not in skipped, f'Missing mandatory peer case: {key}'
+          print(f'Peer cases verified: {len(cases)}; only two explicit Windows-only skips')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: peer-macos
+          path: peer-macos.xml
+          if-no-files-found: error
   # The application stays free of Flower; only the explicit algorithm process
   # uses its independently installed, pinned environment.
   federation-isolated:

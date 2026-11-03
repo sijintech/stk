@@ -27,6 +27,12 @@ flowchart LR
 远程客户端通过 SSH 转发访问图中的 API；API、supervisor 和 worker 分别运行，
 无需让桌面进程一直保持打开。当前实现的验收记录见 [runtime 验收记录](runtime-validation.md)。
 
+CLI 现在也可以通过已配对的控制服务访问已连接节点：`suan connect hub-pair` 配对、
+`suan connect hub-nodes` 选择节点，再用 `suan jobs --hub NAME --node ID` 提交、查询 action、
+精确查看或监控任务、读日志和事件、下载产物及取消。原有直连和 SSH 配置继续使用。
+命令、幂等键恢复、复核、200 条快照限制和断线行为见 [hub CLI 说明](hub.md#cli-经已配对的-hub-执行任务)。
+此路径仍使用已有 Linux Runtime / 节点；不是 Windows / macOS 节点支持，也不自动把一个任务拆到多台电脑。
+
 ## 安装与启动
 
 在仓库根目录安装；Python 要求为 3.11–3.14（推荐 3.12）。服务器与计算节点仅支持 Linux；

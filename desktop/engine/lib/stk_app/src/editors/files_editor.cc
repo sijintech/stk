@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/app/app_store.hh"
+#include "stk/app/analysis_document.hh"
 #include "stk/app/editor_area.hh"
 #include "stk/app/project_file_tree.hh"
 #include "stk/app/project_state.hh"
@@ -192,6 +193,11 @@ class FilesEditor final : public Editor {
           project.project()->handle == handle && project.project()->revision == revision && tree_->selected() == item;
     };
     auto *screen = ctx.area.screen();
+    const auto record = io::get_string(item, indexed ? "id" : "record_id");
+    layout.button("files_share_peer", ctx.tr("peer.share_selected"), [shell, screen, valid, record, handle, revision] {
+      if (valid()) { shell->open_target_later(screen, kEditorPeers,
+          {{"record_id", record}, {"project_handle", handle}, {"expected_revision", revision}}, valid); }
+    }).disable(blocked || !canonical_uuid(record));
     layout.button("files_open_code", ctx.tr("files.open_code"), [this, version, shell, screen, valid] {
       if (!valid() || tree_->version() != version) { return; }
       tree_->resolve([shell, screen, valid](const std::string &path) {

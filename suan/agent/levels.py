@@ -250,6 +250,27 @@ DESKTOP_ONLY.update({
     "federation.owner.models.activate": ("external_network", "a person explicitly activates or rolls back an admitted version"),
 })
 
+# Every peer operation, including passive metadata and manual signaling, remains
+# desktop-only. This classification never enrolls it in the scripting catalog.
+DESKTOP_ONLY.update({"peer." + action: ("external_network", "explicit desktop peer lifecycle and sharing only")
+    for action in ("info", "operations.get", "operations.list", "identity.initialize", "identity.rotate", "identity.revoke",
+                   "identity.recover", "pins.list", "pins.verify", "pins.revoke", "connections.open", "connections.list", "connections.signals",
+                   "connections.push_signal", "connections.authenticate", "connections.close", "sessions.list", "sessions.host",
+                   "sessions.revoke", "files.list", "files.get", "files.offer", "files.accept", "files.send", "files.query",
+                   "files.recover", "files.cancel", "files.revoke")})
+DESKTOP_ONLY["project.peer.files.prepare"] = ("project_edit", "explicit desktop snapshot-file preparation only")
+
+# Local literature ownership stays with the desktop, including passive reads.
+# This does not enroll any method in OPERATIONS, tools or the script catalog.
+DESKTOP_ONLY.update({"literature." + action: ("read", "desktop local literature metadata and original operation observation")
+    for action in ("info", "corpora.list", "corpora.info", "encoder.info", "versions.list",
+                   "operations.get", "operations.list", "operations.result")})
+DESKTOP_ONLY.update({"literature." + action: ("project_edit", "explicit desktop literature authorization and local state changes")
+    for action in ("corpora.create", "encoder.review", "encoder.select", "import.review", "import.commit",
+                   "import.recover", "versions.revoke")})
+DESKTOP_ONLY.update({"literature." + action: ("submit_run", "explicit desktop local parsing, embedding, search or citation rendering")
+    for action in ("index.start", "dense.build", "search", "citations.resolve", "pages.render")})
+
 # The operations each tool's implementation performs (by their store equivalents); all must be at agent levels.
 TOOL_USES = {
     "project_outline": [],  # its own structure read (no values): see suan/agent/tools.py

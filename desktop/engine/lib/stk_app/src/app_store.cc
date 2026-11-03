@@ -9,6 +9,7 @@
 #include "stk/app/module_settings.hh"
 #include "stk/app/materials_state.hh"
 #include "stk/app/federation_state.hh"
+#include "stk/app/peer_state.hh"
 #include "stk/app/project_archive.hh"
 #include "stk/app/project_data_labels.hh"
 #include "stk/app/project_attention.hh"
@@ -70,6 +71,7 @@ AppStore::~AppStore()
   modules_.reset();
   materials_.reset();
   federation_.reset();
+  peers_.reset();
   skills_.reset();
   scripts_.reset();
   project_.reset();
@@ -119,6 +121,12 @@ FederationState &AppStore::federation()
 {
   if (!federation_) { federation_ = std::make_unique<FederationState>(*this); }
   return *federation_;
+}
+
+PeerState &AppStore::peers()
+{
+  if (!peers_) { peers_ = std::make_unique<PeerState>(*this); }
+  return *peers_;
 }
 
 ProjectArchive &AppStore::archive()

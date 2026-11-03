@@ -8,7 +8,7 @@ Conventions: links are written on the input side as `{"from": "<node>.<port>"}` 
 
 - **source** — read data through connectors; a `binding` names the run, `path` is relative inside it: `stk.source.file@1`, `stk.source.lammps_density_series@1`, `stk.source.lammps_log@1`, `stk.source.lammps_structure@1`, `stk.source.muferro_frame@1`, `stk.source.muferro_run@1`, `stk.source.table@1`
 - **filter** — transform datasets (data-stage params re-run them): `stk.filter.calculator@1`, `stk.filter.contour@1`, `stk.filter.crop@1`, `stk.filter.glyph_source@1`, `stk.filter.label_surfaces@1`, `stk.filter.sample@1`, `stk.filter.slice@1`, `stk.filter.streamlines@1`, `stk.filter.threshold@1`
-- **analysis** — derive labels, fractions and statistics: `stk.analysis.film_detect@1`, `stk.analysis.label_fractions@1`, `stk.analysis.lammps_diffusion@1`, `stk.analysis.lammps_modulus@1`, `stk.analysis.lammps_tg@1`, `stk.analysis.orientation_classify@1`, `stk.analysis.statistics@1`
+- **analysis** — derive labels, fractions and statistics: `stk.analysis.film_detect@1`, `stk.analysis.label_fractions@1`, `stk.analysis.lammps_diffusion@1`, `stk.analysis.lammps_modulus@1`, `stk.analysis.lammps_tg@1`, `stk.analysis.orientation_classify@1`, `stk.analysis.reproduction_compare@1`, `stk.analysis.statistics@1`
 - **render** — turn data into draw layers; appearance params are client-stage: `stk.render.axes@1`, `stk.render.categorical_legend@1`, `stk.render.glyphs@1`, `stk.render.molecule_atoms@1`, `stk.render.molecule_lines@1`, `stk.render.orientation_legend@1`, `stk.render.outline@1`, `stk.render.scalar_bar@1`, `stk.render.surface@1`, `stk.render.volume@1`
 - **view** — camera and scene assembly: `stk.view.camera@1`, `stk.view.scene@1`
 - **output** — deliverables: payload, image, dataset export: `stk.output.dataset@1`, `stk.output.image@1`, `stk.output.payload@1`
@@ -355,6 +355,29 @@ Label each point with the nearest reference direction (docs/specs/domain-classif
 | `film_detection` | boolean | false | data |  |
 | `film_epsilon` | number (≥0) | 1e-06 | data |  |
 | `output` | string | "domain" | data |  |
+
+## `stk.analysis.reproduction_compare@1` — Reproduction comparison
+
+Compare explicitly selected Table columns with declared units, statuses, tolerances and domain; source metadata is not authenticated.
+
+- Inputs: `reference` (table), `actual` (table)
+- Outputs: `comparison` (value), `errors` (table)
+
+| param | type | default | stage | notes |
+|---|---|---|---|---|
+| `kind` | "scalar" \| "curve" | **required** | data |  |
+| `reference_value` | string | **required** | data |  |
+| `actual_value` | string | **required** | data |  |
+| `reference_status` | "succeeded" \| "failed" \| "missing" | **required** | data |  |
+| `actual_status` | "succeeded" \| "failed" \| "missing" | **required** | data |  |
+| `absolute` | number (≥0) | **required** | data |  |
+| `relative` | number (≥0) | **required** | data |  |
+| `alignment` | "exact" \| "linear" | **required** | data |  |
+| `domain` | null \| array[2] of number | null | data |  |
+| `reference_x` | string \| null | null | data |  |
+| `actual_x` | string \| null | null | data |  |
+| `reference_row_status` | string \| null | null | data |  |
+| `actual_row_status` | string \| null | null | data |  |
 
 ## `stk.analysis.statistics@1` — Statistics
 

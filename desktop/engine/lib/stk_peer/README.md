@@ -4,8 +4,12 @@ This directory is an explicit **MIT-licensed exception** to `desktop/`'s default
 GPL license; see [LICENSE](LICENSE). It contains a standalone CPU executable,
 `stk-peer-transport`. It neither imports the desktop bridge nor links Blender or
 GPU/window libraries. Python ships only the adapter `suan.peer.transport` and
-requires the caller to supply the executable explicitly. There is no automatic
-helper discovery, installation, network dependency fetch or install rule here.
+requires the caller to supply the executable explicitly. The passive
+`suan.peer.helper_installation.load_helper_installation(prefix)` validates one
+explicit installed prefix; it never searches PATH/environment/source locations,
+downloads, installs, starts a helper or grants access. See
+[INSTALLATION.md](INSTALLATION.md) for the opt-in Linux installation and complete
+dependency/source packaging contract. macOS/Windows packaging remains pending.
 
 The tested upstream stack is **libdatachannel 0.24.6 built with `USE_NICE=ON`,
 `NO_MEDIA=ON`, `NO_WEBSOCKET=ON`**, libnice 0.1.23, OpenSSL 3.5.5 and the release's
@@ -20,7 +24,9 @@ Libdatachannel is MPL-2.0, usrsctp BSD and OpenSSL Apache-2.0; libnice/GLib have
 their own LGPL/MPL notices. This directory's MIT exception does not relicense
 those libraries. Any later binary package must explicitly include the runtime
 libraries, their full applicable licenses/notices and required source provisions.
-No helper binary or upstream source is hidden inside the Python wheel.
+No helper binary or upstream source is hidden inside the Python wheel. The
+separate installation includes exact dependency sources and full notices; its
+self-hashed manifest is an integrity check, not a publisher signature.
 
 ## Private IPC and application boundary
 

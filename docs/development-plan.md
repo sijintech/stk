@@ -1,10 +1,114 @@
 # STK 开发计划
 
-更新：2026-10-31 UTC。本文是后续开发的主计划；产品约定见[项目工作台设计](design/project-workbench.md)，
+更新：2026-11-03 UTC。本文是后续开发的主计划；产品约定见[项目工作台设计](design/project-workbench.md)，
 存储与求值方案见[项目数据模型](design/project-model.md)。设计目标不代表当前版本已经实现。
 当前模块职责、归档清单与新增代码放置原则见[仓库结构说明](repository-structure.md)。
 
-## 2026-10-31：通用owner交付候选（源码447/2513）
+## 2026-11-03：恢复持续开发，STK 主体的分布式科研工作台（当前）
+
+所有者恢复持续目标“继续工作完成我们所有的开发计划”，11-02 冻结转交点转为历史。
+最新产品方向以 STK 为主体，融合 Synthrix AI 对话/科研管理；本地完整、Web 托管资源受成本限制，
+通过授权节点共用电脑/自有云能力。轻量 CLI 可跨位置提交并持续追踪任务；对话、文件、任务与能力目录形成稳定壳，
+领域功能通过可锁版本的插件深度定制。共同对象、事实归属与全部增量验收见
+[分布式科研工作台](design/distributed-research-workbench.md)。
+
+先保护并稳定现有 91 份 WIP，验证 encoder profiles、LiteratureService 最终适配与 S6 I/O；
+同时沿现有 Hub/Runtime 完成 CLI 节点任务纵切面，补旧任务超出心跳列表后仍可按 ID 追踪的缺口。
+之后按共同契约/节点能力 → Synthrix 本地科研闭环 → 文献/数据/Computer Use → 多节点/云配额/插件分发与发行推进。
+旧八项范围、P4/S4 目标平台与真实 S6、toolkits/ABACUS 依赖、三待决和 PET 新专项后置保持。
+这不是以设计文档代替功能交付；实际测试、提交和 CI 持续记入运行验收与交接。
+
+本批进度：Qwen融合检索标识及历史encoder review恢复两个反例已修。真实E5/Qwen/PDFium联合69/69、零skip、14输入稳定；
+服务三父Python各26/26、20输入稳定；公开文献Bridge最终54/54、27输入稳定，原fresh链Schema失败及实际缓存续接的范围见运行验收。
+Hub CLI新增精确 `task.get` 与提交/观察/日志/产物/取消入口，9文件187项通过（控制台证据）；S6三Python各430/430、334输入稳定。
+独立冻结heldout一次评价Qwen同语120/120、跨语119/120通过原门，E5 reference跨语24/120；一般段落诊断不替代原科学PDF失败。
+S4撤权后旧Accept复活的最小CAS补修2红→绿；联合460pass/2个Windows-only skip，独立三Python各10/10、220输入稳定。
+Linux原生整合2075/2075、零skip，1291输入稳定；Python整合02为5489pass/74skip/4deselected/1warning，5563案例、973输入稳定，pytest1207.90s。74skip包含encoder资产、Flower、离屏SIG11、Windows、MuPRO及可选依赖；真实推理69项独立证明不计入全量通过数。首轮旧editor计数/Python两失败及两文件漂移保留，修正与本轮证据见运行验收。
+当前wheel新Linux隔离安装299/299、零skip，四个真实模型/PDF案例明确deselected，715输入稳定、704产品成员逐字节匹配；最终sdist未完成。
+AOCI最新Root24/24交付confirmed、Challenge9/10 pass（1144条、estimated165707 tokens），29条Observed已按当前SHA确认；Entry语义维护/Dirty-Stale治理仍待最终收口。
+本地HEAD仍3ef，本批无新commit/push/新头CI。原生文献UI、原科学PDF12/18/cross0/6质量失败、真实MuPRO、跨平台/网络与完整发行仍是待办。
+
+## 2026-11-02 21:38 UTC：冻结并转交当前待办（历史）
+
+所有者要求把待办交给另一 Agent，已冻结开发；[handoff.md](../handoff.md#当前接手顺序) 是当前接手入口，覆盖旧恢复指令。main/HEAD/local origin/main/实际远端均 `3ef4b2716d42304d708062f9715edae0afb5874f`；91份逐文件WIP（33 tracked/58 untracked）、暂存空，无新提交/push/包/新头CI。交接保留87份非状态文档WIP原字节；证据 `OWNER_NEW/handoff-20261102T2138Z/`，根见handoff。
+
+新增E5/Qwen精确profile目录、双维Dense/Collection和worker bundle身份及专用测试已保存但未运行；LiteratureService最终双profile/显式timeout适配预计25项也未测，未接Bridge/Schema/native。旧服务三Python各21项/19输入稳定、后22项单版本、worker38项只保当时来源。S6四工作流文件已入仓；415项稳定矩阵早于FIFO修复，最新三Python各41项通过但252输入稳定性因literature.py并行变化失败，需冻结后补验。
+
+原40QA主质量失败保留。独立公开tune：E5同语119/120、跨语12/120，Qwen FP32为119/120、115/120；INT8为115/120、101/120，质量/半耗时/RSS门失败，不采用。独立heldout未推理/评分，先冻结最终profile与严格release；旧selection/driver不可覆盖。完整八项路线、三待决、PET后置仍保持；平台/真实MuPRO/发行/AOCI/main交付未完成。官方同3ef/attempt1 Desktop失败、Runtime成功均终态，不覆盖WIP。
+
+## 2026-11-02：恢复持续目标，推进服务和复现闭环（历史，本次转交前）
+
+所有者已恢复按当前计划完成所有开发，上一轮handoff停止点为历史。main/HEAD/远端仍3ef、暂存空。S6新增四文件，三Python各415/415零skip、252输入稳定（`OWNER_NEW/reproduction-workflow-02/matrix-02/closure.json`）；Root随后复现FIFO读取阻塞并要求增量修复，后改代码不能借旧415结论。LiteratureService真实21项与worker38项已跑，正修独立审查的历史配置/引用rank和身份/数值类型/manifest预算问题并准备三父Python验证，尚未接Bridge/native。
+
+原40QA全局12/18、cross0/6的质量失败保留；独立混合240段实验已冻结文章级tune/heldout，E5开发同语言119/120、cross12/120，候选本地模型正在运行，heldout尚未编码或评分。完整实验和限定在 `OWNER_NEW/retrieval-quality-independent-01/`；无产品模型/endpoint/网络设置或旧QA/语料改动。当前无新commit/push/包/新头CI，AOCI仍Dirty/Stale；稳定交付再维护。完整八项路线、三待决及PET后置保持，接手入口见[handoff](../handoff.md)。
+
+## 2026-11-02：保存当前待办并转交（历史，本轮恢复前）
+
+所有者最新要求将工作交另一 Agent，开发已停止；[handoff.md](../handoff.md#当前接手顺序) 是唯一当前接手快照，覆盖下方历史“继续开发/41项运行中/尚无排名”。main/HEAD/实际远端仍 `3ef4b2716d42304d708062f9715edae0afb5874f`；83 个 WIP 文件（33 tracked/50 untracked），暂存空，无新提交/push/包/新头 CI。
+
+PDF/Store 三 Python 各92/92零skip，Runtime gate已改92唯一/68必跑/76负例；Dense/Collection最新真实E5 43/43零skip、14输入稳定。1051引用批次核验保完整结果/顺序/几何，解析循环31.489→3.248秒，不是端到端加速。首次冻结40QA/80查询已实际完成，但全局heldout hit@5 **12/18<0.85，cross 0/6<0.75**，S5不达标；保留失败，不按旧heldout调参。S6核心+图节点三版本新增97项全过，相关组各195pass/1旧可选离屏skip；制造的API→Report闭环草稿仅外部3.12初验15项，尚未入仓，不能称真实论文复现。
+
+首要接续：修正未测试LiteratureService的可信encoder解释器、原DB UUID/授权发布和DTO守卫，再写spec/tests并接Bridge/原生引用；独立调查检索质量、接S6外部草稿并修renderer-import/prepare丢回复恢复，再继续平台、包和AOCI/main收尾。三待决与完整八项路线、通用优先/PET后置保持。官方同3ef/attempt1 Desktop失败、Runtime成功，均终态，WIP未获得新CI。当前AOCI仍Dirty/Stale；机器收尾和本机草稿/证据入口见handoff。
+
+## 2026-11-02：持续目标恢复，按当前计划继续（历史，本次转交前）
+
+所有者更新目标为按现在计划完成所有开发；10-31转交是历史。通用优先、PET专项后置与三待决不变。已修Runtime文献gate为72项唯一案例/48必跑，三真实XML及56负例、三Python门禁通过。Dense/Collection37项真实回归稳定通过，独立审查追加模型选择漂移/深层引用输入四反例并修复，当前41项正在验；两新格式语料库23页1051段及91冻结引用已核验，尚无embedding/排名。正在准备冻结全局两库主评估及S6独立通用比较核心，后续仍须原生引用/隐私RAG/共享、真实复现、平台、包安装及AOCI/main交付。当前头仍3ef，无新提交/push；详细证据与边界见[handoff](../handoff.md)。
+
+## 2026-10-31 18:30 UTC：保存待办并转交（历史）
+
+所有者要求交给另一 Agent，开发已冻结；以 [handoff.md](../handoff.md#当前接手顺序) 为接手入口，覆盖下方历史“继续开发”指令。main/HEAD/实际远端均为 `3ef4b2716d42304d708062f9715edae0afb5874f`，69 个逐文件 WIP（27 tracked/42 untracked），暂存为空；无新提交/push/包/新头 CI。
+
+Store 最新三 Python 各72/72、零 skip，10 输入稳定；Runtime CI 仍写38，须先同步 gate。Dense28/28绑定旧Store；Collection9/9有Store漂移，后加引用分支清单未测试，当前37项闭合、两库语料build/排名均待办。Peer最新Bridge123/122/122pass、原生真实helper19/19及13/7点击证据保留其平台和起点限制。下一步依次为当前源码审查/回归、冻结QA-v2两库全局评估、性能与原生集成、包安装/治理/暂存扫描/main交付及新平台CI。八项通用路线、PET新专项后置、三待决均不变；本次只交接，不宣布完成。
+
+## 2026-10-31 18:10 UTC：继续通用开发（历史）
+
+持续目标已明确恢复，10:30转交是历史。Root文献Store首轮修复8红→绿，基础三Python各38/38；独立审查发现hot-journal未知库物理写入、fd关闭丢SQLite锁，P4正完善进程/跨进程门与真实反例，尚无最终Store闭合。S5 dense纯校验16/16、28项真实完整回归待Store冻结；40QA初版泄漏/不完整证据已保留，v2全篇文档隔离、Root抽查6例后冻结，真实全局两库检索正在实现，尚无语料检索指标。
+
+Peer Bridge用最新loader三Python再验123/122/122pass、129输入稳定，19专用及两真实helper场景通过。原生实际安装helper新增发送13点击/接收7点击（各0滚轮），与原17项共19/19、971输入稳定、六组守卫通过；LinuxCPU、已认证/已有Offer起点、对端显式夹具，不代连接UI/OS/GPU/跨站。证据 `peer-bridge-loader-rebind-01/`、`peer-native-ui-02/`，根见[handoff当前节](../handoff.md)。
+
+HEAD仍3ef、67路径WIP、无新提交/push；原Desktop失败/Runtime成功不覆盖当前改动。继续稳定Store/dense/collection、实际两语料全局评估、包安装/整合/AOCI/暂存扫描/main交付，再新头平台CI；P4/S4/S5/S6/P5-S7与八项范围不缩减，PET新专项后置、三待决不擅选。
+
+## 2026-10-31 10:30 UTC：按所有者要求转交（历史）
+
+已停止继续开发；完整接手顺序、代码入口、证据和限制见 [handoff.md](../handoff.md#当前接手顺序)，覆盖下方历史恢复指令。main/HEAD/远端仍 `3ef4b2716d42304d708062f9715edae0afb5874f`；67 个 WIP 路径（27 tracked/40 untracked，含四状态文档），暂存为零。本轮无新产品测试、构建、包、commit/push 或 CI 触发，参与 Agent 作业均终态。
+
+Peer 原生页面/控制器现已接通，build08 和 17/17 CPU/鼠标测试、四组守卫通过，971 输入稳定；固定起点点击 11/20/1，Host/query 为合成 DTO，保护 Viewer 和隐藏稿。Bridge 最后 3.12 为123pass/1skip、3.11/3.14各122pass/2skip，129输入稳定；早于最新 helper loader ctime 补修。loader 三版本各38/38。PDF/FTS 基础三 Python 各30/30，但随后真实复现**未知 SQLite 被修改、跨实例恢复改写 completed receipt**两个 Store 缺陷，尚未修复，列首要待办。真实固定 E5 3.12为8/8；hybrid_search后加未测，40QA已冻结但独立审查及检索指标未做。
+
+先修 Store、完成 dense/fusion/两语料评估，再补当前 Bridge/真实 helper UI/包/目标平台及 AOCI 整合收尾。P4/S4/S5/S6/P5-S7、八项通用路线和三待决保持；PET新专项后置。官方同3ef/attempt1 Desktop41178119889 completed/failure、Runtime41178119790 success；当前WIP没有新头CI，旧全量和旧包不能覆盖。交接核验入口 `OWNER_EVIDENCE/handoff-20261031T1030Z/`。
+
+## 2026-10-31：继续通用开发，Bridge启动与桌面Peer接线（历史）
+
+持续目标已明确恢复，09:00转交点为历史，PET新专项继续后置。Bridge已修复MaterialsService急切导入NumPy导致基础/子进程启动失败：无NumPy真实构造/stdio各2/2，材料接口35/35；最终Bridge三版本源绑定3.12为119pass/1Win skip，3.11/3.14各118pass/2skip（缺可选VTK的旧图测试另skip），129输入稳定、所有15专用Bridge及实际两安装helper场景均执行。`peer-bridge-02/closure.json`保留完整边界与旧失败根因。
+
+helper六文件独立审查未增可确认缺陷；新桌面PeersEditor/稳定注册/i18n/Files导航已写入但尚待编译/交互验证。正在补准备来源/桥代次绑定、分页和必跑CI依赖，不把源码写入称平台验收。HEAD仍3ef、WIP未提交；新源稳定后再AOCI/包/全链检查。P4、S4、S5/S6/P5-S7与八项主路线、三待决保持完整范围，详见[handoff当前节](../handoff.md)。
+
+## 2026-10-31：最新转交点（历史，09:00 UTC）
+
+所有者要求把待办保存后交给另一 Agent；已冻结功能开发，仅收集先前已启动的验证终态。当前入口是 [handoff.md](../handoff.md#当前接手顺序)，覆盖下方历史“继续开发中”指令。main/HEAD/官方远端仍 `3ef4b2716d42304d708062f9715edae0afb5874f`；48 个未提交路径（19 tracked、29 untracked，含四状态文档），暂存为空，没有本次 commit/push/新 CI。
+
+生产 sender/receiver 已接通、两项接收端缺陷已修；Linux helper 可重定位候选及三 Python loader 各35/35 已验证。真实安装前缀 Bridge 最终3.12为117pass/1Win skip，116输入稳定；3.11/3.14各101pass/2skip/**15fail**（13缺numpy，2旧子Bridge超时，待诊断），不称三版本通过。新 C++ PeerState 和测试目标已构建 exit0，但三项测试未执行；真正 PeersEditor、配对/分享UI、i18n、导航和点击验收尚未实现，identity.recover 也尚未接 C++ whitelist。
+
+下一 Agent 先解决 Bridge 环境/超时、审查并完善控制器和 UI、独立审查 helper 六文件及整合包，再做新头Mac/Windows P4验证。官方同3ef/attempt1 Desktop41178119889已终态failure、Runtime41178119790成功10/10；push等待前提满足但平台未验收。后续S4信令/站点网络、S5、S6、P5/S7与八项主路线保留，PET新专项后置、三待决不擅选。新包/最终整合回归/暂存扫描和AOCI当前治理收尾仍待完成；旧全量与旧便携WIP包均不覆盖当前源码。交接机器结果见 `OWNER_EVIDENCE/handoff-current-20261031T0900Z/`。
+
+## 2026-10-31：持续通用开发与生产文件链（历史，本次转交前）
+
+持续目标已恢复，PET新专项后置；HEAD仍3ef，当前源码未提交。FileStore重复操作竞态/长resume租约已修复，新增生产FileSender/ReceiverAdapter与精确完成证明的显式recover。14文件peer最终源绑定：3.12为581pass/2Win skip，含真实持久身份/双方批准/生产两helper、断线重新批准续传和240MiB/4098块/Python峰值<32MiB；3.11/3.14各580pass/2Win skip（不重复大文件），81输入稳定。不是全仓、安装态、其他OS或跨站验收，详见[当前handoff](../handoff.md#当前接手顺序)。
+
+3ef Windows原生实际5/6通过，余HTML-video停在divider方向反常、尚未观察媒体；新增有界诊断，Linux72CPU通过。Mac解析补修和Windows诊断均待新头目标OS。Mac peer CI已加纯sender/recovery必跑，Linux502pass/2Win skip及守卫负例通过，Mac执行仍pending。
+
+现在继续helper可重定位发行/对应源码许可/被动发现与干净前缀、真实桌面PeerService/Bridge及原生配对/分享UI；网络/跨平台与跨站、S5/S6/P5-S7和八项主路线不缩减。三待决不擅选。AOCI正式1144条仍Dirty/Stale，业务最终稳定再维护；当前无新提交/push或新包全量声明。下文转交点为历史。
+
+## 2026-10-31：转交点（历史，3ef 已推送，peer 文件链 WIP）
+
+所有者要求保存待办交另一 Agent；已停止扩展实现、测试和构建。HEAD/main/origin/main为 `3ef4b2716d42304d708062f9715edae0afb5874f`，447/2513/3ef已推送；20个未提交产品/测试/spec路径及本次四状态文档保留，暂存为空。当前入口是[handoff首节](../handoff.md#当前接手顺序)，以下旧停止点/HEAD/“已对齐”均为历史。
+
+S4新增持久设备身份、public pin/双方会话、冻结manifest/安全IO、接收journal和可选文件B通道，仍是工作树中间态。接收端17项通过但两已知问题未修：重复操作须最终写租约内重查、resume长前缀扫描须移出Authority租约。发送协调器尚未创建，生产FileStore/Endpoint未集成，桌面配对/分享、helper发行和跨OS/站点尚缺；不能称S4完成。当前endpoint定向301/301、早期联合408/408及纯codec三Python各286均有各自源码边界；详情见handoff/验收。
+
+07:40:57UTC同头attempt1：Desktop41178119889 completed/failure（Mac编译、Windowsnative失败），Runtime41178119790 success10/10；前头终态push前提满足，平台未通过。Mac解析补修已在WIP且只验Linux24/24；Windows最新日志/工件待调查。无新包或当前全量结论；AOCI仍Dirty/Stale，业务最终稳定后按实时Guide维护。
+
+下一步先修receiver两问题/接发送端并做真实helper大文件和故障撤权恢复，处理新平台失败，再完成bridge/UI/发行/网络纵向；S5/S6/P5-S7与[八项通用路线](#2026-10-24通用能力优先的后续交付)保持原范围。PET新专项后置，三待决不擅选。本次仅交接文档，没有新产品测试/提交/push/CI触发。
+
+## 2026-10-31：通用owner交付候选（历史，源码447/2513）
 
 **当前转交指令：** 所有者要求把待办写入handoff交下一Agent，本次停止扩展实现；本地447/2513未推送，六份记录资产未提交、暂存为空。先依[接手待办](../handoff.md#接手先做的待办)核AOCI最终机器收尾、最新`package-final-docs-02`重绑和实际暂存扫描，再提交记录/push并跟新头平台CI。整份计划仍未完成；本次未新增产品测试或CI触发。后文“持续目标恢复”为本次转交前的历史，不是要求本Agent继续开发。
 
