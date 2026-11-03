@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 namespace stk::reports_native_test {
 namespace {
@@ -181,6 +182,101 @@ NSRect ax_frame(id element)
   return {[position pointValue], [size sizeValue]};
 }
 
+// Diagnostic reads never supply children/roles to the acceptance traversal.
+// They query only the already visited node in this exact own-WKWebView tree.
+std::string diagnostic_role(id value)
+{
+  if (!value) { return "nil"; }
+  if (![value isKindOfClass:NSString.class]) { return "other-type"; }
+  if ([value isEqualToString:NSAccessibilitySliderRole]) { return "slider"; }
+  if ([value isEqualToString:@"AXWebArea"]) { return "webarea"; }
+  if ([value isEqualToString:NSAccessibilityGroupRole]) { return "group"; }
+  if ([value isEqualToString:NSAccessibilityScrollAreaRole]) { return "scrollarea"; }
+  return "other";
+}
+
+TimelineChildListObservation diagnostic_children(id value)
+{
+  if (!value) { return {"nil", 0, false}; }
+  if (![value isKindOfClass:NSArray.class]) { return {"other", 0, false}; }
+  const NSUInteger count = [value count];
+  return {"array", int(std::min(count, NSUInteger(257))), count > 256};
+}
+
+// Capture only values already selected by the original walk. The local array
+// owns at most 32 visited nodes until this lookup returns; Observation has no id.
+void record_node(id element, id role, NSArray *selected, NSUInteger depth,
+                 bool paged_count_observed, NSUInteger paged_count,
+                 std::chrono::steady_clock::time_point began, NSMutableArray *retained,
+                 TimelineObservation &observed)
+{
+  if (observed.nodes.size() >= 32) { observed.diagnostics_truncated = true; return; }
+  TimelineNodeObservation node;
+  node.ordinal = int(observed.nodes.size()) + 1; node.depth = int(depth);
+  node.elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+  node.paged_count_observed = paged_count_observed;
+  node.paged_count = int(std::min(paged_count, NSUInteger(257)));
+  node.paged_count_over_budget = paged_count > 256;
+  node.selected_role = diagnostic_role(role);
+  node.selected_children = diagnostic_children(selected);
+  [retained addObject:element];
+  observed.nodes.push_back(std::move(node));
+}
+
+// Only a completed, unsuccessful original lookup may query alternate getters.
+// They never replace/merge the selected tree or change its error/candidates.
+void diagnose_failed_nodes(NSArray *retained, TimelineObservation &observed)
+{
+  const auto began = std::chrono::steady_clock::now();
+  auto budget = [&] {
+    const auto elapsed = std::chrono::steady_clock::now() - began;
+    observed.diagnostic_elapsed_ms = std::chrono::duration<double, std::milli>(elapsed).count();
+    if (elapsed > std::chrono::seconds(2)) {
+      observed.diagnostics_timeout = true; observed.diagnostics_truncated = true; return false;
+    }
+    return true;
+  };
+  for (NSUInteger index = 0; index < retained.count && index < observed.nodes.size(); ++index) {
+    if (!budget()) { return; }
+    id element = retained[index];
+    auto &node = observed.nodes[index];
+    node.extra_getters_started = true;
+    @try {
+      // Fixed class categories only; no arbitrary class names are serialized.
+      Class remote = NSClassFromString(@"NSAccessibilityRemoteUIElement");
+      if ([element isKindOfClass:WKWebView.class]) { node.category = "webview"; }
+      else if (remote && [element isKindOfClass:remote]) { node.category = "remote"; }
+      node.legacy_selector = [element respondsToSelector:@selector(accessibilityAttributeValue:)];
+      node.modern_children_selector = [element respondsToSelector:@selector(accessibilityChildren)];
+      node.modern_role_selector = [element respondsToSelector:@selector(accessibilityRole)];
+      node.paged_count_selector = [element respondsToSelector:@selector(accessibilityArrayAttributeCount:)];
+      node.paged_values_selector = [element respondsToSelector:@selector(accessibilityArrayAttributeValues:index:maxCount:)];
+      if (node.legacy_selector) {
+        if (!budget()) { return; }
+        @try { node.legacy_children = diagnostic_children([element accessibilityAttributeValue:NSAccessibilityChildrenAttribute]); }
+        @catch (NSException *exception) { (void)exception; node.legacy_children.type = "exception"; }
+        if (!budget()) { return; }
+        @try { node.legacy_role = diagnostic_role([element accessibilityAttributeValue:NSAccessibilityRoleAttribute]); }
+        @catch (NSException *exception) { (void)exception; node.legacy_role = "exception"; }
+      }
+      if (node.modern_children_selector) {
+        if (!budget()) { return; }
+        @try { node.modern_children = diagnostic_children([element accessibilityChildren]); }
+        @catch (NSException *exception) { (void)exception; node.modern_children.type = "exception"; }
+      }
+      if (node.modern_role_selector) {
+        if (!budget()) { return; }
+        @try { node.modern_role = diagnostic_role([element accessibilityRole]); }
+        @catch (NSException *exception) { (void)exception; node.modern_role = "exception"; }
+      }
+      if (!budget()) { return; }
+      node.extra_getters_complete = true;
+    }
+    @catch (NSException *exception) { (void)exception; node.diagnostic_exception = true; }
+  }
+  budget();
+}
+
 bool timeline(const Target &target, const TimelineInput &input, NSRect video,
               TimelineObservation &observed, NSRect &found, std::string &error)
 {
@@ -188,7 +284,19 @@ bool timeline(const Target &target, const TimelineInput &input, NSRect video,
   NSMutableArray *pending = [NSMutableArray arrayWithObject:target.web];
   NSMutableArray<NSNumber *> *depths = [NSMutableArray arrayWithObject:@0];
   NSHashTable *seen = [NSHashTable hashTableWithOptions:NSPointerFunctionsObjectPointerPersonality];
+  // This target is built with -fobjc-arc. This owned local container is
+  // cleared before normal return; ARC also releases it on early errors.
+  // No retained AX object escapes into Observation, logs or persistent state.
+  NSMutableArray *diagnostic_nodes = [[NSMutableArray alloc] initWithCapacity:32];
   const auto began = std::chrono::steady_clock::now();
+  struct Elapsed {
+    TimelineObservation &observed;
+    std::chrono::steady_clock::time_point began;
+    ~Elapsed() { if (!observed.lookup_complete) {
+      observed.elapsed_ms = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - began).count();
+    } }
+  } elapsed{observed, began};
   while (pending.count) {
     if (std::chrono::steady_clock::now() - began > std::chrono::seconds(2)) {
       error = "Bounded own-WKWebView accessibility lookup expired"; return false;
@@ -230,9 +338,12 @@ bool timeline(const Target &target, const TimelineInput &input, NSRect video,
       }
     }
     NSArray *children = nil;
+    bool paged_count_observed = false;
+    NSUInteger paged_count = 0;
     if ([element respondsToSelector:@selector(accessibilityArrayAttributeCount:)] &&
         [element respondsToSelector:@selector(accessibilityArrayAttributeValues:index:maxCount:)]) {
       const NSUInteger count = [element accessibilityArrayAttributeCount:NSAccessibilityChildrenAttribute];
+      paged_count_observed = true; paged_count = count;
       if (count > node_limit - seen.count || pending.count > node_limit - seen.count - count) {
         error = "Own-WKWebView accessibility children exceed the remaining node budget"; return false;
       }
@@ -262,13 +373,21 @@ bool timeline(const Target &target, const TimelineInput &input, NSRect video,
     if (children.count && depth == depth_limit) {
       error = "Own-WKWebView accessibility children exceed the depth budget"; return false;
     }
+    // The original child list and candidate decision above are unchanged.
+    // Diagnostics do not merge, replace or descend any alternative child list.
+    record_node(element, role, children, depth, paged_count_observed, paged_count, began, diagnostic_nodes, observed);
     for (id child in children) { [pending addObject:child]; [depths addObject:@(depth + 1)]; }
   }
   observed.lookup_complete = true;
+  observed.elapsed_ms = std::chrono::duration<double, std::milli>(
+      std::chrono::steady_clock::now() - began).count();
   if (observed.candidates != 1) {
     error = "Own-WKWebView must expose exactly one time-matched horizontal video slider";
+    diagnose_failed_nodes(diagnostic_nodes, observed);
+    diagnostic_nodes = nil;
     return false;
   }
+  diagnostic_nodes = nil;
   return true;
 }
 #pragma clang diagnostic pop

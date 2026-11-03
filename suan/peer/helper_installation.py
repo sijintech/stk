@@ -67,6 +67,16 @@ def _stamp(value):
             value.st_mtime_ns, value.st_ctime_ns)
 
 
+def _cross_api_stamp(value):
+    mode = value.st_mode
+    if os.name == "nt":
+        # CPython path stat infers these bits from .exe/.bat/.cmd/.com, while
+        # descriptor stat has no filename. Full per-API stamps below still
+        # detect every mode or ctime change during and after hashing.
+        mode &= ~0o111
+    return (value.st_dev, value.st_ino, mode, value.st_size, value.st_mtime_ns)
+
+
 def _digest(path, maximum):
     before = _ordinary(path)
     if before.st_size > maximum:
@@ -77,9 +87,9 @@ def _digest(path, maximum):
         fd = os.open(path, flags)
         with os.fdopen(fd, "rb") as stream:
             opened = os.fstat(stream.fileno())
-            # Windows fd/path APIs can report different ctime meanings/precision.
-            # Compare it only within each API's own before/after observations.
-            if not stat.S_ISREG(opened.st_mode) or _stamp(before)[:-1] != _stamp(opened)[:-1]:
+            # Windows fd/path APIs expose different ctime and executable bits.
+            # Compare each API's full metadata against its own final observation.
+            if not stat.S_ISREG(opened.st_mode) or _cross_api_stamp(before) != _cross_api_stamp(opened):
                 _bad()
             digest = hashlib.sha256()
             count = 0

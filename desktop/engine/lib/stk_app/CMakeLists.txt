@@ -55,6 +55,8 @@ add_library(stk_app STATIC
   src/materials_state.cc
   src/federation_state.cc
   src/peer_state.cc
+  src/literature_state.cc
+  src/literature_page.cc
   src/project_review.cc
   src/script_state.cc
   src/scripting_ui.cc

@@ -4,10 +4,15 @@
 #include "stk/core/mmap.hh"
 
 #include <spng.h>
+#define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
+#include "../../../third_party/libspng/miniz/miniz.h"
 
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <array>
+#include <algorithm>
+#include <string_view>
 
 namespace stk::io {
 
@@ -151,6 +156,44 @@ Image read_png(const std::filesystem::path &path, const PngLimits &limits)
 {
   const core::SharedBytes bytes = core::SharedBytes::from_file(path, false);
   return decode_png(bytes.span(), limits);
+}
+
+void check_rgba8_filter_zero_png(std::span<const uint8_t> data, const PngLimits &limits)
+{
+  const auto reject = [] { throw PngError("invalid fixed RGBA8/filter-zero PNG"); };
+  static constexpr std::array<uint8_t, 8> signature = {137, 80, 78, 71, 13, 10, 26, 10};
+  if (data.size() < 57 || data.size() > 4 * 1024 * 1024 || !std::equal(signature.begin(), signature.end(), data.begin())) { reject(); }
+  const auto word = [&](size_t p) -> uint32_t {
+    if (p > data.size() - 4) { reject(); }
+    return uint32_t(data[p]) << 24 | uint32_t(data[p + 1]) << 16 | uint32_t(data[p + 2]) << 8 | data[p + 3];
+  };
+  const std::array<std::string_view, 3> names = {"IHDR", "IDAT", "IEND"};
+  size_t at = 8; uint32_t width = 0, height = 0; std::span<const uint8_t> idat;
+  for (size_t index = 0; index < names.size(); ++index) {
+    if (at > data.size() - 12) { reject(); }
+    const uint32_t size = word(at);
+    if (size > data.size() - at - 12 || std::string_view(reinterpret_cast<const char *>(data.data() + at + 4), 4) != names[index] ||
+        mz_crc32(0, data.data() + at + 4, size_t(size) + 4) != word(at + 8 + size)) { reject(); }
+    if (index == 0) {
+      if (size != 13 || data[at + 16] != 8 || data[at + 17] != 6 || data[at + 18] || data[at + 19] || data[at + 20]) { reject(); }
+      width = word(at + 8); height = word(at + 12);
+      if (!width || !height || width > std::min(limits.max_width, 2048u) || height > std::min(limits.max_height, 2048u) ||
+          uint64_t(width) * height > std::min(limits.max_pixels, uint64_t(4 * 1024 * 1024))) { reject(); }
+    }
+    else if (index == 1) { if (!size) { reject(); } idat = data.subspan(at + 8, size); }
+    else if (size) { reject(); }
+    at += size_t(size) + 12;
+  }
+  if (at != data.size()) { reject(); }
+  const size_t stride = size_t(width) * 4 + 1, expected = stride * height;
+  std::vector<uint8_t> rows(expected + 1);
+  mz_stream stream{};
+  if (mz_inflateInit(&stream) != MZ_OK) { reject(); }
+  struct End { mz_stream *stream; ~End() { mz_inflateEnd(stream); } } end{&stream};
+  stream.next_in = idat.data(); stream.avail_in = unsigned(idat.size());
+  stream.next_out = rows.data(); stream.avail_out = unsigned(rows.size());
+  if (mz_inflate(&stream, MZ_FINISH) != MZ_STREAM_END || stream.total_out != expected || stream.avail_in != 0) { reject(); }
+  for (size_t row = 0; row < height; ++row) { if (rows[row * stride]) { reject(); } }
 }
 
 }  // namespace stk::io

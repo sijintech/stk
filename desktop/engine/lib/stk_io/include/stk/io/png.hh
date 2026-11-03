@@ -72,4 +72,10 @@ struct PngLimits {
 Image decode_png(std::span<const uint8_t> data, const PngLimits &limits = {});
 Image read_png(const std::filesystem::path &path, const PngLimits &limits = {});
 
+/** Fixed local citation renderer wire profile only: one IHDR/IDAT/IEND, RGBA8,
+ * noninterlaced, every decompressed row filter zero, with no trailing stream.
+ * At most 4 MiB encoded, 2048 per edge and 4M pixels (or stricter supplied limits).
+ * Checks CRCs, complete zlib consumption and bounded rows. General decode_png is unchanged. */
+void check_rgba8_filter_zero_png(std::span<const uint8_t> data, const PngLimits &limits);
+
 }  // namespace stk::io

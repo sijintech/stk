@@ -197,3 +197,52 @@ def test_time_metadata_is_compared_within_its_stat_api(installation, monkeypatch
         with pytest.raises(hi.HelperInstallationError) as caught:
             hi.load_helper_installation(root)
         assert caught.value.code == "changed_installation"
+
+
+@pytest.mark.parametrize("change", ["stable_cross_api", "fd_changed", "path_changed", "read_permission", "identity"])
+def test_windows_executable_mode_is_compared_within_its_stat_api(installation, monkeypatch, change):
+    # CPython adds 0111 to Windows path stat for .exe/.bat/.cmd/.com; fstat
+    # cannot infer that suffix. Each API must still detect its own mode changes.
+    from types import SimpleNamespace
+    root, value = installation
+    executable = root / value["executable"]
+    real_fd, real_path = hi.os.fstat, hi._ordinary
+    fd_calls, path_calls = 0, 0
+
+    def replacement(info, **changes):
+        fields = {key: getattr(info, key) for key in
+                  ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")}
+        return SimpleNamespace(**(fields | changes))
+
+    def path_stat(path, directory=False):
+        nonlocal path_calls
+        info = real_path(path, directory=directory)
+        if path == executable:
+            path_calls += 1
+            mode = info.st_mode | 0o111
+            if change == "path_changed" and path_calls > 1:
+                mode ^= 0o100
+            return replacement(info, st_mode=mode)
+        return info
+
+    def fd_stat(fd):
+        nonlocal fd_calls
+        info = real_fd(fd)
+        if (info.st_dev, info.st_ino) == (executable.stat().st_dev, executable.stat().st_ino):
+            fd_calls += 1
+            mode = info.st_mode & ~0o111
+            if change == "fd_changed" and fd_calls > 1:
+                mode ^= 0o100
+            if change == "read_permission":
+                mode ^= 0o400
+            return replacement(info, st_mode=mode, st_ino=info.st_ino + int(change == "identity"))
+        return info
+
+    monkeypatch.setattr(hi, "os", SimpleNamespace(**(vars(hi.os) | {"name": "nt", "fstat": fd_stat})))
+    monkeypatch.setattr(hi, "_ordinary", path_stat)
+    if change == "stable_cross_api":
+        assert hi.load_helper_installation(root).abi == hi.HELPER_ABI
+    else:
+        with pytest.raises(hi.HelperInstallationError) as caught:
+            hi.load_helper_installation(root)
+        assert caught.value.code == ("changed_installation" if change.endswith("changed") else "invalid_installation")

@@ -253,7 +253,7 @@ def _windows_drive(path):
     create = ctypes.WinDLL("kernel32", use_last_error=True).CreateFileW
     create.argtypes = [w.LPCWSTR, w.DWORD, w.DWORD, w.LPVOID, w.DWORD, w.DWORD, w.HANDLE]
     create.restype = w.HANDLE
-    handle = create(path.anchor, 0x100000 | 0x80 | 0x20 | 0x1, 7, None, 3,
+    handle = create(path.anchor, 0x100000 | 0x80 | 0x20, 7, None, 3,
                     0x02000000 | 0x00200000, None)
     if handle in (None, w.HANDLE(-1).value):
         raise FileStorageError("Cannot open the local drive")
@@ -370,7 +370,9 @@ def _windows_relative(parent, name, *, directory, create=False, exclusive=False,
     function.argtypes = [ctypes.POINTER(w.HANDLE), w.DWORD, ctypes.POINTER(Attributes),
         ctypes.POINTER(Status), w.LPVOID, w.ULONG, w.ULONG, w.ULONG, w.ULONG, w.LPVOID, w.ULONG]
     function.restype = ctypes.c_long
-    access = 0x100000 | 0x80 | (0x20 | 0x1 if directory else 0x1)
+    # Directory handles need traversal and attributes, not enumeration. The
+    # rename target's internal open must not conflict with FILE_LIST_DIRECTORY.
+    access = 0x100000 | 0x80 | (0x20 if directory else 0x1)
     if write and not directory:
         access |= 0x2
     if delete:
@@ -394,25 +396,40 @@ def _windows_relative(parent, name, *, directory, create=False, exclusive=False,
 
 
 def _windows_publish(parent, source, target, expected_identity):
-    from ctypes import wintypes as w
+    # Keep the operation in the same native, parent-relative handle namespace
+    # as NtCreateFile. No Win32 path conversion or check-then-rename fallback.
+    # Contract: learn.microsoft.com/windows-hardware/drivers/ddi/ntifs/
+    #          nf-ntifs-ntsetinformationfile and ns-ntifs-_file_rename_information.
     source_handle = _windows_relative(parent, source, directory=True, delete=True)
     try:
         identity, attributes = _windows_info(source_handle)
         if identity != expected_identity or attributes & 0x400:
             raise FileStorageError("Staged directory identity changed")
         class Rename(ctypes.Structure):
-            _fields_ = [("flags", w.DWORD), ("root", w.HANDLE), ("length", w.DWORD), ("name", w.WCHAR * 1)]
+            _fields_ = [("replace", ctypes.c_ubyte), ("root", ctypes.c_void_p),
+                        ("length", ctypes.c_uint32), ("name", ctypes.c_uint16 * 1)]
+        class Status(ctypes.Structure):
+            # IO_STATUS_BLOCK starts with a pointer-sized Status/Pointer union.
+            _fields_ = [("status", ctypes.c_void_p), ("information", ctypes.c_size_t)]
         encoded = target.encode("utf-16-le")
-        buffer = ctypes.create_string_buffer(Rename.name.offset + len(encoded))
+        buffer = ctypes.create_string_buffer(ctypes.sizeof(Rename) + len(encoded))
         value = ctypes.cast(buffer, ctypes.POINTER(Rename)).contents
-        value.flags, value.root, value.length = 0, parent, len(encoded)
+        value.replace, value.root, value.length = 0, parent, len(encoded)
         ctypes.memmove(ctypes.addressof(buffer) + Rename.name.offset, encoded, len(encoded))
-        function = ctypes.WinDLL("kernel32", use_last_error=True).SetFileInformationByHandle
-        function.argtypes, function.restype = [w.HANDLE, ctypes.c_int, w.LPVOID, w.DWORD], w.BOOL
-        if not function(source_handle, 3, buffer, len(buffer)):
-            if ctypes.get_last_error() in (80, 183):
+        function = ctypes.WinDLL("ntdll").NtSetInformationFile
+        function.argtypes = [ctypes.c_void_p, ctypes.POINTER(Status), ctypes.c_void_p,
+                             ctypes.c_uint32, ctypes.c_int]
+        function.restype = ctypes.c_int32
+        status = Status()
+        returned = function(source_handle, ctypes.byref(status), buffer, len(buffer), 10)
+        code, completed = int(returned) & 0xFFFFFFFF, int(status.status or 0) & 0xFFFFFFFF
+        # NtCreateFile opens synchronous handles. A pending/informational return
+        # is still uncertain, never evidence that the publication completed.
+        if code != 0 or completed != 0:
+            code = code or completed
+            if code in (0xC0000035, 0xC0000101, 0x40000000):
                 raise FileExistsError("Publication target already exists")
-            raise FileStorageError("Atomic file publication failed")
+            raise FileStorageError(f"Atomic file publication failed (NTSTATUS 0x{code:08x})")
     finally:
         _windows_close(source_handle)
 

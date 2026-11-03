@@ -503,12 +503,34 @@ class Exercise {
     // A first accessibility read may enable WebKit's tree asynchronously. Repeat
     // only an empty completed read, never a partially delivered input or a limit
     // failure. All successful input still has to pass unchanged DOM/OS gates.
+    const auto lookup_began = Clock::now();
     for (int attempt = 0; attempt < 4; ++attempt) {
       reports_native_test::TimelineObservation observed;
       std::string delivery, error;
       const bool sent = native_input_.seek_document(window_.native_window_handle(), native_bounds(bounds),
           window_.width(), window_.height(), input, observed, delivery, error);
+      auto list_json = [](const reports_native_test::TimelineChildListObservation &value) {
+        return Json{{"type", value.type}, {"count", value.count}, {"over_budget", value.over_budget}};
+      };
+      Json nodes = Json::array();
+      for (const auto &node : observed.nodes) {
+        nodes.push_back({{"ordinal", node.ordinal}, {"depth", node.depth}, {"elapsed_ms", node.elapsed_ms},
+            {"category", node.category}, {"selected_role", node.selected_role},
+            {"legacy_role", node.legacy_role}, {"modern_role", node.modern_role},
+            {"legacy_selector", node.legacy_selector}, {"modern_children_selector", node.modern_children_selector},
+            {"modern_role_selector", node.modern_role_selector}, {"paged_count_selector", node.paged_count_selector},
+            {"paged_values_selector", node.paged_values_selector}, {"paged_count_observed", node.paged_count_observed},
+            {"paged_count", node.paged_count}, {"paged_count_over_budget", node.paged_count_over_budget},
+            {"selected_children", list_json(node.selected_children)}, {"legacy_children", list_json(node.legacy_children)},
+            {"modern_children", list_json(node.modern_children)}, {"diagnostic_exception", node.diagnostic_exception},
+            {"extra_getters_started", node.extra_getters_started}, {"extra_getters_complete", node.extra_getters_complete}});
+      }
       result_["native_media_inputs"].push_back({{"cycle", cycle}, {"phase", phase},
+          {"lookup_elapsed_ms", observed.elapsed_ms}, {"diagnostic_elapsed_ms", observed.diagnostic_elapsed_ms},
+          {"diagnostics_timeout", observed.diagnostics_timeout}, {"attempts_elapsed_ms",
+              std::chrono::duration<double, std::milli>(Clock::now() - lookup_began).count()},
+          {"frame_number", window_.frames_drawn()}, {"ax_nodes", std::move(nodes)},
+          {"ax_nodes_truncated", observed.diagnostics_truncated},
           {"action", "observed-timeline-click"}, {"lookup_attempt", attempt + 1},
           {"lookup_complete", observed.lookup_complete}, {"visited_nodes", observed.visited_nodes},
           {"deepest_node", observed.deepest_node}, {"sliders", observed.sliders},

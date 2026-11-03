@@ -39,6 +39,7 @@ class ModuleSettings;
 class MaterialsState;
 class FederationState;
 class PeerState;
+class LiteratureState;
 
 /**
  * A request to show a result in the Viewer (raised by the Jobs editor, "Open in viewer"; consumed
@@ -169,6 +170,8 @@ class AppStore {
   FederationState &federation();
   /** Explicit peer identity, connection, sharing and durable original-action observation. */
   PeerState &peers();
+  /** Shared desktop local literature authority; each tab owns an independent View. */
+  LiteratureState &literature();
 
   /** Queues a request for the Viewer (replaces an unconsumed one) and calls #changed. */
   void request_open_result(OpenResultRequest request);
@@ -228,6 +231,7 @@ class AppStore {
   std::unique_ptr<MaterialsState> materials_;
   std::unique_ptr<FederationState> federation_;
   std::unique_ptr<PeerState> peers_;
+  std::unique_ptr<LiteratureState> literature_;
   ui::LogBuffer app_log_{20000};
   ui::LogBuffer bridge_log_{20000};
   uint64_t version_ = 0;

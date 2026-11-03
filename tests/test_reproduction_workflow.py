@@ -47,8 +47,12 @@ def isolated(tmp_path, monkeypatch):
     # evaluator, node, Table sources, renderer or any returned DTO.
     (guard / "sitecustomize.py").write_text(
         "import json, os, sys\n"
-        "assert os.environ.get('STK_TOKEN_PLAN_API_KEY') == ''\n"
-        "assert 'STK_TOKEN_PLAN_MODEL' not in os.environ\n"
+        # Windows CRT environment inheritance can omit an explicitly empty
+        # variable. Absence is equally unable to authorize a model request.
+        # Fail closed: sitecustomize's ordinary exceptions are printed and then
+        # ignored by Python, so an assert here would leave sockets unguarded.
+        "if os.environ.get('STK_TOKEN_PLAN_API_KEY', '') != '' or 'STK_TOKEN_PLAN_MODEL' in os.environ:\n"
+        "    os.write(2, b'unsafe test model environment\\n'); os._exit(3)\n"
         "with open(os.environ['STK_EXAMPLE_GUARD_LOG'], 'a') as f: f.write(json.dumps({'pid':os.getpid(),'loaded':True})+'\\n')\n"
         "def audit(event, args):\n"
         "    if event.startswith('socket.'):\n"
@@ -171,11 +175,27 @@ def test_actual_analysis_archives_five_outcomes_error_rows_pngs_and_guarded_chil
     assert len(calls) == 1
 
 
-def test_socket_guard_really_rejects_a_subprocess_connection(isolated):
+@pytest.mark.parametrize('missing_key', [False, True])
+def test_socket_guard_really_rejects_a_subprocess_connection(isolated, monkeypatch, missing_key):
     _, _, log = isolated
+    if missing_key:
+        monkeypatch.delenv('STK_TOKEN_PLAN_API_KEY', raising=False)
     result = subprocess.run([sys.executable, "-c", "import socket; socket.socket()"], capture_output=True, timeout=10)
     assert result.returncode != 0 and b"offline socket guard" in result.stderr
     assert any("blocked" in json.loads(line) for line in log.read_text().splitlines())
+
+
+@pytest.mark.parametrize('unsafe_var', ['STK_TOKEN_PLAN_API_KEY', 'STK_TOKEN_PLAN_MODEL'])
+def test_child_guard_stops_before_user_code_for_unsafe_model_environment(isolated, unsafe_var):
+    _, _, log = isolated
+    env = {key: os.environ[key] for key in ('SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL')
+           if key in os.environ}
+    env.update(PYTHONPATH=os.environ['PYTHONPATH'], STK_EXAMPLE_GUARD_LOG=str(log), STK_TOKEN_PLAN_API_KEY='')
+    env[unsafe_var] = 'abcdefghijklmnopqrstu'
+    result = subprocess.run([sys.executable, '-c', "print('unexpected user code')"],
+                            env=env, capture_output=True, timeout=10)
+    assert result.returncode == 3 and result.stdout == b''
+    assert b'unsafe test model environment' in result.stderr
 
 
 def test_read_recover_and_headless_reopen_do_not_reexecute_or_rewrite_archive(isolated, tmp_path, monkeypatch):
@@ -540,29 +560,42 @@ def test_reader_rejects_actual_named_file_replacement_and_closes_descriptor(tmp_
     target, replacement = tmp_path / "intent.json", tmp_path / "replacement"
     target.write_bytes(b"original")
     replacement.write_bytes(b"replaced")
-    real_open, real_read, descriptors = demo.os.open, demo.os.read, []
+    real_open, real_read, real_fd, descriptors = demo.os.open, demo.os.read, demo._read_fd, []
     changed = False
+    def replace_file():
+        if os.name == 'nt':
+            # MoveFileExW (os.replace) cannot replace this open old generation.
+            # Use the existing native POSIX rename actor; the reader under test
+            # still has to reject the actual changed directory entry.
+            from suan.documents.latex import _replace_windows
+            info = replacement.stat()
+            _replace_windows(replacement, target, replacement.read_bytes(), (info.st_dev, info.st_ino))
+        else:
+            os.replace(replacement, target)
     def open_file(path, flags, *args, **kwargs):
         nonlocal changed
         if Path(path) == target and moment == "before_open":
             os.replace(replacement, target)
             changed = True
-        fd = real_open(path, flags, *args, **kwargs)
-        if Path(path) == target:
-            descriptors.append(fd)
+        return real_open(path, flags, *args, **kwargs)
+    def read_descriptor(path):
+        fd = real_fd(path)
+        descriptors.append(fd)
         return fd
     def read_file(fd, size):
         nonlocal changed
         data = real_read(fd, size)
         if not changed and moment == "after_read":
-            os.replace(replacement, target)
+            replace_file()
             changed = True
         return data
     monkeypatch.setattr(demo.os, "open", open_file)
     monkeypatch.setattr(demo.os, "read", read_file)
+    monkeypatch.setattr(demo, '_read_fd', read_descriptor)
     with pytest.raises(ValueError, match="changed"):
         demo._read(target)
     assert changed and target.read_bytes() == b"replaced"
+    assert len(descriptors) == 1
     for fd in descriptors:
         with pytest.raises(OSError):
             os.fstat(fd)

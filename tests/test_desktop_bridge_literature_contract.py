@@ -129,6 +129,10 @@ def test_constructor_hello_reopen_shutdown_and_passive_reads_never_spawn_or_buil
 def test_stdio_passive_protocol_does_not_create_literature(tmp_path):
     env=child_environment()
     env.update(STK_PROFILES_FILE=str(tmp_path/'profiles.json'),STK_STATE_DIR=str(tmp_path/'no-runtime'))
+    # This is a complete desktop host, rather than the private literature worker.
+    # Give its platform directory discovery a private home on both POSIX and
+    # Windows; do not add ambient user settings to the worker's allowlist.
+    env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path))
     bridge=ProcessBridge(tmp_path/'stdio',env=env)
     try:
         assert 'literature.info' in bridge.call('hello',{'protocol':1,'resume_transfers':False})['methods']
@@ -139,13 +143,14 @@ def test_stdio_passive_protocol_does_not_create_literature(tmp_path):
 
 
 def test_only_host_constructor_selects_interpreters_and_shutdown_reaps_created_service(tmp_path, monkeypatch):
-    bridge=InProcessBridge(tmp_path/'desktop',literature_parser_python='/tmp/trusted-parser',literature_encoder_python='/tmp/trusted-encoder')
+    parser, encoder, arbitrary = (str(tmp_path/name) for name in ('trusted-parser', 'trusted-encoder', 'arbitrary'))
+    bridge=InProcessBridge(tmp_path/'desktop',literature_parser_python=parser,literature_encoder_python=encoder)
     try:
         assert bridge.bridge._literature is None
-        error=bridge.error('literature.encoder.review',{'operation_id':uid(),'assets':'/tmp/assets','python':'/tmp/arbitrary'})
+        error=bridge.error('literature.encoder.review',{'operation_id':uid(),'assets':str(tmp_path/'assets'),'python':arbitrary})
         assert error['code']=='invalid_params'
         service=bridge.bridge._literature
-        assert service.parser_python=='/tmp/trusted-parser' and service.encoder_python=='/tmp/trusted-encoder'
+        assert service.parser_python==parser and service.encoder_python==encoder
         assert service.python==sys.executable and not service.root.exists()
         called=[]
         monkeypatch.setattr(service,'shutdown',lambda:called.append(True))
@@ -281,7 +286,7 @@ def test_actual_corpus_uuid_replay_and_passive_reopen_through_bridge(tmp_path, m
     finally:bridge.close()
     from suan.desktop_bridge import literature
     monkeypatch.setattr(literature,'WorkerProcess',lambda *a,**k:pytest.fail('Reopen dispatched old action'))
-    bridge=InProcessBridge(tmp_path/'desktop',literature_encoder_python='/tmp/changed-trusted-encoder')
+    bridge=InProcessBridge(tmp_path/'desktop',literature_encoder_python=str(tmp_path/'changed-trusted-encoder'))
     try:
         assert bridge.call('literature.corpora.create',params)=={'operation':operation}
         assert bridge.call('literature.operations.result',{'operation_id':operation['operation_id'],
