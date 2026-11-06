@@ -2,6 +2,11 @@
 
 更新：2026-10-30（补充 peer 边界；既有归档验证保留原交付范围）。目标依据：[开发计划](development-plan.md)与[工作台设计](design/project-workbench.md)。
 
+2026-11-06 多仓协作补充：当前 STK 内部模块边界保持，统一后端与原生桌面暂留同仓；
+Synthrix 作为 React 网页仓，旧后端按领域迁入共同实现；集成发布仓按实际跨仓交付需要再建立。
+具体职责、契约单一来源、版本组合、CI 和迁移门槛见[仓库规划](planning/repository-strategy.md)，
+全局框架见[平台总体框架](design/platform-framework.md)。这是规划，本轮没有执行分仓或移动代码。
+
 ## 检查结论
 
 当前顶层按桌面、Python 服务、网页和协议文档划分，适合继续实现统一项目模型与 AI 工作台，

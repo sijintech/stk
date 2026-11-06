@@ -5,6 +5,10 @@
 下述模块拆分、部署配置与迁移顺序是实现建议，不把这些建议写成已有能力。
 配套文档：[任务与数据协议](distributed-task-data-protocol.md)、[完整场景验收](distributed-workbench-acceptance.md)。
 
+面向启动会及跨团队实施的上层材料见[总体框架](platform-framework.md)、
+[滚动开发计划](../planning/platform-roadmap.md)、[多仓库协作](../planning/repository-strategy.md)和
+[汇报提纲](../planning/research-kickoff.md)。周数与新仓均为待核定规划，不覆盖本文协议及实施边界。
+
 ## 1. 架构决定与同一后端的含义
 
 本地 Core、自托管服务、官方云端采用**同一套后端源码、领域模型、应用服务、校验、授权与任务状态机**。

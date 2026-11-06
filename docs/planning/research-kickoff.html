@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>STK × Synthrix｜科研平台启动会</title>
+<style>
+:root{--navy:#11263c;--teal:#087f83;--muted:#52677a;--paper:#f3f6f8;--line:#d5dfe6}
+*{box-sizing:border-box}body{margin:0;background:#192b3c;color:var(--navy);font-family:"Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+.stage{position:relative;margin:auto;overflow:hidden}.deck{width:1280px;height:720px;transform-origin:top left}
+.slide{width:1280px;height:720px;padding:44px 56px 50px;background:var(--paper);display:none;flex-direction:column;position:relative;overflow:hidden}
+.slide.active,.slide.measure{display:flex}.slide.measure{position:absolute;visibility:hidden;top:0;left:0}
+.eyebrow{font-size:17px;letter-spacing:2px;color:var(--teal);font-weight:700;margin:0 0 12px}
+h1{font-size:58px;line-height:1.28;letter-spacing:-1px;margin:18px 0 24px}h2{font-size:38px;line-height:1.3;margin:0 0 20px}h3{font-size:24px;margin:0 0 12px}
+p,li{font-size:23px;line-height:1.65;margin:0 0 12px}ul{margin:0;padding-left:1.25em}li{margin-bottom:10px}
+.lead{font-size:28px;line-height:1.65;max-width:1060px}.small{font-size:18px;line-height:1.6}.muted{color:var(--muted)}.accent{color:var(--teal)}
+.grid{display:grid;gap:22px}.two{grid-template-columns:1fr 1fr}.three{grid-template-columns:repeat(3,1fr)}.card{padding:24px;background:white;border:1px solid var(--line);border-radius:12px}
+.card p{font-size:21px}.tag{display:inline-block;font-size:17px;padding:6px 12px;border-radius:6px;background:#dcefee;color:#08666a;margin-right:8px}
+.callout{margin-top:20px;padding:17px 22px;border-left:5px solid var(--teal);background:#e5efef;font-size:21px;line-height:1.65}
+.footer{position:absolute;bottom:20px;left:56px;right:56px;display:flex;justify-content:space-between;border-top:1px solid var(--line);padding-top:10px;color:var(--muted);font-size:14px}
+.grow{flex:1}.cover{background:var(--navy);color:#fff}.cover .eyebrow{color:#76d7ce}.cover .muted{color:#c0d0de}.cover .footer{color:#b5c7d6;border-color:#405366}.cover .tag{background:#284b5c;color:#c4f2eb}
+table{width:100%;border-collapse:collapse;font-size:20px;line-height:1.6;background:#fff}th{text-align:left;background:#e3eded;color:#123e48}th,td{padding:13px 17px;border-bottom:1px solid var(--line);vertical-align:top}td strong{color:var(--teal)}
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:16px}.step{background:white;border-top:5px solid var(--teal);padding:20px 16px;min-height:190px;border-radius:8px}.step .num{font-size:38px;font-weight:700;color:#90b9bc}.step p{font-size:20px}
+.timeline{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.period{background:white;border:1px solid var(--line);border-radius:10px;padding:17px 20px;min-height:148px}.period strong{color:var(--teal);font-size:23px}.period p{font-size:20px;margin:8px 0 0}
+.agenda{display:flex;border-radius:10px;overflow:hidden;margin:20px 0}.agenda div{padding:22px 12px;color:white;background:var(--teal);text-align:center;font-size:19px;border-right:1px solid #ffffff50}.agenda strong{display:block;font-size:30px}
+.controls{height:56px;display:flex;align-items:center;justify-content:center;gap:16px;color:#e8f0f4;font-size:14px}.controls button,.controls a{font:inherit;color:inherit;background:#294255;border:1px solid #6e8596;border-radius:6px;padding:7px 14px;text-decoration:none;cursor:pointer}.controls button:focus-visible,.controls a:focus-visible{outline:3px solid #8ee1d8}.controls button:disabled{opacity:.4;cursor:default}
+svg text{font-family:"Noto Sans CJK SC","Microsoft YaHei",sans-serif}svg{display:block;max-width:100%;flex-shrink:0}
+@page{size:13.333333in 7.5in;margin:0}
+@media print{body{background:white}.stage{width:1280px!important;height:auto!important;overflow:visible;margin:0}.deck{transform:none!important;height:auto}.slide{display:flex!important;position:relative!important;visibility:visible!important;break-after:page;page-break-after:always}.slide:last-child{break-after:auto;page-break-after:auto}.controls{display:none}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style>
+</head>
+<body>
+<main class="stage" id="stage"><div class="deck" id="deck">
+<section class="slide cover active" aria-label="1 共同目标">
+<p class="eyebrow">STK × SYNTHRIX · 科研合作启动会</p>
+<h1>同一后端<br>连接科研工作台与计算节点</h1>
+<p class="lead">原生桌面保留性能与本地能力。<br>网页提供对话、轻量分析和跨端任务入口。</p>
+<div class="grow"></div><p><span class="tag">STK 为主体</span><span class="tag">C++ / Python / GPU</span><span class="tag">React Web</span></p>
+<p class="small muted">约 15 分钟汇报 · 2026-11-06 规划稿<br>已有架构设计；新统一后端与跨端试点尚待实施验收。</p>
+<div class="footer"><span>合作方启动讨论材料 · 范围、人员与日期待核定</span><span>01 / 10</span></div>
+</section>
+<section class="slide" aria-label="2 当前基础与差距">
+<p class="eyebrow">01 · 从已有能力出发</p><h2>已有模块基础，先打通共同后端</h2>
+<div class="grid two">
+<div class="card"><h3>已有基础</h3><ul><li>STK 原生编辑器与 GPU 可视化</li><li>Python 项目、桥接和科学服务</li><li>Linux Runtime / Hub / 节点 / CLI</li><li>Synthrix React 与独立后端</li></ul></div>
+<div class="card"><h3>尚待交付</h3><ul><li>Core 与云端同实现装配</li><li>React / 原生 / CLI 完整接线</li><li>真实许可、GPU 和数据交接</li><li>完整多平台节点与发行验证</li></ul></div>
+</div>
+<div class="callout">架构、任务数据协议和验收设计已形成；本轮材料不代表新增功能已经运行通过。</div>
+<div class="footer"><span>依据：总体框架与已记录的源码能力边界</span><span>02 / 10</span></div>
+</section>
+<section class="slide" aria-label="3 总体架构">
+<p class="eyebrow">02 · 总体框架</p><h2>后端实现共用，部署角色与前端不同</h2>
+<svg viewBox="0 0 1160 350" role="img" aria-label="原生桌面、React网页和CLI调用同一后端；同一后端分别部署在本地和云端，并调用获授权的执行节点。">
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#087f83"/></marker></defs>
+<g fill="#fff" stroke="#bacdd7" stroke-width="2"><rect x="15" y="8" width="350" height="66" rx="10"/><rect x="405" y="8" width="350" height="66" rx="10"/><rect x="795" y="8" width="350" height="66" rx="10"/></g>
+<g font-size="24" fill="#11263c" text-anchor="middle"><text x="190" y="49">STK Desktop · C++ / Python</text><text x="580" y="49">Synthrix Web · React</text><text x="970" y="49">CLI / SDK</text></g>
+<g stroke="#087f83" stroke-width="3" marker-end="url(#arrow)"><path d="M190 75V108"/><path d="M580 75V108"/><path d="M970 75V108"/></g>
+<rect x="15" y="118" width="1130" height="92" rx="12" fill="#087f83"/>
+<text x="580" y="155" text-anchor="middle" font-size="28" fill="white">同一后端：项目 · 对话 · 科研记录 · 任务 · 文献 · 授权</text>
+<text x="580" y="189" text-anchor="middle" font-size="20" fill="#d8f1ef">同一源码、应用服务和状态机；本地 / 云端按角色装配</text>
+<g stroke="#087f83" stroke-width="3" marker-end="url(#arrow)"><path d="M290 212V245"/><path d="M870 212V245"/></g>
+<rect x="15" y="255" width="550" height="85" rx="10" fill="#e1ebef"/><rect x="595" y="255" width="550" height="85" rx="10" fill="#e1ebef"/>
+<g fill="#11263c" text-anchor="middle"><text x="290" y="288" font-size="25">本地 Core / 自有计算节点</text><text x="290" y="319" font-size="20">数据 · 专业软件许可 · GPU · 用户会话</text><text x="870" y="288" font-size="25">云端 / 团队部署</text><text x="870" y="319" font-size="20">账号协作 · 节点目录 · 路由 · 状态与配额</text></g>
+</svg>
+<div class="callout">本地独立工作可离线；原生三维保持本地性能。节点主动连接，计算靠近数据与许可。</div>
+<div class="footer"><span>目标架构 · 不是当前部署拓扑</span><span>03 / 10</span></div>
+</section>
+<section class="slide" aria-label="4 第一条流程">
+<p class="eyebrow">03 · 首条可验收链路</p><h2>换一个终端，仍然是同一个任务</h2>
+<div class="steps"><div class="step"><div class="num">01</div><h3>明确提交</h3><p>网页选择输入、节点与参数<br>冻结请求，取得任务 ID</p></div><div class="step"><div class="num">02</div><h3>原节点执行</h3><p>检查资源和软件许可<br>记录实际启动与退出</p></div><div class="step"><div class="num">03</div><h3>换端追踪</h3><p>关闭网页、重新登录<br>按原 ID 读取日志与状态</p></div><div class="step"><div class="num">04</div><h3>查看结果</h3><p>网页轻量预览<br>STK 打开完整三维数据</p></div></div>
+<div class="callout">主动验证：断线、重复投递、取消、数据损坏。失联保持待核实，不自动换机器重算。</div>
+<p class="small muted" style="margin-top:18px">先打通公开合成算例；真实许可软件与 GPU 在资产和节点支持就绪后接入，分别留证。</p>
+<div class="footer"><span>目标演示流程 · 尚未执行的新场景不填“通过”</span><span>04 / 10</span></div>
+</section>
+<section class="slide" aria-label="5 基本规则">
+<p class="eyebrow">04 · 贯穿研发的规则</p><h2>可靠执行与科研有效性分别证明</h2>
+<div class="grid three"><div class="card"><h3>明确事实归属</h3><p>项目修订、操作回执与任务身份稳定。</p><p>多个入口共享规则，不能重复调度或双写。</p></div><div class="card"><h3>数据按需使用</h3><p>原件与文献索引默认留节点。</p><p>原始数据、预览、传输、桌面控制分别授权。</p></div><div class="card"><h3>科学独立验收</h3><p>执行完成、字节完整、科学合理与专家复核分开。</p><p>真实设备和参考结果不能由 stub 替代。</p></div></div>
+<div class="callout">合作方确认研究问题、参数与参考口径；工程侧证明可靠运行、来源追踪和实际交互。</div>
+<div class="footer"><span>私有项目不送外部模型 · 既有权限与待决边界保持</span><span>05 / 10</span></div>
+</section>
+<section class="slide" aria-label="6 仓库规划">
+<p class="eyebrow">05 · 仓库协作</p><h2>两个现有产品仓库，加一个拟议协同仓</h2>
+<table><thead><tr><th style="width:21%">仓库</th><th>维护内容</th><th style="width:28%">边界</th></tr></thead><tbody>
+<tr><td><strong>stk · 现有</strong></td><td>共同后端、原生 Desktop、CLI、正式协议</td><td>后端与桌面先留同仓模块化</td></tr>
+<tr><td><strong>synthrix · 现有</strong></td><td>React 网页、前端测试与构建</td><td>旧 Node 业务逐领域迁入并退出</td></tr>
+<tr><td><strong>stk-platform · 拟议</strong></td><td>固定版本组合、跨端验收、部署与回退编排</td><td>候选名；达到门槛后建立或复用</td></tr>
+</tbody></table>
+<div class="callout">协议保持一个权威来源；SDK 锁版本；跨仓验收锁定源码 SHA 与制品摘要。</div>
+<p class="small muted" style="margin-top:16px">插件和受限研究资料按维护与权限需要再分仓。本轮没有创建、重命名或迁移仓库。</p>
+<div class="footer"><span>仓库边界服务协作与发布，不产生第二套后端</span><span>06 / 10</span></div>
+</section>
+<section class="slide" aria-label="7 十二周试点">
+<p class="eyebrow">06 · 条件性排期</p><h2>W0 启动，12 周有限试点，W2 重新校准</h2>
+<div class="timeline"><div class="period"><strong>W1–W2 · 定义与预检</strong><p>范围、角色、输入和资产<br>最小装配与可用性检查</p></div><div class="period"><strong>W3–W4 · 共同后端</strong><p>同修订本地 / 云部署<br>规则一致与旧接口兼容</p></div><div class="period"><strong>W5–W6 · 跨端任务链</strong><p>实际提交、换端与取消<br>断线恢复和结果追踪</p></div><div class="period"><strong>W7–W8 · 单领域迁移</strong><p>一项 Synthrix 业务切片<br>历史回执、授权与回滚</p></div><div class="period"><strong>W9–W10 · 真实能力</strong><p>资产就绪时接许可 / GPU<br>原生结果与科学参考</p></div><div class="period"><strong>W11–W12 · 试点收口</strong><p>合作方试用、故障回归<br>有限安装与版本清单</p></div></div>
+<p class="small muted" style="margin-top:20px">人员与日期待确认；角色兼任不重复计产能。完整多平台、全部业务、PDF 协同及完整发行另列后续。</p>
+<div class="footer"><span>候选安排，不是交付承诺；真实链缺资产仍记阻塞</span><span>07 / 10</span></div>
+</section>
+<section class="slide" aria-label="8 前两周准备">
+<p class="eyebrow">07 · 立刻可组织的工作</p><h2>前两周把范围、环境与验收落到实处</h2>
+<div class="grid two"><div class="card"><h3>工程侧</h3><ul><li>核版本、现有失败和兼容接口</li><li>固定任务身份与输入 / 输出</li><li>最小无 GUI 后端装配</li><li>三端操作流程与证据清单</li></ul></div><div class="card"><h3>合作方与双方共同</h3><ul><li>选择一个试点研究问题</li><li>确认软件许可、GPU 与机器</li><li>给出参数、单位及参考结果</li><li>指定责任人、验收人和投入</li></ul></div></div>
+<div class="callout">W2 检查点：看真实预检与最小演示，依据已完成、返工和阻塞调整后十周。</div>
+<div class="footer"><span>唯一软件若依赖未支持平台，应重估节点工作，不换假环境冒充</span><span>08 / 10</span></div>
+</section>
+<section class="slide" aria-label="9 每周协作">
+<p class="eyebrow">08 · 每周固定协作</p><h2>会前给材料，会中看证据，会后落责任</h2>
+<div class="agenda"><div style="flex:1"><strong>5′</strong>行动复盘</div><div style="flex:2"><strong>10′</strong>科学输入</div><div style="flex:3"><strong>15′</strong>实际演示</div><div style="flex:2"><strong>10′</strong>结果与风险</div><div style="flex:2"><strong>10′</strong>范围与决定</div><div style="flex:2"><strong>10′</strong>下周行动</div></div>
+<div class="grid two"><div class="card"><h3>会前一个工作日</h3><p>目标 → 实际 → 证据 → 失败 / 未验证<br>标明版本、依赖与需决定的问题。</p></div><div class="card"><h3>每项行动必须具备</h3><p>负责人、验收人、输入、退出证据<br>依赖与下次检查点。</p></div></div>
+<p class="small muted" style="margin-top:20px">建议每周约 60 分钟，具体时段待双方确认；演示注明 live / 录屏 / 原型 / stub。</p>
+<div class="footer"><span>会议不替代真实验收；决定和计划变化保留记录</span><span>09 / 10</span></div>
+</section>
+<section class="slide" aria-label="10 启动会决定">
+<p class="eyebrow">09 · 本次会议的输出</p><h2>确定一份有输入、有负责人、有验收的清单</h2>
+<div class="grid two"><div class="card"><h3>01 · 试点问题</h3><p>软件、数据、参考结果与验收人。</p></div><div class="card"><h3>02 · 资源与投入</h3><p>各角色实际时间、节点、许可 / GPU。</p></div><div class="card"><h3>03 · 首期切片</h3><p>选择一个迁移领域，明确依赖与后置项。</p></div><div class="card"><h3>04 · 协作方式</h3><p>周会时段、行动台账、跨仓集成人。</p></div></div>
+<div class="callout">先确定前两周，再用每周演示和真实证据推动整条研究流程。</div>
+<p class="small muted" style="margin-top:14px">配套：总体框架 · 开发路线 · 仓库规划 · 任务数据协议 · 场景验收方案</p>
+<div class="footer"><span>STK × Synthrix · 合作方启动讨论材料</span><span>10 / 10</span></div>
+</section>
+</div></main>
+<nav class="controls" aria-label="演示导航"><button id="prev" type="button">上一页</button><span id="position" aria-live="polite">1 / 10</span><button id="next" type="button">下一页</button><button id="print" type="button">打印 / 保存 PDF</button><a href="research-kickoff.md">讲稿</a><span>← → 翻页 · Home / End</span></nav>
+<script>
+const slides=[...document.querySelectorAll('.slide')],stage=document.getElementById('stage'),deck=document.getElementById('deck');let index=0;
+function fit(){const w=Math.max(1,Math.min(innerWidth,(innerHeight-56)*16/9));stage.style.width=w+'px';stage.style.height=w*9/16+'px';deck.style.transform='scale('+w/1280+')';}
+function show(n){index=Math.max(0,Math.min(slides.length-1,n));slides.forEach((s,i)=>{s.classList.toggle('active',i===index);s.setAttribute('aria-hidden',i===index?'false':'true');});document.getElementById('position').textContent=(index+1)+' / '+slides.length;document.getElementById('prev').disabled=index===0;document.getElementById('next').disabled=index===slides.length-1;if(location.hash!=='#'+(index+1))history.replaceState(null,'','#'+(index+1));}
+document.getElementById('prev').onclick=()=>show(index-1);document.getElementById('next').onclick=()=>show(index+1);document.getElementById('print').onclick=()=>window.print();
+addEventListener('keydown',e=>{if(e.ctrlKey||e.metaKey||e.altKey||e.target.closest('button,a,input,select,textarea'))return;if(['ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();show(index+1);}else if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();show(index-1);}else if(e.key==='Home')show(0);else if(e.key==='End')show(slides.length-1);});
+addEventListener('resize',fit);addEventListener('hashchange',()=>show((Number(location.hash.slice(1))||1)-1));fit();show((Number(location.hash.slice(1))||1)-1);
+document.fonts.ready.then(()=>{const issues=[];slides.forEach((s,i)=>{s.classList.add('measure');if(s.scrollHeight>s.clientHeight||s.scrollWidth>s.clientWidth)issues.push(i+1);s.classList.remove('measure');});document.documentElement.dataset.slideCount=slides.length;document.documentElement.dataset.slideOverflow=issues.join(',')||'none';});
+</script>
+</body></html>
