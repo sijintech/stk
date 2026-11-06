@@ -1,5 +1,22 @@
 # STK 开发计划
 
+## 2026-11-06 UTC：先完成统一后端设计（当前）
+
+所有者确定 Core 与云端必须复用同一后端实现，前端分别为 C++ / Python 原生 Desktop 和 React Web。
+设计交付 main 提交：`f541393b31b9f32b1f73bc738998075bc93e6dbd`；详细入口为
+[架构与迁移](design/shared-backend-architecture.md)、[任务与数据协议](design/distributed-task-data-protocol.md)、
+[跨端验收](design/distributed-workbench-acceptance.md)。本轮只完成 D0，不推进业务代码。
+
+后续顺序：D1 同后端本地/云端装配 → D2 一条实际跨端任务链 → D3 Synthrix 对话/科研领域迁移 →
+D4 原生 PDF/三维及真实许可/GPU/会话 → D5 多平台发行与分发。当前 API/项目格式仍以发布契约为准；
+Python 共同服务与 Node/Fastify 现有业务之间须显式迁移，不能只换前端调用地址就宣告合并。
+D1–D5 均待实现及验收；旧八项范围、三待决和 PET 后置不变。
+
+本轮检查为文档交叉审阅、87 个相对链接目标、围栏、暂存空白和 gitleaks（零发现），无新产品运行/点击证据。
+本地前源码 535b0d63 未推送且无该头 CI；远端 350534d 的 Desktop/Runtime 均失败终态，Docs/Secret 成功。
+本轮文档仅本地提交。所有者已批准本轮 AOCI 直接证据例外，完整加载与维护暂缓；原既有 WIP 保留，索引对齐未声明。
+详细事实及证据见[运行验收](runtime-validation.md)和[当前交接](../handoff.md)。以下旧“当前”章节为历史快照。
+
 更新：2026-11-03 UTC。本文是后续开发的主计划；产品约定见[项目工作台设计](design/project-workbench.md)，
 存储与求值方案见[项目数据模型](design/project-model.md)。设计目标不代表当前版本已经实现。
 当前模块职责、归档清单与新增代码放置原则见[仓库结构说明](repository-structure.md)。

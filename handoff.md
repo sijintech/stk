@@ -1,5 +1,29 @@
 # STK 当前交接
 
+## 2026-11-06 UTC：当前交付为统一后端三项设计
+
+本轮按所有者要求先完成设计，未继续功能实现。STK Core 与云端采用同一后端代码、领域服务和状态机；
+Desktop 保留 C++ / Python / GPU，Synthrix Web 保留 React。三项设计已交叉审阅并本地提交 main：
+`f541393b31b9f32b1f73bc738998075bc93e6dbd`（设计及两处设计入口，共五文件）。
+
+- [架构边界与迁移](docs/design/shared-backend-architecture.md)：以现有 suan 服务为基础，明确 Synthrix 领域迁移、部署角色与唯一写入归属。
+- [任务与数据协议](docs/design/distributed-task-data-protocol.md)：保留当前 Runtime/Hub/Bridge 版本，区分任务/action/运行记录，增加拟议身份、租约、数据副本和恢复边界。
+- [跨端验收](docs/design/distributed-workbench-acceptance.md)：同后端双部署、真实跨端链、15 项故障和 4 项迁移场景；所有新运行/点击结果均未执行。
+
+核验基线为本地源码 535b0d63、Synthrix 当前网页 a15ab6b；后者没有旧 90d7c4a 接缝，后续不能沿历史交接推定已有集成。
+实际远端 STK main 仍为 350534d；该头 Desktop 41639295121 与 Runtime 41639295206 均 completed/failure，Docs/Secret success。
+535b0d63 尚未推送，按该 SHA 查询无 CI；本轮文档仅本地提交，不连带发布旧源码，也不触发或重跑 CI。
+
+验证：五份设计 87 个相对链接目标存在、代码围栏配对、暂存 diff 空白检查通过；最终暂存 gitleaks 零发现。
+未运行产品测试、构建、模型请求或实际 UI。下一步为按 D1–D5 实施前逐项落定新 schema/兼容门，不能把 D0 设计完成当功能验收。
+旧八项范围、三项待所有者决定和 PET 专项后置继续保留。
+
+AOCI 例外：所有者在本轮明确允许直接证据设计并暂缓完整加载/维护；宿主此前截断且 chunk_tokens 已是最小 4000。
+本轮未改 aoci.txt、baseline 或配置，未声称索引已对齐。四份既有状态文档的原内容原样保留，本节为新增当前快照。
+证据目录：`/home/mnemora/.local/state/stk-validation/stk-unified-backend-design-20261106/`。
+
+以下 2026-11-03 及更早内容保留为历史，不覆盖本节当前 Git、CI、AOCI 与实施范围。
+
 更新：**2026-11-03 UTC，所有者恢复持续开发目标；完整计划未完成，目标保持 active。**
 STK 作为主体，融合 Synthrix 对话与科研管理；本地完整、Web 轻量、分布式节点、跨位置 CLI 与插件底座为当前方向。
 详见 [分布式科研工作台](docs/design/distributed-research-workbench.md)。旧冻结转交点为历史；旧八项范围、PET 新专项后置和三待决保持。

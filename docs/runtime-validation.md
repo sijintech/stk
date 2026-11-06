@@ -1,5 +1,28 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-06 UTC：统一后端设计交付（仅文档，当前）
+
+设计提交 `f541393b31b9f32b1f73bc738998075bc93e6dbd`，main 本地。三项文档为
+[架构](design/shared-backend-architecture.md)、[协议](design/distributed-task-data-protocol.md)、
+[跨端验收](design/distributed-workbench-acceptance.md)；共同后端采用同一源码/模型/应用服务/状态机，部署适配有明确边界。
+
+| 项目 | 本轮实际结果与限制 |
+|---|---|
+| 源码核对 | STK 535b0d63；Synthrix 网页 a15ab6b。当前网页无历史 90d7c4a 的可选 STK Hub 接线，不沿旧分支证据宣称当前集成 |
+| 文档检查 | 五份设计、87 个相对链接目标均存在，围栏配对；最终暂存 diff 空白检查通过。未验证网页渲染或外部链接持续可用性 |
+| 独立审阅 | 同后端实现、D0–D5、离线授权、旧回执缺证据与回滚边界交叉审查，无剩余阻塞问题 |
+| 密钥扫描 | gitleaks 8.30.1 / .gitleaks.toml，最终五文件暂存约 63.12 KB、零发现；交接追记另在提交前扫描 |
+| 新产品/界面验收 | 未运行测试、构建、模型、服务或 UI；固定起始布局、点击预算及实际值栏已在验收设计分开，实际点击全部未执行 |
+| 真实计算 | 新许可软件、GPU、跨平台/网络与科学质量均未验证；stub 不抵扣这些门 |
+| Git / CI | 远端 main 350534d；Desktop [41639295121](https://github.com/sijintech/stk/actions/runs/41639295121) completed/failure，Runtime [41639295206](https://github.com/sijintech/stk/actions/runs/41639295206) completed/failure，Docs/Secret success。本地前代码头 535b0d63 尚未推送，按 SHA 查询无 workflow runs；本轮不 push、无新 CI |
+| AOCI | 所有者明确批准本轮直接证据设计并暂缓完整加载/维护；此前宿主截断且 chunk_tokens 为合法最小 4000。本轮未改其资产，不声明当前索引对齐 |
+| 既有改动 | 六项既有 WIP 已保留；四文档原内容保持，仅追加本轮记录；AOCI config/baseline 摘要与起始快照一致 |
+
+证据目录 `/home/mnemora/.local/state/stk-validation/stk-unified-backend-design-20261106/`：
+`before.json`/文档 preimages、`ci-observation.json`、`design-check.json`、`gitleaks-design-final.json`；
+本轮交付收口另保存当前文档摘要与既有改动保留验证。D1–D5 所列实测为后续任务，不预填通过。
+以下历史记录和旧“当前”标记不覆盖本节。
+
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 

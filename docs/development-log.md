@@ -1,5 +1,24 @@
 # 开发交接记录
 
+## 2026-11-06 UTC：交付统一后端架构、协议和验收设计
+
+按所有者补充，明确 STK Core 与云端共用后端实现，Desktop 保留 C++ / Python / GPU，Web 保留 React。
+新增[架构](design/shared-backend-architecture.md)、[协议](design/distributed-task-data-protocol.md)、
+[验收](design/distributed-workbench-acceptance.md)，并更新两处已有设计入口。
+设计提交：`f541393b31b9f32b1f73bc738998075bc93e6dbd`（main 本地，五文件、497+/2-）。
+
+直接证据核对 STK 535b0d63 与 Synthrix 网页 a15ab6b；纠正不能将历史 90d7c4a 的可选 Hub 接缝当作当前网页能力。
+交叉审查明确同后端代码/状态机、数据归属、迁移回滚、旧回执缺证据不猜补、不在失联时重算，
+以及本地独立任务离线可用与远端授权失联限制的区别。验收包含 15 项故障、4 项迁移，真实 license/GPU 与 stub 分开。
+
+文档验证：87 个相对链接目标均存在，代码围栏配对、暂存 diff 空白检查通过；最终暂存 gitleaks 扫描约 63.12 KB，零发现。
+未运行产品测试/构建/UI/模型，未修改发布契约或业务源码。旧六项 WIP 原样保留；本次只向四份状态文档追加当前记录。
+远端仍 350534d；该头 Desktop/Runtime 失败终态、Docs/Secret 成功；本地前代码头 535b0d63 未推送、无对应 CI。
+本轮仅本地文档提交，无 push 或新 CI。所有者授权本轮直接证据设计并暂缓 AOCI 加载/维护，未改配置/索引/baseline、未声称对齐。
+证据：`/home/mnemora/.local/state/stk-validation/stk-unified-backend-design-20261106/`。
+
+以下为历史记录，旧“当前”标记不覆盖本节。
+
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
 ## 2026-11-03：恢复持续目标并落实 STK 主体方向（当前）
