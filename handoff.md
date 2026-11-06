@@ -1,5 +1,26 @@
 # STK 当前交接
 
+## 2026-11-06 UTC：启动会材料、总体框架与多仓协作（当前）
+
+本轮继续同一设计工作，所有者要求为与合作方的固定周会/启动会准备整体框架、开发计划与仓库规划。
+已交付 [总体框架](docs/design/platform-framework.md)、[12 周有限试点路线](docs/planning/platform-roadmap.md)、
+[多仓库策略](docs/planning/repository-strategy.md)、[约 15 分钟讲稿](docs/planning/research-kickoff.md)和
+[10 页投屏稿](docs/planning/research-kickoff.html)。材料本地 main 提交：`325fe57dc955b4e9a69370e60d03f39ad0a6bb7b`，七文件、647 行新增。
+
+共同后端方向保持。建议保留 stk 的后端/原生/CLI/契约与 synthrix 的 React，旧 Node 逐领域迁入；
+达到重复交付门槛时新建或复用集成发布仓，候选名 stk-platform。本轮未开仓、改权限、迁移代码或部署。
+W0 日期/人员/首演时间未确认，W1–W12 是有限试点候选安排，W2 用实际投入校准；
+没有承诺 12 周完整 D1–D5、所有平台或全部科研业务。周会候选 60 分钟，含会前材料、演示、决定/行动模板。
+
+文档交叉审查、60 个相对链接目标/5 个章节锚点及暂存空白检查通过；材料 gitleaks 零发现。
+实际 headless Chrome 导出 10 页 PDF，逐页文字/页码可读，并查看架构/仓库/排期页实物；这些不属于 STK 产品 UI 验收。
+PDF 与证据在 `/home/mnemora/.local/state/stk-validation/stk-kickoff-plan-20261106/`。
+
+实时 Git/CI：远端仍 350534d；Desktop 41639295121 completed/failure；本地前代码头 535b0d63 无对应 runs。
+本轮仅本地文档提交，不连带推送旧源码，不触发 CI；未运行新产品/科研/GPU/许可测试。
+沿用所有者已批准的本设计直接证据方式，AOCI 加载/维护继续暂缓；配置/baseline 及六项既有 WIP 原内容保留。
+旧八项范围、三待决与 PET 后置继续有效。以下先前三项设计与历史交接保留，当前材料入口以上方为准。
+
 ## 2026-11-06 UTC：当前交付为统一后端三项设计
 
 本轮按所有者要求先完成设计，未继续功能实现。STK Core 与云端采用同一后端代码、领域服务和状态机；

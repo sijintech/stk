@@ -1,5 +1,24 @@
 # 开发交接记录
 
+## 2026-11-06 UTC：准备启动会、整体框架和多仓库协作材料
+
+交付 [平台总体框架](design/platform-framework.md)、[滚动路线/周会模板](planning/platform-roadmap.md)、
+[仓库规划](planning/repository-strategy.md)、[讲稿](planning/research-kickoff.md)及
+[10 页 HTML 演示](planning/research-kickoff.html)，更新共同后端设计与仓库结构入口。
+材料 main 本地提交 `325fe57dc955b4e9a69370e60d03f39ad0a6bb7b`（七文件，647 行新增）。
+
+明确 stk 共用后端/原生/CLI/协议，synthrix 保留 React 并逐领域退出旧 Node；候选 stk-platform 仅集成发布，达到门槛再建或复用。
+W0+12 周是有限试点条件计划，W2 以实际投入重排，不承诺全平台/全部领域；真实许可/GPU/科学结论各自验收。
+审阅收窄了网络波动下“绝不重复”的口径为原键恢复、未知不另起执行，避免承诺任意外部副作用 exactly-once。
+
+验证：60 相对链接目标、5 章节锚点、围栏和暂存空白检查通过，材料暂存 gitleaks 扫描约 70.13 KB、零发现。
+headless Chrome 导出最终 PDF 10 页，PDFium 逐页文字/页码核对，实际查看架构/仓库/排期页；无新产品运行测试。
+证据/PDF：`/home/mnemora/.local/state/stk-validation/stk-kickoff-plan-20261106/`。
+远端仍 350534d，Desktop 41639295121 失败终态；本地前代码头 535b0d63 查询无 CI。本轮不 push、不触发 CI、不创建仓库或改权限。
+设计直接证据例外继续，AOCI 不维护或改资产；六项原 WIP 保留，本节仅追加当前记录。
+
+以下保留此前交付原文。
+
 ## 2026-11-06 UTC：交付统一后端架构、协议和验收设计
 
 按所有者补充，明确 STK Core 与云端共用后端实现，Desktop 保留 C++ / Python / GPU，Web 保留 React。

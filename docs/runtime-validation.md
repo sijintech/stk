@@ -1,5 +1,27 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-06 UTC：启动会与多仓规划材料验收（当前，仅文档）
+
+材料提交 `325fe57dc955b4e9a69370e60d03f39ad0a6bb7b`；入口为[总体框架](design/platform-framework.md)、
+[开发/周会计划](planning/platform-roadmap.md)、[分仓方案](planning/repository-strategy.md)、
+[讲稿](planning/research-kickoff.md)与[HTML 投屏稿](planning/research-kickoff.html)。
+
+| 检查 | 本轮实测与边界 |
+|---|---|
+| 内容/链接 | 60 个相对目标存在，5 个 Markdown 章节锚点可解析；围栏与暂存 diff 空白检查通过。独立审阅阶段、仓职责、人员假设、旧回执/科学边界无剩余实质问题 |
+| 浏览器呈现 | headless Chrome 实际导出 10 页 PDF；DOM 首轮检测 10 页、无整页 scroll overflow；最终只细化仓库候选名，最终仓库页另作实物检查。未声称已测全部交互按钮 |
+| PDF | 最终 665750 字节，10 页均有可提取文字及正确页码，仓库页含 stk-platform；实际查看架构/仓库/排期页。来源/摘要见 presentation-final.json，不作为 STK 原生 UI/点击验收 |
+| 暂存密钥扫描 | gitleaks 8.30.1 / .gitleaks.toml，材料七文件约 70.13 KB，零发现；交接追记另在其提交前扫描 |
+| 产品/科研测试 | 未运行产品回归、许可软件/GPU/节点/科学质量测试，无模型请求。12 周为条件性有限试点，新用例仍未执行 |
+| Git/CI | 远端 main 350534d；[Desktop 41639295121](https://github.com/sijintech/stk/actions/runs/41639295121) completed/failure；按本地前代码头 535b0d63 查询 runs 为 0。本轮仅本地文档提交，无 push 或新 CI |
+| AOCI/既有改动 | 延续所有者批准的本设计直接证据路径，加载与维护暂缓；config/baseline 字节摘要不变，四文档原文与其既有未提交改动保留 |
+| 外部动作 | 未创建/重命名仓库、改访问权限、发送会议消息、预订会议或部署。新仓名称与时间/人员均未当作已确认事实 |
+
+本轮证据根：`/home/mnemora/.local/state/stk-validation/stk-kickoff-plan-20261106/`，包括 preimages、
+content-validation.json、presentation-final.json、gitleaks-materials.json 和 STK-Synthrix-kickoff.pdf。
+HTML 可直接打开投屏或通过打印保存 PDF，不依赖外部脚本/字体下载。讲稿约 15 分钟，周会 60 分钟均为可调整建议。
+以下为此前设计与历史验收，不能用来填本轮新功能的通过状态。
+
 ## 2026-11-06 UTC：统一后端设计交付（仅文档，当前）
 
 设计提交 `f541393b31b9f32b1f73bc738998075bc93e6dbd`，main 本地。三项文档为
