@@ -1,8 +1,14 @@
 # STK 主体的分布式科研工作台
 
-更新：2026-11-03。状态：所有者已确定产品方向，本文记录目标、增量顺序和验收要求；
+更新：2026-11-06。状态：所有者已确定产品方向，本文记录目标、增量顺序和验收要求；
 具体新增协议仍是设计，已发布的 `docs/specs/` 契约继续有效。实际实现与证据见
 [开发计划](../development-plan.md)、[运行验收](../runtime-validation.md)和[当前交接](../../handoff.md)。
+
+2026-11-06 所有者进一步确定：STK Core 与云端采用同一套后端代码、领域服务与状态机，
+本地 Desktop 保留 C++ / Python / GPU，Web 使用 React 等网页技术。部署角色、存储和执行能力可以不同，
+不能只统一 API 而长期保留两套业务实现。功能开发先完成并评审下列三项设计：
+[架构边界与迁移](shared-backend-architecture.md)、[任务与数据协议](distributed-task-data-protocol.md)、
+[完整跨端验收](distributed-workbench-acceptance.md)。这些文档是设计交付，尚未扩展现有发布契约。
 
 ## 所有者已经确定的方向
 

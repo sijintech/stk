@@ -1,9 +1,14 @@
 # 项目工作台设计
 
-更新：2026-11-03。模块化与常驻可视化已交付；本地多维表格扩展及实际验收见
+更新：2026-11-06。模块化与常驻可视化已交付；本地多维表格扩展及实际验收见
 [多维表格](multidimensional-tables.md)和[验收记录](../runtime-validation.md)。
 开发次序见[开发计划](../development-plan.md)，持久化与计算规则见[项目数据模型](project-model.md)。
 本文区分目标行为与已实现首版；当前使用说明见[桌面指南](../desktop.md#ai-助手)。
+
+2026-11-06 补充决定：Core 与云端复用同一后端实现，C++ / Python 原生 Desktop 与 React Web
+调用共同业务服务；本地渲染和界面状态按前端特点实现。下一步以
+[架构与迁移](shared-backend-architecture.md)、[任务/数据协议](distributed-task-data-protocol.md)和
+[跨端验收方案](distributed-workbench-acceptance.md)为设计入口，先理清设计再继续功能开发。
 
 ## 2026-11-03：STK 主体、本地完整与分布式节点
 
