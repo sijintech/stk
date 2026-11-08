@@ -1,5 +1,19 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：工作区CLI最终验证、联邦等待与691整轮终态
+
+main源码2fcc7251c9a5b70a5918e87792e16b8bfe0046b1，仅三路径集成Claude8ae2088d；其父1a5dc3ad独立提案未合入。作者六模块100通过、0skip、54.752s；root主线test_runtime_hub_cli 42通过、0skip、15.716s。独立新最小Python3.12.14安装态42通过、0skip、17.224s，-I且无源码注入；wheel SHA11bacdc79c0398b2e231517d9888d08b3c01787ad5d3d52195e343bb336eb907，f052归档仅覆盖最终cli.py，已核2fcc产品差异仅该文件。9实际父进程模块来自site-packages且SHA匹配，无NumPy/VTK/PySide6/Torch/h5py；不是逐子进程完整sys.modules采集。
+
+初稿零等待P2有旧红新绿：真实HubBackend加排队传输替身，只POST一次并轮询同ID三次后取得files；失败/超时不当结果，写零等待后原读wait恢复含异常路径。独立23项纯检查通过；作者注入旧全局wait=0的四新例均失败。真实联网用单Linux回环Hub/Node/Runtime与实际worker，review状态是精确请求种入；兼容旧节点为替身，不代旧安装发行或跨机/目标OS。Hub上传在文件检查与网络前拒绝，direct上传spy另证有6种实际文件访问。三路径完整暂存32723字节、SHAf6cce7e59d83d49e06223ca1b6b1924b698ca7cf3655b2003514db5d42efe242，gitleaks0。
+
+root f052f06b406ccc56464ca5ae9942d81b699c38aa仅改联邦测试：准备前等待owner信息采用；生产busy不包含info，prepare会取消在途读取，故晚到info可使Register永不解锁。外部同源红绿均加0.5s响应延迟，仅等待一行不同：旧30.671185913s失败，新2.769111266s通过。固定起点zh_CN/1000×1200/scale1、a4最大化联邦Data、修订1无选择/计划/owner连接、隐藏Python稿及既有Viewer；实际50点击/0滚轮，完成同意、留出准入、显式启用/回退与撤权，Viewer和稿不变，无新增点击。root目标重建及24/24零skip18.464s通过；暂存857字节扫描0。该机制已受控证明，但Mac原日志未给info/future证据，不认定唯一CI根因。证据mac-ci-42495020086/root-federation-race/。
+
+前整个[Desktop42495020086](https://github.com/sijintech/stk/actions/runs/42495020086)绑定691f3f12，于16:29:30Z completed/failure，push等待门已满足。LinuxGPU/包/新机包冒烟三个job成功；WindowsCPU1447通过、0skip/0fail、844.71s；Windows原生6/6、0fail、1030.19s。Mac构建成功，CPU1502/1503、531.86s，唯一ChineseNarrow1x联邦Register30s未解锁；Metal步骤跳过；原生4/6、501.4s，两视频0/20轮失败。691不含c0ff等待补丁，WindowsPDF本轮通过不证明旧根因或该新候选。Runtime42495020053整轮13job成功，Docs42495020085完整部署和Secret42495020054成功；新字节不得继承旧头绿灯。
+
+AX两条诊断仍待实现：数值父链用于区分WebArea祖先/兄弟支；独立有界非阻塞进度通道用于无最终Response时定位API阶段。不能仅给最终Response加phase，更不降低2s/8s、四provider、唯一slider、DOM、OS像素和20轮门。没有新产品UI交付；CLI不记作点击改善。
+
+Claude17仅设计文档，root独占main/共享构建/状态与推送。旧四文档和AOCI WIP保留；最终交付/新CI见d1-hub-workspaces-20261108-20/root/closure.json。MuPRO真实资产、科学扫描值、提案持久形式及原八项/D1-D5继续，HDF5仍需DAT，PET新专项后置。
+
 ## 2026-11-08 UTC：Bridge收块丢ACK恢复最终验证与691新CI
 
 Claude15 `4d02ea3a03b8583d13bd8ab1a0a4a7fb8f771a53` 已仅三路径选择集成为 main `2cc40a0ddbe789770a43cb06c1f0f758ae48e524`，尚未push；root原生等待候选c0ff亦未push。远端691整个Desktop42495020086在16:22Z附近仍运行，须整轮终态后推送。Runtime42495020053已13job全绿，Docs/Secret成功；WindowsCPU成功，Windows原生128786216358仍live。Mac CPU1502/1503通过、531.86s，唯一失败为联邦ChineseNarrow1x的federation_register未解锁；Metal跳过。原生4/6，两视频仍失败，不能沿用旧7ef CPU/Metal结果。

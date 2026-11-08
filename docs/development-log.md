@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：集成Claude16并补联邦测试等待
+
+实际Claude16交8ae2088d（父1a5dc3ad），root只集成cli.py、test_runtime_hub_cli.py、hub.md为2fcc7251。父提交的独立AOCI使用提案保留在Claude分支，未入main或生效。新增Hub工作区入口沿用原动作身份和权限；审阅抓到全局wait=0使旧节点读取无法完成的P2，改为仅写操作临时零等待并finally恢复。真实HubBackend排队读取反例一POST、同ID三次poll取得结果，失败/超时不返回文件；独立23项纯检查通过，作者恢复旧行为的四例全部失败。
+
+作者100/0skip/54.752s；root集成42/0skip/15.716s；独立最小安装42/0skip/17.224s，wheel11bacdc7…及9实际父模块来源/摘要匹配。原三文件暂存32723字节SHAf6cce7e5…扫描0发现。root f052f06b只补测试owner信息采用等待，24项18.464s全过；同0.5s延迟旧30.671s失败、新2.769s通过，不宣布Mac动态根因已证实。
+
+691 Desktop42495020086已16:29:30Z整轮failure终态：Linux三成功，WindowsCPU1447/1447及原生6/6成功；Mac1502/1503、Metal跳过、原生4/6。Runtime13job、Docs部署、Secret成功。新代码仍待新头CI；691不含c0ff，PDF通过不证旧根因。root继续main/构建/公共后端/原生/集成/交付，实际Claude接17独立journal/上传恢复设计，唯一文档候选不实施产品。原八项/D1-D5和真实MuPRO缺口保留，旧WIP受保护；本批closure记录最终推送。
+
 ## 2026-11-08 UTC：集成真实Bridge上传恢复并派发Claude16
 
 Claude15 `4d02ea3a03b8583d13bd8ab1a0a4a7fb8f771a53` 已仅三路径选择集成为 main `2cc40a0ddbe789770a43cb06c1f0f758ae48e524`，尚未push；root原生等待候选c0ff亦未push。远端691整个Desktop42495020086在16:22Z附近仍运行，须整轮终态后推送。Runtime42495020053已13job全绿，Docs/Secret成功；WindowsCPU成功，Windows原生128786216358仍live。Mac CPU1502/1503通过、531.86s，唯一失败为联邦ChineseNarrow1x的federation_register未解锁；Metal跳过。原生4/6，两视频仍失败，不能沿用旧7ef CPU/Metal结果。

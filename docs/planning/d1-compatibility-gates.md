@@ -1,5 +1,13 @@
 # D1 实施前的最小契约与兼容门清单
 
+## 2026-11-08 后续进度：既有Hub工作区CLI入口
+
+Claude16的三路径8ae2088d由root选择集成为main2fcc7251，新增工作区create/list/files及仅workspace.create原action观察；不接Hub上传或新授权。原key/action先输出，unknown只读原身份；列表标明heartbeat_snapshot且有限，离线/能力错误不猜不存在。旧节点读取兼容仍可创建read action并有界轮询，只有写操作临时wait=0并finally恢复。
+
+作者六模块100/0skip/54.752s、root主线42/0skip/15.716s、新最小安装42/0skip/17.224s通过；wheel11bacdc7…产品差异及9父模块site-packages来源/SHA匹配。review是种入状态，旧节点是传输替身；真实联网仅单Linux回环，不代跨站、旧发行或目标OS。独立发现并关闭旧读零等待P2，23纯检查及四旧行为红例保留。详见运行验收及d1-hub-workspaces-20261108-20/root/。
+
+Claude17已接独立journal/锁/原身份恢复的设计，未实施上传CLI。既有Bridge上传恢复不代此入口，也不证完整D1、R3、云端项目或网络分区。691整个Desktop已失败终态，Windows原生6/6成功；MacCPU1502/1503、Metal跳过、原生4/6。root f052联邦测试等待修正已本地24项通过，仍待新平台CI；独立AOCI提案未集成。
+
 ## 2026-11-08 后续进度：真实Bridge收块丢ACK恢复
 
 [上传恢复样例](../../examples/backend_parity/UPLOAD_RESTART.md)由实际Claude4d02ea3a三路径选择集成为main2cc40a0d，本地未push。真实Hub先收首1MiB、Bridge原journal仍bytes_done=0时SIGKILL/reap，仅重开同profile/state/journal，保持其他四服务原PID/创建时间；原transfer/key/request/upload_session恢复，首新块1048576、下一块2097152，总2621464字节。完成后原workspace.import仍待人工批准，批准前零文件/任务，之后精确大小/SHA一致；无Task提交，不声称程序消费了输入。驱动写后及启动前SHA核验，缺证明和清理失败独立禁通过。

@@ -1,5 +1,13 @@
 # Codex / Claude worktree 协作约定
 
+## 2026-11-08 当前补充：16已集成，17先做上传恢复设计
+
+Claude16实际8ae2088d（父1a5dc3ad）仅三路径选择集成为main2fcc7251；作者100项、root集成42及最小安装42均零skip通过。独立旧节点等待P2已修，原key/action及有限快照语义保持；Hub上传本片仍不支持。父提交是另一会话按所有者请求写的独立AOCI使用提案，保留在Claude分支，未集成或改变现行规则。
+
+CL-D1-HUB-UPLOAD-CLI-17已派给实际Claude，独立stk-claude/claude/support以8ae2088d干净HEAD为基线，不同步main。仅新docs/design/hub-cli-transfers.md，先交固定设计diff/SHA；不stage/commit或实施产品。要核已有owner授desktop额度、原transfer/key/request/SHA/server_key/node、独立CLI journal和namespace生命周期租约；构造恢复/GC是写入，读不能resume，stop超时不能让仍活worker失去锁保护。复用TransferManager/既有Hub协议，人工import与显式恢复分离，不自授额度、不重配对、不扩R2/R3。任务卡d1-hub-upload-cli-20261108-21/root/claude-task17.txt。
+
+root继续独占main、共享构建、公共后端/契约、原生、独立审阅、集成、四状态文档/AOCI与推送。691前整个Desktop已终态，详细结果见运行验收；新代码待新头CI。旧任务“未交付”均为历史状态，以上更新优先。
+
 ## 2026-11-08 当前补充：15已集成，16接Hub工作区CLI
 
 实际Claude15交4d02ea3a，仅三新harness路径，由root选择集成为2cc40a0d。root67项/最小installed10断言及独立审阅通过，既有WIP保留；证据见运行验收。root仍独占main/共享build/状态文档/AOCI/推送，前整个Desktop42495020086终态前不push。

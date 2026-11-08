@@ -1,5 +1,19 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：工作区 CLI 已集成，691 Desktop 已终态
+
+当前代码 main `2fcc7251c9a5b70a5918e87792e16b8bfe0046b1`，集成实际 Claude16 `8ae2088d56a7ac1ab5ca25e3e99e42ad3317209e` 的三个文件；其父1a5dc3ad是独立AOCI使用提案，未合入main或改变现行规则。Hub工作区create/list/files/action已接既有后端，原key/action先打印，未知只查原身份；快照明确有界，上传仍早拒绝。独立审阅发现的旧节点读取零等待P2已修复：只有写操作临时wait=0，finally恢复；读取沿用有界轮询。
+
+作者六模块100通过/零skip/54.752s；root集成42通过/零skip/15.716s，独立最小安装42通过/零skip/17.224s。wheel11bacdc7…来自f052归档加唯一cli.py覆盖，已核至2fcc产品差异仅该文件，9个实际父进程模块来自site-packages，无源码注入。旧节点为真实HubBackend加传输替身，review为种入状态；真实联网部分仅单Linux回环，不代旧发行版/跨机/目标OS。三文件完整暂存32723字节，gitleaks零发现。
+
+root另提交测试修正 `f052f06b406ccc56464ca5ae9942d81b699c38aa`：准备前等owner信息真正采用，避免prepare取消在途info后Register永不解锁。相同0.5s延迟旧测试30s失败、新测试2.769s通过；主线24/24、零skip、18.464s。未证实它就是Mac CI唯一根因。
+
+前整个[Desktop42495020086](https://github.com/sijintech/stk/actions/runs/42495020086)于16:29:30Z completed/failure，push等待门满足。Linux三job成功；WindowsCPU1447/1447、原生6/6成功；Mac CPU1502/1503、Metal跳过、原生4/6。691不含c0ff，Windows本轮通过不证PDF旧根因或新等待补丁。Runtime13job、Docs部署和Secret成功；新代码待新头CI。AX数值父链/独立有界进度通道仅外部建议，尚未实现。
+
+root独占main、共享构建、公共后端/契约、原生、审阅集成、状态/认知和推送。Claude在stk-claude/claude/support以8ae2088d接CL-D1-HUB-UPLOAD-CLI-17，只写docs/design/hub-cli-transfers.md设计候选，不实施产品或提交；需核独立journal租约、构造时恢复/GC、stop超时和显式原身份resume。任务卡d1-hub-upload-cli-20261108-21/root/claude-task17.txt。
+
+继续D1剩余合同/故障与云端项目、文献原生点击、Synthrix正常接线、D2-D5及原八项。MuPRO/MuFerro首期、插件自定格式/MuPRO HDF5、有限S2c已定；真实主机/SDK/许可/小算例、扫描具体值和分析修改提案持久形式仍缺，HDF5完成仍需DAT，PET新专项后置。旧WIP保留；最终推送/新CI与治理见d1-hub-workspaces-20261108-20/root/closure.json和实际Git。
+
 ## 2026-11-08 UTC：上传崩溃恢复已集成，Claude转Hub工作区CLI
 
 Claude15 `4d02ea3a03b8583d13bd8ab1a0a4a7fb8f771a53` 已仅三路径选择集成为 main `2cc40a0ddbe789770a43cb06c1f0f758ae48e524`，尚未push；root原生等待候选c0ff亦未push。远端691整个Desktop42495020086在16:22Z附近仍运行，须整轮终态后推送。Runtime42495020053已13job全绿，Docs/Secret成功；WindowsCPU成功，Windows原生128786216358仍live。Mac CPU1502/1503通过、531.86s，唯一失败为联邦ChineseNarrow1x的federation_register未解锁；Metal跳过。原生4/6，两视频仍失败，不能沿用旧7ef CPU/Metal结果。
@@ -418,7 +432,7 @@ Linux helper `OWNER_OLD/helper-package-01/relocated/stk-peer-runtime`有UDP/TCP/
 
 <a id="三项待所有者决定"></a>
 
-**不能擅选**：（1）合作方S3格式和MuPRO电场扫描；（2）S2c智能体prepare/run权限；（3）保存分析修改提案的持久形式。内部capsule/比较节点/desktop-only服务不构成这些决定。PET新字典/厂内专项/专用训练/长链气体收敛后置，保护已有功能。
+**已定与待决**：首期MuPRO/MuFerro；数据格式由插件定义、MuPRO用HDF5；有限S2c本地prepare和桌面人工首次批准已获准并有软件实现。仍须提供真实执行主机/SDK/许可/小算例、MuPRO电场扫描方向/幅度/单位/步长/推进与采样，以及分析修改提案的持久形式。HDF5收集仍需DAT完成验证；内部capsule不是合作方格式裁决。PET新字典/厂内专项/专用训练/长链气体收敛后置，保护已有功能。
 
 ## 环境、验证和交付规则
 

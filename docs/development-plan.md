@@ -1,5 +1,15 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：交付工作区入口，继续可恢复上传设计
+
+1. 已集成Claude16为main2fcc7251：Hub工作区create/list/files与仅创建action观察；旧节点读回退保持有界轮询，写操作只确认收下。作者100项、root集成42项及独立最小安装42项均零skip通过；未接Hub上传、未扩授权或R2/R3。
+2. root测试修正f052f06b等待owner信息后再prepare；24项通过，受控延迟旧红新绿。前691 Desktop整轮已于16:29:30Z失败终态，WindowsCPU与原生6/6成功；Mac单个联邦测试失败、Metal跳过、原生4/6。c0ff和本批新字节仍待新头平台CI。
+3. 实际Claude在独立stk-claude/claude/support接17，仅设计Hub输入CLI的持久journal、单实例生命周期、人工import与显式resume；root审核具体方案后再分配实现路径。AOCI使用提案为另一独立提交，未纳入本片或改变规则。
+4. root继续公共后端、Mac AX位置/超时证据、原生文献实际点击、Synthrix正常装配及D1剩余退出门；随后按依赖推进D2-D5和原八项。当前AX诊断建议未实施，不放宽2s/8s、唯一slider、像素及20轮门。
+5. 首期MuPRO/MuFerro、插件自主格式/MuPRO HDF5、有限S2c方向已确认。真实执行资产、扫描数值及分析修改提案形式不代选；HDF5仍需DAT完成验证，PET新专项后置。
+
+本批证据d1-hub-workspaces-20261108-20/root/；最终推送和CI见closure及运行验收，旧WIP保留。
+
 ## 2026-11-08 UTC：完成上传恢复有限切片，推进工作区入口
 
 Claude15 `4d02ea3a03b8583d13bd8ab1a0a4a7fb8f771a53` 已仅三路径选择集成为 main `2cc40a0ddbe789770a43cb06c1f0f758ae48e524`，尚未push；root原生等待候选c0ff亦未push。远端691整个Desktop42495020086在16:22Z附近仍运行，须整轮终态后推送。Runtime42495020053已13job全绿，Docs/Secret成功；WindowsCPU成功，Windows原生128786216358仍live。Mac CPU1502/1503通过、531.86s，唯一失败为联邦ChineseNarrow1x的federation_register未解锁；Metal跳过。原生4/6，两视频仍失败，不能沿用旧7ef CPU/Metal结果。
