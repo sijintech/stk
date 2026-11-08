@@ -60,7 +60,7 @@ def settled(executor,store,run, timeout=5):
     while time.monotonic()<deadline:
         record=store.analysis_runs.get(run['id'])
         with executor._lock: active=executor._key(store,run['id']) in executor._jobs
-        if not active: return record
+        if not active: return store.analysis_runs.get(run['id'])
         time.sleep(.01)
     pytest.fail('analysis did not settle')
 
