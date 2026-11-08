@@ -1,5 +1,6 @@
 """Run the control server and outbound agent as separate long-lived processes."""
 import asyncio
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -7,7 +8,7 @@ import secrets
 
 import click
 
-from suan.runtime.common import UnsupportedServerPlatform, atomic_json, load_config, require_linux_server
+from suan.runtime.common import UnsupportedServerPlatform, atomic_json, instance_lock, load_config, require_linux_server
 from suan.runtime.client import RuntimeClient
 from .agent import NodeAgent, endpoint
 from .limits import FRAME_LIMIT
@@ -89,32 +90,38 @@ def init(state_dir):
 def serve(state_dir, host, port, web_dir, allow_demo_template, names, files, blob_max_mib, desktop_auto_mib,
           upload_quota_mib, upload_gc_hours, upload_min_free_mib, review_policy):
     linux_server()
-    import uvicorn
-    from .app import create_app
-    from .model import ChatModel
-    try:
-        templates = load_templates((("demo-field",) if allow_demo_template else ()) + names, files)
-    except (OSError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
-    config = json.loads((state_dir / "control.json").read_text(encoding="utf-8"))
-    desktop_auto_mib = setting(config, "desktop_auto_mib", desktop_auto_mib, DESKTOP_AUTO_BYTES // (1024 * 1024),
-                               65536)
-    upload_quota_mib = setting(config, "upload_quota_mib", upload_quota_mib, 4096, 1048576)
-    upload_gc_hours = setting(config, "upload_gc_hours", upload_gc_hours, 24, 8760, number=True)
-    upload_min_free_mib = setting(config, "upload_min_free_mib", upload_min_free_mib, 5120, 1048576)
-    if review_policy is None:
-        review_policy = config.get("review_policy", "any")
-        if review_policy not in REVIEW_POLICIES:
-            raise click.ClickException("control.json review_policy must be one of " + ", ".join(REVIEW_POLICIES))
-    model = None
-    if os.environ.get("STK_MODEL_URL") and os.environ.get("STK_MODEL_NAME"):
-        model = ChatModel(os.environ["STK_MODEL_URL"], os.environ.get("STK_MODEL_KEY", ""), os.environ["STK_MODEL_NAME"])
-    mib = 1024 * 1024
-    app = create_app(state_dir, config["owner_token"], templates, model, web_dir,
-                     blob_max_bytes=blob_max_mib * mib, desktop_auto_bytes=desktop_auto_mib * mib,
-                     upload_quota_bytes=upload_quota_mib * mib, upload_ttl_seconds=upload_gc_hours * 3600,
-                     upload_min_free_bytes=upload_min_free_mib * mib, review_policy=review_policy)
-    uvicorn.run(app, host=host, port=port, ws_max_size=FRAME_LIMIT, access_log=False)
+    state_dir = state_dir.resolve()
+    with ExitStack() as lifecycle:
+        try:
+            lifecycle.enter_context(instance_lock(state_dir / "control.lock"))
+        except BlockingIOError:
+            raise click.ClickException("Control service is already running for this state directory") from None
+        import uvicorn
+        from .app import create_app
+        from .model import ChatModel
+        try:
+            templates = load_templates((("demo-field",) if allow_demo_template else ()) + names, files)
+        except (OSError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        config = json.loads((state_dir / "control.json").read_text(encoding="utf-8"))
+        desktop_auto_mib = setting(config, "desktop_auto_mib", desktop_auto_mib, DESKTOP_AUTO_BYTES // (1024 * 1024),
+                                   65536)
+        upload_quota_mib = setting(config, "upload_quota_mib", upload_quota_mib, 4096, 1048576)
+        upload_gc_hours = setting(config, "upload_gc_hours", upload_gc_hours, 24, 8760, number=True)
+        upload_min_free_mib = setting(config, "upload_min_free_mib", upload_min_free_mib, 5120, 1048576)
+        if review_policy is None:
+            review_policy = config.get("review_policy", "any")
+            if review_policy not in REVIEW_POLICIES:
+                raise click.ClickException("control.json review_policy must be one of " + ", ".join(REVIEW_POLICIES))
+        model = None
+        if os.environ.get("STK_MODEL_URL") and os.environ.get("STK_MODEL_NAME"):
+            model = ChatModel(os.environ["STK_MODEL_URL"], os.environ.get("STK_MODEL_KEY", ""), os.environ["STK_MODEL_NAME"])
+        mib = 1024 * 1024
+        app = create_app(state_dir, config["owner_token"], templates, model, web_dir,
+                         blob_max_bytes=blob_max_mib * mib, desktop_auto_bytes=desktop_auto_mib * mib,
+                         upload_quota_bytes=upload_quota_mib * mib, upload_ttl_seconds=upload_gc_hours * 3600,
+                         upload_min_free_bytes=upload_min_free_mib * mib, review_policy=review_policy)
+        uvicorn.run(app, host=host, port=port, ws_max_size=FRAME_LIMIT, access_log=False)
 
 
 def setting(config, key, value, default, maximum, number=False):
