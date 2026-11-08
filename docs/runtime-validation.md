@@ -1,5 +1,23 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：S2c MuPRO 接线、目标绑定与原生卡片验收
+
+源码 main `b6b92d911860b52eda755679f4cc2094a39ba24d`；证据根 `/home/mnemora/.local/state/stk-validation/s2c-wire-20261108-07/`。此前组件99/8只属于旧字节，本批最终结果如下。
+
+- `root/joint-final.xml`：154通过、零跳过、28.27s；`python-final-inputs.json` 的17个Python源码/测试输入前后稳定。严格桥接包含新工具/卡片结构、桌面专用目录排除、完整计划限制、单次消费、资源/修订/busy/容量、失联及转发恢复。
+- `root/runtime-final.xml`：22通过、零跳过、148.34s；真实本机Runtime配合制造MuFerro程序、脚本规划回复、旧工作流与Runtime/Hub传输。包括既有案例准备→完整计划→人工首次批准→运行/收集/分析→原观察，重复决定没有第二个Runtime任务。无收费模型或真实MuPRO许可运行。
+- `root/native-build-03.log`、`native-build-clicks.log`：共享stk-project-tests目标构建退出0；`native-runs-final.xml` 最终13/13、零跳过、6.401s。独立原生两提交曾12/12，root修正/实际点击另验，不将作者局部链接冒充共享重建。
+- `root/native-project.xml`：919/919通过、零跳过、722.343s，进程退出0。完整回归二进制含原12卡片例，后补实际指针例由最终13例单独覆盖；产品实现相同，测试源新增一例。记录24输入时唯一漂移为新增该C++用例，17个Python输入不变。
+- `root/code-gitleaks.json`：暂存177180字节扫描退出0、零发现；提交前diff空白检查通过。四文档仅本轮前置增量提交，AOCI预存资产不整包纳入。
+
+固定点击起点：英语、缩放1、1280×1600、a2最大化AI智能体、已选会话的待批准卡片，初始prepare开关关闭。实际鼠标按下/抬起两次：读取完整计划、批准开始；结果各一次run_plan/run_decide，未发planner start，Viewer保存状态及屏幕布局完全相同。长字符串、Unicode、路径和空格经无损换行可完整读取；640px另测每行宽度。此为CPU窗口事件驱动/FakeTextMeasurer，未执行Mac/Windows新功能UI或GPU字体验收；隐藏草稿保护另属原有完整项目回归。
+
+审查证据：`review/backend-wire/` 与 `review/native-6f009292/final-52bb7b4d/`。早期preliminary/wire/binding日志包括陈旧测试断言、fixture参数/回执/Schema不匹配，修正后最终套件通过；不删失败或借前一轮成功覆盖后改。实际修正含完整计划视觉裁剪、目标失败后Continue、stale decline门、historical状态标签、混合步骤回放、decline的ok与端点竞态；传输worker保留ContextVar，新journal还核原端点，重开不改投。
+
+前置远端 `a506cc69a0a86b596eedb55551cc31813648228b` 的整个Desktop42459561098已于08:42:54Z completed/failure，六job均终态、五成功一失败。Windows native128675100405成功，artifact13611270962六份result均20/20轮且保留Viewer/Python草稿；Mac128665708537 CPU1488/1488、Metal254/254成功，两视频失败均为Own-WKWebView唯一时间匹配slider断言，原生4/6、退出8。250ms时序候选未解决问题，不削弱唯一slider/OS像素/20轮门。同头Runtime42459561111、Docs、Secret成功。详见 `ci-audit/desktop-42459561098-final-audit.md`；前整轮等待门满足，新提交CI另记。
+
+真实MuPRO主机/SDK/许可/小算例、新目标OS UI、科学有效性与HDF5-only完成仍未验。HDF5附加结果仍需DAT完成核验，扫描数值与提案持久形式未代选。推送/新CI/AOCI最终身份见本批closure。
+
 ## 2026-11-08 UTC：S2c 批准组件与既有 MuPRO 路径回归
 
 源码本地main `afef46c52336ba6dec00594ad1edad560e582b86`（Claude原867eef9b）及 `67670ae30c137fb45903b9f0e90d7421cb4ebdde`（root），尚未push，远端a506cc69。证据根 `/home/mnemora/.local/state/stk-validation/s2c-agent-run-20261108-06/root/`，最终Git/CI与治理见closure。

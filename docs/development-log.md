@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：S2c MuPRO 工具、桌面批准与 Runtime 目标绑定
+
+本地源码提交 `b6b92d911860b52eda755679f4cc2094a39ba24d`，29文件。集成Claude09内部准备模块与独立原生卡片，root接资源选择/工具级别/完整桥接、单次消费与派发、端点/传输恢复绑定及发布扩展；不升项目格式，不重写旧会话头。
+审阅发现并修复长行视觉裁剪、目标配置失败后切换会话放行继续、混合 frozen step 回放、decline缺ok、历史状态误标当前及批准后profile改投窗口。反例/早期失败日志均保留，最终联合154项、Runtime/Hub22项及原生卡片13项通过；额外完整项目回归919/919通过、零跳过、722.343s。
+固定1280×1600、AI智能体a2最大化、原待批准卡片：两次真实指针事件读完整计划并批准；仅一次run_plan/run_decide，无planner start，Viewer与布局不变。CPU/FakeTextMeasurer不是GPU字体或目标OS证明。
+前远端a506 Desktop42459561098已于08:42:54Z失败终态：五job成功；Windows原生6/6各20轮过，Mac CPU/Metal过、两视频AX失败。新代码CI尚待推送，不借旧绿灯；PR53/54实际head未变，不整合无关旧差异。
+四状态文档旧WIP保留；root统一AOCI与交付，Claude10只交外部复核。真实许可/HDF5-only完成与科学有效性仍未验，原八项/D1和待决保留。完整证据见 s2c-wire-20261108-07/root/closure.json。
+
 ## 2026-11-08 UTC：首次批准启动与单次消费组件
 
 Claude独立claude/support交 `867eef9b`，root审查后选择集成 `afef46c5`；仅两个分配文件。WorkflowRuns.start可选approval在追加started同一事务核原计划/请求、当前修订与归档并拒绝历史started，普通人工重启保留。Claude38+13项回归通过，禁用started/归档门分别出现2/1个预期失败。
