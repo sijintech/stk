@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <gtest/gtest.h>
+#include <gtest/gtest-spi.h>
 #include "stk/app/app_store.hh"
 #include "stk/app/peer_state.hh"
 #include "stk/core/sha256.hh"
@@ -10,11 +11,14 @@
 #include "stk/app/editor.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/io/payload.hh"
+#include <chrono>
 #include <cstdlib>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
+#include <iterator>
 
 namespace stk::app {
 namespace {
@@ -114,6 +118,10 @@ from suan.desktop_bridge.projects import ProjectSessions
 from suan.desktop_bridge.__main__ import main
 from suan.project.store import ProjectStore
 control = Path(sys.argv.pop(1))
+def publish(path, text):
+    # Write-then-replace: a JSON fixture file that exists already holds its complete text.
+    pending = path.with_name(path.name + '.tmp')
+    pending.write_text(text, encoding='utf-8'); pending.replace(path)
 seeds = []
 for label in ('first', 'second'):
     project = ProjectStore.create(control.parent / label, 'Public synthetic peer source')
@@ -122,7 +130,7 @@ for label in ('first', 'second'):
     records = project.files.index([str(project.directory / 'selected.bin'), str(project.directory / 'another.bin')], expected_revision=0)['record_ids']
     snapshot = project.snapshots.capture(records, expected_revision=1)['snapshot']
     seeds.append({'path':str(project.directory), 'snapshot_id':snapshot['id'], 'record_ids':records})
-control.with_suffix('.seed.json').write_text(json.dumps(seeds), encoding='utf-8')
+publish(control.with_suffix('.seed.json'), json.dumps(seeds))
 lock = threading.Lock()
 counts = {}
 draw_results = {}
@@ -170,7 +178,7 @@ def controlled(self, message, method=None):
             if control.with_suffix('.uncertain_' + suffix).exists():
                 op.update(state='uncertain', result=None, error=None)
             draw_results[op['operation_id']] = json.loads(json.dumps(op))
-            control.with_suffix('.' + suffix + '_operation.json').write_text(json.dumps(op), encoding='utf-8')
+            publish(control.with_suffix('.' + suffix + '_operation.json'), json.dumps(op))
         if method == 'peer.operations.get' and message['result']['operation'] is not None:
             original = message['result']['operation']['operation_id']
             if original in draw_results:
@@ -255,7 +263,7 @@ def native_initialize(self, *args, **kwargs):
             'session_id':session['session_id'], 'transfer_id':None})['operation']
         assert offered['state'] == 'completed'
         metadata['transfer_id'] = offered['result']['transfer_id']
-    control.with_suffix('.native.json').write_text(json.dumps(metadata))
+    publish(control.with_suffix('.native.json'), json.dumps(metadata))
     self._test_native_stop = threading.Event()
     def recipient():
         try:
@@ -344,6 +352,50 @@ class PeerBridge : public ::testing::Test {
   {
     ASSERT_TRUE(loop.pump_until([&] { return std::filesystem::exists(dir.path() / ("control." + name)); }));
   }
+  // JSON fixture files are published by the bridge script with write-then-replace (publish()), so a
+  // name that exists already holds its complete text. A stream that failed to open or read nothing must
+  // not reach the parser: nlohmann reports it as "attempting to parse an empty input".
+  enum class Published { Missing, Unreadable, Empty, Invalid, Complete };
+  struct Reading { Published kind = Published::Missing; Json value; std::string cause = "not read"; };
+  /** One attempt; the cause names a state only, never file content or a path. */
+  static Reading read_published(const std::filesystem::path &path)
+  {
+    std::error_code error;
+    const auto status = std::filesystem::status(path, error);
+    if (status.type() == std::filesystem::file_type::not_found) { return {Published::Missing, {}, "not published"}; }
+    if (error) { return {Published::Unreadable, {}, "status unavailable"}; }
+    if (status.type() != std::filesystem::file_type::regular) { return {Published::Unreadable, {}, "not a regular file"}; }
+    std::ifstream in(path, std::ios::binary);
+    if (!in.is_open()) { return {Published::Unreadable, {}, "published but could not be opened"}; }
+    std::string text;
+    try {  // A filebuf read error can throw (libstdc++ underflow) instead of setting a stream flag.
+      text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    catch (const std::exception &) { return {Published::Unreadable, {}, "published but the read failed"}; }
+    if (in.bad()) { return {Published::Unreadable, {}, "published but the read failed"}; }
+    if (text.empty()) { return {Published::Empty, {}, "published but empty"}; }
+    Json value = Json::parse(text, nullptr, false);
+    if (value.is_discarded()) { return {Published::Invalid, {}, "not valid JSON (" + std::to_string(text.size()) + " bytes)"}; }
+    return {Published::Complete, std::move(value), "complete"};
+  }
+  /** Waits within the usual budget until control.<name> is complete JSON and adopts it. A missing,
+   * unopenable or empty file is retried; non-empty invalid content cannot become valid under
+   * write-then-replace, so it fails at once. Every failure names the file and its last state. */
+  bool published(const std::string &name, Json &out, double timeout_s = 30.0,
+                 const std::function<void(const Reading &)> &observed = {})
+  {
+    const auto path = dir.path() / ("control." + name);
+    Reading last;
+    const bool settled = loop.pump_until([&] {
+      last = read_published(path);
+      if (observed) { observed(last); }
+      return last.kind == Published::Complete || last.kind == Published::Invalid;
+    }, timeout_s);
+    if (settled && last.kind == Published::Complete) { out = std::move(last.value); return true; }
+    ADD_FAILURE() << "fixture file control." << name
+                  << (settled ? " is permanently bad: " : " was not complete before the deadline; last state: ") << last.cause;
+    return false;
+  }
   void SetUp() override
   {
     std::string python = STK_BRIDGE_TEST_PYTHON_DEFAULT;
@@ -369,7 +421,7 @@ class PeerBridge : public ::testing::Test {
       "--cache-dir", options.cache_dir, "--strict"};
     client = bridge::Client::create(options); ASSERT_TRUE(client->start()); ASSERT_TRUE(client->wait_ready(60));
     loop.run_ready(); store.set_bridge(client.get());
-    std::ifstream in(dir.path() / "control.seed.json"); in >> seeds;
+    ASSERT_TRUE(published("seed.json", seeds));
     ASSERT_EQ(seeds.size(), 2u);
   }
   void TearDown() override
@@ -579,6 +631,72 @@ TEST_F(PeerBridge, NewUncertainHostAndQueryClearPriorSuccessWhileLocallyRejected
   }
 }
 
+TEST_F(PeerBridge, FixtureJsonIsAdoptedOnlyWhenCompleteAndPermanentlyBadContentFailsAtOnceWithItsCause)
+{
+  const auto path = dir.path() / "control.probe.json";
+  const std::string complete = R"({"session_id":"00000000-0000-4000-8000-000000000007"})";
+  const auto expected = Json::parse(complete);
+  const auto publish = [&](const std::string &text) {  // The bridge script's write-then-replace, in C++.
+    const auto pending = dir.path() / "control.probe.json.tmp";
+    { std::ofstream out(pending, std::ios::binary); out << text; ASSERT_TRUE(out.good()); }
+    std::filesystem::rename(pending, path);
+  };
+  // The pre-fix reader parsed an unchecked stream: a file that could not be opened (here: missing) and an
+  // empty file both become nlohmann's "attempting to parse an empty input", the message of the CI failure.
+  // (A directory is platform-specific: libstdc++ opens it and its read throws a non-JSON ios_failure.)
+  const std::vector<std::pair<std::string, std::function<void()>>> unreadable{
+      {"not opened", [] {}}, {"empty", [&] { std::ofstream(path).close(); }}};
+  for (const auto &[label, make] : unreadable) {
+    SCOPED_TRACE(label); make();
+    try {
+      std::ifstream in(path); Json value; in >> value; ADD_FAILURE() << "an unreadable file parsed";
+    }
+    catch (const Json::parse_error &error) {
+      EXPECT_EQ(error.id, 101); EXPECT_NE(std::string(error.what()).find("empty input"), std::string::npos);
+    }
+  }
+  std::filesystem::remove(path);
+  // One attempt distinguishes every state.
+  EXPECT_EQ(read_published(path).kind, Published::Missing);
+  std::filesystem::create_directory(path); EXPECT_EQ(read_published(path).kind, Published::Unreadable);
+  std::filesystem::remove(path);
+  ASSERT_NO_FATAL_FAILURE(publish("")); EXPECT_EQ(read_published(path).kind, Published::Empty);
+  ASSERT_NO_FATAL_FAILURE(publish(complete.substr(0, 30)));
+  auto partial = read_published(path); EXPECT_EQ(partial.kind, Published::Invalid);
+  EXPECT_EQ(partial.cause, "not valid JSON (30 bytes)"); // A state and a size, never the content.
+  ASSERT_NO_FATAL_FAILURE(publish(complete));
+  auto whole = read_published(path); EXPECT_EQ(whole.kind, Published::Complete); EXPECT_EQ(whole.value, expected);
+  // While it waits, an unreadable or empty file is never adopted; the complete text published later is.
+  for (const auto &[label, make] : std::vector<std::pair<std::string, std::function<void()>>>{
+           {"unreadable", [&] { std::filesystem::create_directory(path); }}, {"empty", [&] { publish(""); }}}) {
+    SCOPED_TRACE(label); std::filesystem::remove(path); make();
+    std::vector<Published> seen; Json value = Json::object();
+    EXPECT_TRUE(published("probe.json", value, 5.0, [&](const Reading &reading) {
+      seen.push_back(reading.kind);
+      if (seen.size() == 2) { std::filesystem::remove(path); publish(complete); }
+    }));
+    ASSERT_EQ(seen.size(), 3u); EXPECT_NE(seen.at(0), Published::Complete); EXPECT_EQ(seen.at(0), seen.at(1));
+    EXPECT_EQ(seen.at(2), Published::Complete); EXPECT_EQ(value, expected);
+  }
+  // Permanently bad content fails at once with its cause; nothing is adopted and the wait is not spent.
+  ASSERT_NO_FATAL_FAILURE(publish(complete.substr(0, 30)));
+  Json kept = Json::object(); bool ok = true; const auto started = std::chrono::steady_clock::now();
+  EXPECT_NONFATAL_FAILURE(ok = published("probe.json", kept, 5.0),
+                          "fixture file control.probe.json is permanently bad: not valid JSON (30 bytes)");
+  EXPECT_FALSE(ok); EXPECT_EQ(kept, Json::object());
+  EXPECT_LT(std::chrono::steady_clock::now() - started, std::chrono::seconds(2));
+  // A file never published, or still empty or unreadable at the deadline, fails with its last state.
+  EXPECT_NONFATAL_FAILURE(ok = published("absent.json", kept, 0.2),
+                          "fixture file control.absent.json was not complete before the deadline; last state: not published");
+  EXPECT_FALSE(ok);
+  ASSERT_NO_FATAL_FAILURE(publish(""));
+  EXPECT_NONFATAL_FAILURE(ok = published("probe.json", kept, 0.2), "last state: published but empty");
+  EXPECT_FALSE(ok);
+  std::filesystem::remove(path); std::filesystem::create_directory(path);
+  EXPECT_NONFATAL_FAILURE(ok = published("probe.json", kept, 0.2), "last state: not a regular file");
+  EXPECT_FALSE(ok); EXPECT_EQ(kept, Json::object()); std::filesystem::remove(path);
+}
+
 class PeerMouse : public PeerBridge {
  protected:
   int clicks = 0, wheels = 0;
@@ -651,7 +769,7 @@ class PeerMouse : public PeerBridge {
   }
   Json recorded(const std::string &name)
   {
-    wait_marker(name); Json value; std::ifstream in(dir.path() / ("control." + name)); in >> value; return value;
+    Json value; published(name, value); return value;  // A failure is already reported with its cause.
   }
   void query_history(const std::string &operation)
   {
@@ -789,14 +907,13 @@ TEST_F(PeerMouse, ActualClicksSelectTwoFilesHostReceiptEnablesOfferAndPreservesO
   ASSERT_NO_FATAL_FAILURE(click("peer_host"));
   ASSERT_NO_FATAL_FAILURE(wait_widget("peer_offer"));
   EXPECT_EQ(calls("sessions.host"), 1); EXPECT_EQ(calls("files.offer"), 0);
-  ASSERT_NO_FATAL_FAILURE(click("peer_offer")); wait_marker("offer_request_1.json");
-  Json offered; { std::ifstream in(dir.path() / "control.offer_request_1.json"); in >> offered; }
+  ASSERT_NO_FATAL_FAILURE(click("peer_offer"));
+  Json offered; ASSERT_TRUE(published("offer_request_1.json", offered));
   EXPECT_EQ(offered.at("session_id"), "00000000-0000-4000-8000-000000000007");
   ASSERT_TRUE(loop.pump_until([&] { frame(); return widget("peer_session_id") && widget("peer_session_id")->enabled; }));
   ASSERT_NO_FATAL_FAILURE(text("peer_session_id", "00000000-0000-4000-8000-000000000006"));
   ASSERT_NO_FATAL_FAILURE(click("peer_offer"));
-  wait_marker("offer_request_2.json"); EXPECT_EQ(calls("files.offer"), 2);
-  { std::ifstream in(dir.path() / "control.offer_request_2.json"); in >> offered; }
+  ASSERT_TRUE(published("offer_request_2.json", offered)); EXPECT_EQ(calls("files.offer"), 2);
   EXPECT_EQ(offered.at("session_id"), "00000000-0000-4000-8000-000000000006");
   EXPECT_EQ(area.tab(1).save_workspace_state(), drafts); EXPECT_TRUE(area.tab(1).has_unsaved_changes());
   EXPECT_EQ(store.viewer().save_workspace_state(), viewer); EXPECT_EQ(store.viewer().camera_serial(), camera);
