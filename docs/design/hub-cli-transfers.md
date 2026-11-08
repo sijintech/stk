@@ -1,7 +1,6 @@
 # Hub CLI 输入上传与传输恢复
 
-状态：**root 审阅通过的实施方案，尚未实现或发布**（Claude 候选 3，经 root 校正）。记录日期：2026-11-08 UTC。本文不定义新 schema，也不改变 hub 协议、
-授权、review 策略、模型或网络策略。实施路径与验收由 root 另行给出。
+状态：**已由 root 审阅并选择集成 CL-D1-HUB-UPLOAD-CLI-18 第四版实现**。记录日期：2026-11-08 UTC。源码与最小安装态验证见文末；目标平台 CI 仍须按实际提交核对。本文不定义新 schema，也不改变 hub 协议、授权、review 策略、模型或网络策略。
 
 ## 源码依据
 
@@ -298,3 +297,99 @@ CLI 以子进程运行。环境中 KEY 为空，MODEL 和显示相关变量全�
 
 hub 或节点的协议、授权、review 策略与 schema 变更；桥的生命周期；私有冻结副本；`--wait-review`；R2/R3；模型、密钥
 与网络策略；科研参数；真实 MuPRO、跨站点使用和科学有效性。
+
+## 实现状态（CL-D1-HUB-UPLOAD-CLI-18 第四版，root 集成）
+
+实现位于 `suan/runtime/hub_transfers.py`（worker、侧记、内容清单、守卫、只读查看与父进程监督）以及 `suan/runtime/cli.py`
+的惰性入口（`workspaces upload` 的 hub 分支与 `workspaces transfers`），测试在 `tests/test_runtime_hub_transfers.py`。
+
+**当前源码定位（本分支基线 `a0f77fa3` 中的 `suan/desktop_bridge/transfers.py`）：** 上文的历史行号已按当前文件复核。
+- `_recover` 在 128-142：只按顶层 `state` 处理，只按 `*.json` 枚举。
+- `list` 在 151-161：只收有顶层 `id` 的记录。
+- 键与身份：`keyed_id` 在 165-168，`_existing` 在 170-180，`_new` 在 182-192（`connection_identity` 在 185）。
+- 启动：`_start_upload` 在 206-256。
+- 恢复与取消：`resume` 在 297-322，`cancel` 在 333-344，`_finish_cancel` 在 346-370。
+- 停止：`stop` 在 372-380。
+- `_upload` 在 530-590：重新哈希在 542-547，`upload_begin` 后保存在 548-550，分块在 554-565，`finish` 校验在 567-581。
+- `_import` 在 592-633：`attempt` 在 599，`post_import` 在 605，拒绝后 `+1` 在 625。
+- 当前文件新增了 `_writer` 准入（69-81）和 `release_after_stop`（387-417）。worker 不调用后者：它的租约随 `os._exit`
+  结束，不需要后台回收线程。
+
+**实现中的细节：**
+- **复核要实时确认：** journal 中的 `review` 可能是上一次运行留下的（`_import` 只在 action 视图变化时才保存）。
+  worker 先实时读取 hub 上同一个导入 action，确认仍为 `review`，才输出 `pending_review`；否则继续观察。
+- **重复派发不改写意图：** 复核通过后恢复时，会以相同的 attempt、action ID 和请求再次派发；这不会改写侧记中的原
+  意图（侧记字节不变）。
+- **侧记写法：** 以排序后的键写入磁盘，按键集合校验形状；通过临时文件加 `os.link` 无覆盖发布。临时文件不匹配
+  `*.json`，所以 Manager 和只读读取都看不到半写的侧记。
+- **worker 的导入来源：** worker 用 `sys.executable -P -m suan.runtime.hub_transfers --worker` 启动（`-P` 需要
+  Python 3.11+，使工作目录不进入 `sys.path`），不用 `-I`：
+  开发环境中 `-I` 会改从可编辑安装的另一棵源码树导入。父进程把自己的 `suan` 来源目录放在子进程 `PYTHONPATH`
+  的最前面；worker 在取得租约之前核对来源一致，不一致即以 `origin_mismatch` 拒绝。安装态下这个目录就是
+  site-packages 本身。
+- **父进程不碰源文件：** `SOURCE` 以普通字符串接收，因为 click 的 `Path` 类型即使不要求存在也会 `stat` 它。直连
+  模式改为显式调用 `click.Path(exists=True)` 转换，保持原有的检查和提示。
+- **租约对象：** 保存在模块级引用中。如果只在构造后丢弃，CPython 会立即关闭文件并解锁；红例已证明。
+- **GC 后复核：** 在 Manager 的恢复与 GC 之后，worker 重读目标 journal 和侧记；除 journal 的 `state` 外，任何身份
+  字段或侧记字节变化都以 `changed_during_recovery` 拒绝。
+- **没有收据时：** 原传输和原导入意图只能在回收之后读取，因此标为 `subsequent_observation` 输出，不冒充收据。
+- **只读读取（候选 2）：**
+  - 以非阻塞、不跟随链接的方式打开，并对描述符本身做 `fstat`；`lstat` 之后被换成 FIFO 的路径直接拒绝，不会阻塞。
+  - 每次读取以剩余预算和单文件上限为界，按实际读到的字节计入总预算；打开后变大的文件按 `budget` 或 `too_large`
+    拒绝，并标记截断。
+  - 目录扫描最多检查 `4 × 10 000` 个条目。
+  - journal 中视图会用到的嵌套字段要先校验类型，不合格的只计为跳过。
+- **父进程监督（候选 2）：**
+  - 作业行超过 IPC 行上限时，在启动 worker 之前拒绝。
+  - 作业和停止请求由单独的写线程发送，worker 不读取输入也不会拖过同一个绝对截止时间。
+  - 第一次 Ctrl-C 请求在宽限内停止；第二次直接终止。终止、强杀与回收放在 `finally` 中，重复中断也不能跳过。
+- **收据的接受条件（候选 2）：** 以下任一不满足，结果都是 `unknown`：
+  - 每条记录都以换行结束，在字节与条数上限之内，并且是已知类型的对象；
+  - 恰好一条、并且是最后一条收据；
+  - 其 `outcome` 已知，并与真实退出码一致；
+  - 带有本次作业的随机 `nonce`；
+  - 指向预期的传输 ID。
+- **候选 3 补充：**
+  - **等待时间：** `--wait`、`run_command` 和 `supervise` 都只接受有限的正数秒（不接受布尔值）。CLI 对 `nan`、`inf`
+    以退出码 2 拒绝，不启动 worker。
+  - **严格 JSON（IPC）：** 在每一层嵌套都拒绝以下内容：
+    - 重复键；
+    - `NaN`/`Infinity` 字面量；
+    - 溢出为无穷的数，如 `1e999`、`-1e999`（`parse_float` 校验，因为这类数不会触发 `parse_constant`）。
+
+    写出端用 `allow_nan=False`。
+  - **收据字段类型：** 先查字段类型，再做成员查找；`journal` 必须是对象，带字符串 `id` 和已知 `state`。
+    `run_command` 还要求 `journal.id` 等于预期的传输 ID。
+  - **回收（`_reap`）：** 只有信号调用真正返回后，这一步才算完成。在 `terminate` 或 `kill` 执行之前到达的中断会
+    重试该调用，不会跳过。进入强杀之后，每一轮都重发 `kill`，再做有界等待，没有无超时的 `wait`。只有观察到
+    worker 真正退出才返回，所以命名空间租约始终由操作系统随进程退出释放。
+  - **只读读取的计费：** 已读到的字节在 `finally` 中计入预算，后续读取失败也照样计入。字段先做类型判断，
+    不可哈希的值计为跳过，不会抛出。
+  - **身份可读回：** 发布侧记前，先估算两样东西的大小：
+    - 侧记加上预留的导入意图（`INTENT_RESERVE`）；
+    - Manager journal（预留 `JOURNAL_RESERVE` = 64 KiB）。
+
+    任一超过 `READ_FILE_BYTES`，就以 `identity_too_large` 拒绝。拒绝发生在构造 Manager、GC 和发布之前，以保证
+    只读查看能读回自己写下的身份。
+- **候选 4 补充（侧记发布）：**
+  - `SidecarHolder.publish` 只使用原子的不覆盖原语 `os.link`：
+    - `FileExistsError` 拒绝为 `sidecar_exists`；
+    - 其他硬链接错误（如 `EOPNOTSUPP`、`EPERM`）拒绝为 `sidecar_publication_unsupported`。
+
+    候选 3 在这里有 `exists()` 后 `os.replace` 的回退，已删除。命名空间租约只排除遵守约定的 worker，
+    排除不了其他写入者，所以这个回退在检查与替换之间可能覆盖别人新出现的侧记。
+  - 已存在的最终侧记从不被替换、删除或修改。只有链接成功后，`holder.sidecar` 才采用新身份。
+  - 只删除本次发布的临时文件：写临时文件和链接都在同一个 `finally` 中。
+
+**已验证：** `tests/test_runtime_hub_transfers.py` 与 `tests/test_runtime_hub_cli.py` 在真实 loopback hub、外连节点与
+Runtime 上运行。红例分别证实：
+- worker 存活期间第二个命令得到 `busy`；
+- 内容守卫在 Manager 重新哈希之前拒绝。
+
+**root 集成验证：** 作者基线 `a0f77fa3` 九模块 225 项通过、零跳过；root 基线 `2b92622d` 加六文件冻结覆盖后，九模块 234 项通过、零跳过，差九项是 `6c481e59` 的共同后端坏状态启动回归。root 使用的 `transfers.py` 摘要为 `54d472903c71f6c5b924d262bb9a2f808804e0e1718077842a08e1aaab1b8b36`；上文 `5311155a…` 仅为作者旧基线，不能当作已包含该修复。
+
+root 离线构建新 wheel，在不继承系统包、无科学/GUI/模型依赖的新环境中，从无产品源码的测试副本以 `python -I` 运行：收集 234 项，明确排除两个需 NumPy/Matplotlib 的部署用例，实际 232 项通过、零跳过；这两项仍由完整源码矩阵覆盖。运行前后三项产品源码摘要和父进程实际导入来源一致，测试结束未观察到自有活后代。此来源证明只覆盖父进程已加载模块；不能声称核对了每个服务进程的完整模块图。
+
+独立纯文件检查还覆盖 12 个发布场景及 11 组读取边界，硬链接失败不覆盖并发出现的侧记，也不提前采用新身份。证据：`d1-hub-upload-cli-20261108-21/root/author-candidate4-20261108-38/`、`candidate4-installed-20261108-38/` 及 `readonly-review-author-candidate4-upload_readonly_review/`（均位于本机验证根）。
+
+**尚未验证：** Windows 与 macOS 上的 worker 生命周期、真实不支持硬链接的文件系统、外部站点网络与科研有效性。本机 loopback 和注入反例不替代这些验收。

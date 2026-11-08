@@ -76,6 +76,11 @@ suan workspaces --hub lab --node NODE_ID create "实验 1" --key workspace-1
 suan workspaces --hub lab --node NODE_ID action ACTION_ID    # 结果中的 workspace.id 即 WORKSPACE_ID
 suan workspaces --hub lab --node NODE_ID list
 suan workspaces --hub lab --node NODE_ID files WORKSPACE_ID
+# 输入上传：需要所有者以 --profile desktop 签发的配对码；导入仍须人工复核
+suan workspaces --hub lab --node NODE_ID upload WORKSPACE_ID ./inputs --key inputs-1
+suan workspaces transfers list
+suan workspaces --hub lab --node NODE_ID transfers show TRANSFER_ID --check
+suan workspaces --hub lab --node NODE_ID transfers resume TRANSFER_ID
 suan jobs --hub lab --node NODE_ID submit --workspace WORKSPACE_ID --template echo --key experiment-1
 suan jobs --hub lab --node NODE_ID action ACTION_ID
 suan jobs --hub lab --node NODE_ID show TASK_ID
@@ -116,8 +121,29 @@ suan jobs --hub lab --node NODE_ID cancel TASK_ID --key cancel-experiment-1
   失败或超时则以 1 退出，不会当作结果输出。因此这种情况不保证零 action 记录。只有写操作（创建、提交、取消）
   才只确认收下、不等待执行或复核。
 - 读取命令不创建工作区，也不运行任务。
-- `upload` 暂不支持 hub：带 `--hub` 时在检查或读取任何本地文件、连接 hub 之前，以用法错误退出。请用直连 / SSH
-  的 `suan workspaces upload`，或桌面应用的上传。CLI 不会给自己授予 desktop 配置，也不会重新配对。
+- `upload WORKSPACE_ID SOURCE --key KEY [--path REMOTE] [--wait 600]`：经 hub 上传输入，只适用于所有者以
+  `--profile desktop` 签发配对码的设备。CLI 不会给自己授予 desktop 配置，也不会重新配对；`--key` 必填，配置不是
+  desktop 或缺少 `--key` 时，在检查或读取任何本地文件、启动任何进程之前以 2 退出。
+  - 父进程只检查参数与配置，并在 stderr 打印原键和传输 ID；实际工作由一个私有 worker 子进程完成。worker 先在
+    `<hub-state-dir>/cli/namespace.lock` 上取得独占租约，持有到进程真正退出；另一个命令正在使用时返回 `busy`
+    （退出码 3），不改动任何记录。
+  - worker 在租约内冻结完整内容清单（每个文件的路径、大小和 sha256），并只按这份清单开启上传会话和请求导入：
+    内容与清单不符时不会开启会话，也不会导入。文件在上传期间改变时，hub 在完成时的 sha256 校验会使传输失败；
+    这种情况下 hub 可能已收下部分字节，但不会导入错误的内容。
+  - 传输的本地记录先写同目录临时文件，再以不覆盖的硬链接发布，因此 hub 状态目录所在的文件系统须支持硬链接。
+    不支持时，以 `sidecar_publication_unsupported` 拒绝（退出码 2），不会改用可能覆盖已有记录的方式。
+  - 导入仍须人工复核。观察到导入处于复核时输出 `pending_review` 并退出 0；这只是 `observed_at` 那一刻的观察，
+    之后可能已被批准。CLI 没有批准入口，hub 的复核策略不变。
+  - 每个结果都带 `outcome`、`observed_at` 和 `observed_from`：`completed`、`pending_review`（0）；`interrupted`
+    （`--wait` 到期或 Ctrl-C，只是停止，不取消）、`unknown`（回复丢失、超时、断线或 worker 被强制结束，hub 可能已
+    收下）、`failed`、`rejected`、`cancelled`、`conflict`（同一个键对应另一份请求）（1）；拒绝（2）；`busy`（3）。
+- `transfers list` 和 `transfers show TRANSFER_ID` 只读本地记录：不加锁、不连接 hub、不恢复，也不写任何文件；
+  journal 中的 `running` 可能来自已结束的进程。每个文件最多读 8 MiB、总共最多 64 MiB，不跟随符号链接，跳过非普通
+  文件。`show --check` 另外只读查询这个传输**最后实际派发**的导入 action，不派发。
+- `transfers resume TRANSFER_ID` 是唯一的恢复方式：以原键、原请求和原内容，在 hub 已有的偏移上续传；重新运行 CLI
+  不会自动恢复。源文件内容、设备、配置或 hub 端点与记录不符时以 2 拒绝。
+- `transfers cancel TRANSFER_ID` 显式取消：撤回复核中的导入并中止上传会话，不需要源文件仍然存在。本地记录缺失或
+  不一致时，`resume` 和 `cancel` 都拒绝，不发起远端请求。
 
 不带 `--hub` 时，直连 / SSH 的 `workspaces` 命令和输出保持不变；`create` 可选的 `--key` 会作为 Runtime 的
 幂等键原样传入。

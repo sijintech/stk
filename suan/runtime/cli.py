@@ -517,11 +517,35 @@ def select_target(ctx, profile, state_dir, hub, node, hub_state_dir):
 @click.pass_context
 def workspaces(ctx, profile, state_dir, hub, node, hub_state_dir):
     """Create workspaces and transfer immutable task inputs."""
-    if hub and ctx.invoked_subcommand == "upload":
-        # Refused before any local file is examined or read, and before the hub is contacted.
-        raise click.UsageError("workspaces upload is not supported with --hub; upload through a direct or SSH "
-                               "Runtime connection, or with the desktop app")
     select_target(ctx, profile, state_dir, hub, node, hub_state_dir)
+
+
+def workspace_target(ctx):
+    """``(hub, node, hub_state_dir)`` of the enclosing ``workspaces`` group."""
+    while ctx is not None and "hub_state_dir" not in ctx.params:
+        ctx = ctx.parent
+    return ctx.params["hub"], ctx.params["node"], ctx.params["hub_state_dir"]
+
+
+def require_desktop(client, hub):
+    """Uploads need an owner-issued desktop pairing; the CLI never grants it or re-pairs (exit 2 otherwise)."""
+    if (client.store.describe("hub:" + hub).get("profile") or "") != "desktop":
+        raise click.UsageError("This hub pairing has no desktop profile; uploads need an owner-issued "
+                               "--profile desktop client pairing code (the CLI cannot grant it)")
+
+
+def finite_wait_option(ctx, param, value):
+    """click.FloatRange lets NaN through (every comparison with NaN is false); a wait must be finite."""
+    import math
+    if value is not None and not math.isfinite(value):
+        raise click.BadParameter("must be a finite number of seconds")
+    return value
+
+
+def finish_hub_transfer(result, code):
+    dump(result)
+    if code:
+        raise click.exceptions.Exit(code)
 
 
 @workspaces.command("create")
@@ -570,14 +594,36 @@ def show_workspace_action(client, action_id):
 
 @workspaces.command("upload")
 @click.argument("workspace_id")
-@click.argument("source", type=click.Path(exists=True, path_type=Path))
+@click.argument("source")  # a plain string: click's Path type stats it even without exists=True
 @click.option(
     "--path", "remote_path", help="Remote relative filename (single-file upload only)"
 )
-@click.pass_obj
-def upload(client, workspace_id, source, remote_path):
-    if isinstance(client, HubCLIClient):  # The group refuses this first; kept as a second guard.
-        raise click.UsageError("workspaces upload is not supported with --hub")
+@click.option("--key", help="Hub: required idempotency key; reuse it to observe the same transfer")
+@click.option("--wait", "wait_seconds", type=click.FloatRange(1, 86400), default=None, callback=finite_wait_option,
+              help="Hub: stop observing after this many seconds (default 600); stopping never cancels")
+@click.pass_context
+def upload(ctx, workspace_id, source, remote_path, key, wait_seconds):
+    client = ctx.obj
+    if isinstance(client, HubCLIClient):
+        from . import hub_transfers
+        hub, node, hub_state_dir = workspace_target(ctx)
+        if not key:
+            raise click.UsageError("--key is required with --hub; reuse it after an interrupted or lost upload")
+        require_desktop(client, hub)
+        transfer_id = hub_transfers.keyed_transfer_id(key)
+        click.echo(f"Idempotency key: {key}", err=True)
+        click.echo(f"Transfer: {transfer_id}", err=True)
+        click.echo(f"Import action: action_id('workspace.import', {node}, {transfer_id}, attempt); "
+                   "transfers show lists the dispatched one", err=True)
+        finish_hub_transfer(*hub_transfers.run_command(
+            "upload", state_dir=hub_state_dir, hub=hub, node=node,
+            wait=wait_seconds or hub_transfers.WAIT_SECONDS, workspace_id=workspace_id,
+            source=str(Path(source).absolute()), remote=remote_path, key=key))
+        return
+    if key or wait_seconds:
+        raise click.UsageError("--key and --wait are only used with --hub")
+    parameter = next(p for p in ctx.command.params if p.name == "source")
+    source = click.Path(exists=True, path_type=Path).convert(source, parameter, ctx)  # the existing check
     if source.is_dir():
         if remote_path:
             raise click.UsageError("--path is only supported for a single file")
@@ -590,6 +636,68 @@ def upload(client, workspace_id, source, remote_path):
                 )
     else:
         dump(client.upload(workspace_id, source, remote_path))
+
+
+@workspaces.group("transfers", cls=FriendlyGroup)
+def hub_transfers_group():
+    """Observe, resume and cancel this CLI's Hub input uploads (only explicitly; reads never resume)."""
+
+
+@hub_transfers_group.command("list")
+@click.pass_context
+def list_hub_transfers(ctx):
+    """The last journaled state of each transfer (local files only: no lock, network or recovery)."""
+    from . import hub_transfers
+    dump(hub_transfers.list_transfers(workspace_target(ctx)[2]))
+
+
+@hub_transfers_group.command("show")
+@click.argument("transfer_id")
+@click.option("--check", is_flag=True, help="Also read the transfer's last dispatched import action on the hub")
+@click.pass_context
+def show_hub_transfer(ctx, transfer_id, check):
+    from . import hub_transfers
+    hub, node, hub_state_dir = workspace_target(ctx)
+    if not check:
+        dump(hub_transfers.show_transfer(hub_state_dir, transfer_id)[0])
+        return
+    if not hub:
+        raise click.UsageError("--check requires --hub and --node")
+    try:
+        view = hub_transfers.check_import(hub_state_dir, transfer_id, hub, node)
+    except hub_transfers.Refused as exc:
+        finish_hub_transfer({"outcome": "refused", "reason": exc.reason, "transfer_id": transfer_id}, 2)
+        return
+    finish_hub_transfer(view, 1 if view["check"].get("matches_intent") is False else 0)
+
+
+def hub_transfer_command(ctx, op, transfer_id, wait_seconds=None):
+    from . import hub_transfers
+    hub, node, hub_state_dir = workspace_target(ctx)
+    if not isinstance(ctx.obj, HubCLIClient):
+        raise click.UsageError(f"transfers {op} requires --hub and --node")
+    require_desktop(ctx.obj, hub)
+    finish_hub_transfer(*hub_transfers.run_command(
+        op, state_dir=hub_state_dir, hub=hub, node=node, wait=wait_seconds or hub_transfers.WAIT_SECONDS,
+        transfer_id=transfer_id))
+
+
+@hub_transfers_group.command("resume")
+@click.argument("transfer_id")
+@click.option("--wait", "wait_seconds", type=click.FloatRange(1, 86400), default=None, callback=finite_wait_option,
+              help="Stop observing after this many seconds (default 600); stopping never cancels")
+@click.pass_context
+def resume_hub_transfer(ctx, transfer_id, wait_seconds):
+    """Resume the original transfer: the same key, request, content and hub session."""
+    hub_transfer_command(ctx, "resume", transfer_id, wait_seconds)
+
+
+@hub_transfers_group.command("cancel")
+@click.argument("transfer_id")
+@click.pass_context
+def cancel_hub_transfer(ctx, transfer_id):
+    """Cancel explicitly: withdraw an import in review and abort the upload session (no source needed)."""
+    hub_transfer_command(ctx, "cancel", transfer_id)
 
 
 @click.group(cls=FriendlyGroup)

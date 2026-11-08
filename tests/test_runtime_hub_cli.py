@@ -350,7 +350,7 @@ def test_artifact_media_types_survive_actual_node_and_backend_adapters(tmp_path,
 
 
 def test_hub_cli_import_remains_lightweight():
-    code = "import sys; from suan.runtime.cli import jobs; assert not any(m in sys.modules for m in ('numpy', 'vtk', 'PySide6', 'fastapi', 'suan.desktop_bridge.server'))"
+    code = "import sys; from suan.runtime.cli import jobs; assert not any(m in sys.modules for m in ('numpy', 'vtk', 'PySide6', 'fastapi', 'suan.desktop_bridge.server', 'suan.runtime.hub_transfers', 'suan.desktop_bridge.transfers'))"
     subprocess.run([sys.executable, "-c", code], check=True, timeout=10)
 
 
@@ -604,8 +604,14 @@ def test_hub_writes_are_acknowledged_without_polling_and_restore_the_read_wait(m
 
 
 @pytest.mark.parametrize("source_exists", [True, False])
-def test_hub_upload_is_refused_before_any_file_or_hub_access(tmp_path, monkeypatch, source_exists):
+@pytest.mark.parametrize("profile,arguments,message", [("desktop", [], "--key is required"),
+                                                       ("", ["--key", "k"], "desktop profile")])
+def test_hub_upload_refusals_come_before_any_file_access_or_worker(tmp_path, monkeypatch, source_exists, profile,
+                                                                   arguments, message):
+    """The parent only checks arguments and the paired profile (stand-in store); it never examines or reads the
+    source and starts no worker before those pass."""
     import pathlib
+    import suan.runtime.hub_transfers as hub_transfers
 
     source = tmp_path / "inputs"
     if source_exists:
@@ -617,9 +623,21 @@ def test_hub_upload_is_refused_before_any_file_or_hub_access(tmp_path, monkeypat
     import os
     touched = []
 
+    class Store:
+        def __init__(self, *args):
+            pass
+
+        def backend(self, connection, node):
+            return type("Backend", (), {"node_id": node, "wait": 30})()
+
+        def describe(self, connection):
+            return {"profile": profile, "device_id": "d" * 32}
+
+        def close(self):
+            pass
+
     def store(*args, **kwargs):
-        touched.append("hub connection store")
-        raise AssertionError("the hub connection store was opened")
+        return Store()
 
     def spy(name, original):
         def call(self, *args, **kwargs):
@@ -638,12 +656,14 @@ def test_hub_upload_is_refused_before_any_file_or_hub_access(tmp_path, monkeypat
     # Record-only spies, active just for this CLI call: the refusal must come before any of them sees the source.
     with monkeypatch.context() as patch:
         patch.setattr("suan.desktop_bridge.connections.ConnectionStore", store)
+        patch.setattr(hub_transfers, "supervise", lambda *a, **k: pytest.fail("a worker was started"))
         for name in ("rglob", "is_dir", "is_file", "open", "read_bytes", "stat", "exists", "iterdir"):
             patch.setattr(pathlib.Path, name, spy(name, getattr(pathlib.Path, name)))
         for name in ("stat", "scandir", "open", "listdir"):
             patch.setattr(os, name, spy_os(name, getattr(os, name)))
-        result = CliRunner().invoke(workspaces, ["--hub", "lab", "--node", "a" * 32, "upload", "b" * 32, str(source)])
-    assert result.exit_code == 2 and "not supported with --hub" in result.output
+        result = CliRunner().invoke(workspaces, ["--hub", "lab", "--node", "a" * 32, "upload", "b" * 32, str(source)]
+                                    + arguments)
+    assert result.exit_code == 2 and message in result.output
     assert "does not exist" not in result.output  # click's existence check of the source never ran
     assert touched == []
 
