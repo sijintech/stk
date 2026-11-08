@@ -1,5 +1,15 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：文献原生入口与生命周期已本地验证，已本地提交，待推送
+
+当前本地 main 为5c0b85d3，远端仍c281620d。root 新增 literature 编辑器、顶栏和 Workspace 入口、双语文本及跟随图像缩放/拖移的逐字高亮；源码已本地提交5c0b85d3，尚未push，状态与认知收尾继续。完整文献 CPU 33/33、零 skip、33.783s；UI 核心131/131、App/AppStore19/19通过。英文1600×1100与中文1000×1200、scale1，从默认工作台一次点击/零滚轮进入文献且文献RPC为0，Viewer/相机/隐藏Python精确稿保持；同布局重复复核和明确导入13点击/零滚轮。隐藏/失效与旧按钮反例另行注入，不把这些注入算作鼠标验收。
+
+独立审阅促成三处修正：批准按钮冻结其展示的review UUID/SHA/generation，动作再核真实Client/PID/spawn，文字稿有效性独立于桥与库的失效代次。局部布局订阅在隐藏/搬移时停观察、清授权和页图并保文字；新render先释放旧纹理。workspace按发布合同仅存query/scope等有限导航，不携路径、授权或执行能力。真实E5/PDF页图全链UI和目标OS仍待验，不能把33项CPU当全文献功能完成。最新固定源码复核与交付收尾仍在进行，证据native-literature-ui-20261108-29/及root-delivery-20261108-31/。
+
+c281 Runtime13job成功，Linux全2105、WindowsCPU1447、MacCPU1503与Metal254成功；Mac原生4/6，两视频已越过AX/Tab前置但首次隐藏暂停检查失败，失败瞬间快照不足。整个Desktop42517256870已20:59:15Z completed/failure，六job均终态，Windows原生job成功，推送等待门满足；Windows原生6/6零skip、1319.76s；冻结总报告root-delivery-20261108-29/ci/review-final.json。实际Claude仍同一会话、独立stk-claude/claude/hub-upload-cli-18六路径修复；RED试跑5失败后中断，曾暂留candidate1，已要求先恢复candidate2，未接受/集成任何新候选。PR53/54旧头无关。原八项、D1-D5及MuPRO真实资产/扫描值/分析提案形式待决保持，HDF5完成仍需DAT，PET新专项后置。
+
+正式索引仍Dirty；root本轮恢复链在25/46后遇非分块响应而停止，未提交Attestation，当前仅据源码推进。另一个代理已完成完整恢复并释放稳定窗口，正式资产待本次最终收尾；必要身份与失败状态见本批closure，不复制正式认知正文。
+
 ## 2026-11-08 UTC：原生报告两项候选已提交，612e Desktop已终态
 
 root在main提交247cca3b（窄区域用既有区域菜单切tab）及70a301f4（同祖先链WebArea与真实选中Slider的交集证明）。前者真实CPU布局1024×656、en/scale1、a3宽401→286，经正常分隔条和菜单事件往返2点击/5按键/0滚轮，Viewer、相机和精确未保存Python稿保留；后者root重建成功，CPU一个CTest内五组通过/4.25s。两项均仅测试代码，新Apple helper尚未编译或原生验收；不能宣布Mac两视频已修复。

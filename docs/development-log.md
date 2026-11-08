@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：原生文献入口和三项生命周期修正已本地验证
+
+root新增文献编辑器、导航/翻译和图像覆盖API；前四成员聚合兼容，高亮用同一fit/pan/zoom矩形并裁剪、不改PNG。独立审阅抓到旧批准闭包改投新review、同Client换进程未泵监听时旧动作可派发、库/桥失效丢TextEdit输入，已分别冻结批准参数、核PID/spawn、分离本地文字guard；隐藏布局订阅停观察并清瞬态。重复render先释放旧纹理，历史只读摘要分页并同步清理。
+
+最新构建成功；完整文献33/33零skip、33.783s，UI核心131/131、App/AppStore19/19通过。初轮新UI8/9，唯一失败是中文点击定位光标后测试误按末尾插入，改为明确End后全过；不把它说成产品丢稿。固定默认en1600×1100、zh_CN1000×1200/scale1一次点击进入、文献RPC为0并保Viewer及隐藏稿；重复复核导入13点击/零滚轮。生命周期注入另计。真实E5/页图全链UI、目标OS与最终推送未完成。
+
+c281 Runtime整轮成功；新Mac原生两视频已越过AX/Tab但隐藏暂停失败，失败瞬间状态未保存，根因待证；整个Desktop已20:59:15Z failure终态，六job均结束且Windows原生job成功，推送等待门满足。Claude18独立修订、RED结束待先恢复candidate2，未接受或集成新候选。源码已本地提交5c0b85d3、远端仍c281620d，原WIP保留，证据native-literature-ui-20261108-29/与root-delivery-20261108-31/。
+
 ## 2026-11-08 UTC：窄区域tab与AX同链证明候选
 
 247cca3b只改原生报告验收的tab导航。612e HTML-video实际将a3从401缩到286，而生产header在300 UI像素以下不建独立tabs、把tab放在区域菜单尾部；旧前置检查因此误拒。现在独立tabs存在时仍要求可见/启用，仅不存在时经既有菜单和End/Up/Enter正常事件选择。外部真实CPU AppFixture固定1024×656、en/scale1复现宽度切换，往返2点击/5按键/0滚轮，Viewer/payload/相机及精确未保存Python稿保留；native-window重建成功。CPU未还原全部原生媒体高度/OS呈现。

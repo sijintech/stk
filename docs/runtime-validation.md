@@ -1,5 +1,22 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：文献原生UI本机回归（源码已本地提交）
+
+当前源码已本地提交5c0b85d3、远端仍c281620d，构建root-build-06/application-build-01成功；17文件完整暂存80031字节，SHA a5be09859f932deaf1c2c98af6287b2ddf193c10965dc4924ee415d01de4ffef，gitleaks退出0且报告[]；源码已commit，四状态文档/认知收尾和push尚未完成。证据根`native-literature-ui-20261108-29/`，本次收尾记录`root-delivery-20261108-31/`。
+
+| 实际范围 | 结果及限制 |
+| --- | --- |
+| 完整文献CPU | literature-full-03.xml/log：33/33、零skip、33.783s，含8项双布局UI、既有控制器及PNG/几何；不代真实E5全链UI或OS。 |
+| UI核心 | image-and-ui-tests-02.xml/log：131/131、零skip、1.317s，含四项高亮变换/裁剪/异常/旧帧回归；KEY为空、MODEL未设置。 |
+| App导航与注册 | app-navigation-01.xml/log：19/19、零skip、0.759s，新编辑器追加第21项，既有ID顺序保留。 |
+| 默认布局文献入口 | en1600×1100、zh_CN1000×1200，scale1；从默认工作台点击顶栏文献一次、零滚轮，落到文献编辑器，0文献RPC/不建库，Viewer payload/相机/精确隐藏Python稿保持。不声称零其他系统RPC。 |
+| 明确复核导入 | 同默认布局13次点击/零滚轮，包含两次复核、一次明确提交；公开自编PDF字节夹具，只验导入不验解析。旧A批准闭包不能批准B。文字键入/Enter未纳入点击计数，隐藏/重连/失效另用注入验证。 |
+| 初轮失败保留 | ui-tests-01为8/9；中文测试点击把光标放到词中，错误期待后缀在末尾。增加明确End后全33项通过；不是修改产品来迁就此断言。 |
+
+原生页面复核三项缺陷已修：执行守卫核真实桥进程，批准冻结原review身份，本地文字提交不借桥/库代次授权。最大化其他区域后、下一帧前的旧动作另被直接guard拒绝。隐藏/搬移清授权与页图、保局部文字；新render先释放旧GPU纹理。workspace按发布合同仅保存有限查询/范围稿；真实本地模型、检索引用页图全链UI、GPU实际呈现及目标OS验收尚未完成。
+
+c281整个Runtime42517256886已success、13job全过；Desktop42517256870已20:59:15Z completed/failure，六job均终态，推送等待门满足。Linux全2105零skip、546.14s；WindowsCPU1447零skip、854.61s；MacCPU1503零skip、561.84s和Metal254零skip、430.04s。Mac原生4/6、507.81s，两视频0/20，均已通过公共AX定位/回收及菜单切换前置，首次hidden pause断言失败；两个必要JSON只取261944B/344656372B并核逐项CRC/SHA，未核整archive摘要、未下载PNG，缺失败瞬间状态和单调耗时，不能断言是哪一子条件或生产根因。Windows原生128854043391已success；整轮失败仅Mac，不能把旧头CI当作5c0b85d3文献UI的跨平台验收。Windows原生6/6、零skip、1319.76s；冻结整轮总报告root-delivery-20261108-29/ci/review-final.json，SHA619b1955de07cb60e4e3446880d93215bc0a3c533d2f4867e5828737f6357217。
+
 ## 2026-11-08 UTC：原生报告候选与612e整轮终态
 
 - 247cca3b：真实CPU AppFixture固定1024×656、en/scale1，原默认a3宽401，经实际divider拖到286，独立tabs缺失而区域菜单可见启用。普通菜单事件到Python再返回Reports：2鼠标点击、5按键、0滚轮；Viewer/payload/相机及精确未保存Python文字保持。原native-window目标构建0，暂存2977B/SHA8a276058…扫描0。没有新产品UI变更；此CPU探针未覆盖CI完整高度/真实媒体/OS呈现，不能充作原生20轮通过。
