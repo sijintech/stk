@@ -68,7 +68,7 @@ enum class Reason : uint64_t {
   ArrayChanged, WindowAssociation, NumericType, WindowType, WindowRole, MultipleWindows, NoWindow,
   TreeBudget, SharedTree, TreeDepth, ChildType, MultipleViewports, NoViewport, MultipleWebareas,
   NoWebarea, WebareaGeometry, EnabledType, MultipleSliders, NoSlider, GeometryChanged, WindowsChanged,
-  WebareaAssociation, Count
+  WebareaAssociation, SliderAssociation, Count
 };
 struct ViewportSelection {
   bool complete = false;
@@ -78,8 +78,13 @@ struct ViewportSelection {
   TopologyWitness witness; // Diagnostic only; rejected selections retain the successful-index sentinels.
 };
 // A complete parent-before-child tree. Coextensive wrappers must form one strict ancestor chain;
-// the outer subtree has exactly one WebArea and it must lie below the innermost matching Group.
+// the outer subtree has exactly one WebArea, comparable by ancestry with the innermost matching Group.
 ViewportSelection select_viewport(const Request &request, std::span<const TreeNode> nodes);
+// After counting every matching candidate in the unique WebArea, prove the one chosen Slider
+// belongs to both it and the inner Group. Add its full numeric parent chain without changing
+// the output on failure. Selection and nodes must come from the same validated tree.
+bool bind_slider_witness(std::span<const TreeNode> nodes, const ViewportSelection &selection,
+                         uint64_t candidates, size_t slider, TopologyWitness &witness);
 enum class Phase : uint64_t { None, Window, Tree, Bind, Slider, Recheck, Count };
 enum class Operation : uint64_t { None, Attribute, AttributeCount, Array, Count };
 enum class Attribute : uint64_t { None, Role, Position, Size, Windows, Children, Window, Enabled, Min, Max, Value, Count };

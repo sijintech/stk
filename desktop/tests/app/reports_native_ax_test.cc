@@ -143,7 +143,9 @@ void topology_cases(const ax::Request &q, const ax::Response &good) {
   const std::vector<Node> ancestor = {{ax::kNodeLimit, Role::Window, q.window},
       {0, Role::Group, q.viewport}, {1, Role::WebArea, q.viewport}, {2, Role::Group, q.viewport},
       {3, Role::Group, q.viewport}, {4, Role::Group, q.viewport}, {5, Role::Slider, good.slider}};
-  reject(ancestor, ax::Reason::WebareaAssociation, "WebArea above inner wrapper accepted");
+  selected = ax::select_viewport(q, ancestor);
+  check(selected.complete && selected.viewport == 5 && selected.webarea == 2 && selected.matches == 4 &&
+      selected.chains == 1 && selected.chain_length == 4, "WebArea on the same ancestor line rejected");
   auto above = good; apply_topology(above, q, ancestor);
   check(above.viewport_matches == 4 && above.viewport_chains == 1 && above.viewport_chain_length == 4 && above.webareas == 1 &&
       above.viewport_matches == divergent.viewport_matches && above.viewport_chains == divergent.viewport_chains &&
@@ -151,9 +153,64 @@ void topology_cases(const ax::Request &q, const ax::Response &good) {
       "ancestor/divergent counterexamples do not retain identical summary counts");
   check(above.witness.relation == ax::TopologyRelation::WebareaAboveInner &&
       divergent.witness.relation == ax::TopologyRelation::Divergent &&
-      ax::decode(ax::encode(above), roundtrip) && !ax::accepted(q, roundtrip) &&
+      !ax::decode(ax::encode(above), roundtrip), "Above success without selected Slider ancestry decoded");
+  check(ax::bind_slider_witness(ancestor, selected, 1, 6, above.witness) &&
+      above.witness.count == 7 && above.witness.rows[6].role == Role::Slider &&
+      ax::decode(ax::encode(above), roundtrip) && ax::accepted(q, roundtrip) &&
       roundtrip.witness.relation == ax::TopologyRelation::WebareaAboveInner,
-      "ancestor diagnostic disappeared or authorized delivery");
+      "Above selected Slider proof was not retained by v3 wire");
+  static_assert(ax::kResponseBytes == 1632); // Existing fixed-size v3 remains the transport contract.
+  auto rejected_above = above; rejected_above.status = ax::Status::ApiError;
+  rejected_above.reason = ax::Reason::ApiError; rejected_above.api_error = -42;
+  rejected_above.phase = ax::Phase::Recheck;
+  check(ax::decode(ax::encode(rejected_above), roundtrip) && !ax::accepted(q, roundtrip) &&
+      roundtrip.witness.rows[6].role == Role::Slider, "post-bind API failure lost its numeric diagnostic");
+  auto outside = ancestor; outside[6].parent = 2;
+  const auto original_witness = selected.witness;
+  auto failed_witness = original_witness;
+  check(!ax::bind_slider_witness(outside, ax::select_viewport(q, outside), 1, 6, failed_witness),
+      "unique Slider outside inner Group accepted");
+  auto failed_diagnostic = good, original_diagnostic = good;
+  failed_diagnostic.witness = failed_witness; original_diagnostic.witness = original_witness;
+  check(ax::encode(failed_diagnostic) == ax::encode(original_diagnostic), "failed association changed its diagnostic");
+  auto duplicate_slider = ancestor; duplicate_slider.push_back({2, Role::Slider, good.slider});
+  const auto duplicate_selection = ax::select_viewport(q, duplicate_slider);
+  // Both Sliders match time and geometry in the same WA. Only one lies under inner; it must
+  // not become unique by prefiltering that subtree before the complete WA candidate count.
+  check(ax::matching_slider(q, duplicate_slider[6].rect, 0, 6, 3) &&
+      ax::matching_slider(q, duplicate_slider[7].rect, 0, 6, 3) &&
+      !ax::bind_slider_witness(duplicate_slider, duplicate_selection, 2, 6, failed_witness) &&
+      !ax::bind_slider_witness(ancestor, selected, 0, 6, failed_witness),
+      "complete WA zero/multiple candidate count authorized a selected Slider");
+  auto above_extra_wa = ancestor; above_extra_wa.push_back({1, Role::WebArea, q.viewport});
+  reject(above_extra_wa, ax::Reason::MultipleWebareas, "Above proof ignored another outer WebArea");
+  for (int mutation = 0; mutation < 5; ++mutation) {
+    auto malformed = above; auto &w = malformed.witness;
+    switch (mutation) {
+      case 0: w.rows[6].parent = 2; w.rows[6].depth = 3; break; // WA sibling branch, still inside video geometry.
+      case 1: w.rows[w.count++] = {7, 5, Role::Slider, 6, false};
+        ++malformed.tree_nodes; ++malformed.nodes; ++malformed.sliders; break;
+      case 2: ++w.rows[6].depth; break;
+      case 3: w.rows[w.count++] = {7, 0, Role::Other, 1, false};
+        ++malformed.tree_nodes; ++malformed.nodes; break;
+      case 4: w.rows[6].role = Role::Other; break;
+    }
+    check(!ax::decode(ax::encode(malformed), roundtrip), "Above fake Slider ancestry decoded");
+  }
+  // The actual CI parent/role ordinals, with synthetic valid frames and a controlled Slider:
+  // 0 -> 6 -> 7 -> 8 -> WA9 -> Group10 -> Group11 -> Slider12.
+  std::vector<Node> ci_chain = {{ax::kNodeLimit, Role::Window, q.window}};
+  for (size_t i = 1; i < 6; ++i) ci_chain.push_back({0, Role::Other, {}});
+  ci_chain.insert(ci_chain.end(), {{0, Role::Group, q.viewport}, {6, Role::Group, q.viewport},
+      {7, Role::ScrollArea, q.viewport}, {8, Role::WebArea, q.viewport},
+      {9, Role::Group, q.viewport}, {10, Role::Group, q.viewport}, {11, Role::Slider, good.slider}});
+  const auto ci_selection = ax::select_viewport(q, ci_chain);
+  auto ci_response = good; apply_topology(ci_response, q, ci_chain);
+  check(ci_selection.complete && ci_selection.viewport == 11 && ci_selection.webarea == 9 &&
+      ci_selection.witness.outer == 6 && ci_selection.witness.count == 7 &&
+      ax::bind_slider_witness(ci_chain, ci_selection, 1, 12, ci_response.witness) &&
+      ax::decode(ax::encode(ci_response), roundtrip) && ax::accepted(q, roundtrip),
+      "observed CI ancestor chain with a proven selected Slider rejected");
   check(ax::decode(ax::encode(divergent), roundtrip) && !ax::accepted(q, roundtrip) &&
       roundtrip.witness.relation == ax::TopologyRelation::Divergent && roundtrip.witness.webarea == 5 &&
       roundtrip.witness.inner == 4, "divergent diagnostic disappeared or authorized delivery");
@@ -196,6 +253,18 @@ void topology_cases(const ax::Request &q, const ax::Response &good) {
   maximum.push_back({14, Role::WebArea, q.viewport}); maximum.push_back({15, Role::Slider, good.slider});
   apply_topology(depth_response, q, maximum);
   check(ax::decode(ax::encode(depth_response), roundtrip) && ax::accepted(q, roundtrip), "maximum-depth wrapper proof rejected");
+  std::vector<Node> above_maximum = {{ax::kNodeLimit, Role::Window, q.window},
+      {0, Role::Group, q.viewport}, {1, Role::WebArea, q.viewport}};
+  for (size_t i = 3; i <= 15; ++i) above_maximum.push_back({i - 1, Role::Group, q.viewport});
+  above_maximum.push_back({15, Role::Slider, good.slider});
+  auto above_depth_response = good; apply_topology(above_depth_response, q, above_maximum);
+  const auto above_depth_selection = ax::select_viewport(q, above_maximum);
+  check(ax::bind_slider_witness(above_maximum, above_depth_selection, 1, 16, above_depth_response.witness) &&
+      above_depth_response.witness.count == 17 && ax::decode(ax::encode(above_depth_response), roundtrip) &&
+      ax::accepted(q, roundtrip), "maximum-depth Above Slider chain rejected");
+  above_maximum[16] = {15, Role::Group, q.viewport};
+  above_maximum.push_back({16, Role::Slider, good.slider});
+  reject(above_maximum, ax::Reason::TreeDepth, "Above chain exceeding original depth accepted");
   depth_response.viewport_matches = 15; depth_response.viewport_chain_length = 15;
   depth_response.tree_nodes = 18; depth_response.nodes = 19;
   check(!ax::accepted(q, depth_response), "wrapper chain too deep for WebArea and slider accepted");
@@ -212,6 +281,7 @@ void topology_cases(const ax::Request &q, const ax::Response &good) {
   }
   auto bytes = ax::encode(nested_response); bytes[7] = 1;
   check(!ax::decode(bytes, roundtrip), "old response version accepted");
+  bytes[7] = 2; check(!ax::decode(bytes, roundtrip), "v2 response version accepted");
   check(!ax::decode(std::span(bytes.data(), bytes.size() - 16), roundtrip), "old response size accepted");
   bytes = ax::encode(nested_response);
   check(!ax::decode(std::span(bytes.data(), bytes.size() - 1), roundtrip), "truncated response accepted");

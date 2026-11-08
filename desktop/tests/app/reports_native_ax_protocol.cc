@@ -129,10 +129,46 @@ ViewportSelection select_viewport(const Request &q, std::span<const TreeNode> no
     witness.rows[witness.count++] = {i, node.parent, node.role, depths[i],
         node.role == TreeRole::Group && same_rect(node.rect, q.viewport)};
   }
-  if (!below(webarea, innermost)) return reject(Reason::WebareaAssociation);
+  if (!below(webarea, innermost) && !below(innermost, webarea)) return reject(Reason::WebareaAssociation);
   if (!contains(nodes[webarea].rect, q.video)) return reject(Reason::WebareaGeometry);
   out.viewport = innermost; out.webarea = webarea; out.reason = Reason::Unique;
   out.complete = true; return out;
+}
+bool bind_slider_witness(std::span<const TreeNode> nodes, const ViewportSelection &selection,
+                         uint64_t candidates, size_t slider, TopologyWitness &witness) {
+  if (!selection.complete || !selection.witness.available || candidates != 1 || nodes.empty() ||
+      nodes.size() > kNodeLimit || slider >= nodes.size() || nodes[slider].role != TreeRole::Slider ||
+      selection.viewport >= nodes.size() || nodes[selection.viewport].role != TreeRole::Group ||
+      selection.webarea >= nodes.size() || nodes[selection.webarea].role != TreeRole::WebArea) return false;
+  std::array<size_t, kNodeLimit> depths{};
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    if (!i) {
+      if (nodes[i].parent != kNodeLimit || nodes[i].role != TreeRole::Window) return false;
+    }
+    else {
+      if (nodes[i].parent >= i) return false;
+      depths[i] = depths[nodes[i].parent] + 1;
+      if (depths[i] > kDepthLimit) return false;
+    }
+  }
+  std::array<bool, kNodeLimit> included{};
+  bool in_viewport = false, in_webarea = false;
+  for (size_t step = 0, at = slider; step <= kDepthLimit && at < nodes.size(); ++step) {
+    included[at] = true;
+    in_viewport |= at == selection.viewport; in_webarea |= at == selection.webarea;
+    at = nodes[at].parent;
+  }
+  if (!in_viewport || !in_webarea) return false;
+  // Comparable WA/inner plus a Slider below both makes the full successful proof one chain.
+  TopologyWitness result = selection.witness;
+  result.rows = {}; result.count = 0;
+  for (size_t i = 0; i < nodes.size(); ++i) if (included[i]) {
+    if (result.count >= kWitnessLimit) return false;
+    const auto &node = nodes[i];
+    result.rows[result.count++] = {i, node.parent, node.role, depths[i],
+        node.role == TreeRole::Group && same_rect(node.rect, nodes[selection.viewport].rect)};
+  }
+  witness = result; return true;
 }
 RequestWire encode(const Request &r) {
   RequestWire bytes{}; size_t at = 0;
@@ -272,17 +308,25 @@ bool witness_valid(const Response &r) {
     last_match = &w.rows[i];
   }
   if (!first_match || first_match->index != w.outer || last_match->index != w.inner) return false;
+  const WitnessRow *slider = nullptr;
+  for (size_t i = 0; i < w.count; ++i) if (w.rows[i].role == TreeRole::Slider) {
+    if (slider) return false;
+    slider = &w.rows[i];
+  }
+  if (slider && (!below(slider->index, w.inner) || !below(slider->index, w.webarea))) return false;
   uint64_t webareas = 0;
   for (size_t i = 0; i < w.count; ++i) {
     const auto &row = w.rows[i];
-    if (!below(w.inner, row.index) && !below(w.webarea, row.index)) return false;
+    if (!below(w.inner, row.index) && !below(w.webarea, row.index) &&
+        (!slider || !below(slider->index, row.index))) return false;
     if (row.role == TreeRole::WebArea && below(row.index, w.outer)) ++webareas;
   }
   if (webareas != 1) return false;
   const auto relation = below(w.webarea, w.inner) ? TopologyRelation::WebareaBelowInner :
       below(w.inner, w.webarea) ? TopologyRelation::WebareaAboveInner : TopologyRelation::Divergent;
   if (relation != w.relation) return false;
-  if (r.status == Status::Success && relation != TopologyRelation::WebareaBelowInner) return false;
+  if (r.status == Status::Success && relation != TopologyRelation::WebareaBelowInner &&
+      (relation != TopologyRelation::WebareaAboveInner || !slider)) return false;
   return r.reason != Reason::WebareaAssociation || relation == TopologyRelation::WebareaAboveInner ||
       relation == TopologyRelation::Divergent;
 }
@@ -341,7 +385,7 @@ std::string_view name(Reason v) {
     "invalid_frame","array_budget","array_changed","window_association","numeric_type","window_type","window_role","multiple_windows",
     "no_window","tree_budget","shared_tree","tree_depth","child_type","multiple_viewports","no_viewport","multiple_webareas",
     "no_webarea","webarea_geometry","enabled_type","multiple_sliders","no_slider","geometry_changed","windows_changed",
-    "webarea_outside_viewport_chain"};
+    "webarea_outside_viewport_chain","slider_outside_viewport_chain"};
   static_assert(std::size(n) == size_t(Reason::Count)); return enum_name(v,n);
 }
 std::string_view name(Phase v) { static constexpr const char *n[] = {"none","window","tree","bind","slider","recheck"}; return enum_name(v,n); }

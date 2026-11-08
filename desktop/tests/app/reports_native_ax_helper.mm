@@ -280,6 +280,10 @@ bool run(Probe &p, const ax::Request &q) {
     ++r.candidates; slider = i; r.slider = node.rect; r.minimum = lo; r.maximum = hi; r.value = value;
   }
   if (r.candidates != 1) return p.reject(r.candidates ? ax::Reason::MultipleSliders : ax::Reason::NoSlider);
+  // Count the full WA first: filtering by the inner Group above would hide a second candidate
+  // in another WA branch. The selected Slider must then lie below both proven ancestors.
+  if (!ax::bind_slider_witness(topology, selected, r.candidates, slider, r.witness))
+    return p.reject(ax::Reason::SliderAssociation);
   ax::Rect last_window, last_viewport, last_slider;
   p.node(0, nodes[0].depth, nodes[0].role);
   if (!frame(p, window.p, ax::Phase::Recheck, last_window)) return false;
