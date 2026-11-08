@@ -1,5 +1,14 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：修复上传 CLI 所依赖的共同传输启动路径
+
+1. 远端4d6426fb已启动新Desktop42531177137和Runtime42531177232；两者仍运行，Docs部署/Secret成功。继续跟踪新头原生视频诊断及跨平台回归，不能提前宣称已绿。
+2. root本地6c481e59修复坏journal state为数组/对象导致整个TransferManager构造失败；保留坏字节/锁、正常queued/running原身份转interrupted与既有显式恢复/GC。九例旧8红/1绿，修后五模块67零skip通过、独立终审0发现；本地待前整个Desktop终态后push。
+3. 实际Claude独立六路径继续第三版，root将早期b3的W2中断前kill/W3指数溢出两项实质发现交回修订。最终冻结、独立复核、最小安装与真实上传证据未完成；不改桌面/模型/R2/R3权限。继续D1余项、云端项目、Synthrix接线及原八项/D2–D5；MuPRO未决、HDF5需DAT、PET后置保持。
+
+本批证据 `transfer-startup-20261108-36/`，保留旧WIP；P1/P2未启用。
+
+
 ## 2026-11-08 UTC：推送真实文献 CPU 界面验收与桌面回归修复
 
 1. 前ae6整个Desktop42523800365于22:21:50Z completed/failure，六job全终态、Windows原生成功；已满足下一批push等待门。将已本地验证的99a25c36/9779efea/fe2cdb4b/9b338172及交付记录送入新CI，不能将旧头结果作为新字节证明。

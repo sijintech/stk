@@ -1,5 +1,12 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：共同传输恢复跳过坏状态，上传第三版继续修订
+
+root以6c481e59本地提交TransferManager._recover的一行字符串类型守卫及九例启动/恢复/GC回归。实际坏数组/对象状态在旧源码造成8个TypeError，控制例通过；新源码五模块67通过、零skip、35.54s，独立固定副本及当前两SHA终审无实质发现。坏日志字节、mtime与锁保留，正常任务仍以原key/request/endpoint标interrupted，构造不派发或联系后端；原显式resume与旧FINAL清理控制保留。不扩大恢复执行或身份权限。暂存扫描零发现，尚未push，等待4d整个Desktop42531177137终态。
+
+上一批4d6426fb已推远端，Docs部署/Secret成功，Runtime与Desktop运行中。实际Claude早期b3经root独立52个worker场景发现两项残留，已在原会话按修订卡继续六路径修改；共享坏日志路径由root修复，早期快照非最终候选或安装验收。完整证据和当前状态见 `transfer-startup-20261108-36/closure.json`；原路线、MuPRO待决、PET后置和旧WIP保留。
+
+
 ## 2026-11-08 UTC：完整 Desktop 终态与本机修复推送收尾
 
 ae6的整个Desktop42523800365已22:21:50Z completed/failure，六job全部终态；Windows原生128875254641成功，先前Mac/Linux/WindowsCPU失败仍照实保留。root重新核对9b338172四项源码提交及d0f749bf文档提交，21源码和五测试XML均与冻结证据一致，未为推送重复跑真实模型。前整轮等待门满足，补齐34/closure.json并记录终态后推送，新头平台结果另验。

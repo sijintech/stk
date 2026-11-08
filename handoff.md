@@ -1,5 +1,12 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：坏传输日志启动隔离已本地修复，4d 新 CI 运行中
+
+远端main已推4d6426fb，含真实PDFium/E5 CPU界面验收和桌面回归修复；新Desktop42531177137、Runtime42531177232仍运行，Docs42531177195及Secret42531177130已成功。root本地新增6c481e59：传输恢复先验state为字符串，坏数组/对象状态不再阻断整个Bridge/上传worker启动，保原坏日志/锁和正常原身份恢复。旧源码新9例8个TypeError失败/1控制通过；修后五相关模块67通过、零skip、35.54s，独立终审0实质发现。未push此修复，须等前整个Desktop终态；证据及最终身份见 `transfer-startup-20261108-36/closure.json`。
+
+实际Claude仍原会话、独立六路径修上传CLI第三版。root固定早期b3的worker52例发现中断前kill跳过及JSON指数溢出两项残留，已交修订卡并观察作者开始修复；R1/R3通过、R2共同后端由root本提交修，不能将早期快照或开发测试当最终安装验收。原八项/D1–D5、MuPRO真实资产/扫描值/提案形式待决、HDF5仍需DAT、PET新专项后置、PR53/54旧头及P1/P2未生效保持，保留旧WIP。
+
+
 ## 2026-11-08 UTC：前整轮 Desktop 已终态，真实文献 UI 与回归修复进入新头验证
 
 前整个 Desktop42523800365 已于22:21:50Z completed/failure，六个job全部终态，Windows原生job成功；推送等待门已满足。已重新核对本地源码9b338172及其四项提交、状态提交d0f749bf：21项源码和五份测试XML与冻结证据一致。记录本次终态后推送，实际最终main、新CI及未提交WIP见 `root-delivery-20261108-35/closure.json`；上一批缺失closure已补齐为34/closure.json。

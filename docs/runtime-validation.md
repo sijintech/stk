@@ -1,5 +1,16 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：坏传输日志的启动隔离与真实共同后端回归
+
+本地源码6c481e59、远端4d6426fb；本修复未push，等待前整个[Desktop42531177137](https://github.com/sijintech/stk/actions/runs/42531177137)终态。该新头[Runtime42531177232](https://github.com/sijintech/stk/actions/runs/42531177232)仍运行，Docs42531177195已实际部署成功、Secret42531177130成功，不能把它们当整个Desktop通过。
+
+TransferManager恢复扫描在集合membership前验证state为字符串；坏数组/对象日志原地保留，不再使其他传输启动失败。不改重放、自动恢复授权或GC规则。新增九例在旧源5311155a…上为8个unhashable TypeError失败、1控制通过、零skip；当前source54d47290…/testab4db1f8…下五模块67/67、零skip、35.54s（XML case合计34.62s），覆盖传输生命周期、shutdown锁持有、真实本机Runtime与Hub审阅/续传。测试KEY空/MODEL未设，无收费请求或许可求解。
+
+新增反例涵盖queued/running、旧/新mtime、数组/对象坏状态，核坏字节/mtime/锁保持；合法原request/key/endpoint转interrupted且构造零launch/backend/emit，显式resume只选原合法ID。控制例核unknown/recent保留、只清旧FINAL。独立终审核两源码SHA及旧红XML，无实质发现；其20个外部固定副本探针不替代root五模块实跑。旧红/新绿XML、完整SHA和扫描证据见 `transfer-startup-20261108-36/validation.json`，最终提交及CI见同目录closure。该后端变化无新UI点击验收，不将上一批真实文献CPU界面当本修复的目标OS证据。
+
+实际Claude第三版的固定早期b3另有52个worker场景、30自有stdlib child全部回收，确认中断前kill与1e999非有限JSON两类残留；root已交修订卡，作者在原会话继续，尚未接受最终候选/安装。原四状态文档与正式资产WIP保留。
+
+
 ## 2026-11-08 UTC：前 ae6 完整 Desktop 终态与下一批推送门
 
 [Desktop42523800365](https://github.com/sijintech/stk/actions/runs/42523800365)已于22:21:50Z completed/failure，六个job均终态，满足前整个Desktop结束后再push的等待门。最终job如下，全部绑定ae6e3d7c：
