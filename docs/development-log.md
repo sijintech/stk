@@ -1,5 +1,10 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：691新头Runtime整轮已通过
+
+691f3f12的Runtime42495020053于15:45:20Z completed/success，13个job全过；Windows3.11/3.12各5098通过、254skip、580未选，分别701.01/900.42s，旧SIGKILL收集错误已获得新头Windows验证。Linux完整矩阵和文献/peer-macos/独立联邦等亦成功；不把Windows排除server组当该组验收。Docs/Secret已成功；整个Desktop42495020086仍live，Mac已目标编译完成并进入CPU测试，WindowsCPU仍构建，原生待出。root c0ff1ac7/7f7a40d3本地未push，仍须等前整个Desktop终态；最新交付见windows-pdf-ci-42487388780/review/closure.json。下方较早“Runtime仍live”为当时快照，保原WIP。
+
+
 ## 2026-11-08 UTC：报告原生等待不依赖额外OS事件
 
 root提交c0ff1ac76617769c9d266304f59d856a7485ca56，仅reports_native_window.cc、新wait helper及原AX CPU测试。旧7ef Windows PDF result/3PNG经精确Range与CRC核验：12完整轮/103图，第13轮closed后无完成捕获，不能当页一像素不匹配。WGC后台frame pool无UI wake，真正GHOST等待循环支持改为非阻塞pump候选；未声称已在Windows复现。

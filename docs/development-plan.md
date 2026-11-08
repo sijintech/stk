@@ -1,5 +1,10 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：691新头Runtime整轮已通过
+
+691f3f12的Runtime42495020053于15:45:20Z completed/success，13个job全过；Windows3.11/3.12各5098通过、254skip、580未选，分别701.01/900.42s，旧SIGKILL收集错误已获得新头Windows验证。Linux完整矩阵和文献/peer-macos/独立联邦等亦成功；不把Windows排除server组当该组验收。Docs/Secret已成功；整个Desktop42495020086仍live，Mac已目标编译完成并进入CPU测试，WindowsCPU仍构建，原生待出。root c0ff1ac7/7f7a40d3本地未push，仍须等前整个Desktop终态；最新交付见windows-pdf-ci-42487388780/review/closure.json。下方较早“Runtime仍live”为当时快照，保原WIP。
+
+
 ## 2026-11-08 UTC：修正原生异步等待，继续上传恢复交付
 
 1. root源码c0ff1ac76617769c9d266304f59d856a7485ca56已本地提交：报告验收按原截止非阻塞泵UI，拒绝晚到成功；55项与独立六探针通过，仍须Windows/Mac原生验证，未认定PDF根因已复现或修好。

@@ -1,5 +1,10 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：691新头Runtime整轮已通过
+
+691f3f12的Runtime42495020053于15:45:20Z completed/success，13个job全过；Windows3.11/3.12各5098通过、254skip、580未选，分别701.01/900.42s，旧SIGKILL收集错误已获得新头Windows验证。Linux完整矩阵和文献/peer-macos/独立联邦等亦成功；不把Windows排除server组当该组验收。Docs/Secret已成功；整个Desktop42495020086仍live，Mac已目标编译完成并进入CPU测试，WindowsCPU仍构建，原生待出。root c0ff1ac7/7f7a40d3本地未push，仍须等前整个Desktop终态；最新交付见windows-pdf-ci-42487388780/review/closure.json。下方较早“Runtime仍live”为当时快照，保原WIP。
+
+
 ## 2026-11-08 UTC：原生捕获等待候选已本地提交
 
 root/main源码 `c0ff1ac76617769c9d266304f59d856a7485ca56` 已本地提交，未push；远端691f3f12的整个Desktop42495020086仍运行，终态前不推。四文档及AOCI原WIP保留，最终提交/CI见windows-pdf-ci-42487388780/review/closure.json。
