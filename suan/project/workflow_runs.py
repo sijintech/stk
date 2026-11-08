@@ -66,6 +66,28 @@ def _error(value):
     return {"code": value["code"], "message": value["message"][:2048]}
 
 
+_APPROVAL_KEYS = frozenset({"approval_id", "plan_sha256", "request_sha256", "expected_revision"})
+
+
+def _sha256_text(value):
+    return type(value) is str and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def _approval(value):
+    """A validated, independent copy of a first-start approval envelope (see ``WorkflowRuns.start``)."""
+    if type(value) is not dict or set(value) != _APPROVAL_KEYS:
+        raise ProjectError("A workflow run approval is exactly {approval_id, plan_sha256, request_sha256, "
+                           "expected_revision}")
+    _id(value["approval_id"])
+    if not _sha256_text(value["plan_sha256"]) or not _sha256_text(value["request_sha256"]):
+        raise ProjectError("Approval plan_sha256 and request_sha256 must be lowercase SHA-256 hex digests")
+    revision = value["expected_revision"]
+    if type(revision) is not int or revision < 0:
+        raise ProjectError("Approval expected_revision must be a nonnegative integer")
+    return {"approval_id": str(value["approval_id"]), "plan_sha256": str(value["plan_sha256"]),
+            "request_sha256": str(value["request_sha256"]), "expected_revision": int(revision)}
+
+
 def _order(steps):
     """Steps other than parameter tables in dependency order (links and `after`), ties in document order."""
     ids = [step["id"] for step in steps]
@@ -545,10 +567,20 @@ class WorkflowRuns:
 
     # ---- execution bookkeeping (used by the explicit executor) ----
 
-    def start(self, run_id, *, executor_id, owner=None):
+    def start(self, run_id, *, executor_id, owner=None, approval=None):
         """Claim a prepared or stopped run for one executor; a running run is refused (see interrupt).
-        ``owner`` ({host, pid}) identifies the service process, so another one can tell whether it still runs."""
+        ``owner`` ({host, pid}) identifies the service process, so another one can tell whether it still runs.
+
+        ``approval`` (optional) makes this the run's *first* start, bound to what a person approved: exactly
+        ``{approval_id, plan_sha256, request_sha256, expected_revision}``. Inside the same write transaction
+        that appends ``started`` it requires the stored plan and preparation-request hashes and the project
+        revision to match, no earlier ``started`` event of any kind (an approved start never restarts a
+        stopped run, and nothing restarts one under an approval), and the run still active (not archived).
+        A copy of the validated object is saved in the ``started`` event. This is a precondition and audit
+        record only: it authenticates nobody and is not reusable. Without ``approval`` the behavior is
+        unchanged, including restarting a stopped run."""
         _id(executor_id)
+        approved = None if approval is None else _approval(approval)
         self.store.archive.require_active("workflow_run", run_id, "start or retry it")
         with self.store._connect(write=True) as db:
             plan, events = self._read(db, run_id)
@@ -557,9 +589,25 @@ class WorkflowRuns:
                 raise RevisionConflict("This workflow run already has an executor")
             if state["complete"]:
                 raise ProjectError("Every task of this workflow run has succeeded")
+            if approved is not None:
+                stored = db.execute("SELECT sha256, request_sha256 FROM workflow_run_plans WHERE id=?",
+                                    (run_id,)).fetchone()
+                if stored[0] != approved["plan_sha256"] or stored[1] != approved["request_sha256"]:
+                    raise RevisionConflict("The approval does not match this frozen workflow run")
+                revision = db.execute("SELECT revision FROM project").fetchone()[0]
+                if revision != approved["expected_revision"]:
+                    raise RevisionConflict(f"The approval expected revision {approved['expected_revision']}, "
+                                           f"current revision is {revision}")
+                if any(event["step"] == "" and event["status"] == "started" for event in events):
+                    raise RevisionConflict("This workflow run has already been started; an approval allows only "
+                                           "its first start")
+                if archive.Archive._archived(db, "workflow_run", run_id):
+                    raise archive.Archived("This workflow run is archived; restore it to start or retry it")
             payload = {"at": _now(), "executor_id": executor_id}
             if owner is not None:
                 payload["owner"] = {"host": str(owner["host"])[:255], "pid": int(owner["pid"])}
+            if approved is not None:
+                payload["approval"] = approved
             self._append(db, run_id, "", "", 0, "started", payload)
         return self.get(run_id)
 
