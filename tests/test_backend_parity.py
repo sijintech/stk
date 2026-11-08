@@ -61,7 +61,7 @@ def test_two_real_deployments_agree_on_task_semantics(tmp_path):
     checks = json.loads((evidence / "assertions.json").read_text(encoding="utf-8"))
     assert result.returncode == 0, (summary, checks)
     assert summary["ok"] and checks["ok"] and checks["cleanup_ok"] and checks["within_deadline"]
-    assert len(checks["assertions"]) == 9 and {c["status"] for c in checks["assertions"]} == {"pass"}
+    assert len(checks["assertions"]) == 12 and {c["status"] for c in checks["assertions"]} == {"pass"}
 
     rows = {row["command"]: row for row in json.loads((evidence / "backend-parity.json").read_text(encoding="utf-8"))}
     assert rows["task.submit conflict"]["A"] == rows["task.submit conflict"]["B"] == {"refused": True, "code": "conflict"}
@@ -142,6 +142,9 @@ def test_unreachable_reads_are_not_task_failure(monkeypatch):
 def passing_facts(module):
     """Facts of one side that pass every assertion (used as a baseline to break one fact at a time)."""
     run = dict(module.EXPECTED_RUN)
+    stamp = {"kind": "utc", "value": "2026-11-08T12:00:00.123456+00:00"}
+    times = {key: dict(stamp) for key in ("created_at", "updated_at", "attempted_at", "started_at", "finished_at")}
+    proof = {"same_task": True, "same_state": True, "observed": times, "authority": copy.deepcopy(times)}
     return {"done": {"state": "succeeded", "cancel_requested": False, "reason": ""}, "replay_same_task": True,
             "conflict": {"refused": True, "code": "conflict"},
             "exact_get": {"state": "succeeded", "cancel_requested": False, "reason": ""}, "exact_get_has_spec": True,
@@ -152,7 +155,9 @@ def passing_facts(module):
             "cancel": {"state": "cancelled", "cancel_requested": True, "reason": ""},
             "cancel_after_replay": {"state": "cancelled", "cancel_requested": True, "reason": ""},
             "cancel_replay_state": "cancelled", "executions_in_workspace": 2, "executions": [dict(run), dict(run)],
-            "identities": {"workspace_id": "w"}}
+            "identities": {"workspace_id": "w"},
+            "time_observations": {key: copy.deepcopy(proof) for key in ("done", "exact", "cancel", "cancel_after_replay")},
+            "created_at_replay": {key: dict(stamp) for key in ("submitted", "replayed", "final")}}
 
 
 def statuses(module, a, b):
@@ -178,6 +183,111 @@ def test_missing_or_wrong_artifact_fails(artifacts, downloads):
             side["artifacts"] = artifacts
         side["downloads"] = downloads
     assert statuses(module, a, b)["A5"] == "fail"
+
+
+@pytest.mark.parametrize("media_type", [None, "application/octet-stream", "image/png", 1])
+def test_missing_or_wrong_media_type_cannot_pass_on_either_path(media_type):
+    module = harness()
+    a, b = passing_facts(module), passing_facts(module)
+    for side in (a, b):
+        if media_type is None:
+            side["artifacts"][0].pop("media_type", None)
+        else:
+            side["artifacts"][0]["media_type"] = media_type
+    assert statuses(module, a, b)["A5"] == "fail"
+
+
+@pytest.mark.parametrize("field", ["created_at", "updated_at", "attempted_at", "started_at", "finished_at"])
+@pytest.mark.parametrize("change", ["missing", "null", "invalid", "changed"])
+def test_dropped_or_changed_terminal_time_cannot_pass(field, change):
+    module = harness()
+    a, b = passing_facts(module), passing_facts(module)
+    for side in (a, b):
+        for name in ("done", "exact", "cancel", "cancel_after_replay"):
+            observed = side["time_observations"][name]["observed"]
+            if change == "missing":
+                observed.pop(field)
+            elif change in ("null", "invalid"):
+                observed[field] = {"kind": change}
+            else:
+                observed[field]["value"] = "2026-11-08T12:00:01.123456+00:00"
+    found = statuses(module, a, b)
+    assert found.get("A10") == "fail" and found.get("A12") == "fail"
+
+
+@pytest.mark.parametrize("value", [True, 1, 1.0, [], {}, "", "not-a-time", "2026-11-08T12:00:00",
+                                 "2026-11-08T12:00:00+01:00"])
+def test_invalid_timestamp_values_cannot_pass_even_if_both_projections_match(value):
+    module = harness()
+    a, b = passing_facts(module), passing_facts(module)
+    for side in (a, b):
+        proof = side["time_observations"]["exact"]
+        for kind in ("observed", "authority"):
+            proof[kind]["updated_at"]["value"] = value
+    assert statuses(module, a, b).get("A10") == "fail"
+
+
+def test_original_created_at_must_survive_same_path_replay():
+    module = harness()
+    a, b = passing_facts(module), passing_facts(module)
+    b["created_at_replay"]["replayed"]["value"] = "2026-11-08T12:00:01+00:00"
+    assert statuses(module, a, b).get("A11") == "fail"
+
+
+def test_each_deployment_keeps_its_own_valid_times_without_cross_clock_ordering():
+    module = harness()
+    a, b = passing_facts(module), passing_facts(module)
+    for proof in b["time_observations"].values():
+        for kind in ("observed", "authority"):
+            for stamp in proof[kind].values():
+                stamp["value"] = "2026-11-09T08:00:00Z"
+            # A host wall clock can move backwards; this check is preservation, not clock ordering.
+            proof[kind]["finished_at"]["value"] = "2026-11-09T07:00:00Z"
+    for stamp in b["created_at_replay"].values():
+        stamp["value"] = "2026-11-09T08:00:00Z"
+    assert set(statuses(module, a, b).values()) == {"pass"}
+    rows = {row["command"]: row for row in module.compare(a, b)}
+    assert rows["task times"]["equal"] and rows["task created_at replay"]["equal"]
+    assert rows["task times"]["A"] != rows["task times"]["B"]
+
+
+@pytest.mark.parametrize("mismatch", ["same_task", "same_state"])
+def test_time_proof_must_belong_to_the_original_task_and_state(mismatch):
+    module = harness()
+    a, b = passing_facts(module), passing_facts(module)
+    b["time_observations"]["exact"][mismatch] = False
+    assert statuses(module, a, b)["A10"] == "fail"
+
+
+def test_invalid_time_metadata_is_not_copied_to_evidence():
+    module = harness()
+    values = {"created_at": "/home/manufactured/private-file", "updated_at": None,
+              "started_at": True, "finished_at": "2026-11-08T12:00:00+00:00"}
+    found = module.timestamp_fields(values)
+    assert found == {"created_at": {"kind": "invalid"}, "updated_at": {"kind": "null"},
+                     "attempted_at": {"kind": "missing"}, "started_at": {"kind": "invalid"},
+                     "finished_at": {"kind": "utc", "value": values["finished_at"]}}
+    assert "/home/" not in json.dumps(found)
+
+
+@pytest.mark.parametrize("value", [None, "image/png", "/home/manufactured/private-license-directory"])
+def test_unexpected_media_type_is_rejected_before_failure_evidence(tmp_path, monkeypatch, value):
+    module = harness()
+    monkeypatch.setattr(module, "module_origins", lambda env, mode: {"consistent": True})
+    monkeypatch.setattr(module, "start_runtime", lambda owned, state, env, label: (None, 1, owned.work / label))
+    monkeypatch.setattr(module, "start_hub", lambda *args: (object(), "a" * 32, 2))
+    monkeypatch.setattr(module, "wait_node_live", lambda *args: None)
+
+    def exercise(side):
+        module.artifact_facts([{"path": "out.txt", "size": 1, "sha256": "1" * 64, "media_type": value}])
+        pytest.fail("The invalid media type was accepted")
+
+    monkeypatch.setattr(module, "exercise", exercise)
+    evidence = tmp_path / "evidence"
+    ok, error, _ = module.run(evidence, mode="source", work_root=tmp_path)
+    assert not ok and error == {"kind": "error", "message": "artifact media type differs from the fixed text/plain fixture"}
+    assert json.loads((evidence / "backend-parity.json").read_text()) == []
+    assert value is None or value not in evidence_text(evidence)
 
 
 PID = 4194301  # a recorded identity that is never alive: create time 1.0 cannot match any live process

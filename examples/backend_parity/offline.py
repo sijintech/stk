@@ -24,6 +24,7 @@ semantics, a minimal-extras install, other operating systems, real solvers or sc
 Nothing here is registered as a product command or started automatically.
 """
 import argparse
+from datetime import datetime, timedelta
 import hashlib
 import json
 import math
@@ -434,6 +435,71 @@ def normalized(task):
     return {key: task.get(key) for key in keys}
 
 
+TIME_FIELDS = ("created_at", "updated_at", "attempted_at", "started_at", "finished_at")
+
+
+def utc_timestamp(value):
+    """An aware UTC ISO timestamp. Invalid metadata is never copied into exported evidence."""
+    if not isinstance(value, str) or not 1 <= len(value) <= 64:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value)
+        return parsed.tzinfo is not None and parsed.utcoffset() == timedelta(0)
+    except ValueError:
+        return False
+
+
+def timestamp_fields(task):
+    """Keep missing/null/invalid distinct; only valid timestamps may retain their actual string value."""
+    result = {}
+    for key in TIME_FIELDS:
+        value = task.get(key)
+        kind = "missing" if key not in task else "null" if value is None else "utc" if utc_timestamp(value) else "invalid"
+        result[key] = {"kind": kind, **({"value": value} if kind == "utc" else {})}
+    return result
+
+
+def time_proof(observed, authority, task_id):
+    """Terminal metadata compared with this task's own Runtime, never the other deployment's clock."""
+    return {"same_task": observed.get("id") == authority.get("id") == task_id,
+            "same_state": observed.get("state") == authority.get("state"),
+            "observed": timestamp_fields(observed), "authority": timestamp_fields(authority)}
+
+
+def valid_timestamp_field(field):
+    return isinstance(field, dict) and field.get("kind") == "utc" and utc_timestamp(field.get("value"))
+
+
+def matching_task_times(proof):
+    """All five fields are required only for these fixtures, which ran before completing/cancelling.
+    Queued, pre-dispatch cancelled and deferred tasks are allowed different shapes by the product contract.
+    No ordering between wall-clock times is assumed, even within one host.
+    """
+    if not isinstance(proof, dict) or proof.get("same_task") is not True or proof.get("same_state") is not True:
+        return False
+    observed, authority = proof.get("observed"), proof.get("authority")
+    return (isinstance(observed, dict) and isinstance(authority, dict)
+            and set(observed) == set(authority) == set(TIME_FIELDS)
+            and all(valid_timestamp_field(value) for value in observed.values()) and observed == authority)
+
+
+def stable_created_at(observations):
+    if not isinstance(observations, dict) or set(observations) != {"submitted", "replayed", "final"}:
+        return False
+    return (all(valid_timestamp_field(value) for value in observations.values())
+            and observations["submitted"] == observations["replayed"] == observations["final"])
+
+
+def artifact_facts(items):
+    """This public fixture only expects text/plain. Reject unexpected metadata before evidence retains it."""
+    result = []
+    for item in items:
+        if item.get("media_type") != "text/plain":
+            raise HarnessError("artifact media type differs from the fixed text/plain fixture")
+        result.append({key: item.get(key) for key in ("path", "size", "sha256", "media_type")})
+    return sorted(result, key=lambda item: item["path"])
+
+
 def exercise(side):
     """The fixed scenario on one side; returns comparable facts and that side's own identities."""
     from suan.desktop_bridge.protocol import BridgeError
@@ -449,9 +515,12 @@ def exercise(side):
     facts["identities"]["done_task_id"] = task["id"]
     final = wait_terminal(side, task["id"], 60)
     facts["done"] = normalized(final)
+    facts["time_observations"] = {"done": time_proof(final, side.observer.task(task["id"]), task["id"])}
 
     replay = side.submit("parity-done", "parity-done-1", workspace)
     facts["replay_same_task"] = replay["id"] == task["id"]
+    facts["created_at_replay"] = {name: timestamp_fields(value)["created_at"]
+                                 for name, value in (("submitted", task), ("replayed", replay), ("final", final))}
 
     try:
         side.submit("parity-wait", "parity-done-1", workspace)  # same key, a different request
@@ -462,9 +531,9 @@ def exercise(side):
     exact = side.task(task["id"])
     facts["exact_get"] = normalized(exact)
     facts["exact_get_has_spec"] = "spec" in exact
+    facts["time_observations"]["exact"] = time_proof(exact, side.observer.task(task["id"]), task["id"])
 
-    artifacts = sorted(({k: a[k] for k in ("path", "size", "sha256")} for a in side.backend.artifacts(task["id"])["artifacts"]),
-                       key=lambda a: a["path"])
+    artifacts = artifact_facts(side.backend.artifacts(task["id"])["artifacts"])
     facts["artifacts"] = artifacts
     facts["downloads"] = {a["path"]: hashlib.sha256(download(side, task["id"], a)).hexdigest() for a in artifacts}
 
@@ -490,11 +559,15 @@ def exercise(side):
                 outcome=((cancelled.get("task") or {}).get("state")) or (cancelled.get("action") or {}).get("state"))
     after = wait_terminal(side, waiting["id"], 60)
     facts["cancel"] = normalized(after)
+    facts["time_observations"]["cancel"] = time_proof(after, side.observer.task(waiting["id"]), waiting["id"])
     # Repeating the cancel: a direct Runtime returns the current record; a Hub replays the original
     # action's result (the record as it was when that cancel ran). Both keep the task cancelled.
     again = side.backend.cancel(waiting["id"], key="parity-cancel")
     facts["cancel_replay_state"] = (again.get("task") or {}).get("state")
-    facts["cancel_after_replay"] = normalized(side.task(waiting["id"]))
+    after_replay = side.task(waiting["id"])
+    facts["cancel_after_replay"] = normalized(after_replay)
+    facts["time_observations"]["cancel_after_replay"] = time_proof(
+        after_replay, side.observer.task(waiting["id"]), waiting["id"])
 
     # Execution count from this deployment's own Runtime (the authority of these tasks): its task records
     # and the run directories its workers created, with the real program/worker process identities.
@@ -584,7 +657,7 @@ def compare(a, b):
     row("task.get", "exact state fields (B: live read, require_live)", a["exact_get"], b["exact_get"], "business")
     row("task.get spec", "A returns the spec; B's projection omits it", a["exact_get_has_spec"],
         b["exact_get_has_spec"], "projection", equal=a["exact_get_has_spec"] and not b["exact_get_has_spec"])
-    row("task.artifacts", "{path,size,sha256} list", a["artifacts"], b["artifacts"], "business")
+    row("task.artifacts", "{path,size,sha256,media_type} list", a["artifacts"], b["artifacts"], "business")
     row("file.read", "downloaded bytes match the listed sha256", a["downloads"], b["downloads"], "business",
         equal=a["downloads"] == b["downloads"] == {x["path"]: x["sha256"] for x in a["artifacts"]})
     row("task.logs", "the same stdout bytes", [a["stdout_sha256"], a["stdout_bytes"]],
@@ -602,10 +675,18 @@ def compare(a, b):
         a["executions"], b["executions"], "business")
     row("identities", "each path keeps its own authority's IDs; equality is not required",
         sorted(a["identities"]), sorted(b["identities"]), "projection")
+    row("task times", "each terminal live observation preserves its own Runtime's exact UTC time fields; "
+        "absolute timestamps are not compared across deployments", a.get("time_observations"), b.get("time_observations"),
+        "business", equal=all(matching_task_times(side.get("time_observations", {}).get(name))
+                              for side in (a, b) for name in ("done", "exact", "cancel", "cancel_after_replay")))
+    row("task created_at replay", "same-path submit replay preserves the original creation timestamp",
+        a.get("created_at_replay"), b.get("created_at_replay"), "business",
+        equal=all(stable_created_at(side.get("created_at_replay")) for side in (a, b)))
     return rows
 
 
-EXPECTED_ARTIFACTS = [{"path": "out.txt", "size": len(EXPECTED_OUT), "sha256": hashlib.sha256(EXPECTED_OUT).hexdigest()}]
+EXPECTED_ARTIFACTS = [{"path": "out.txt", "size": len(EXPECTED_OUT), "sha256": hashlib.sha256(EXPECTED_OUT).hexdigest(),
+                       "media_type": "text/plain"}]
 EXPECTED_RUN = {"start_markers": 1, "marker_lines_valid": True, "marker_pid_is_program": True,
                 "program_recorded": True, "program_exited": True, "worker_exited": True, "finished_record": True}
 
@@ -632,6 +713,14 @@ def assertions(a, b, rows):
          "is the recorded program's, and valid recorded worker and program identities that have exited",
          all(len(side["executions"]) == 2 and all(run == EXPECTED_RUN for run in side["executions"])
              for side in (a, b))),
+        ("A10 completed live observations preserve all five UTC timestamps from their own Runtime",
+         all(matching_task_times(side.get("time_observations", {}).get(name))
+             for side in (a, b) for name in ("done", "exact"))),
+        ("A11 same-path submit replay preserves the original created_at",
+         all(stable_created_at(side.get("created_at_replay")) for side in (a, b))),
+        ("A12 post-ready cancellation and repeated-cancel live reads preserve their own Runtime's timestamps",
+         all(matching_task_times(side.get("time_observations", {}).get(name))
+             for side in (a, b) for name in ("cancel", "cancel_after_replay"))),
     ]
     return [{"id": name, "status": "pass" if ok else "fail"} for name, ok in checks]
 

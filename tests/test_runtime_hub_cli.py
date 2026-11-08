@@ -278,7 +278,15 @@ def test_watch_exit_status_preserves_runtime_state(state, exit_code, monkeypatch
     assert json.loads(result.stdout)["task"]["state"] == state
 
 
-def test_task_get_policy_private_reservations_and_public_projection(tmp_path):
+@pytest.mark.parametrize("times", [
+    {},
+    {"created_at": "2026-11-08T12:00:00+00:00", "updated_at": "2026-11-08T12:00:01+00:00"},
+    {"created_at": "2026-11-08T12:00:00+00:00", "updated_at": "2026-11-08T12:00:01+00:00",
+     "attempted_at": None},
+    {key: "2026-11-08T12:00:02.123456+00:00"
+     for key in ("created_at", "updated_at", "attempted_at", "started_at", "finished_at")},
+])
+def test_task_get_policy_private_reservations_and_public_projection(tmp_path, times):
     from suan.control.agent import NodeAgent
     from suan.control.policy import validate_action
     task_id, workspace = "a" * 32, "b" * 32
@@ -288,7 +296,7 @@ def test_task_get_policy_private_reservations_and_public_projection(tmp_path):
         validate_action({**action, "payload": {"task_id": task_id, "path": "secret"}}, {})
     class Runtime:
         def task(self, identity):
-            return {"id": task_id, "state": "running", "spec": {"name": "public", "workspace_id": workspace,
+            return {"id": task_id, "state": "running", **times, "spec": {"name": "public", "workspace_id": workspace,
                     "argv": ["private argv"], "env": {"TEST_VALUE": "abcdefghijklmnopqrstu"}}}
     class Federation:
         private = False
@@ -297,11 +305,47 @@ def test_task_get_policy_private_reservations_and_public_projection(tmp_path):
     federation = Federation()
     agent = NodeAgent(Runtime(), tmp_path / "agent", federation=federation)
     assert agent.read("task.get", action["payload"]) == {
-        "id": task_id, "state": "running", "name": "public", "workspace_id": workspace}
+        "id": task_id, "state": "running", "name": "public", "workspace_id": workspace, **times}
     federation.private = True
     with pytest.raises(ValueError, match="private federation"):
         agent.read("task.get", action["payload"])
     assert not list((tmp_path / "agent").glob("*.json"))  # Exact reads do not cache stale task state.
+
+
+def test_artifact_media_types_survive_actual_node_and_backend_adapters(tmp_path, monkeypatch):
+    from suan.control.agent import NodeAgent
+    from suan.desktop_bridge.backends import RuntimeBackend, _NO_READ_PATH
+    task_id, node_id = "b" * 32, "a" * 32
+    artifacts = [{"path": "out.txt", "size": 8, "sha256": "1" * 64, "media_type": "text/plain"},
+                 {"path": "raw.unknown-stk-format", "size": 9, "sha256": "2" * 64,
+                  "media_type": "application/octet-stream"}]
+    calls = []
+
+    class Runtime:
+        def artifacts(self, identity):
+            assert identity == task_id
+            calls.append("runtime.artifacts")
+            return artifacts
+
+    runtime = Runtime()
+    agent = NodeAgent(runtime, tmp_path / "agent")
+
+    class Hub:
+        url = "http://127.0.0.1:3"
+
+        def read(self, node, kind, payload):
+            assert (node, kind, payload) == (node_id, "task.artifacts", {"task_id": task_id})
+            calls.append("hub.read")
+            return agent.read(kind, payload)
+
+        def action(self, *args):
+            pytest.fail("The read must not create an action")
+
+    monkeypatch.delitem(_NO_READ_PATH, (Hub.url, node_id), raising=False)
+    assert RuntimeBackend("runtime:metadata", runtime).artifacts(task_id) == {"artifacts": artifacts}
+    assert HubBackend("hub:metadata", Hub(), node_id).artifacts(task_id) == {"artifacts": artifacts}
+    assert calls == ["runtime.artifacts", "hub.read", "runtime.artifacts"]
+    assert not list((tmp_path / "agent").glob("*.json"))
 
 
 def test_hub_cli_import_remains_lightweight():

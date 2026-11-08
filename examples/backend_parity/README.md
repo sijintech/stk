@@ -23,7 +23,7 @@ For each side, using only that side's own authority and IDs:
 2. Resubmitting the same key on the same path returns the original task.
 3. The same key with a different request is refused as `conflict`.
 4. The artifact list and the downloaded bytes. Each side must list exactly `out.txt`, with the fixed
-   expected UTF-8 bytes (size and SHA-256), and the downloaded bytes must have that SHA-256. An empty or
+   expected UTF-8 bytes (size and SHA-256) and `media_type: text/plain`, and the downloaded bytes must have that SHA-256. An empty or
    different list fails.
 5. UTF-8 stdout read by byte cursor, including a cursor that starts inside a multi-byte character.
    The stdout must be non-empty and identical on both sides.
@@ -42,6 +42,19 @@ For each side, using only that side's own authority and IDs:
 
    A malformed line, an extra line, another PID, a missing or malformed identity, or a third run directory
    fails.
+8. Terminal task metadata. The completed task's live reads and the post-ready cancelled task's live reads
+   must preserve `created_at`, `updated_at`, `attempted_at`, `started_at` and `finished_at` exactly as read
+   from that task's own Runtime. All five are required for these two fixtures, which actually ran. Each must
+   be an aware UTC ISO timestamp; missing, null, invalid or changed values fail. Invalid metadata is recorded
+   only by its missing/null/invalid category, without copying its value into evidence. Same-path submission
+   replay must preserve the original `created_at` even when the Hub replays an older cached action result.
+
+These checks make twelve assertions (A1–A12). Absolute timestamps and elapsed times are never compared
+between A and B, and no wall-clock ordering is assumed. Queued tasks, cancellation before dispatch and
+transient dispatch deferrals can legitimately omit timestamps or have null `attempted_at`; the product's
+older optional-field contract is unchanged. The adapter regressions separately check preservation of those
+shapes. MIME type comes from the Runtime host; this fixed `.txt` fixture expects `text/plain`, without
+claiming a uniform MIME policy for arbitrary formats on other hosts.
 
 IDs are never expected to match across paths, and recovery never switches paths. A wait that expires is
 reported as `unknown`, and nothing is resubmitted. An unreachable service or node is retried as
@@ -136,8 +149,8 @@ Raw exception text, command arguments and paths are never written.
 |---|---|
 | `run-manifest.json` | Module origins (base kind; relative paths and SHA-256 of the key modules; harness SHA-256), the checkout HEAD and whether it has uncommitted changes (for reference only; the hashes identify the code run), interpreter and package versions, ports, deadline, scenario and total seconds, verified and not-verified scope |
 | `requests.jsonl` | The operations the scenario recorded per side: workspace creation, each submission (operation, key, template, outcome or error code, task ID, elapsed time) and each first cancel. Reads, log pages, downloads, the repeated cancel and setup and cleanup calls are not listed. A run that fails early lists only what it reached. |
-| `backend-parity.json` | Per command: both sides' observations, the comparison rule, and whether it is a business rule or a permitted projection difference |
-| `assertions.json` | A1–A9, the exported error, `cleanup_ok`, `within_deadline` and `ok` |
+| `backend-parity.json` | Per command: both sides' observations, including terminal timestamp fields and their own Runtime oracle, the comparison rule, and whether it is a business rule or a permitted projection difference |
+| `assertions.json` | A1–A12, the exported error, `cleanup_ok`, `within_deadline` and `ok` |
 | `resources.json` | Processes started, each cleanup step's outcome (failures by type only), leftover PIDs, whether the private directory was created and removed |
 
 ## Scope and limits
