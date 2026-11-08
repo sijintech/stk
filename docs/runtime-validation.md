@@ -1,5 +1,21 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：D1 真实双部署与最终安装验收
+
+本地源码 `6ae9699940633de8fd4de004486bd440107e7bc9`，Claude原提交6cc2d39e选择集成4b33e131；本节成文时尚未push，远端304ba0be。证据根 `d1-parity-20261108-08/root/parity-integration/`，最终提交/推送见closure。无新产品UI或点击验收。
+
+- `final-boundaries-red.xml`：两个无服务反例各失败，分别是受支持Python3.12的config.exists抛PermissionError中断后续清理，以及实际1.04s/预算1s被round成1.0假绿。root改为整步隔离和未舍入耗时后，`final-joint.xml`（41项新样例/边界＋20项既有Hub CLI）61通过、零skip、23.35s。
+- `installed-final/`及installed-final-summary.json：root独立最小server/control/test extras、非system-site-packages Python3.12，用-I installed运行最终脚本c1235e8c…，9/9断言通过，scenario10.964686322s、含清理12.1s。A直连Runtime与B真实Hub/WS/Node/另一Runtime来源base与12模块SHA一致；各2任务/run、每个marker严格匹配实际程序PID，程序/worker均退出，目录和进程无残留，五证据文件无个人路径/Bearer等禁止标记。
+- `installed-product-binding.json`：已装包由58fbd03e归档构建；git diff58..6ae --suan toolkits pyproject为空。最终harness另绑SHA，不以包版本或旧Git头替代字节证明。最小环境无GUI/科学依赖；未逐服务记录sys.modules，未称完整D1或跨机通过。
+- 独立审阅在review/parity/candidate-2、candidate-3及本目录review-final.json/probes；最后两边界均有纯桩红绿验证。Claude最终原版39项/双模式试跑是其交付证据，root最终61项和-I验证绑定已修字节，不混用初稿绿灯。
+- code-delivery.json：选择集成暂存81622字节、root修正6266字节，两次gitleaks均退出0/零发现。四状态文档仅提交本批新增前缀，原WIP和AOCI预存资产保留；工作树治理不等发布索引完整提交。
+
+前远端304ba0be的整个Runtime42472416392于2026-11-08T10:57:40Z completed/success，13job全成功。Linux3.11/3.14各5696通过153skip4未选，分别845.02/716.20s；Linux3.12为5713/136/4、937.97s。Windows3.11/3.12各5098通过254skip354未选、934.25/805.86s；旧24项失败均消失。文献三版本、协议、web、peer-macos、Flower和workflow desktop也成功，详见root/ci-304-runtime-terminal.json；不把skip计为能力通过。
+整个Desktop42472416447于11:15:29Z completed/failure：Linux GPU job128706090506成功；Linux包job128706090129配置时googletest下载收流curl56，WindowsCPU128706090402下载ninja1.13.2 HTTP503，Mac128706090443下载fmt12.2.0 HTTP2 framing curl92失败，额外必跑检查缺XML因测试未启动。Windows native和Linux smoke跳过，不能借ec32/a506的原生结果作本轮证明。前整轮推送等待门已满足。
+Docs42472416432、Secret42472416393各重试一次后仍failure：attempt2 build job128708594837的sharp-libvips请求超时，gitleaks安装job128708601818收流退出56，未执行正式构建/扫描。未改变网络策略或绕下载校验，没有第三次重复触发。
+
+当前只验正常任务切片：state/reason/cancel_requested、三字段产物及下载、UTF8字节游标、重放/冲突、取消和真实启动数。media_type/更多时间字段、输入传输/撤权/其余故障和云端项目语义仍待补。Claude12仅新增disconnect.py、DISCONNECT.md和新测试，正在独立树验证NodeAgent离线/原profile重连；root的另一原生辅助在第四树开发公共AX候选，尚未Mac编译/运行、不算修复。真实MuPRO许可/HDF5-only完成和科学有效性仍未验。
+
 ## 2026-11-08 UTC：MuPRO HDF5 预检、完整回归与最小安装核验
 
 源码 `58fbd03ee5976af90a3a083dcb24cf0aeed4994f`；证据根 `/home/mnemora/.local/state/stk-validation/d1-parity-20261108-08/`。本节成文时尚未push、远端ec32a182；最终交付及推送见root/closure.json。无新产品UI或点击验收。

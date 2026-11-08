@@ -1,5 +1,12 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：D1 双部署样例与严格验收边界
+
+Claude独立提交 `6cc2d39e0f57b15426462897edfb943b2df01505`，root选择集成main `4b33e131`；三路径为offline.py、README和test_backend_parity.py，没有新增产品CLI或业务契约。修正空产物假绿、来源混用、marker/PID、清理和错误导出；root最后复现config.exists异常跳过清理、实际1.04s/预算1s被舍入为通过，两红例先失败，`6ae96999` 修后联合61通过/零skip、23.35s。
+root独立最小extras环境-I installed跑最终真实Runtime A及Hub/Node/Runtime B，9断言通过，总12.1s。harness c1235e8c…单独绑定；已装包来自58，产品suan/toolkits/pyproject到6ae无差异；来源base/模块SHA一致，实际进程/marker、下载字节和清理已核。不称整个D1矩阵、云端项目、目标OS或真实求解器通过。
+304的整个Runtime42472416392 success：三Linux/两Windows通用矩阵零失败，旧24项前提问题关闭；13job全成功。整个Desktop42472416447于11:15:29Z failure：Linux GPU成功，其余三个直接失败为googletest收流56、ninja503及fmt HTTP2下载92；两下游skip，没有新的目标原生证明。Docs/Secret各重试一次仍失败，不绕下载校验。
+Claude已接12任务，只开发节点断线/原任务恢复观察；另一Codex在stk-native-ax开发Mac公共AX测试候选，非Claude且未目标机验收。root收口共享构建、认知与推送；四文档旧WIP保留。当前源码尚未push，最终交付见 `d1-parity-20261108-08/root/parity-integration/closure.json`，原八项/待决仍保留。
+
 ## 2026-11-08 UTC：陈旧 HDF5 红绿例与完整回归收尾
 
 源码 `58fbd03ee5976af90a3a083dcb24cf0aeed4994f` 已本地提交；本节成文时未push。旧run.h5被CLI上传及制造求解器成功运行的两反例已修：可选输出仅加入陈旧预检，RUN_OUTPUTS/DAT验证不变，其他HDF5名不被该规则保留。定向2红1绿变3绿，MuPRO联合90通过/2真实资产跳过。D1文档纠正超限拒绝和批准消费前后手工启动观察。

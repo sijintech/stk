@@ -1,12 +1,16 @@
 # D1 实施前的最小契约与兼容门清单
 
-任务卡：CL-D1-01（见[协作约定](agent-collaboration.md#当前任务卡)）。状态：**D1 两部署联合验收仍在实施；下列新进度优先于历史基线。**
+任务卡：CL-D1-01、CL-D1-PARITY-11（见[协作约定](agent-collaboration.md#当前任务卡)）。状态：**首个任务切片已本地验收，D1 完整退出门尚未完成；下列新进度优先于历史基线。**
 本文不发布新 schema，不改产品代码或数据库格式，也不替所有者选择 D3 领域、剩余未决事项或 PET 新专项。
 2026-11-07 所有者对原三项待决作了新回答，root 已把它们写入任务卡并要求纳入本清单，见 §6。
 
 **历史基线：** 初稿来自 `claude/support` 的 `37d26464591f9191986459f4d70b7320e68f5555`；三份设计当时以 `535b0d63d15521ea7d4294ddfce2ac68a3555667` 为证据，两头当时的产品代码相同。下文未更新的 `路径:行` 仅定位该历史版本，不能据此声称当前源码仍相同。
 
-**2026-11-08 进度核定：** 已推主线 `ec32a182` 含 HDF5 连接器和 MuPRO 智能体本地准备、完整计划审阅及人工单次首次批准；发布契约分别见 [MuPRO HDF5/1](../specs/mupro-hdf5-1.md) 和 [agent MuFerro run/1](../specs/agent-muferro-run-1.md)。当前 S2c 只支持桌面明确选择的直连/SSH Runtime，仍不支持 Hub 准备。root 已选择 R1 的 (a)，Claude 在独立 worktree 开发真实 CLI 双部署 harness。root 从该已提交源码独立安装 `.[server,control,test]`，四类入口/后端导入无 GUI 或科学计算模块，已安装包的 Hub CLI 20 项回归通过；这还不等于新 harness 的两部署比较、云端项目服务或真实 MuPRO 验收。证据见 `d1-parity-20261108-08/root/minimal-imports.json` 和 `minimal-hub-cli.xml`，最终状态以运行验收为准。
+**2026-11-08 进度核定：** 已推主线 `304ba0be` 的整个 Runtime 工作流通过；HDF5 和有限 S2c 契约分别见 [MuPRO HDF5/1](../specs/mupro-hdf5-1.md) 和 [agent MuFerro run/1](../specs/agent-muferro-run-1.md)。S2c 仍只允许桌面明确选择的直连/SSH Runtime，不支持 Hub 准备。
+
+root 选择 R1(a)，已将 Claude `6cc2d39e` 的[双部署样例](../../examples/backend_parity/README.md)选择集成，并修正清理异常和未舍入预算判断；源码本地头 `6ae96999`，本节成文时尚未推送。联合测试 61 通过、零跳过；root 在独立、非 system-site-packages 的最小 `server/control/test` 环境，以 `-I --mode installed` 验证真实 Runtime A 和 Hub/Node/Runtime B，9 项断言通过、总耗时 12.1s，两个部署的实际模块来源/摘要一致，任务程序和 worker 均退出，临时目录已删除。包来自 `58fbd03e`，到 `6ae96999` 的 `suan/`、`toolkits/`、`pyproject.toml` 无差异；样例自身另绑 SHA。证据为 `d1-parity-20261108-08/root/parity-integration/`，最终提交/推送以其 closure 和[运行验收](../runtime-validation.md)为准。
+
+这只完成已列明的正常任务切片，未覆盖全部合同矩阵或故障门；云端项目语义、跨主机/目标 OS、真实 MuPRO 和科学有效性均未验。下一模块 CL-D1-DISCONNECT-12 验节点离线/原 profile 重连观察，不自动重提任务。
 
 **输入：**
 - [共享架构](../design/shared-backend-architecture.md)
@@ -27,7 +31,7 @@
 | unknown | 本轮未核实 |
 
 Claude 编写清单时没有运行产品测试；root 集成时实际运行的子集见[运行验收](../runtime-validation.md)。
-"退出证据"列的是建议产出的 D1 验收产物，不是已有结果。
+未被上述实际进度覆盖的“退出证据”仍为建议产物。
 证据文件名沿用[跨端验收 §7](../design/distributed-workbench-acceptance.md#7-证据格式与结果判定)的约定，例如 `run-manifest.json`、`requests.jsonl`、`backend-parity.json`、`resources.json` 和 `assertions.json`。
 
 ## 1. 最小无 GUI 装配切片
@@ -42,7 +46,7 @@ Claude 编写清单时没有运行产品测试；root 集成时实际运行的�
 
 ### 1.1 两种部署的进程计划
 
-各个入口都是现行实现，把它们组合成两种部署是本文的拟议。
+各入口均为现行实现；CL-D1-PARITY-11 已按 R1(a) 在单 Linux 主机组合以下两种独立部署，没有新增产品入口。
 
 | 项 | 部署 A：本地 Core | 部署 B：云端/团队协调 |
 |---|---|---|
@@ -65,10 +69,10 @@ Claude 编写清单时没有运行产品测试；root 集成时实际运行的�
 
 | ID | 门 | 类别与现状 | 退出证据 |
 |---|---|---|---|
-| G1-1 | 两部署用同一源码修订的同一安装。不共享状态目录、数据库、端口或个人凭据 | 拟议 | `run-manifest.json`：源码 SHA、依赖清单与 extras、两套 state dir、端口、PID |
-| G1-2 | 无 GUI 启动：环境中不设 `DISPLAY` 和 `WAYLAND_DISPLAY`；独立 venv 只装 `.[server,control,test]` | 拟议。Runtime CI 目前装的 extras 更多（`.github/workflows/runtime.yml:26`），不能直接证明这一点 | 各服务进程的启动日志。拟议检查：`sys.modules` 中不含 `PySide6`、`vtk` 和 `suan.gui` |
-| G1-3 | 合成命令在两条路径上字面相同 | **缺口。** `@python` 只由节点代理替换（`suan/control/agent.py:344`），内置 `demo-field` 模板正用它（`suan/control/policy.py:110`）。内置 `muferro-example` 模板用的是 `{python}`（`suan/control/templates.py:14-17`），但它需要 MuPRO SDK。`{python}` 由 Runtime worker 替换（`suan/runtime/worker.py:151`），两条路径都生效 | 拟议做法：只用 `{python}` 令牌。B 侧用 `--template-file` 注册同一条精确命令，避免进入复核；也可以照实记录一次复核动作。两边的 argv 原样记入 `requests.jsonl` |
-| G1-4 | 每个部署只写自己的 state dir。收尾时只清理本轮拥有的进程和目录 | 锁和停止命令是现行实现；收尾清单是拟议 | `resources.json` |
+| G1-1 | 两部署用同一源码修订的同一安装。不共享状态目录、数据库、端口或个人凭据 | 当前样例已验：逐模块 base/SHA 相同；新建两套私有状态和进程，源码头仅作参考，实际 SHA 绑定执行字节 | `run-manifest.json`、`resources.json` 及 root 的 `installed-product-binding.json` |
+| G1-2 | 无 GUI 启动：环境中不设 `DISPLAY` 和 `WAYLAND_DISPLAY`；独立 venv 只装 `.[server,control,test]` | 最小安装和 unset 显示环境已验；Runtime CI 的较多 extras 不替代该证据。尚未逐服务采集完整 `sys.modules` | `minimal-imports-58.json`、`installed-final/`；各服务内部模块清单仍待专门核验 |
+| G1-3 | 合成命令在两条路径上字面相同 | 当前样例已用同一固定公开程序及 `{python}` argv；B 注册精确运维模板，不使用仅由节点展开的 `@python`。未运行 `muferro-example` | `run-manifest.json` 的模板 argv SHA 和冻结样例源码；`requests.jsonl` 只列实际记录的创建/提交/首次取消，不保存原环境 |
+| G1-4 | 每个部署只写自己的 state dir。收尾时只清理本轮拥有的进程和目录 | 正常路径及信号竞态、配置检查失败、扫描/移除失败等反例已验；有清理错误不能 ok，API/监督器停止不等于取消任务 | `resources.json`、`final-joint.xml` 及 `final-boundaries-red.xml` 中的两红例 |
 | G1-5 | 本片不比较项目语义 | **缺口。** 云端角色目前没有项目应用服务。Hub 提供的是配对、设备、action、blob/上传、图谱目录、节点连接，以及一个简易会话消息接口；该接口用消息 ID 幂等，同 ID 不同内容时返回 409（`suan/control/app.py:282-639`，会话部分在 `:580-600`）。这个会话接口不是 Synthrix 的对话或科研领域服务。ProjectStore 只有本地 SQLite（`suan/project/store.py`） | 本片只比较任务生命周期命令。项目语义的双部署比较列为 D1 后续片，承载方式见 §7.2 的 R2 |
 
 ## 2. 同语义合同矩阵
@@ -77,6 +81,8 @@ Claude 编写清单时没有运行产品测试；root 集成时实际运行的�
 - **业务差异**：D1 必须消除，或明确拒绝相应操作；
 - **部署/策略差异**：必须由能力或策略声明解释；
 - **投影差异**：允许存在，但要写明。
+
+当前样例仅比较 `state/reason/cancel_requested`、同路径重放/冲突、产物 `path/size/sha256` 及下载字节、UTF-8 日志、取消和实际启动数。下表要求的更多状态/时间字段、`media_type`、输入传输、撤权和故障场景仍须补齐，不能据 9 项断言宣称整个矩阵通过。
 
 | 命令 | A：直连 Runtime | B：Hub → 节点 → Runtime | 类别 | D1 比较规则 |
 |---|---|---|---|---|

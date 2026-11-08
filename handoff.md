@@ -1,5 +1,14 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：D1 首个双部署任务切片已本地验收
+
+main 源码 `6ae9699940633de8fd4de004486bd440107e7bc9` 已本地提交；本节成文时未push，远端 `304ba0be`，最终交付/推送见本批closure。Claude原提交 `6cc2d39e` 已选择集成 `4b33e131`；root补清理配置检查异常隔离、未舍入时限和两红例，原MuPRO/共同后端产品代码未变。
+实际启动独立Runtime A和Hub/Node/Runtime B，固定同argv公开程序，比同路径重放/冲突、精确task.get、产物下载/UTF8字节日志、取消及真实marker/PID退出。联合61通过、零skip、23.35s；root独立最小extras环境以-I installed运行最终9断言通过，总12.1s，实际base/模块SHA相同、两边各2次启动/已退出、清理无残留。包由58归档构建，58到6ae的suan/toolkits/pyproject无差异；harness自身SHA单独绑定。证据 `d1-parity-20261108-08/root/parity-integration/`。
+这是首个正常任务切片，不等D1完整退出；更多时间字段/media_type、输入传输/撤权/全部故障、云端项目语义、跨主机/目标OS及真实MuPRO仍未覆盖。最小环境未装GUI/科学依赖，不冒称逐服务sys.modules已检查；无新产品UI或点击验收。
+实际Claude继续独立stk-claude/claude/support，CL-D1-DISCONNECT-12已派发，先同步root两文件修正再独占三新路径，验证节点离线时Runtime原任务继续、同profile重连观察、无重复提交；尚未交付。另一Codex辅助在stk-native-ax开发公共AX测试候选，不是Claude；未Mac编译/运行，不称修好。root仍独占共享构建、四状态文档、AOCI和main推送。
+远端304整个Runtime42472416392于10:57:40Z success，13job全过：Linux3.11/3.14各5696通过153skip，3.12为5713/136；Windows两版本各5098/254，旧24失败消失。整个Desktop42472416447于11:15:29Z failure：Linux GPU job成功，Windows下载ninja503、Linux包googletest收流56、Mac fmt HTTP2下载92失败；两下游skip，无本轮Mac/Windows原生验收。前整轮等待门已满足。Docs/Secret各重试一次仍下载超时/收流失败，未跑构建/扫描；暂存本地扫描均零发现。
+真实MuPRO主机/SDK/许可/小算例、扫描具体数值、分析提案持久形式仍待输入；保原八项、文献实际点击、Synthrix正常装配和PET新专项后置。PR53/54头未变，未合入无关旧差异。四文档旧WIP及AOCI预存资产保留，工作树索引对齐不等发布索引已全量提交。
+
 ## 2026-11-08 UTC：MuPRO 陈旧 HDF5 预检与完整 Python 回归已收尾
 
 main 源码 `58fbd03ee5976af90a3a083dcb24cf0aeed4994f` 已本地提交；本节成文时未推送，远端仍 `ec32a182`，最终交付/推送身份见本批 closure。CLI 和计算侧提前拒绝遗留 `run.h5`，不把可选 HDF5 加入 DAT 必需产物；其他 HDF5 名字不受这条预检规则保留。旧代码两个红例仍上传/运行；修后联合90通过、2真实MuPRO资产例跳过，102.80s。旧S2c矩阵24失败已复现，只补两个过期等级断言和传输桩server_key，相关权限/端点绑定联合91通过、13.76s，生产门不变。

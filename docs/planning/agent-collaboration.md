@@ -56,6 +56,28 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
 
 ## 当前任务卡
 
+### CL-D1-PARITY-11：首个实际双部署任务切片
+
+- **状态：** Claude 已交 `6cc2d39e0f57b15426462897edfb943b2df01505`，root 选择集成为 `4b33e131`，再以 `6ae96999` 修正清理存在检查的异常隔离和未舍入预算判断。当前为本地主线提交，推送/CI 见交接和本批 closure。
+- **独占交付：** `examples/backend_parity/offline.py`、`examples/backend_parity/README.md`、`tests/test_backend_parity.py`；仅测试样例，不新增产品 CLI、协议或数据库格式。
+- **实际验收：** root 联合 61 通过、零跳过，23.35s；独立最小 extras 环境 `-I --mode installed` 的 A 直连 Runtime 与 B Hub/Node/Runtime 共 9 断言通过、12.1s，来源摘要一致、实际 marker/PID 相符且进程退出、清理完成。原最小包来自 `58fbd03e`，产品目录到 `6ae96999` 零差异，harness SHA 单独绑定。
+- **审阅：** 两次独立审阅和 root 红绿反例修正空产物假绿、混合来源、启动计数/PID、预算、异常/清理失效和错误路径导出。root 最后两反例先失败，修后纳入上述 61 项；证据 `d1-parity-20261108-08/root/parity-integration/`。
+- **范围：** 单 Linux 主机、固定公开合成程序；不含整个 D1 合同/故障矩阵、云端项目服务、跨站、目标 OS、真实 MuPRO 或科学有效性。
+
+### CL-D1-DISCONNECT-12：节点断线与原任务恢复观察
+
+- **状态：** 已派给同一实际 Claude 会话及独立 worktree，尚未集成。基线为其 `6cc2d39e`，先对 root `6ae96999` 两文件 patch 做 no-commit cherry-pick、暂存扫描和独立提交；不合并 main 或重置本树。
+- **唯一新增写入：** `examples/backend_parity/disconnect.py`、`examples/backend_parity/DISCONNECT.md`、`tests/test_backend_parity_disconnect.py`。同步后已有 helper/README 只读，root 树、全局状态、AOCI、共享构建、产品契约及 CI 均不改，不推送或另委派 peer。
+- **目标：** 私有 loopback Hub/Node/Runtime 中只提交一次固定程序；只停本次 NodeAgent，证明 Runtime 原任务及真实程序身份继续；Hub 离线精确读保持 unavailable/unknown。用同 profile 重启节点后观察同 task，再明确取消并核 PID/worker 退出和一次启动，没有换 authority 或重新提交。
+- **退出证据：** 原请求身份、实际阶段观察、逐模块与两份 harness SHA、无新增观察 action、marker/PID 和清理。只读接口若不能证明某项须报告限制；预算、source/installed 和窄环境约束复用已验 helper，异常不导出私有路径或凭据。
+- **限制：** 仍为单主机制造故障，不代表站点故障转移、许可求解或科学通过。任务与证据在 `d1-node-disconnect-20261108-10/`，由 root 独立审查后选择集成。
+
+### root 原生 AX client 测试候选
+
+- **归属：** 另一 Codex 辅助代理，独立 detached `/home/mnemora/xcheng/sijin/stk-native-ax`、基线 `304ba0be`；不是 Claude。旧 `stk-native-runs` worktree 保留。
+- **范围：** 仅报告测试夹具、新公共 AX helper、numeric 协议/所属进程控制和 CPU 反例；不改生产文档适配、权限或网络。root 统一共享构建、原生验收、认知及发布。
+- **待验：** 父端持续泵 UI、有限 kill/reap、实际窗口/视图/session/导航和布局代次再核。唯一 slider、原生输入、DOM/OS 像素和 20 轮门不放宽。未目标 Mac 编译/运行的候选不算修复。
+
 ### CL-D1-01：D1 实施前的最小契约与兼容门清单
 
 - **状态：Claude 文档头 `9590d21b` 已由 root 审阅修正并集成到 main `f6a75f84`；D1 两部署验收仍待实施。**
