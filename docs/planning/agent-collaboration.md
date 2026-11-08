@@ -1,7 +1,7 @@
 # Codex / Claude worktree 协作约定
 
 所有者最新决定：Codex 作为 root 总负责，Claude 在独立 worktree 配合文档和特定模块开发。
-本约定替代此前共用 main 工作树、Claude 仅做设计的安排；不改变已发布协议或三项待决。
+本约定替代此前共用 main 工作树、Claude 仅做设计的安排；发布协议仍以当前版本为准，剩余待决见交接。
 
 ## 工作区和职责
 
@@ -58,7 +58,7 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
 
 ### CL-D1-01：D1 实施前的最小契约与兼容门清单
 
-- **状态：ready，供 Claude 接单；尚未开始或验收。**
+- **状态：Claude 已在 `claude/support` 提交文档，当前文档头 `9590d21b`；root 审查中，尚未合入 main。**
 - **基线：** 创建本 worktree 时继承的协作规则提交；接单时在交付说明记录实际完整 SHA。
 - **目标：** 将现有三份统一后端设计转为 root 可实施的 D1 清单，逐项区分已发布、拟议新增、当前缺口和依赖决定。
 - **唯一写入范围：** 新文件 `docs/planning/d1-compatibility-gates.md`。只读核对相关实现、测试和规格。
@@ -66,11 +66,27 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
   [场景验收](../design/distributed-workbench-acceptance.md)、[发布规格](../specs/README.md)、[路线图](platform-roadmap.md)。
 - **必须交付：** 最小无 GUI 装配切片；本地/云部署的同语义合同矩阵；旧 CLI/Bridge/Runtime 兼容门；
   原操作回执、当前授权、取消/观察/重开和唯一写入的反例；源码与测试入口、未具备资产及逐项退出证据。
-- **边界：** 不发布新 schema，不改产品代码或数据库格式，不替所有者选择 D3 领域、三待决或 PET 新专项；
+- **本轮新决定：** 优先执行器与专业软件，首项 MuPRO/MuFerro；插件定义原生格式，MuPRO 使用 HDF5；开发 S2c prepare/run 权限扩展。
+  这些方向已获准但尚未实现/发布，纳入本任务的兼容门；电场扫描具体参数和分析提案持久形式仍须区分。
+- **边界：** 不发布新 schema，不改产品代码或数据库格式，不替所有者选择剩余未决或 PET 新专项；
   不把历史 Synthrix `90d7c4a` 接缝当当前正常启动可达，不推送、不启动主机服务/模型/科研任务。
 - **验收：** 文档相对链接/章节锚点和 diff 空白检查；条目均指向精确来源或标明 proposal/unknown，实际未跑检查写未运行；
   提交前暂存 gitleaks 按 `.gitleaks.toml` 零发现，交付完整 commit 与 root 审阅问题清单。
 
-root 当前先核对 `6f4de650` 的整个 Desktop CI 与既有记录/AOCI 债务，再完成原生文献编辑器与实际点击验收、
-核实 Synthrix 当前正常启动装配及桌面入口，随后依据 CL-D1-01 进入 D1。顺序可由 root 按真实依赖调整并记录。
-后续模块任务在 root 明确路径和验收后交 Claude，不因本任务卡自动获得其他模块写入权。
+### CL-MUPRO-H5-01：MuPRO 原生 HDF5 独立读取模块
+
+- **状态：已派发；Claude 已读取任务并开始实现，尚无代码交付或验收结果。**
+- **基线：** `claude/support` 文档头 `9590d21b`；该头产品源码与 root `37d26464` 相同。
+- **唯一写入范围：** 新增 `suan/connectors/mupro/hdf5.py` 和 `tests/test_mupro_hdf5.py`，另作独立提交。
+- **目标：** 提供惰性加载的只读 MuPRO HDF5 适配，显式选择 `/tNNNNNNNN/<field>`；
+  将源 `(nx,ny,nz,nc)` 映射为 C 连续 `(nz,ny,nx,nc)`，保持原值、dtype 与未知单位。
+- **验收：** 真实 h5py 合成非对称网格、多步号/字段、区域与步长等价和读取前预算；
+  缺失/错误 shape/dtype、损坏、链接/虚拟数据/外部存储和源变化必须明确拒绝。
+  普通导入不读文件或加载 h5py/NumPy，不执行求解器或模型。
+- **边界：** 不读合作方私有实现；不改 connector 注册、父模块、依赖、发布协议、智能体或全局状态文档。
+  这是独立读取子模块；root 审查后再接既有 FileSource、connector 和图节点，不把合成数据当真实 MuPRO 运行。
+- **交接：** 只提交上述两文件，附完整 SHA、接口、实际测试/扫描和限制；不推送，不拷贝 AOCI baseline。
+
+root 跟进 `6f4de650` 的整个 Desktop CI 与既有记录/AOCI 债务，同时按最新决定优先 MuPRO/MuFerro 执行器与 HDF5 试点；
+原生文献 UI、Synthrix 正常装配/桌面入口及 D1-D5 保留在队列，按真实依赖推进。
+其他模块仍须 root 明确路径和验收后再派发。

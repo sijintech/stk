@@ -1,5 +1,10 @@
 # 项目工作台设计
 
+2026-11-07 最新决定：首期先试点执行器和专业软件，选 MuPRO / MuFerro；原生数据格式由插件定义，MuPRO 用 HDF5。
+所有者同意扩展 S2c prepare/run 权限；具体工具、授权、执行与恢复仍待实现和发布验收。
+实施切片、已有 DAT 兼容、电场扫描参数与剩余决定见 [MuPRO 执行器试点](mupro-executor-pilot.md)。
+该决定更新历史对应待决，不把新增权限视为当前已可用。
+
 更新：2026-11-06。模块化与常驻可视化已交付；本地多维表格扩展及实际验收见
 [多维表格](multidimensional-tables.md)和[验收记录](../runtime-validation.md)。
 开发次序见[开发计划](../development-plan.md)，持久化与计算规则见[项目数据模型](project-model.md)。

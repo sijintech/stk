@@ -74,8 +74,10 @@ the earlier shared-worktree, design-only arrangement. The working agreement and 
   whole historical branches or copy another worktree's AOCI baselines as integration.
 - **Protect WIP:** inspect the staged diff before every commit. Stage only owned changes, using hunks
   when a file contains pre-existing WIP; avoid `git add .`, destructive cleanup and unintended commits.
-- **Decisions:** designs remain proposals until the owner chooses an option. The three pending owner
-  decisions and PET new-work deferral remain in force. Claude may investigate and propose; task
+- **Decisions:** the owner selected MuPRO/MuFerro as the executor pilot, plugin-defined native
+  formats (HDF5 for MuPRO), and development of S2c prepare/run permission extensions. Implementation
+  and published-contract changes still need verification; see `docs/design/mupro-executor-pilot.md`.
+  Remaining owner decisions and PET new-work deferral stay in force. Claude may investigate and propose; task
   assignment does not authorize changing endpoints, credentials, network policy or execution powers.
 
 <!-- aoci:begin -->

@@ -1,5 +1,17 @@
 # 开发交接记录
 
+## 2026-11-07：MuPRO/HDF5 试点与 S2c 方向获准
+
+所有者选择 MuPRO/MuFerro 为首个执行器/专业软件试点，原生格式由各插件定义、MuPRO 使用 HDF5，并同意开发 S2c prepare/run 权限扩展。
+新增试点设计并更新工作台决定和协作入口；研究任务的电场扫描数值与分析修改提案持久形式仍未指定。
+协作规则已本地提交 `37d26464`，Claude worktree/分支独立建立，CL-D1-01 后台会话89bf764a已启动并收到排队的新决定。
+31 项 AOCI 两批应用后 Verify/Check/Guide 均退出0、Guide complete/none；新决定文档的增量随后再维护。
+root 审查并选择性提取 Claude 文档头 `9590d21b`，纠正外部网络与回环的区分、未核实的 SDK/HDF5 版本推断和 AOCI 配置推断，清单仍不是 D1 实施验收。
+另派发 CL-MUPRO-H5-01 独立读取模块和测试；Claude 已在自己的树开始写代码，root 暂不采用未交付源码。
+MuPRO 当前配置预检退出1（无 SDK/程序/许可配置），四组旧链回归74 pass/1真实程序资产skip，Linux文献现有单例复核通过。
+Desktop同头整轮尚未结束，macOS文献9项和原生视频2项失败均保留，未盲合PR53/54；详情及证据在运行验收。
+本节是决定、前置检查与协作交付，不表示新 HDF5/Agent 功能或真实 MuPRO 科研验收。
+
 ## 2026-11-07：所有者指定 root 总负责与独立 worktree
 
 Codex 负责拆任务、审查、集成和交付；Claude 在独立 `stk-claude` / `claude/support` 承担文档及指定模块，

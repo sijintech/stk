@@ -1,5 +1,22 @@
 # STK 当前交接
 
+## 2026-11-07：MuPRO 执行器试点与权限方向更新（当前）
+
+所有者已选择先试点执行器和专业软件，第一项为 MuPRO/MuFerro；数据格式由插件自行定义，MuPRO 使用 HDF5；
+同意开发 S2c 智能体 prepare/run 权限扩展。方向已确定，当前工具/发布契约尚未扩展，不能称功能已可用。
+实施入口为 [MuPRO 执行器试点](docs/design/mupro-executor-pilot.md) 和 [工作台决定](docs/design/project-workbench.md)。
+电场扫描的方向/幅度/单位/步长/推进与采样等由研究任务显式给定；分析修改提案持久形式仍待决定。
+
+root/main 协作规则提交 `37d26464`，Claude 独立 `stk-claude` / `claude/support` 已创建，CL-D1-01 已派发，
+后台会话 `89bf764a` 正在工作；新决定已通过该会话排队交付，待 root 核对文档提交，不复用原“ready”状态当当前实况。
+Claude 文档头 `9590d21b` 的 D1 清单已由 root 选择性提取并修正事实表述，随本批主线文档集成；D1 两部署验收尚未执行。
+CL-MUPRO-H5-01 已另行派发且开始实现，仅两个新文件；独立读取完成后 root 再接 FileSource/connector，不把模块草稿当插件已可用。
+root 已运行 MuPRO 配置预检（退出1，当前配置未就绪）及旧链回归（74 pass/1 真实软件资产 skip）。
+远端 6f4de650 的 Desktop 整轮仍运行：Linux 三项和 Windows CPU 成功，macOS CPU 文献9项及原生媒体2项失败，Windows原生仍运行。
+root 继续 MuPRO 数据/任务集成和 CI 定位；文献 UI 等旧范围保留，详见运行验收。
+main 的协作设置 AOCI 31 项两批已应用，Verify/Check/Guide 对当时稳定态均退出0，Guide complete/none；
+本节及新试点文档使其再次产生增量，待最终稳定态维护，不借前一 aligned 覆盖新字节。
+
 ## 2026-11-07：root / Claude 独立 worktree 协作（当前）
 
 所有者最新决定覆盖此前共用工作树、Claude 只做设计的分工。Codex 为 root，继续在

@@ -1,5 +1,39 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-07：独立 worktree 已建立与试点决定（当前）
+
+协作规则提交 `37d26464`（main 本地，7 文件），仅新增本次协作记录，四份状态文档的原有 WIP 未连带提交。
+13 个相对链接、暂存空白检查和最终 gitleaks 扫描15.91KB零发现；原四文档正文与本轮前 preimage 精确匹配。
+Claude 独立 worktree `/home/mnemora/xcheng/sijin/stk-claude`、分支 `claude/support`，基线同规则提交，后台任务89bf764a已启动。
+检测到旧交互 Claude 会话仍指向 root，未终止其进程或覆盖现场；新增任务只在隔离树工作。
+
+AOCI 两批分别16/15项应用成功、最终1195条/remaining0；顺序 Verify/Check/Guide 均退出0，治理aligned、Check ok、Guide complete=true/next_action=none。
+保留非阻塞E档提示；证据在 `~/.local/state/stk-validation/worktree-coordination-20261107-01/aoci/`。
+本节和新试点决定是该证明之后的新字节，最终治理需覆盖此增量，不能借旧aligned声称当前完整认知可靠。
+
+所有者已选 MuPRO/MuFerro、插件定义格式/MuPRO HDF5、扩展 S2c prepare/run 开发；软件/许可、真实HDF5产物、智能体权限实现和科研结果尚未新验收。
+Claude 文档头 `9590d21b` 已按唯一文档路径选择性提取，root 修正未核实的 SDK/HDF5 版本、AOCI 配置推断及回环/外网表述；
+D1 两部署、权限及完整迁移验收仍未执行。CL-MUPRO-H5-01 的两个新文件正在独立树开发，尚未作为产品支持采用。
+
+本轮新增实际检查（来源产品代码 `37d26464`，测试期间 main 未改产品代码）：
+
+- `python -m suan.mupro check --json` 退出1：当前 SDK前缀/程序失败，MPI与许可目录未配置，动态库无程序可查。
+  未 source 环境脚本、读许可内容或运行求解器；仅查当前配置/PATH及两个已知安装根的名字，不是穷尽搜索。
+- `test_mupro.py`、`test_integration_mupro.py`、`test_bridge_workflow_muferro.py`、`test_desktop_transfer_lifecycle.py`：
+  74 passed / 1 skipped，82.23s；skip 为未设置 `STK_TEST_MUPRO_PREFIX` 的真实 muFerro 例，不计通过。
+  其余使用假求解器及真实本机 Runtime/Hub 链，不证明真实 MuPRO 或科学结论。
+- 现有原生 Linux `LiteratureBridge.ActualCorpusKeepsCallerUuidAndPassivelyReopensWithoutReissue` 单例通过（1240ms），
+  不能替代 macOS 当前失败。上述命令均清空 KEY、unset MODEL，无收费产品模型请求。
+
+证据：`~/.local/state/stk-validation/worktree-coordination-20261107-01/mupro-preflight-01/report.json`、`mupro-regression-01.xml`。
+本轮压缩后按合同新传1195条/45块、约174896估算tokens，交付确认、Challenge10/10、覆盖100%、框架自评87%；
+治理仍dirty/stale，最终增量维护另行记录，不借认知验证代当前源码和平台验收。
+
+实时同 `6f4de650` Desktop `42442318655` 整轮仍 in_progress：Linux三job、Windows CPU成功；
+macOS CPU1488中9个文献控制器例失败，原生6中两个视频例失败（own-WKWebView时间滑条定位），Windows原生job仍运行。
+Runtime/Docs/Secret成功；未提前push下一代码头。PR53旧传输实现与main已有修复重复且有冲突，PR54旧大写HANDOFF与当前交接重复，均未盲合。
+本轮没有新的UI点击验收，不记录虚构点击数。
+
 ## 2026-11-07：root / Claude worktree 协作设置（当前）
 
 本轮范围是协作规则、隔离 worktree 和交接任务，不是产品 UI/科研功能交付。
