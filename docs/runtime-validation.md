@@ -1,5 +1,22 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：MuPRO HDF5 预检、完整回归与最小安装核验
+
+源码 `58fbd03ee5976af90a3a083dcb24cf0aeed4994f`；证据根 `/home/mnemora/.local/state/stk-validation/d1-parity-20261108-08/`。本节成文时尚未push、远端ec32a182；最终交付及推送见root/closure.json。无新产品UI或点击验收。
+
+- `root/stale-hdf5-red.xml`：旧代码2失败/1通过，CLI接受旧run.h5、制造MuFerro仍成功运行；修后green为3通过。上传/求解器之前拒绝，不改输入字节或引入HDF5依赖。
+- `root/mupro-preflight-joint.xml`：90通过/2跳过、102.80s；CLI/计算wrapper、项目流程、HDF5收集及agent准备。两跳过均缺STK_TEST_MUPRO_PREFIX；制造SDK不证真实许可或科学有效。
+- `root/ci-fixtures-red.xml`：24失败/1通过，复现ec32五通用矩阵的两个旧等级断言和22传输桩缺server_key。green五文件联合91通过、13.76s，含材料权限及端点漂移/传输恢复/审批；生产门不变。
+- `root/full-python.log/xml`：完整非desktop/perf回归退出0，5698通过/151跳过/4未选、964.35s、零失败。full-inputs-before/after.json的850跟踪输入SHA全同。full-python-summary.json列完整跳过原因：未供PDFium/编码器/Flower/helper/MuPRO和Windows专属，另有15个既有离屏探测SIG11；不借旧专用组证明本次跳过能力。
+- `root/minimal-install.log`及minimal-imports.json：先从ec32归档安装server/control/test，独立venv非system-site-packages，四入口/后端无GUI/科学模块，installed Hub CLI20通过/10.51s。随后minimal-install-58.log、minimal-imports-58.json和minimal-hub-cli-58.xml：从58已提交归档重新构建安装，实际site-packages服务/后端无GUI/科学模块，20通过/8.54s。这两次不是新D1harness的最终验收。
+- `root/preflight-ci-staged-gitleaks.json`：本批源码暂存27932字节、退出0零发现；独立审查见review/preflight。Claude初稿trial-2和trial-installed各9断言通过，13.3s/20.7s且cleanup_ok；最终需修预期产物、真实启动计数、预算和移除失败反例，未集成，不沿用初稿绿灯。
+
+远端ec32 Runtime42468258331已completed/failure：Linux3.11/3.12/3.14及Windows3.11/3.12各24失败，均定位上述旧测试前提；其他成功包括文献三版本、协议、web、peer-macos、Flower及该workflow desktop组。修正源码仍待新头CI。
+整个Desktop42468258292于2026-11-08T10:22:29Z completed/failure，前整轮推送等待门满足。Mac job128692718551的CPU1501/1501（含13个新agent UI）、Metal254/254通过；原生4/6，两个视频唯一time-matched slider失败、退出8，各0/20轮。WindowsCPU拉CMake4.4.4、Linux两job拉googletest1.17.0均下载504，下游Windows native/Linux smoke跳过，不继承旧a506目标平台绿灯。
+Docs42468258328、Secret42468258293各attempt2仍下载504，分别sharp-libvips/gitleaks；后者扫描未执行。未绕下载校验或重放生产动作。本批Mac终态独立审计在review/mac-ax/ec32-terminal：8次AX仍2节点/0slider，与旧头同型。外部公共AX helper未Mac编译/运行、未父端接线，不算修复；唯一slider、原生输入、DOM/OS像素与20轮门保留。
+
+云端项目语义、真实MuPRO/HDF5-only完成、目标OS新UI及科学有效性仍未验；四状态文档旧WIP和AOCI预存资产保留。最终Git/推送/扫描及工作树治理状态见本批closure。
+
 ## 2026-11-08 UTC：S2c MuPRO 接线、目标绑定与原生卡片验收
 
 源码 main `b6b92d911860b52eda755679f4cc2094a39ba24d`；证据根 `/home/mnemora/.local/state/stk-validation/s2c-wire-20261108-07/`。此前组件99/8只属于旧字节，本批最终结果如下。

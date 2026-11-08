@@ -1,5 +1,14 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：MuPRO 陈旧 HDF5 预检与完整 Python 回归已收尾
+
+main 源码 `58fbd03ee5976af90a3a083dcb24cf0aeed4994f` 已本地提交；本节成文时未推送，远端仍 `ec32a182`，最终交付/推送身份见本批 closure。CLI 和计算侧提前拒绝遗留 `run.h5`，不把可选 HDF5 加入 DAT 必需产物；其他 HDF5 名字不受这条预检规则保留。旧代码两个红例仍上传/运行；修后联合90通过、2真实MuPRO资产例跳过，102.80s。旧S2c矩阵24失败已复现，只补两个过期等级断言和传输桩server_key，相关权限/端点绑定联合91通过、13.76s，生产门不变。
+完整非desktop/perf Python回归退出0：5698通过、151跳过、4未选、964.35s，850个跟踪输入前后SHA一致。跳过包含未供PDFium/编码器/Flower/helper/真实MuPRO、Windows专属及15个既有离屏探测SIG11；不能称这些能力通过。证据 `d1-parity-20261108-08/root/full-python-summary.json`。
+root先独立安装ec32的server/control/test，再从58已提交归档更新同一非system-site-packages纯净Python3.12环境；58安装态后端/服务导入无GUI或科学模块，Hub CLI20通过、8.54s。Claude独立 `stk-claude / claude/support` 的CL-D1-PARITY-11仅新增双部署harness/README/测试；初稿source和installed各9断言通过，仍在补预期产物、程序启动计数、预算和清理失败反例，尚未集成或验收最终模块。root负责main、独立审阅/安装验收、共享构建、四状态文档、AOCI和推送。
+远端ec32 Runtime42468258331已failure：五个通用矩阵各24失败，均为本批修正的旧测试前提；文献三版本、协议、web、peer-macos及Flower组成功。整个Desktop42468258292于10:22:29Z completed/failure：Mac CPU1501/1501、Metal254/254通过，原生4/6，两个视频仍AX slider失败；WindowsCPU及Linux两job因依赖下载504失败，两个下游job跳过。前整轮等待条件已满足，不称CI全绿。Docs/Secret各attempt2仍下载504失败，未获得新构建/扫描成功证据。
+Mac本轮8次AX查询仍仅WKWebView→remote两节点/0slider，0/20轮；外部公共AX helper未Mac编译/运行、未接父端watchdog，不算修复。原唯一slider、原生输入、DOM/OS像素和20轮门保留。D1清单已更新有限S2c/HDF5现状，但云端项目服务与HDF5-only完成仍未实现/验收。
+真实MuPRO主机/SDK/许可/小算例、科学扫描数值和分析提案持久形式仍待输入，不代选。原八项、原生文献实际点击和Synthrix正常装配继续，PET新专项后置。PR53/54头未变、未合入旧差异；四文档原WIP及AOCI预存资产保留。当前交付/测试/CI/治理以本批closure及实际Git为准。
+
 ## 2026-11-08 UTC：MuPRO 智能体准备与桌面首次批准已接通
 
 main 源码 `b6b92d911860b52eda755679f4cc2094a39ba24d` 已本地提交，推送与新 CI 以本批 closure 为准。Claude 执行器已集成 `c39f31e4`，准备模块原提交 `6d9d0e08` 已由 root 接工具/权限、严格桥接、资源选择与原生卡片；原生辅助由另一 Codex 在第三棵独立树交付，未冒称 Claude。
