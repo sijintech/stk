@@ -26,6 +26,7 @@ import copy
 import json
 from pathlib import Path
 import sys
+import threading
 import time
 from suan.desktop_bridge import server
 from suan.desktop_bridge.__main__ import main
@@ -39,6 +40,7 @@ server.bridge_schema.validate_params = lambda m, p: [] if m.startswith('project.
 def init(self, *args, **kwargs):
     original_init(self, *args, **kwargs)
     sessions = {}
+    calls_lock = threading.Lock()
     def session(identity):
         if identity not in sessions:
             item = {'item_id': 'approve:' + identity, 'kind': 'start_run', 'run_id': 'run:' + identity,
@@ -48,7 +50,7 @@ def init(self, *args, **kwargs):
                 'run_approvals': [{'item': item, 'decision': None, 'receipt': None}]}
         return sessions[identity]
     def action(method, p):
-        with (control / 'calls.jsonl').open('a') as out:
+        with calls_lock, (control / 'calls.jsonl').open('a', encoding='utf-8') as out:
             out.write(json.dumps({'method': method, 'params': p}) + '\n')
         if method == 'route':
             return {'choice': {'model': 'fixture', 'endpoint': 'local-fixture'}, 'candidates': []}
@@ -167,7 +169,10 @@ class NativeAgentRuns : public ::testing::Test {
   {
     std::ifstream input(dir.path() / "calls.jsonl");
     std::vector<Json> items;
-    for (std::string line; std::getline(input, line);) { items.push_back(Json::parse(line)); }
+    for (std::string line; std::getline(input, line);) {
+      if (input.eof()) { break; }  // The writer publishes each record with its final newline.
+      items.push_back(Json::parse(line));
+    }
     return items;
   }
   size_t count(const std::string &method)
