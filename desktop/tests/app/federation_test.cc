@@ -617,6 +617,7 @@ class FederationMouse : public FederationBridge, public ::testing::WithParamInte
     ASSERT_TRUE(loop.pump_until([&] { frame(); const auto *w = widget("federation_connection"); return w && w->items.size() == 1; }));
     ASSERT_NO_FATAL_FAILURE(select("federation_connection", 0));
   ASSERT_NO_FATAL_FAILURE(click("federation_owner_info"));
+    ASSERT_NO_FATAL_FAILURE(wait_text(std::string(store().tr("federation.owner")) + ": "));
     ASSERT_NO_FATAL_FAILURE(select("federation_table", 0));
   ASSERT_NO_FATAL_FAILURE(click("federation_load_table"));
     ASSERT_NO_FATAL_FAILURE(click("federation_feature/" + feature_id));
