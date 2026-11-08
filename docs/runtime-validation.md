@@ -1,5 +1,23 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：CI 定向修正的本机证据（目标 OS 待验）
+
+源提交 `dc5890b17eeb4c1b7a76aa42e0e8770abeccc924`（5文件），本地main；远端仍761a9e37。本批证据根 `native-ci-20261108-04/root/`，最终Git/认知/CI见该目录closure。
+所有测试 `STK_TOKEN_PLAN_API_KEY=` 且移除 `STK_TOKEN_PLAN_MODEL`，无收费模型、真实求解器或端点/网络策略修改。
+
+- **文献租约：** 按[Apple XNU锁实现](https://raw.githubusercontent.com/apple-oss-distributions/xnu/main/bsd/kern/kern_lockf.c)核对flock/fcntl同inode冲突路径，Darwin改为目录租约候选；Linux保留原DB租约。恢复复制前后身份、授权和关闭顺序不变。独立进程红例lease-red为1失败，修正后lease-green为1通过；Linux可执行两种策略，Darwin测试只启用兼容目录策略。Linux回归不能证明Darwin已修好。
+- **真实PDF：** 初轮literature-joint-01为137过/28skip，缺固定PDFium不算解析验收。外部隔离pdfium-python显式安装5.14.0，joint-02为161过/4资产skip；最终joint-03六文件为189过/5skip、26.42s，文献PDF/store恰92唯一、零非通过。4项skip是未配置E5/Qwen真实资产，另一项旧离屏子进程SIG11。
+- **测试污染：** CLI测试先于HDF5结果测试时真实复现1失败/27过/1skip；旧缓存注册表仍持早期模块函数。测试使用独立无第三方入口注册表并定位当前模块后28过/1skip；产品插件规则未放宽。红/绿XML与日志均保留。
+- **原生CPU/构建：** 当前文献C++24/24、14.392s，literature-cpp-01.xml；stk-literature-app-tests与stk-reports-native-window两个目标build退出0，native-build-01.log。final-inputs-before.json与final-verification.json绑定21个记录输入，最终前后SHA一致；不声称覆盖全部构建依赖。
+- **Windows原生候选：** 前失败artifact的windows-html-video-result.json显示直接移动使report宽401→359，泵队列时捕获期真实hover又使宽变511。改夹具在泵队列前完成本地MouseUp，原OS事件仍留正常路由；尺寸、捕获释放、像素和20轮门不降。Linux仅编译此夹具，未做Windows原生通过声明。
+- **Mac原生剩余：** 两个旧视频artifact仅看到WKWebView→remote两节点、无slider；四次查找总计仅几十毫秒。未把诊断当修复，没有关闭AX、像素或20轮门。文献创建C++诊断只添状态/error_code。
+- **提交检查：** 暂存源码10.44KB由gitleaks8.30.1按.gitleaks.toml扫描零发现；扫描归档SHA256 `551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb`已核。四状态文档只前置本次记录，原WIP另证保留；认知托管资产与产品分开审计。
+
+同761a9e37的[Runtime42455805124](https://github.com/sijintech/stk/actions/runs/42455805124)已completed/failure（Linux三版本、Windows两版本失败；文献三版本、peer-macos、Flower等成功）；不能称全绿。
+[Desktop42455805095](https://github.com/sijintech/stk/actions/runs/42455805095)最后查询仍in_progress，Windows CPU、Linux包及fresh24.04冒烟成功；须整轮终态才允许下一push。Docs/Secret成功。
+PR53/54头仍c9f13994/2dd3e4ee，没有新增修改；旧重复实现/历史交接未因持续目标自动合并。
+Claude独立claude/support/c975f58d正整理CL-S2C-PLAN-05，只有外部方案，未当实现或发布契约。本批没有新产品UI交付，无固定布局实际点击数据；真实MuPRO、目标OS及科学有效性仍未验证。
+
 ## 2026-11-08 UTC：HDF5 自动发现/收集交付（本地待推送）
 
 源码：main `89e40c89f946556e35ee954eb9a3fbf9c1a0dbfe`，19文件；Claude读取/发现模块后续交付 `c975f58da1290317ecbe9eff510ca53b82ab52b3` 只选择两新文件集成。

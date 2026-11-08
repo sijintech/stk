@@ -1,5 +1,19 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：原生 CI 定向修正与真实 PDF 回归
+
+root 源码已本地提交 main `dc5890b17eeb4c1b7a76aa42e0e8770abeccc924`（5文件），尚未推送；实际远端为 `761a9e37`，纠正下方旧快照的“未推 HDF5”状态。
+本批把 Darwin 文献库租约移到 corpus 目录，避免与 SQLite 的 DB 锁冲突；Linux 保留原 DB 租约及恢复身份检查。
+Windows 报告夹具在泵 OS 队列前完成本地拖动，保留原排队事件与尺寸/捕获/像素/20轮门；文献创建失败补状态/错误码诊断。
+另已复现 HDF5 替换插件测试的模块重载污染，改为独立注册表及当前模块，未改产品插件权限。
+最终六文件联合189通过/5跳过，21个记录输入前后稳定；文献必跑92个唯一案例零跳过，原生文献CPU24/24及两个相关目标构建通过。
+跳过为4项真实编码器资产与旧离屏SIG11；Mac/Windows修正仍待目标平台CI，没有新产品UI或实际点击验收。
+远端761a Runtime 42455805124 已 completed/failure（五个通用矩阵job失败）；文献三版本、peer-macos和独立Flower组成功。
+Desktop 42455805095 最新仍 in_progress；Windows CPU、Linux包与全新24.04冒烟成功，整轮终态前不push。Docs/Secret成功不代整轮通过。
+Claude 独立 `stk-claude / claude/support` 保持 `c975f58d`，CL-S2C-PLAN-05 正在核源码、仅交外部方案和反例，尚未验收为实现。
+下一步顺序：前CI终态与目标平台验证 → S2c冻结计划/人工单次批准 → 真实MuPRO资产和完成链 → D1双部署；原生文献UI/Synthrix入口及八项范围保留。
+扫描数值、实际主机/SDK/许可/算例和分析提案持久形式仍待输入，不代选。证据在 `native-ci-20261108-04/root/`；认知、Git和后续CI终态以其closure为准。
+
 ## 2026-11-08 UTC：HDF5 自动发现与原任务附加产物收集
 
 源码已本地提交 main `89e40c89f946556e35ee954eb9a3fbf9c1a0dbfe`（19文件），尚未推送；远端仍为 `f152e67a`。
