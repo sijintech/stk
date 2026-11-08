@@ -1,5 +1,14 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：推送真实文献 CPU 界面验收与桌面回归修复
+
+1. 前ae6整个Desktop42523800365于22:21:50Z completed/failure，六job全终态、Windows原生成功；已满足下一批push等待门。将已本地验证的99a25c36/9779efea/fe2cdb4b/9b338172及交付记录送入新CI，不能将旧头结果作为新字节证明。
+2. 真实PDFium/E5 CPU界面2/2、各37点击/零滚轮；默认文献33、材料22和金样8零skip通过，21源码及五XML摘要复核一致。继续目标OS/GPU与Mac两视频诊断、20轮真实验收，不降低既有门。
+3. 实际Claude在独立worktree继续六路径上传CLI第三版，root对固定早期快照并行验证worker协议/回收和只读预算；作者最终冻结、独立终审、最小安装及真实执行证据仍未交付。D1剩余合同/故障与云端项目、Synthrix正常接线及原八项/D2–D5继续；MuPRO未决、HDF5仍需DAT、PET后置保持。
+
+最终提交、push和新CI以 `root-delivery-20261108-35/closure.json` 为准；原WIP保留，P1/P2未启用。
+
+
 ## 2026-11-08 UTC：真实文献 UI 验收推进，修复当前桌面回归
 
 1. 本地main `9b338172` 已含99a25c36、9779efea、fe2cdb4b及9b338172，远端仍ae6；前整个Desktop42523800365尚运行，终态前不push。Runtime13job/Docs/Secret成功不替代整轮Desktop或本批新字节。

@@ -1,5 +1,12 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：完整 Desktop 终态与本机修复推送收尾
+
+ae6的整个Desktop42523800365已22:21:50Z completed/failure，六job全部终态；Windows原生128875254641成功，先前Mac/Linux/WindowsCPU失败仍照实保留。root重新核对9b338172四项源码提交及d0f749bf文档提交，21源码和五测试XML均与冻结证据一致，未为推送重复跑真实模型。前整轮等待门满足，补齐34/closure.json并记录终态后推送，新头平台结果另验。
+
+真实文献CPU界面2/2、默认33/33、材料22/22、布局8/8均零skip；不能代目标OS/GPU或科学有效性。实际Claude同会话独立六路径继续第三版，早期v3只读快照分派worker与读取预算复核，不作作者最终交付或安装验收。原八项/D1–D5、MuPRO待决、HDF5仍需DAT和PET后置保持；最终交付见35/closure.json，原WIP保留。
+
+
 ## 2026-11-08 UTC：真实 PDFium/E5 文献 UI 与桌面回归
 
 本地提交99a25c36（八份布局金样仅顶栏变化）、9779efea（显式/隐藏暂停实际诊断）、fe2cdb4b（默认关闭的真实文献UI验收）和9b338172（材料测试等待发布/激活ACK）。暂存扫描均使用原.gitleaks.toml、零发现；本批未push，前ae6整个Desktop42523800365仍live。Runtime13job、Docs实际部署及Secret成功；各平台旧头失败与当前本机修复分别记录于运行验收。

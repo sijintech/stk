@@ -1,5 +1,25 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：前 ae6 完整 Desktop 终态与下一批推送门
+
+[Desktop42523800365](https://github.com/sijintech/stk/actions/runs/42523800365)已于22:21:50Z completed/failure，六个job均终态，满足前整个Desktop结束后再push的等待门。最终job如下，全部绑定ae6e3d7c：
+
+| job | 终态 | UTC结束 |
+|---|---|---|
+| Linux package128862806342 | success | 21:20:08Z |
+| Linux package smoke128865547978 | success | 21:21:11Z |
+| Linux GL/Vulkan128862806684 | failure | 21:40:32Z |
+| macOS Cocoa/Metal128862806575 | failure | 21:42:37Z |
+| Windows CPU128862806559 | failure | 21:58:17Z |
+| Windows native128875254641 | success | 22:21:50Z |
+
+Windows原生六项全通过、零skip、1329.01s，required六项精确匹配；冻结终态报告 `root-delivery-20261108-35/ci-review/review.json`（SHA256 `48e1c4169ab37e6d9672fe04cc879a03e19c6067daac50977810f2dbe99b8f65`）。七项artifact仅取得元数据，未下载内容或独立核验整包摘要。
+
+旧头Linux2109/2118、MacCPU1510/1516、WindowsCPU1454/1460，失败为此前记录的八/六布局金样及一个材料测试；Mac原生4/6，两视频分别显式和隐藏暂停条件失败。新源码9b338172（四项提交99a25c36/9779efea/fe2cdb4b/9b338172）不在本轮CI中，不能继承Windows原生成功或宣称Mac已修。Runtime42523800339的13job、Docs实际部署42523800384和Secret42523800368成功。
+
+推送前重新核对21源码和五XML的完整SHA256，全部等于 `root-delivery-20261108-34/root-verification.json`；默认文献33、真实资产UI2、材料22、布局8及AX五组所在1CTest均零skip通过。真实资产两布局各37点击/0滚轮、页图采用/纹理释放和Viewer/隐藏稿保持证据沿用34节；本次无新UI变化或重复模型调用。新头CI、实际push身份及未提交WIP见 `root-delivery-20261108-35/closure.json`，34/closure.json已补齐。Claude第三版仍独立复核，未计入本批产品验收。
+
+
 ## 2026-11-08 UTC：真实文献 CPU UI 全链、当前桌面 CI 与修复
 
 本地源码HEAD9b338172（99a25c36、9779efea、fe2cdb4b、9b338172），远端仍ae6e3d7c。前整个Desktop42523800365尚在运行，Windows原生128875254641仍live，push门未满足；不以任一job终态代整体。最终提交和推送结果见 `root-delivery-20261108-34/closure.json` 与实际Git。
