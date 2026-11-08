@@ -99,8 +99,8 @@ bool frame(Probe &p, AXUIElementRef e, ax::Phase phase, ax::Rect &out) {
   // Type-checked CF AXValues only; no ObjC NSAccessibility object is converted to an AXUIElement.
   AXValueRef point = (AXValueRef)position.p, extent = (AXValueRef)size.p;
   CGPoint origin{}; CGSize dimensions{};
-  if (AXValueGetType(point) != kAXValueCGPointType || AXValueGetType(extent) != kAXValueCGSizeType ||
-      !AXValueGetValue(point, kAXValueCGPointType, &origin) || !AXValueGetValue(extent, kAXValueCGSizeType, &dimensions))
+  if (AXValueGetType(point) != kAXValueTypeCGPoint || AXValueGetType(extent) != kAXValueTypeCGSize ||
+      !AXValueGetValue(point, kAXValueTypeCGPoint, &origin) || !AXValueGetValue(extent, kAXValueTypeCGSize, &dimensions))
     return p.reject(ax::Reason::FrameEncoding);
   out = {origin.x, origin.y, dimensions.width, dimensions.height};
   return ax::valid_rect(out) ? true : p.reject(ax::Reason::InvalidFrame);
