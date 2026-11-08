@@ -1,7 +1,10 @@
 """Deterministic transfer handoff between a published terminal state and worker cleanup."""
 
 from concurrent.futures import ThreadPoolExecutor
+import json
+import os
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +12,98 @@ import pytest
 from suan.desktop_bridge.protocol import BridgeError
 from suan.desktop_bridge.transfers import TransferManager
 import suan.desktop_bridge.transfers as transfers
+
+
+@pytest.mark.parametrize("bad_state", [[], {}], ids=["array", "object"])
+@pytest.mark.parametrize("aged", [False, True], ids=["recent", "old"])
+@pytest.mark.parametrize("active_state", ["queued", "running"])
+def test_startup_recovers_other_transfers_without_touching_bad_state_journals(
+        tmp_path, monkeypatch, bad_state, aged, active_state):
+    source = tmp_path / "input.txt"
+    source.write_text("public restart fixture", encoding="utf-8")
+    state = tmp_path / "state"
+    launches, events, backend_reads = [], [], []
+
+    def backend(*args):
+        backend_reads.append(args)
+        return SimpleNamespace(kind="runtime", server_key="runtime:test")
+
+    monkeypatch.setattr(TransferManager, "_launch", lambda self, transfer_id: launches.append(transfer_id))
+    manager = TransferManager(state, lambda *args: events.append(args), backend)
+    restarted = None
+    try:
+        first = manager.start_upload("runtime:test", "workspace", source, idempotency_key="restart-once")
+        record = manager.load(first["id"])
+        record["state"] = active_state
+        manager.save(record)
+        original_request = record["request"]
+        bad_path = manager.root / ("f" * 32 + ".json")
+        bad_bytes = json.dumps({"id": "f" * 32, "state": bad_state}).encode("utf-8")
+        bad_path.write_bytes(bad_bytes)
+        bad_lock = bad_path.with_suffix(".lock")
+        bad_lock.write_bytes(b"preserve this existing lock")
+        if aged:
+            old = time.time() - transfers.KEEP_FINISHED_SECONDS - 60
+            os.utime(bad_path, (old, old))
+        bad_stat = bad_path.stat()
+        manager.stop()
+        launches.clear()
+        backend_reads.clear()
+        events.clear()
+
+        restarted = TransferManager(state, lambda *args: events.append(args), backend)
+        recovered = restarted.load(first["id"])
+        assert recovered["state"] == "interrupted"
+        assert recovered["request"] == original_request
+        assert recovered["idempotency_key"] == "restart-once"
+        assert recovered["connection_identity"] == "runtime:test"
+        assert launches == backend_reads == events == []
+        assert bad_path.read_bytes() == bad_bytes
+        assert bad_path.stat().st_mtime_ns == bad_stat.st_mtime_ns
+        assert bad_lock.read_bytes() == b"preserve this existing lock"
+
+        # Explicit resume sees only the valid interrupted record, with its original identity.
+        assert restarted.resume_interrupted() == [first["id"]]
+        assert launches == [first["id"]]
+        assert restarted.load(first["id"])["request"] == original_request
+        assert bad_path.read_bytes() == bad_bytes
+    finally:
+        manager.stop()
+        if restarted is not None:
+            restarted.stop()
+
+
+def test_startup_retains_unknown_state_and_collects_only_old_finished_journals(tmp_path):
+    state = tmp_path / "state"
+    root = state / "transfers"
+    root.mkdir(parents=True)
+    kept = {}
+    old = time.time() - transfers.KEEP_FINISHED_SECONDS - 60
+    for index, state_name in enumerate(("completed", "failed", "cancelled", "future-state"), 1):
+        path = root / (f"{index:032x}" + ".json")
+        path.write_text(json.dumps({"id": f"{index:032x}", "state": state_name}), encoding="utf-8")
+        path.with_suffix(".lock").write_bytes(b"existing lock")
+        os.utime(path, (old, old))
+        if state_name == "future-state":
+            kept[path] = path.read_bytes()
+    recent = root / ("e" * 32 + ".json")
+    recent.write_text(json.dumps({"id": "e" * 32, "state": "completed"}), encoding="utf-8")
+    kept[recent] = recent.read_bytes()
+
+    def unexpected(*args):
+        pytest.fail("Startup must not emit events or contact a backend")
+
+    manager = TransferManager(state, unexpected, unexpected)
+    try:
+        assert set(root.glob("*.json")) == set(kept)
+        for path, contents in kept.items():
+            assert path.read_bytes() == contents
+        assert (root / (f"{4:032x}" + ".lock")).read_bytes() == b"existing lock"
+        assert not any((root / (f"{index:032x}" + ".lock")).exists() for index in (1, 2, 3))
+        assert manager.threads == {}
+        assert manager.resume_interrupted() == []
+    finally:
+        manager.stop()
 
 
 @pytest.mark.parametrize("kind", ["runtime", "hub"])

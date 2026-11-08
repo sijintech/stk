@@ -132,7 +132,7 @@ class TransferManager:
                 record = read_json(path)
             except (OSError, ValueError):
                 continue
-            if not isinstance(record, dict) or "state" not in record:
+            if not isinstance(record, dict) or not isinstance(record.get("state"), str):
                 continue
             if record["state"] in ACTIVE:
                 record["state"] = "interrupted"
