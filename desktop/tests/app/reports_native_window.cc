@@ -317,17 +317,46 @@ class Exercise {
   }
   void tab(app::EditorArea &area, int index)
   {
-    const auto key = area.id() + "/header/tabs";
-    const auto *w = widget(key); require(w && w->enabled && visible(w), "Tab selector must be fully visible");
-    if (w->type == ui::WidgetType::Tabs) {
-      click_point({w->rect.x + w->rect.w * (float(index) + 0.5f) / float(w->items.size()), w->rect.cy()});
-      ++clicks;
+    const int count = area.tab_count();
+    require(index >= 0 && index < count, "Tab selection must name an existing tab");
+    const int before_clicks = clicks;
+    int key_presses = 0;
+    const char *route = nullptr;
+    const auto selector_key = area.id() + "/header/tabs";
+    if (const auto *w = widget(selector_key)) {
+      require(w->enabled && visible(w), "Tab selector must be fully visible");
+      if (w->type == ui::WidgetType::Tabs) {
+        route = "tabs";
+        click_point({w->rect.x + w->rect.w * (float(index) + 0.5f) / float(w->items.size()), w->rect.cy()});
+        ++clicks;
+      }
+      else {
+        require(w->type == ui::WidgetType::Dropdown, "Expected tab selector");
+        route = "tabs_dropdown";
+        click(selector_key, area); keypress_tab_choice(index); key_presses = index + 2;
+      }
     }
     else {
-      require(w->type == ui::WidgetType::Dropdown, "Expected tab selector");
-      click(key, area); keypress_tab_choice(index);
+      // Production headers below 300 UI pixels expose their tabs at the end of
+      // the area menu. Use that existing visible control through normal events.
+      const auto menu_key = area.id() + "/header/area_menu";
+      const auto *menu = widget(menu_key);
+      require(menu && menu->enabled && visible(menu) && menu->type == ui::WidgetType::MenuButton &&
+          count > 1 && menu->menu.size() >= size_t(count), "Narrow-area tab menu must be fully visible");
+      for (int i = 0; i < count; ++i) {
+        const auto &entry = menu->menu[menu->menu.size() - size_t(count) + size_t(i)];
+        require(entry.enabled && bool(entry.action), "Every existing tab must have an enabled menu entry");
+      }
+      route = "area_menu";
+      click(menu_key, area);
+      key(wm::Key::End); ++key_presses;
+      for (int i = count - 1; i > index; --i) { key(wm::Key::UpArrow); ++key_presses; }
+      key(wm::Key::Enter); ++key_presses;
     }
     wait([&] { return area.active_tab() == index; }, "Tab selection"); frame();
+    result_["tab_navigation"].push_back({{"target_index", index}, {"route", route},
+        {"area_width", area.rect().width()}, {"mouse_clicks", clicks - before_clicks}, {"key_presses", key_presses}});
+    save();
   }
   void native_scroll(int cycle, ui::Rect bounds)
   {
