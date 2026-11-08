@@ -544,7 +544,11 @@ class Exercise {
       save();
       if (sent) { process(); return; }
       require(observed.lookup_complete && observed.candidates == 0 && attempt < 3, error);
-      frame();
+      // A frame can complete in milliseconds while WebContent still initializes
+      // its remote AX tree. Give each empty read a real scheduling interval,
+      // pumping this window's UI throughout; keep the same four lookup attempts.
+      const auto retry_after = Clock::now() + std::chrono::milliseconds(250);
+      do { frame(); } while (Clock::now() < retry_after);
     }
   }
 #  endif
