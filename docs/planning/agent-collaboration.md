@@ -58,7 +58,7 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
 
 ### CL-D1-01：D1 实施前的最小契约与兼容门清单
 
-- **状态：Claude 已在 `claude/support` 提交文档，当前文档头 `9590d21b`；root 审查中，尚未合入 main。**
+- **状态：Claude 文档头 `9590d21b` 已由 root 审阅修正并集成到 main `f6a75f84`；D1 两部署验收仍待实施。**
 - **基线：** 创建本 worktree 时继承的协作规则提交；接单时在交付说明记录实际完整 SHA。
 - **目标：** 将现有三份统一后端设计转为 root 可实施的 D1 清单，逐项区分已发布、拟议新增、当前缺口和依赖决定。
 - **唯一写入范围：** 新文件 `docs/planning/d1-compatibility-gates.md`。只读核对相关实现、测试和规格。
@@ -75,7 +75,7 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
 
 ### CL-MUPRO-H5-01：MuPRO 原生 HDF5 独立读取模块
 
-- **状态：已派发；Claude 已读取任务并开始实现，尚无代码交付或验收结果。**
+- **状态：初稿 `760b7ae1` 已提交 Claude 分支；root 复现 selector 尾换行和恢复 mtime 后漏检两项问题，Claude 修正中，尚未合入 main。**
 - **基线：** `claude/support` 文档头 `9590d21b`；该头产品源码与 root `37d26464` 相同。
 - **唯一写入范围：** 新增 `suan/connectors/mupro/hdf5.py` 和 `tests/test_mupro_hdf5.py`，另作独立提交。
 - **目标：** 提供惰性加载的只读 MuPRO HDF5 适配，显式选择 `/tNNNNNNNN/<field>`；
