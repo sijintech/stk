@@ -1,5 +1,15 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：修复测试竞态，启动Hub上传CLI实施
+
+1. root已提交299e756b、13035ccc、fdbefeac，分别处理模型失败详情、智能体夹具日志及分析完成状态的观察竞态；17/13/36项本机回归全过，生产逻辑及预算保持。新头平台验证尚待CI。
+2. 实际Claude17设计经校正成为a0f77fa3实施方案。Claude18在独立stk-claude/claude/hub-upload-cli-18从a0实施Hub上传、只读传输查看与显式恢复/取消；仅六路径，先固定候选。root负责共同后端/契约、原生、集成和共享构建，不扩R2/R3。
+3. 远端612e的Runtime整轮失败：3.14 payload测试旧running快照；Desktop42509570653整轮仍live，MacCPU/Metal成功、原生4/6，两视频仍失败。先取新AX诊断和Windows终态，记录前整个Desktop终态后才push；Docs/Secret成功。提案2aea已在远端，P1/P2仍未生效。
+4. 原八项、D1剩余合同/故障与云端项目、原生文献实际点击、Synthrix正常接线及D2-D5继续。MuPRO/MuFerro、插件自主格式/HDF5和有限S2c按已定方向；真实资产、扫描数值和分析修改提案形式不代选，HDF5完成需DAT，PET新专项后置。PR53/54未变且无关，不自动合入。
+
+本批证据与最终交付状态见root-delivery-20261108-25/closure.json；保留旧WIP。
+
+
 ## 2026-11-08 UTC：关闭传输竞态，继续CI修复和上传设计
 
 1. main本地2aea4a95合入root修订后的AOCI评估提案；P1/P2未启用，现行规则保持。

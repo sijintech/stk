@@ -1,5 +1,20 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：三项测试修正的受控验证与612e CI
+
+| 本地提交 | 实际检查 | 覆盖限制 |
+|---|---|---|
+| 299e756b | 监督失败发布延迟0.3s：旧KeyError/2.60s，新通过/2.84s；模块17通过、零skip、10.23s | 公开假模型服务，无生成请求；原15s不变，目标3.14新头CI未跑 |
+| 13035ccc | 实际夹具加受控Windows CRT seek/write语义：长104B/短91B同offset旧红，锁后两完整行；C++20/-Werror编译0；root目标重建及13/13、零skip、6.74s | 仅夹具；原13测试正文不变。未取得原calls.jsonl，非目标Windows运行，不能断定历史唯一根因 |
+| fdbefeac | 真实SQLite/executor中旧helper返回running、持久succeeded，新重读succeeded，归档42/一次worker；Python3.14.4模块36通过、零skip、6.27s，真实冷payload0.713s | 受控计算替身与真实冷worker分别核验；原20s不变，产品执行器/worker未改 |
+
+三次实际暂存补丁分别1832B/SHA50bf36e7…、1917B/SHA7102735b…、615B/SHAca1eb59c…，按.gitleaks.toml扫描均0发现。Windows完整坏JSON仍失败，未终止尾行留待下次读取；没有done写入或错flag路径的证据。局部改动不提供新的产品UI点击改善或目标OS验收。
+
+远端612e的[Runtime42509570684](https://github.com/sijintech/stk/actions/runs/42509570684)于18:39:50Z整轮failure，12job成功；Python3.14/job128819473622的test_real_payload_archive_decodes_signed_values_after_worker_cache_is_removed返回running/error=None，6019通过、153skip、4未选、814.57s。真正helper超时走pytest.fail，故该断言不是20s耗尽的证据。[Desktop42509570653](https://github.com/sijintech/stk/actions/runs/42509570653)整轮仍in_progress，终态前不push：MacCPU1503/1503、559.67s，Metal254/254、337.61s，原生4/6、492.30s；video仍唯一slider证明失败，html-video仍Tab不可全见。WindowsCPU仍运行、原生尚待。Docs42509570687完整部署及Secret42509570637成功；本批新测试字节不在612e，不能借其结果验收。
+
+证据：local-model-ci-42504540440/root/、windows-agent-ci-42504540481/review/、runtime-ci-42509570684/analysis-observer/；612e公开失败摘录在root-delivery-20261108-25/runtime-314-failure.log。a0f77fa3为尚未实现的上传CLI方案；设计暂存25059B/SHA30d790d5…扫描0。Claude18尚在独立树实现，未计作功能或安装态验收。最终Git/CI和索引收尾见root-delivery-20261108-25/closure.json，旧WIP保留。
+
+
 ## 2026-11-08 UTC：桥关闭生命周期和AX诊断的有限验证
 
 本地源码7bfae902（Bridge）和0e0a1246（AX诊断），另有提案2aea4a95；均尚未push。Bridge新9例在HEAD旧源码8失败/1通过、0.78s，在新源码连同六既有模块共137通过、零skip、46.43s。真实OS目录锁、真实TransferManager日志及Bridge.shutdown受控重现运行中/准备中重叠；其他服务stub，上传后台用事件控制，不代全Bridge RPC静止或真实远端传输。线程创建失败与已创建后异常均覆盖，释放后原worker已退出。暂存15351B、SHAa868ceb2…，gitleaks0。

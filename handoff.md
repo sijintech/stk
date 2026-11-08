@@ -1,5 +1,16 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：三项测试修正已提交，Claude18开始实现上传CLI
+
+远端main为612e3551，已含提案审阅2aea4a95；P1/P2未生效、AGENTS未改。root本地新增299e756b（完整模型失败报告等待）、13035ccc（智能体夹具JSONL写入串行化/完整行读取）、a0f77fa3（上传CLI实施方案）及fdbefeac（分析结束后重读状态）。本批最终状态提交、推送与CI见外部root-delivery-20261108-25/closure.json，先核真实Git；既有四文档及索引WIP保留。
+
+本机验证分别17项、13项和Python3.14的36项全过、零skip。受控旧红新绿证明具体观察/写入窗口，不能认定原CI唯一调度根因；Windows原calls.jsonl未取得，未发现done文件误读。生产模型/执行器与原15s/20s预算不变。612e的Runtime42509570684已failure：12job成功，3.14的payload测试返回旧running快照（6019通过/153skip），并非20s超时。整个Desktop42509570653仍in_progress，终态前不push；MacCPU1503/1503、Metal254/254，原生4/6，两视频仍失败；Windows结果待整轮。Docs部署与Secret已成功。
+
+实际Claude17原设计提交443c9fa7保留在claude/support；root校正sidecar形状、API参数、源变更窗口和GC顺序后，以a0f77fa3纳入实施方案。已在干净的同一stk-claude工作树从a0创建claude/hub-upload-cli-18，授权六路径实施，先交固定候选，不stage/commit/push。root仍负责main、公共后端/契约、原生、共享构建、审阅集成及交付。原八项/D1-D5、原生文献点击、Synthrix正常接线继续；MuPRO真实资产、扫描值和提案持久形式待输入，HDF5仍需DAT，PET新专项后置。
+
+索引按现行规则收尾，必要续接事实与证据留本批closure；不将正式认知正文存入交接。
+
+
 ## 2026-11-08 UTC：提案审阅、桥关闭修正与原生诊断已本地提交
 
 main已含提案2aea4a95、Bridge修正7bfae902及AX诊断0e0a1246，当前尚未push，远端仍bcec982b。AOCI提案经root修订合入，P1/P2未生效、AGENTS未改；后续治理记录精简，保留恢复事实。旧WIP仍保留，认知收尾与本批证据见外部root-delivery-20261108-24/closure.json。

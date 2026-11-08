@@ -1,5 +1,14 @@
 # Codex / Claude worktree 协作约定
 
+## 2026-11-08 当前补充：17设计已审定，18在新分支实施
+
+实际Claude17仅设计提交443c9fa76dd64de064e7f3def77f70f9b5d063e4，保留在claude/support。root校正sidecar禁止顶层id/state、精确backend签名、两段源变更窗口及先GC后新意图/不清孤立意图，以a0f77fa34e2505fb0de4090fd714b6b6aa20aa2c纳入实施方案；非已实现功能。提案2aea4a95已随612e进入远端main，P1/P2未生效。
+
+root确认peer全干净后，在同一/home/mnemora/xcheng/sijin/stk-claude从a0新建claude/hub-upload-cli-18；保留旧support引用，无reset/clean/stash。CL-D1-HUB-UPLOAD-CLI-18只可写suan/runtime/cli.py、新hub_transfers.py、新tests/test_runtime_hub_transfers.py、必要test_runtime_hub_cli.py、docs/hub.md及该设计的实际事实更新。复用共同TransferManager/Hub协议，独立命名空间租约持至worker真实退出，原内容/设备/请求绑定、人工import和显式resume/cancel保持；不扩R2/R3或自授desktop。任务卡d1-hub-upload-cli-20261108-21/root/claude-task18.txt，先交固定候选、真实loopback及安装来源证据；未授权stage/commit/push。
+
+root独占main、公共后端/契约、原生、共享构建、四状态文档、正式认知、集成及push。299e756b/13035ccc/fdbefeac三项测试修正本机通过；612e Desktop整轮仍live，终态前不push，Mac视频仍待修。实际分工和最终交付见本批root-delivery-20261108-25/closure.json。下方旧任务状态按时间保留，以上更新优先。
+
+
 ## 2026-11-08 当前补充：root交付生命周期与诊断，Claude修订17设计
 
 root已在main本地提交2aea4a95（修订并合入1a5的AOCI使用提案）、7bfae902（Bridge传输关闭锁）和0e0a1246（AX数值拓扑/独立进度诊断）；当前未push；bcec整个Desktop已18:16:12Z failure终态，Windows原生6/6成功，等待门满足。提案P1/P2未启用，现行AGENTS与工具合同保持；后续治理记录仅留必要状态与外部证据。
@@ -55,7 +64,7 @@ root新增input_transfer.py/INPUT_TRANSFER.md/测试并修singleton跨平台收�
 | 角色 | 工作区 / 分支 | 负责的结果 |
 |---|---|---|
 | Codex / root | `/home/mnemora/xcheng/sijin/stk` / `main` | 任务拆分、模块及契约边界、跨仓协调、代码审查、集成、最终回归与构建、AOCI、提交推送和 CI |
-| Claude | `/home/mnemora/xcheng/sijin/stk-claude` / `claude/support` | root 分配的文档和模块实现、相关测试、独立审阅与交接证据；每次只推进明确的任务范围 |
+| Claude | `/home/mnemora/xcheng/sijin/stk-claude` / `claude/hub-upload-cli-18` | root 分配的文档和模块实现、相关测试、独立审阅与交接证据；每次只推进明确的任务范围 |
 
 root 统一维护 `AGENTS.md`、`CLAUDE.md`、本协作约定和四份状态文档：`handoff.md`、
 `docs/development-plan.md`、`docs/development-log.md`、`docs/runtime-validation.md`。

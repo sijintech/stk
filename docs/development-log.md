@@ -1,5 +1,16 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：测试观察修正与上传实施分工
+
+299e756b让local-model测试等同一次观察的failed、exited详情和autostart=false，原15s预算不变；公开假服务使用确定性测试凭据。0.3s监督发布延迟下旧KeyError、新通过，模块17项零skip/10.23s；无产品模型配置变化。
+
+13035ccc把智能体Python夹具日志的open/write/close串行化并仅解析完整JSONL行；原13个测试正文不变。受控Windows CRT seek/write语义重现长短行覆盖后首字符d，另证未终止尾行；完整坏JSON仍拒绝。root构建成功，13/13零skip/6.74s；未取得原CI日志文件或新Windows运行，不认定唯一历史根因，旧done误读猜想无源码依据。
+
+fdbefeac让settled在确认job移除后重读SQLite。真实executor/SQLite、受控计算旧返回running而持久状态succeeded，新返回succeeded，归档42、一次worker；Python3.14.4模块36通过/零skip/6.27s，真实payload0.713s，原20s不变。生产执行器/worker文件无改动，未找到Bridge.shutdown参与此测试路径。
+
+实际Claude17提交443c9fa7；root经sidecar/API/源变更与GC校正以a0f77fa3纳入实施设计，尚非产品能力。干净peer安全新建claude/hub-upload-cli-18后开始六路径实现，旧support引用保留；root独占集成、构建和push。612e Runtime已失败、Desktop整轮仍live，Mac两视频未修复；终态前不push本批。提案2aea已在远端但P1/P2未启用。原路线及待决保持，证据和最终状态见root-delivery-20261108-25/closure.json，保WIP。
+
+
 ## 2026-11-08 UTC：审阅提案并修复Bridge传输关闭生命周期
 
 root以2aea4a95将实际Claude1a5提案修订合入本地main，纠正字符比例/成本、主线提交计法和worktree边界，保留交付与恢复约束；P1/P2未启用、AGENTS未改。7bfae902修复已复现的关桥早释目录锁：关闭传输准入，计数已接收调用与worker，stop仍有界，真实线程退出后才释放。旧源码新9例8失败/1通过，新七模块137通过、零skip、46.43s；完整暂存15351B扫描0。
