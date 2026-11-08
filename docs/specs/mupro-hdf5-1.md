@@ -1,7 +1,8 @@
 # MuPRO HDF5 reader /1
 
 This additive profile defines `mupro.hdf5@1` and `stk.source.mupro_hdf5@1`.
-Existing DAT readers, MuFerro task verification and automatic run discovery retain their contracts.
+Existing DAT readers and MuFerro task verification retain their contracts. The public MuFerro
+connector 0.2.0 additionally discovers native fields in the selected case's `run.h5`.
 Reading an HDF5 field does not establish solver success or scientific validity.
 
 ## Native field
@@ -34,7 +35,8 @@ refused. Only built-in filters and h5py's bundled LZF are accepted. No allocated
 chunks in a chunked field, is rejected. Allocated fill values and partially written contiguous data
 cannot be reliably distinguished from intentional data; this reader is not a completion verifier.
 
-The last path component must be an ordinary file, without symlink/reparse indirection; callers
+For the local `read_hdf5_image` API, the last path component must be an ordinary file,
+without symlink/reparse indirection; callers
 provide trusted parents. Reads use a pinned descriptor, with before/after file identity and metadata
 checks. POSIX uses same-API status-change time; Windows queries the handle's `FILE_BASIC_INFO.ChangeTime`.
 An unavailable change-time query is an error. These checks detect changes during the read, without
@@ -50,6 +52,10 @@ Closing handles also releases the copy when the worker is killed. Both operation
 cancellation between chunks. A remote FileSource needs no local path. Returned provenance identifies
 the original relative path/SHA; a single frame's `SourceRef` binds that path, reader, size, SHA and
 native selector, rather than the temporary filename.
+FileSource path rules apply before copying: `LocalFiles` allows links whose resolved target stays
+inside its binding root; the pinned-reader rule above applies to the verified anonymous copy.
+Runtime bindings expose published artifacts only after the task reaches a terminal state; this
+profile does not add live access to an actively written Runtime `run.h5`.
 The copy uses the host's default temporary filesystem; on tmpfs its bytes consume memory outside
 the selected-array estimate and the evaluator's process-RSS accounting. The separate 1 GiB source
 cap still applies. Fingerprinting reads the complete source even on cache hits; cache misses read
@@ -70,5 +76,49 @@ the fingerprint used to plan that key, preventing changed source bytes from popu
 ```
 
 The node is available through the shared graph service/CLI and saved project analyses with an
-explicit input binding. It does not add automatic HDF5 result discovery, change the DAT-based
-MuFerro completion verifier, execute MuPRO, or expand agent permissions. Those are separate increments.
+explicit input binding. It does not execute MuPRO or expand agent permissions.
+
+## Run discovery and collection
+
+`MuFerroConnector.describe` inspects `run.h5` in the selected case directory when present. This is
+native-format discovery within an identified MuFerro run, not a generic `.h5` filename sniffer.
+It verifies one private copy and inspects only two levels of metadata, with a total limit of 4096
+visited entries including ignored names. Recognized step groups and fields must satisfy the same
+hard-link, shape, numeric type, storage and filter checks as the reader. No field values are read.
+Unrecognized names are ignored; malformed recognized objects reject the HDF5 listing. Cancellation is
+checked during traversal. Discovery is subject to the same separate 1 GiB container limit.
+
+Dataset IDs are `hdf5:<field>`, so DAT `Polar` and HDF5 `hdf5:Polar` coexist without replacing one
+another. Frames retain the exact native selector and observed container SHA/size; field descriptors
+retain native dtype and unknown units. One field's shape and dtype must agree across its steps.
+`connector.open(..., "hdf5:Polar", result=result)` selects frames with the existing frame-selector
+policy, then refuses any source bytes that differ from that observation. A fresh `describe` is
+required after an external rewrite. Crop/stride use the same hyperslab reader and preserve dtype.
+
+If this optional container has a profile, dependency or budget error, the connector exposes
+`extensions.mupro.hdf5_error` with its stable code/message and publishes no datasets from that
+container. Existing DAT fields and energy/progress tables remain readable. Requesting a missing
+`hdf5:<field>` handle surfaces the recorded HDF5 diagnostic. Declared over-limit containers need
+not be copied just to report the size error. Hard-link aliases remain separate declared selectors;
+their names do not establish independent observations or physical time.
+`complete` and `verification` retain the existing DAT-run meaning; HDF5 consumers must also check
+the separate diagnostic before using this container.
+
+The graph run index exposes these descriptors in `result.datasets`. Its `frames` table and
+`muferro_frame@1` remain DAT interfaces; use `mupro_hdf5@1` with a discovered selector for HDF5
+analysis. Run-index implementation version 2 binds discovery to its planned container SHA and
+rejects additions, removals or rewrites between planning and execution.
+These content-binding failures are errors, not optional-format diagnostics. Replacement connectors
+keep their existing `describe` call signature and own native-format policy; the public HDF5 extension
+is passed only to the shared public implementation.
+
+The existing MuFerro project collector includes `case/run.h5` when published by the same successful
+task. It checks artifact size/SHA, validates native field metadata, requires at least one discovered
+field and rejects any grid that differs from the frozen case. It registers the original
+file with that run's result row; repeated collection does not submit work. Downstream workflow
+snapshots retain the whole container and still obey the existing 100-file/256 MiB input budget.
+
+HDF5 discovery does not replace the DAT-based completion verifier: an HDF5-only directory can be
+read without establishing a successful MuPRO run. Real licensed output and scientific validity
+require separate evidence; the automatic collector currently still requires the existing verified
+DAT outputs as well as any HDF5 sidecar.

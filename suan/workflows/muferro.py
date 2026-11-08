@@ -311,7 +311,8 @@ class MuFerro:
                 name.removeprefix("case/"): value for name, value in plan["input_bindings"].items()}}, folder)
             case = read_case(folder)
         names = sorted(set(plan["input_bindings"]) | {"stk-mupro.json"} |
-                       {"case/" + name for name in (*RUN_OUTPUTS, *expected_frames(case))})
+                       {"case/" + name for name in (*RUN_OUTPUTS, *expected_frames(case))} |
+                       ({"case/run.h5"} if "case/run.h5" in artifacts else set()))
         if type(max_bytes) is not int or max_bytes <= 0 or len(names) > 10000:
             raise ValueError("Invalid download budget or more than 10000 result files")
         if any(name not in artifacts for name in names):
@@ -341,6 +342,15 @@ class MuFerro:
                 or verification["verification"]["status"] != "passed" or verification["qoi"] != report.get("qoi")
                 or report.get("case") != case):
             raise ValueError("Collected MuFerro output does not match its input/completion/energy contract")
+        if "case/run.h5" in artifacts:
+            from suan.connectors.files import LocalFiles
+            from suan.connectors.mupro.results import descriptors
+            from suan.connectors.mupro.source import describe as describe_hdf5
+            observation = describe_hdf5(LocalFiles(destination), "case/run.h5",
+                                        expected_sha256=artifacts["case/run.h5"]["sha256"])
+            descriptors(observation)  # same cross-step shape/dtype contract as connector.open
+            if not observation["fields"] or any(field["shape"][:3] != case["grid"] for field in observation["fields"]):
+                raise ValueError("Collected MuPRO HDF5 fields are missing or do not match the frozen grid")
         revision = p.snapshot()["project"]["revision"]
         for offset in range(0, len(paths), 100):
             revision = p.files.index(paths[offset:offset + 100], expected_revision=revision)["revision"]

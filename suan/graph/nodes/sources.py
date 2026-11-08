@@ -55,6 +55,12 @@ def _muferro():
     return default_registry().get("mupro.muferro")
 
 
+def _native_hdf5(connector):
+    from suan.connectors.mupro import MuFerroConnector
+    # Replacement plugins keep their published describe signature and native-format policy.
+    return getattr(connector.describe, "__func__", None) is MuFerroConnector.describe
+
+
 # ---------------------------------------------------------------------------
 # stk.source.muferro_run
 
@@ -67,6 +73,7 @@ def _muferro_run_fingerprint(ctx, inputs, params):
     prefix = _prefix(case_dir)
     from suan.connectors.mupro import run_files
     names = run_files(source, prefix)
+    connector = _muferro()
     # Frames by (path, size, mtime): a frame rewritten in place (same size) changes the run key.
     frames = sorted([path, item.size, item.mtime] for path, item in names.items()
                     if path.startswith(prefix) and "/" not in path[len(prefix):] and FRAME.search(path))
@@ -75,18 +82,31 @@ def _muferro_run_fingerprint(ctx, inputs, params):
     small += sorted(path for path in names if path.endswith(".toml"))[:MAX_TOML_FILES]
     try:
         hashed = {path: source.sha256(path) for path in dict.fromkeys(small) if path in names}
+        from suan.connectors.mupro.source import FILE_LIMIT, file_fingerprint
+        hdf5_path = prefix + "run.h5"
+        hdf5, hdf5_files = {}, []
+        if _native_hdf5(connector) and hdf5_path in names:
+            item = names[hdf5_path]
+            hdf5_files.append([hdf5_path, item.size, item.mtime])
+            try:
+                if item.size > FILE_LIMIT:
+                    raise ConnectorError("MuPRO HDF5 source exceeds the 1 GiB file limit", "budget_exceeded")
+                hdf5[hdf5_path] = file_fingerprint(source, hdf5_path, check=ctx.check)["sha256"]
+            except ConnectorError as exc:
+                hdf5[hdf5_path] = {"error": exc.code, "message": str(exc)}
     except ConnectorError as exc:
         raise _failure(exc) from None
-    connector = _muferro()
     return {"connector": f"{connector.id}@{connector.version}", "case_dir": case_dir, "frames": frames,
-            "sha256": hashed}
+            "sha256": hashed, "hdf5": hdf5, "hdf5_files": hdf5_files}
 
 
 def _frames_table(result, attrs):
     import numpy as np
     from suan.connectors.mupro import frame_rows
     from suan.data.model import Table
-    rows = frame_rows(result)
+    # muferro_frame@1 remains the DAT reader. Native HDF5 selectors are exposed in
+    # result.datasets and consumed by the explicit mupro_hdf5 source/connector handle.
+    rows = [row for row in frame_rows(result) if not row["dataset"].startswith("hdf5:")]
     table = Table(id="frames", attrs=attrs)
     table.add_column("dataset", np.array([r["dataset"] for r in rows], dtype=str))
     table.add_column("step", np.array([r["step"] for r in rows], dtype=np.int64), role="index", quantity="step",
@@ -124,7 +144,7 @@ def _empty_table(table_id, columns, index="step"):
                                            "\"auto\" = the case_dir recorded by the STK launcher in stk-mupro.json "
                                            "(runs submitted with --input DIR), else the binding root."),
       },
-      time_dependent=True, fingerprint=_muferro_run_fingerprint)
+      time_dependent=True, impl_version=2, fingerprint=_muferro_run_fingerprint)
 def muferro_run(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
     from suan.connectors.mupro.tables import ENERGY_COLUMNS
@@ -137,10 +157,12 @@ def muferro_run(ctx, inputs, params):
     if case_dir != "." and not ours:
         raise NodeExecutionError(f"Connector {connector.id} does not take a case directory", code="unsupported")
     extra = {"case_dir": case_dir} if ours else {}
+    if _native_hdf5(connector):
+        extra["hdf5_sha256"] = ctx.source_fingerprint.get("hdf5", {})
     try:
         result = connector.describe(source, live=True, **extra)
         datasets = {d["id"] for d in result["datasets"]}
-        extra = {**extra, "result": result} if ours else {}
+        extra = {"case_dir": case_dir, "result": result} if ours else {}
         energy = connector.open(source, "energy", **extra).read(frame=None) if "energy" in datasets else None
         progress = connector.open(source, "progress", **extra).read(frame=None) if "progress" in datasets else None
     except ConnectorError as exc:

@@ -324,7 +324,7 @@ Standard library only; heavy imports inside methods.
 `info()`:
 
 ```json
-{"id": "mupro.muferro", "version": "0.1.0", "api": 1, "apps": ["mupro.muferro"], "priority": 0,
+{"id": "mupro.muferro", "version": "0.2.0", "api": 1, "apps": ["mupro.muferro"], "priority": 0,
  "license": "MIT",
  "capabilities": {"read": ["image", "table"], "inputs": {"schema": "mupro.muferro/input@1", "read": true,
                   "write": true}, "verify": "stk-mupro-1", "monitor_adapter": true, "task_spec": true,
@@ -360,5 +360,9 @@ Registration: when two connectors claim one id the higher `priority` wins (priva
   `unit: "normalized"`, quantity `energy`.
 - `mupro_progress.jsonl` → table `progress` (`step`, `completed_steps`, `total_steps`).
 - `verify` wraps `suan.mupro.run.verify_run` (`stk-mupro-1`).
+- Connector 0.2.0 also discovers the selected case's `run.h5` as separately qualified
+  `hdf5:<field>` datasets with native dtype, selector and container SHA. Discovery and the optional
+  sidecar collection rules are defined in [MuPRO HDF5/1](mupro-hdf5-1.md); they do not replace the
+  DAT-based completion verifier or the DAT graph frame table.
 - The full muFerro parameter schema belongs to MuPRO (installed with the SDK); the public connector
   ships a minimal schema for the keys STK reads.

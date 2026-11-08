@@ -15,6 +15,10 @@ It wraps STK's own launcher/verifier ``suan.mupro.run`` (``FRAME``,
   ``unspecified``. ``energy`` and ``progress`` are tables;
 * ``open`` -- frames read with the fast DAT reader (region/stride applied after
   the read; DAT has no random access), tables parsed on demand;
+* ``run.h5`` -- bounded native HDF5 metadata is discovered explicitly inside
+  the selected case directory. Qualified ``hdf5:<field>`` datasets keep their
+  native dtype and selectors, separate from DAT stems. Opening a handle reads
+  only bytes matching the container SHA observed during discovery;
 * ``verify`` -- ``verify_run`` on a local run directory, else the verification
   recorded by the launcher in ``stk-mupro.json``.
 
@@ -37,7 +41,7 @@ __all__ = ["CONNECTOR_ID", "MuFerroConnector", "VERSION", "case_prefix", "field_
            "recorded_case_dir", "run_files", "stem_field"]
 
 CONNECTOR_ID = "mupro.muferro"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 READER = "mupro.dat@1"
 IDENTITY = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
 OUTPUTS = ("energy_out.dat", "mupro_progress.jsonl", "mupro_completion.json")
@@ -93,7 +97,8 @@ def frame_rows(result):
             for source in frame["sources"].values():
                 rows.append({"dataset": dataset["id"], "step": frame.get("step"), "time": frame.get("time"),
                              "path": source["path"], "size": source.get("size"), "sha256": source.get("sha256"),
-                             "reader": source.get("reader", READER), "components": components})
+                             "reader": source.get("reader", READER), "components": components,
+                             **({"selector": source["selector"]} if "selector" in source else {})})
     return sorted(rows, key=lambda r: (r["dataset"], r["step"] if r["step"] is not None else -1))
 
 
@@ -276,7 +281,7 @@ class MuFerroConnector:
             return info["dimensions"], info
         return None, None
 
-    def describe(self, run, *, live=False, case_dir=None):
+    def describe(self, run, *, live=False, case_dir=None, hdf5_sha256=None):
         """stk.result/1 of a muFerro run directory (``live``: frames so far, ``complete: false``)."""
         from suan.data.manifest import file_entry, qoi_entry, result_manifest
         case_dir = self._case_dir(run, case_dir)
@@ -303,6 +308,27 @@ class MuFerroConnector:
             if stem != "Polar" and stem not in COMPONENTS:
                 components = self._components(run, entries[0]["sources"][stem]["path"])
             datasets.append(field_descriptor(stem, grid, entries, components))
+        hdf5_path = prefix + "run.h5"
+        observation = None
+        hdf5_error = None
+        if hdf5_sha256 is not None and set(hdf5_sha256) != ({hdf5_path} if hdf5_path in names else set()):
+            raise ConnectorError("MuPRO HDF5 files changed after discovery was planned", "invalid_data")
+        if hdf5_path in names:
+            from .source import ContentChanged, FILE_LIMIT, describe as describe_hdf5
+            from .results import descriptors
+            expected = hdf5_sha256[hdf5_path] if hdf5_sha256 is not None else None
+            try:
+                if isinstance(expected, dict):
+                    raise ConnectorError(expected["message"], expected["error"])
+                if names[hdf5_path].size > FILE_LIMIT:
+                    raise ConnectorError("MuPRO HDF5 source exceeds the 1 GiB file limit", "budget_exceeded")
+                observation = describe_hdf5(run, hdf5_path, expected_sha256=expected)
+                datasets.extend(descriptors(observation))
+            except ContentChanged:
+                raise
+            except ConnectorError as exc:
+                # HDF5 profile errors remain visible without disabling existing DAT/tables.
+                hdf5_error = {"code": exc.code, "message": str(exc)}
         qoi = []
         energy_path = prefix + "energy_out.dat"
         if energy_path in names:
@@ -356,6 +382,8 @@ class MuFerroConnector:
                 state = "succeeded" if verification["status"] == "passed" else "failed"
         run_info = {"case": {"case_id": None, "dir": case_dir, "manifest": None}}
         extensions = {"mupro": {"case": case}}
+        if hdf5_error:
+            extensions["mupro"]["hdf5_error"] = hdf5_error
         if case_error:
             extensions["mupro"]["case_error"] = case_error
         if missing:
@@ -375,9 +403,11 @@ class MuFerroConnector:
         for path, item in sorted(names.items()):
             name = PurePosixPath(path).name
             role = ("manifest" if path == RESULT else "input" if name.endswith(".toml")
-                    else "log" if name.endswith(".log") else "output" if (FRAME.search(name) or name in OUTPUTS)
+                    else "log" if name.endswith(".log") else "output" if (FRAME.search(name) or name in OUTPUTS or name == "run.h5")
                     else "other")
-            files.append(file_entry(path, size=item.size, sha256=known(path) if known else None,
+            observed = observation if path == hdf5_path else None
+            files.append(file_entry(path, size=observed["size"] if observed else item.size,
+                                    sha256=observed["sha256"] if observed else known(path) if known else None,
                                     media_type=_media_type(path), role=role))
         return result_manifest(
             connector=self.id, connector_version=self.version, stk=_stk_version(), app=app, state=state,
@@ -417,10 +447,16 @@ class MuFerroConnector:
         result = result or self.describe(run, live=True, case_dir=case_dir)
         descriptor = next((d for d in result["datasets"] if d["id"] == dataset_id), None)
         if descriptor is None:
+            diagnostic = result.get("extensions", {}).get("mupro", {}).get("hdf5_error")
+            if dataset_id.startswith("hdf5:") and diagnostic:
+                raise ConnectorError(diagnostic["message"], diagnostic["code"])
             raise ConnectorError(f"No dataset {dataset_id!r} in this run; datasets: "
                                  f"{', '.join(d['id'] for d in result['datasets']) or 'none'}", "not_found")
         if descriptor["kind"] == "table":
             return _TableHandle(run, descriptor)
+        if dataset_id.startswith("hdf5:"):
+            from .results import HDF5Handle
+            return HDF5Handle(run, descriptor)
         return FrameHandle(run, descriptor)
 
     def verify(self, run, *, case_dir=None):

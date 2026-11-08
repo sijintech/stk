@@ -592,14 +592,29 @@ def test_change_time_helper_fails_closed(tmp_path):
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows HANDLE query")
 def test_windows_change_time_is_not_creation_time(tmp_path):
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
     path = tmp_path / "win.bin"
     path.write_bytes(b"0123456789abcdef")
     descriptor = os.open(path, os.O_RDONLY | os.O_BINARY)
+    query = ctypes.WinDLL("kernel32", use_last_error=True).GetFileTime
+    query.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.FILETIME),
+                      ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME))
+    query.restype = wintypes.BOOL
+
+    def creation_time():
+        value = wintypes.FILETIME()
+        assert query(msvcrt.get_osfhandle(descriptor), ctypes.byref(value), None, None)
+        return value.dwHighDateTime << 32 | value.dwLowDateTime
+
     try:
-        created = os.fstat(descriptor).st_ctime_ns  # creation time on Windows
+        # Python's path/fd stat APIs and versions need not expose the same ctime.
+        # Query creation time independently of the reader's ChangeTime API.
+        created = creation_time()
         changed = hdf5._windows_change_time(descriptor)
         rewrite_restoring_mtime(path, 0, b"ABCD")
-        assert os.fstat(descriptor).st_ctime_ns == created  # st_ctime does not see the rewrite
+        assert creation_time() == created
         assert hdf5._windows_change_time(descriptor) != changed  # FILE_BASIC_INFO.ChangeTime does
         assert hdf5._change_time(descriptor) == hdf5._windows_change_time(descriptor)
     finally:
@@ -701,7 +716,8 @@ def run_python(code_text):
 def test_passive_import():
     loaded = run_python("import json, sys\n"
                         "import suan.connectors.mupro.hdf5 as m\n"
-                        "print(json.dumps([n for n in ('h5py', 'numpy', 'suan.data.model', 'ctypes', 'msvcrt')\n"
+                        # msvcrt may already be loaded by subprocess in the parent package on Windows.
+                        "print(json.dumps([n for n in ('h5py', 'numpy', 'suan.data.model', 'ctypes')\n"
                         "                  if n in sys.modules]))")
     assert loaded == []
 

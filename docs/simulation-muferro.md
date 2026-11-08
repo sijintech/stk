@@ -84,3 +84,12 @@ stk.muferro.view(run['id'])
 
 工作区、任务、传输和 Viewer 使用既有共享 API；没有额外调度器或自动重试循环。
 `project=` 可明确传入已打开的项目对象；未指定时使用本次脚本开始执行时选中的项目，切换界面不会重定向旧句柄。
+
+## MuPRO HDF5 结果补充
+
+已识别的 MuFerro 运行如包含 `run.h5`，连接器会发现其中的原生字段并列为 `hdf5:Polar` 等数据集；
+同名 DAT 数据集独立保留。字段描述包含原生 selector、容器 SHA 和 dtype，读取拒绝已变化的容器。
+项目收集会一并下载、核验并登记同一任务的 `case/run.h5`；图分析可使用显式
+`stk.source.mupro_hdf5@1`。详见 [读取与发现契约](specs/mupro-hdf5-1.md)。
+
+目前收集仍要求既有 DAT 完成验证通过；HDF5 元数据可读不代表求解成功，真实 MuPRO 产物尚待验收。

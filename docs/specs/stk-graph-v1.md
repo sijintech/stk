@@ -1330,7 +1330,11 @@ Unless stated otherwise: input fields are kept (zero-copy), coordinates are phys
 
 **Sources**
 
-- `muferro_run`: uses the `mupro.muferro` connector (`describe(live=True)`). `case_dir: "auto"` (the
+- `muferro_run`: implementation 2 additionally discovers the selected case's `run.h5`, binding its
+  metadata observation to the planned container SHA. HDF5 descriptors are qualified as `hdf5:<field>`
+  in `result.datasets`; the `frames` table and `muferro_frame@1` retain their DAT contract. Native
+  selectors are read by `mupro_hdf5@1`; see [MuPRO HDF5/1](mupro-hdf5-1.md).
+  The node uses the `mupro.muferro` connector (`describe(live=True)`). `case_dir: "auto"` (the
   default) is the `case_dir` the STK launcher recorded in `stk-mupro.json` at the binding root (runs
   submitted with `suan mupro submit --input DIR` keep their case in `DIR/`), else `"."`; an unsafe
   recorded path also gives `"."`. `frames` columns: `dataset` (string stem), `step` (int64), `time`

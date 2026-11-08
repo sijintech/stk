@@ -17,7 +17,7 @@ from suan.graph.registry import (Budget, CancelToken, GraphError, NodeContext, N
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_NODES = {"muferro_run": "stk.source.muferro_run@1", "muferro_frame": "stk.source.muferro_frame@1",
                 "file_source": "stk.source.file@1", "table_source": "stk.source.table@1",
-                "lammps_log": "stk.source.lammps_log@1"}
+                "lammps_log": "stk.source.lammps_log@1", "mupro_hdf5_source": "stk.source.mupro_hdf5@1"}
 
 
 class Context:
@@ -35,6 +35,7 @@ class Context:
         self.choices = {}
         self.warnings = []
         self.checks = 0
+        self.source_fingerprint = None
 
     def resolve(self, binding):
         if binding not in self.bindings:
@@ -64,6 +65,7 @@ def call(function, bindings, params, inputs=None):
     normalized = node_type.normalize_params(params)
     fingerprint = node_type.fingerprint(ctx, inputs or {}, normalized)
     json.dumps(fingerprint)
+    ctx.source_fingerprint = json.loads(json.dumps(fingerprint))
     result = node_type.wrap_outputs(function(ctx, inputs or {}, normalized))
     return result, ctx, fingerprint
 

@@ -55,7 +55,7 @@ def test_builtins_are_registered_without_entry_points():
     assert isinstance(registry.get("mupro.muferro"), MuFerroConnector)
     assert all(isinstance(c, Connector) for c in registry.connectors())
     assert isinstance(registry.inputs("mupro.muferro"), InputConnector)
-    assert {"id": "mupro.muferro", "version": "0.1.0"} in registry.enabled()
+    assert {"id": "mupro.muferro", "version": "0.2.0"} in registry.enabled()
     with pytest.raises(ConnectorError) as error:
         registry.get("nope")
     assert error.value.code == "unsupported"

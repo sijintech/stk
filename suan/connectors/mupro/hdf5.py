@@ -37,8 +37,9 @@ descriptor's fstat is compared with its fstat at open and the path's lstat
 with its lstat before open (device, inode, size, mtime), and the descriptor's
 change time is compared with its change time at open: POSIX
 ``st_ctime_ns`` of fstat, Windows ``FILE_BASIC_INFO.ChangeTime`` of the pinned
-HANDLE (``GetFileInformationByHandleEx``; Windows ``st_ctime`` is the creation
-time and is never used). The path's lstat ctime is also compared on POSIX. So
+HANDLE (``GetFileInformationByHandleEx``; Windows ``st_ctime`` can represent
+creation or change time depending on the Python version/API, so is not used).
+The path's lstat ctime is also compared on POSIX. So
 a replacement or an in-place rewrite with a restored mtime is refused; a
 change time that cannot be read fails closed. Soft and external HDF5
 links, virtual (VDS) datasets and datasets with external raw storage are
@@ -141,8 +142,8 @@ _WINDOWS = os.name == "nt"
 
 def _same_file(a, b, *, ctime=False):
     """Same device, inode, size and mtime. With ``ctime`` (POSIX only, and only for two results of the same
-    API: lstat/lstat) also the status-change time; on Windows ``st_ctime`` is the creation time and is never
-    used, the pinned handle's change time comes from :func:`_change_time` instead."""
+    API: lstat/lstat) also the status-change time. Windows stat ctime varies with Python version/API;
+    the pinned handle's change time comes from :func:`_change_time` instead."""
     same = (a.st_dev, a.st_ino, a.st_size, a.st_mtime_ns) == (b.st_dev, b.st_ino, b.st_size, b.st_mtime_ns)
     return same and (not ctime or _WINDOWS or a.st_ctime_ns == b.st_ctime_ns)
 
