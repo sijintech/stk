@@ -891,6 +891,17 @@ std::shared_ptr<ResourceSession> resource_session(wm::NativeWindowHandle parent,
   return state ? state->resources : nullptr;
 }
 
+bool matches_native_view(wm::NativeWindowHandle parent, std::string_view session_id,
+                         const void *expected_view, uint64_t navigation_generation)
+{
+  if (!expected_view) { return false; }
+  std::string error;
+  const auto state = find_view(parent, session_id, error);
+  return state && state->view && state->result.status == NativeViewStatus::Ready &&
+         (__bridge const void *)state->view == expected_view &&
+         state->result.navigation_generation == navigation_generation;
+}
+
 bool probe_media(wm::NativeWindowHandle parent, std::string_view session_id,
                  MediaProbeCallback callback, std::string &error)
 {

@@ -1,5 +1,16 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Real production report path. Only the public fixture is captured; no desktop capture fallback.
+find_package(Threads REQUIRED)
+add_library(stk_reports_native_ax_cpu STATIC reports_native_ax_protocol.cc reports_native_ax_process.cc)
+target_compile_features(stk_reports_native_ax_cpu PUBLIC cxx_std_20)
+target_link_libraries(stk_reports_native_ax_cpu PUBLIC Threads::Threads)
+add_executable(stk-reports-native-ax-tests reports_native_ax_test.cc)
+target_link_libraries(stk-reports-native-ax-tests PRIVATE stk_reports_native_ax_cpu)
+add_test(NAME reports_native_ax_cpu COMMAND stk-reports-native-ax-tests)
+set_tests_properties(reports_native_ax_cpu PROPERTIES LABELS "unit;app;document_preview" TIMEOUT 20
+  FAIL_REGULAR_EXPRESSION "FAIL:" ENVIRONMENT "STK_TOKEN_PLAN_API_KEY="
+  ENVIRONMENT_MODIFICATION "STK_TOKEN_PLAN_MODEL=unset:")
+
 if(NOT STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW OR NOT TARGET stk_document_native OR NOT TARGET stk_app)
   return()
 endif()
@@ -19,6 +30,18 @@ add_executable(stk-reports-native-window reports_native_window.cc ${_reports_cap
 if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_TEST_PROBES)
   if(APPLE)
     target_sources(stk-reports-native-window PRIVATE reports_native_input_cocoa.mm)
+    find_library(_reports_ax_services ApplicationServices REQUIRED)
+    add_executable(stk-reports-native-ax-client reports_native_ax_helper.mm reports_native_ax_protocol.cc)
+    target_link_libraries(stk-reports-native-ax-client PRIVATE "${_reports_ax_services}")
+    target_compile_features(stk-reports-native-ax-client PRIVATE cxx_std_20)
+    target_compile_options(stk-reports-native-ax-client PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
+    # Test-only helper, outside the application/package bin directory; never installed.
+    set_target_properties(stk-reports-native-ax-client PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native-ax-tools")
+    target_link_libraries(stk-reports-native-window PRIVATE stk_reports_native_ax_cpu)
+    target_compile_definitions(stk-reports-native-window PRIVATE
+      STK_REPORTS_NATIVE_AX_HELPER="$<TARGET_FILE:stk-reports-native-ax-client>")
+    add_dependencies(stk-reports-native-window stk-reports-native-ax-client)
   elseif(WIN32)
     target_sources(stk-reports-native-window PRIVATE reports_native_input_win32.cc)
   else()

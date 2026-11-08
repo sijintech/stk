@@ -1,11 +1,17 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "reports_native_input.hh"
+#include "stk/document/resources.hh"
+#include "stk/document/test_media_probe.hh"
 #import <AppKit/AppKit.h>
 #import <WebKit/WebKit.h>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <functional>
+#include <limits>
+#include <optional>
+#include <unistd.h>
 #include <utility>
 
 namespace stk::reports_native_test {
@@ -88,6 +94,83 @@ bool attached(const Target &target)
          std::abs(NSMinY(actual) - NSMinY(target.pixels)) <= 0.5 &&
          std::abs(actual.size.width - target.pixels.size.width) <= 0.5 &&
          std::abs(actual.size.height - target.pixels.size.height) <= 0.5;
+}
+
+struct ClientSeek {
+  Target target;
+  wm::NativeWindowHandle handle;
+  document_preview::ViewBounds bounds;
+  TimelineInput input;
+  std::shared_ptr<document_preview::ResourceSession> resources;
+  NSRect primary_screen{};
+  ax::Request request;
+  std::unique_ptr<ax::ProbeProcess> process;
+  std::optional<ax::ProcessResult> result;
+  std::optional<document_preview::test::MediaProbeResult> media;
+  TimelineObservation provider_observation;
+  ax::Rect candidate;
+  double minimum = 0, maximum = 0, value = 0;
+  std::chrono::steady_clock::time_point began = std::chrono::steady_clock::now();
+  bool public_client = false, cancelled = false, media_requested = false;
+};
+
+ax::Rect ax_rect(NSRect native, NSRect primary)
+{
+  return {NSMinX(native), NSMaxY(primary) - NSMaxY(native), native.size.width, native.size.height};
+}
+NSRect native_rect(ax::Rect value, NSRect primary)
+{
+  return NSMakeRect(value.x, NSMaxY(primary) - value.y - value.height, value.width, value.height);
+}
+bool same_native_rect(NSRect a, NSRect b)
+{
+  return a.origin.x == b.origin.x && a.origin.y == b.origin.y && a.size.width == b.size.width && a.size.height == b.size.height;
+}
+bool client_bound(const ClientSeek &state)
+{
+  if (!state.input.deadline.permits(std::chrono::steady_clock::now()) ||
+      ![NSThread isMainThread] || !state.resources || !state.resources->active() || !attached(state.target) ||
+      !NSApp.active || !state.target.parent.keyWindow || NSApp.keyWindow != state.target.parent ||
+      NSScreen.screens.count == 0 || !same_native_rect(NSScreen.screens.firstObject.frame, state.primary_screen)) return false;
+  std::string ignored;
+  const auto current = document_preview::test::resource_session(state.handle, state.resources->identity().session_id, ignored);
+  if (current != state.resources || !document_preview::test::matches_native_view(
+          state.handle, state.resources->identity().session_id,
+          (__bridge const void *)state.target.web, state.input.navigation_generation)) return false;
+  Target target;
+  if (!resolve(state.handle, state.bounds, state.target.width, state.target.height,
+          state.input.left + state.input.width * .5, state.input.top + state.input.height * .5, target, ignored) ||
+      target.parent != state.target.parent || target.content != state.target.content || target.web != state.target.web) return false;
+  const NSRect viewport = [target.parent convertRectToScreen:[target.web convertRect:target.web.bounds toView:nil]];
+  return ax::same_rect(ax_rect(target.parent.frame, state.primary_screen), state.request.window) &&
+      ax::same_rect(ax_rect(viewport, state.primary_screen), state.request.viewport) &&
+      state.input.deadline.permits(std::chrono::steady_clock::now());
+}
+
+bool local_click(const Target &target, double nx, double ny, std::string &delivery, std::string &error,
+                 const std::function<bool()> &still_current = {})
+{
+  auto valid = [&] { return attached(target) && (!still_current || still_current()); };
+  if (!valid()) { error = "Local click lost its frozen native owner before input"; return false; }
+  const NSTimeInterval timestamp = NSProcessInfo.processInfo.systemUptime;
+  NSEvent *down = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:target.in_window
+      modifierFlags:0 timestamp:timestamp windowNumber:target.parent.windowNumber context:nil
+      eventNumber:0 clickCount:1 pressure:1];
+  NSEvent *up = [NSEvent mouseEventWithType:NSEventTypeLeftMouseUp location:target.in_window
+      modifierFlags:0 timestamp:timestamp + .001 windowNumber:target.parent.windowNumber context:nil
+      eventNumber:1 clickCount:1 pressure:0];
+  if (!down || !up || down.window != target.parent || up.window != target.parent || !valid()) {
+    error = "Local Cocoa mouse events lost the exact STK window"; return false;
+  }
+  [target.hit mouseDown:down];
+  if (!valid()) { error = "Native click owner invalidated before mouseUp"; return false; }
+  [target.hit mouseUp:up];
+  if (!valid()) { error = "Native click owner invalidated during delivery"; return false; }
+  delivery = "Cocoa local mouseDown:/mouseUp:; window=" + std::to_string(target.parent.windowNumber) +
+      "; WKWebView_descendant=true; window_point=" + std::to_string(target.in_window.x) + "," +
+      std::to_string(target.in_window.y) + "; normalized=" + std::to_string(nx) + "," +
+      std::to_string(ny) + "; no global event post";
+  return true;
 }
 
 bool key_spec(wm::Key key, unsigned short &code, NSString *__strong &characters, NSEventModifierFlags &flags)
@@ -444,51 +527,200 @@ bool NativeInput::window_is_active(wm::NativeWindowHandle handle,
   return NSApp.active && parent.keyWindow && NSApp.keyWindow == parent;
 }
 
-bool NativeInput::seek_document(wm::NativeWindowHandle handle, document_preview::ViewBounds bounds,
+bool NativeInput::prepare_seek(wm::NativeWindowHandle handle, document_preview::ViewBounds bounds,
                                int width, int height, const TimelineInput &input,
-                               TimelineObservation &observation, std::string &delivery, std::string &error)
+                               std::shared_ptr<document_preview::ResourceSession> resources,
+                               bool public_client, std::string &error)
 {
-  observation = {}; delivery.clear(); error.clear();
-  if (!std::isfinite(input.left) || !std::isfinite(input.top) || !std::isfinite(input.width) ||
-      !std::isfinite(input.height) || !std::isfinite(input.current_time) || !std::isfinite(input.duration) ||
-      !std::isfinite(input.target_fraction) || input.left < 0 || input.top < 0 ||
-      input.width <= 0 || input.height <= 0 || input.left + input.width > 1 || input.top + input.height > 1 ||
-      input.duration <= 0 || input.current_time < 0 || input.current_time >= input.duration ||
-      input.target_fraction <= 0 || input.target_fraction >= 1 || bounds.width <= 1 || bounds.height <= 1) {
-    error = "Invalid bounded native timeline input"; return false;
+  error.clear();
+  if (client_seek_ || !child_cleanup_confirmed_ || !resources || !resources->active() || bounds.width <= 1 || bounds.height <= 1 ||
+      !std::isfinite(input.target_fraction) || input.target_fraction <= 0 || input.target_fraction >= 1 ||
+      input.viewport_generation == std::numeric_limits<uint64_t>::max() ||
+      seek_generation_ == std::numeric_limits<uint64_t>::max()) {
+    error = "Invalid or overlapping public AX test seek"; return false;
   }
-  Target target;
-  if (!resolve(handle, bounds, width, height, input.left + input.width * 0.5,
-          input.top + input.height * 0.5, target, error)) { return false; }
-  if (!NSApp.active || !target.parent.keyWindow || NSApp.keyWindow != target.parent) {
-    error = "Timeline input requires this application's exact active key window"; return false;
+  auto state = std::make_shared<ClientSeek>();
+  state->handle = handle; state->bounds = bounds; state->input = input; state->resources = std::move(resources);
+  if (!resolve(handle, bounds, width, height, input.left + input.width * .5, input.top + input.height * .5, state->target, error)) return false;
+  if (NSScreen.screens.count == 0) { error = "No primary screen for exact AX point conversion"; return false; }
+  state->primary_screen = NSScreen.screens.firstObject.frame;
+  if (NSMinX(state->primary_screen) != 0 || NSMinY(state->primary_screen) != 0) {
+    error = "Unsupported primary screen origin for exact AX conversion"; return false;
   }
+  const auto &target = state->target;
+  const NSRect viewport = [target.parent convertRectToScreen:[target.web convertRect:target.web.bounds toView:nil]];
   const NSRect pixels = NSMakeRect(NSMinX(target.pixels) + input.left * bounds.width,
       target.content.isFlipped ? NSMinY(target.pixels) + input.top * bounds.height :
           NSMaxY(target.pixels) - (input.top + input.height) * bounds.height,
       input.width * bounds.width, input.height * bounds.height);
   const NSRect video = [target.parent convertRectToScreen:[target.content convertRect:
       [target.content convertRectFromBacking:pixels] toView:nil]];
-  NSRect slider = NSZeroRect;
-  @try {
-    if (!timeline(target, input, video, observation, slider, error)) { return false; }
+  state->request.parent_pid = uint64_t(getpid());
+  state->request.request_generation = ++seek_generation_;
+  state->request.viewport_generation = input.viewport_generation; // Screen invalidation generation, frozen by the UI owner.
+  state->request.navigation_generation = input.navigation_generation;
+  state->request.window = ax_rect(target.parent.frame, state->primary_screen);
+  state->request.viewport = ax_rect(viewport, state->primary_screen);
+  state->request.video = ax_rect(video, state->primary_screen);
+  state->request.current_time = input.current_time; state->request.duration = input.duration;
+  if (!ax::valid_request(state->request) || !client_bound(*state)) {
+    error = "Public AX test request lost the exact window, viewport or resource session"; return false;
   }
-  @catch (NSException *exception) {
-    (void)exception;
-    error = "Own-WKWebView accessibility lookup failed"; return false;
+#ifdef STK_REPORTS_NATIVE_AX_HELPER
+  // Only numeric request/process state reaches the worker. All AppKit/resource objects remain in this UI-owned state.
+  state->public_client = public_client;
+  if (public_client) state->process = std::make_unique<ax::ProbeProcess>(STK_REPORTS_NATIVE_AX_HELPER, state->request);
+  client_seek_ = state;
+  return true;
+#else
+  error = "The macOS public AX test helper was not built"; return false;
+#endif
+}
+
+bool NativeInput::begin_client_seek(wm::NativeWindowHandle handle, document_preview::ViewBounds bounds,
+                                    int width, int height, const TimelineInput &input,
+                                    std::shared_ptr<document_preview::ResourceSession> resources,
+                                    std::string &error)
+{
+  return prepare_seek(handle, bounds, width, height, input, std::move(resources), true, error);
+}
+
+void NativeInput::cancel_seek() noexcept
+{
+  if (const auto state = std::static_pointer_cast<ClientSeek>(client_seek_)) {
+    state->cancelled = true;
+    if (state->process) state->process->cancel(); // No join/wait. poll_seek observes cleanup while the caller pumps UI.
   }
-  if (!attached(target)) { error = "Native timeline target detached during lookup"; return false; }
-  const NSPoint screen = NSMakePoint(NSMinX(slider) + slider.size.width * input.target_fraction,
-                                     NSMidY(slider));
+}
+
+std::optional<ax::ProcessResult> NativeInput::poll_cancelled_seek() noexcept
+{
+  const auto state = std::static_pointer_cast<ClientSeek>(client_seek_);
+  ax::ProcessResult result; result.status = ax::ProcessStatus::Cancelled;
+  if (!state) return result;
+  cancel_seek();
+  if (state->process) {
+    const auto value = state->process->poll();
+    if (!value) return std::nullopt;
+    result = *value;
+    if (result.child_pid > 0 && !result.reaped) child_cleanup_confirmed_ = false;
+  }
+  client_seek_.reset(); // Every actual worker is finished; no Cocoa owner is dropped ahead of its child cleanup.
+  return result;
+}
+
+TimelinePoll NativeInput::poll_seek(TimelineObservation &observation, std::string &delivery, std::string &error)
+{
+  observation = {}; delivery.clear(); error.clear();
+  const auto state = std::static_pointer_cast<ClientSeek>(client_seek_);
+  if (!state || ![NSThread isMainThread]) { error = "No UI-owned AX seek"; return TimelinePoll::Failed; }
+  observation = state->provider_observation;
+  observation.public_client_attempted = state->public_client;
+  auto fail = [&](const char *message) {
+    error = message; client_seek_.reset(); return TimelinePoll::Failed;
+  };
+  if (!state->cancelled && (!client_bound(*state) ||
+      std::chrono::steady_clock::now() - state->began >= std::chrono::seconds(4))) {
+    state->cancelled = true;
+    if (state->process) state->process->cancel();
+  }
+  if (state->public_client) {
+    if (!state->result) state->result = state->process->poll();
+    if (!state->input.deadline.permits(std::chrono::steady_clock::now())) {
+      state->cancelled = true;
+      state->process->cancel();
+    }
+    // A stale/cancelled client remains pending until the worker has completed owned-child cleanup.
+    if (!state->result) return TimelinePoll::Pending;
+    observation.public_client = *state->result;
+    const auto &result = *state->result;
+    if (result.child_pid > 0 && !result.reaped) child_cleanup_confirmed_ = false;
+    const auto &response = result.response;
+    observation.visited_nodes = int(response.nodes); observation.deepest_node = int(response.deepest);
+    observation.sliders = int(response.sliders); observation.candidates = int(response.candidates);
+    observation.lookup_complete = response.status == ax::Status::Success || response.reason == ax::Reason::NoSlider ||
+        response.reason == ax::Reason::MultipleSliders;
+    if (state->cancelled) return fail("AX seek cancelled after owner, layout or session invalidation");
+    if (result.status != ax::ProcessStatus::Response || !result.reaped || !ax::accepted(state->request, response))
+      return fail("Public AX client did not prove one time-matched slider in the exact own viewport");
+    state->candidate = response.slider; state->minimum = response.minimum;
+    state->maximum = response.maximum; state->value = response.value;
+  }
+  if (state->cancelled || !state->input.deadline.permits(std::chrono::steady_clock::now()))
+    return fail("AX seek cancelled or expired before consuming its result");
+  observation.elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - state->began).count();
+  if (!state->media_requested) {
+    state->media_requested = true;
+    const std::weak_ptr<ClientSeek> weak = state;
+    std::string ignored;
+    if (!document_preview::test::probe_media(state->handle, state->resources->identity().session_id,
+        [weak](document_preview::test::MediaProbeResult value) {
+          if (const auto current = weak.lock()) current->media = std::move(value);
+        }, ignored)) return fail("AX seek could not revalidate its native media session");
+    return TimelinePoll::Pending;
+  }
+  if (!state->media) return TimelinePoll::Pending;
+  const auto &media = state->media->media;
+  if (!state->media->ok || !client_bound(*state) || media.navigation_generation != state->input.navigation_generation ||
+      !media.paused || media.ended || media.seeking || media.error_code || !media.duration_known ||
+      media.duration != state->input.duration || std::abs(media.current_time - state->input.current_time) > .10 ||
+      media.viewport_width <= 0 || media.viewport_height <= 0 ||
+      media.rect_x / media.viewport_width != state->input.left || media.rect_y / media.viewport_height != state->input.top ||
+      media.rect_width / media.viewport_width != state->input.width || media.rect_height / media.viewport_height != state->input.height)
+    return fail("AX seek media/navigation changed before native input");
+  auto fresh = state->request; fresh.current_time = media.current_time; fresh.duration = media.duration;
+  if (!ax::matching_slider(fresh, state->candidate, state->minimum, state->maximum, state->value))
+    return fail("AX slider no longer matches the freshly paused media time");
+  const NSRect slider = native_rect(state->candidate, state->primary_screen);
+  const NSPoint screen = NSMakePoint(NSMinX(slider) + slider.size.width * state->input.target_fraction, NSMidY(slider));
+  const auto &target = state->target;
   const NSPoint point = [target.content convertPointToBacking:[target.content convertPoint:
       [target.parent convertPointFromScreen:screen] fromView:nil]];
-  observation.normalized_x = (point.x - NSMinX(target.pixels) - 0.5) / (bounds.width - 1);
-  observation.normalized_y = ((target.content.isFlipped ? point.y - NSMinY(target.pixels) :
-      NSMaxY(target.pixels) - point.y) - 0.5) / (bounds.height - 1);
-  if (!click_document(handle, bounds, width, height, observation.normalized_x,
-          observation.normalized_y, delivery, error)) { return false; }
-  delivery += "; unique read-only AX time-slider geometry; no AX action/setter or DOM mutation";
-  return true;
+  observation.screen_x = slider.origin.x; observation.screen_y = slider.origin.y;
+  observation.screen_width = slider.size.width; observation.screen_height = slider.size.height;
+  observation.minimum = state->minimum; observation.maximum = state->maximum; observation.value = state->value;
+  observation.normalized_x = (point.x - NSMinX(target.pixels) - .5) / (state->bounds.width - 1);
+  observation.normalized_y = ((target.content.isFlipped ? point.y - NSMinY(target.pixels) : NSMaxY(target.pixels) - point.y) - .5) /
+      (state->bounds.height - 1);
+  if (state->cancelled || !client_bound(*state)) return fail("AX seek detached immediately before native click");
+  Target clicked;
+  if (!resolve(state->handle, state->bounds, target.width, target.height, observation.normalized_x,
+      observation.normalized_y, clicked, error) || clicked.web != target.web || clicked.parent != target.parent ||
+      clicked.content != target.content) return fail("AX seek click target differs from its frozen native view");
+  observation.public_client_revalidated = state->public_client;
+  if (!local_click(clicked, observation.normalized_x, observation.normalized_y, delivery, error,
+      [&] { return !state->cancelled && client_bound(*state); })) {
+    client_seek_.reset(); return TimelinePoll::Failed;
+  }
+  delivery += state->public_client ? "; public own-parent AX child; numeric DTO; session/navigation revalidated" :
+      "; unique provider AX slider; session/navigation revalidated";
+  client_seek_.reset(); return TimelinePoll::Delivered;
+}
+
+bool NativeInput::begin_provider_seek(wm::NativeWindowHandle handle, document_preview::ViewBounds bounds,
+                                     int width, int height, const TimelineInput &input,
+                                     std::shared_ptr<document_preview::ResourceSession> resources,
+                                     TimelineObservation &observation, std::string &error)
+{
+  observation = {}; error.clear();
+  if (!prepare_seek(handle, bounds, width, height, input, std::move(resources), false, error)) return false;
+  const auto state = std::static_pointer_cast<ClientSeek>(client_seek_);
+  NSRect slider = NSZeroRect;
+  bool found = false;
+  @try { found = timeline(state->target, input, native_rect(state->request.video, state->primary_screen), observation, slider, error); }
+  @catch (NSException *exception) { (void)exception; error = "Own-WKWebView accessibility lookup failed"; }
+  if (!input.deadline.permits(std::chrono::steady_clock::now())) {
+    error = "Provider AX query crossed the original seek deadline";
+    client_seek_.reset(); return false;
+  }
+  if (!found || state->cancelled || !client_bound(*state)) {
+    if (found) error = "Provider AX target invalidated during lookup";
+    client_seek_.reset(); return false;
+  }
+  state->candidate = ax_rect(slider, state->primary_screen);
+  state->minimum = observation.minimum; state->maximum = observation.maximum; state->value = observation.value;
+  state->provider_observation = observation;
+  return true; // Candidate only: poll_seek must revalidate native media before delivering any input.
 }
 
 bool NativeInput::click_document(wm::NativeWindowHandle handle, document_preview::ViewBounds bounds,
@@ -497,27 +729,8 @@ bool NativeInput::click_document(wm::NativeWindowHandle handle, document_preview
 {
   delivery.clear(); error.clear();
   Target target;
-  if (!resolve(handle, bounds, width, height, nx, ny, target, error)) { return false; }
-  const NSTimeInterval timestamp = NSProcessInfo.processInfo.systemUptime;
-  NSEvent *down = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:target.in_window
-      modifierFlags:0 timestamp:timestamp windowNumber:target.parent.windowNumber context:nil
-      eventNumber:0 clickCount:1 pressure:1];
-  NSEvent *up = [NSEvent mouseEventWithType:NSEventTypeLeftMouseUp location:target.in_window
-      modifierFlags:0 timestamp:timestamp + 0.001 windowNumber:target.parent.windowNumber context:nil
-      eventNumber:1 clickCount:1 pressure:0];
-  if (!down || !up || down.window != target.parent || up.window != target.parent) {
-    error = "Local Cocoa mouse events did not retain the exact STK window";
-    return false;
-  }
-  [target.hit mouseDown:down];
-  if (!attached(target)) { error = "Native click target detached before mouseUp"; return false; }
-  [target.hit mouseUp:up];
-  if (!attached(target)) { error = "Native click target detached during delivery"; return false; }
-  delivery = "Cocoa local mouseDown:/mouseUp:; window=" + std::to_string(target.parent.windowNumber) +
-      "; WKWebView_descendant=true; window_point=" + std::to_string(target.in_window.x) + "," +
-      std::to_string(target.in_window.y) + "; normalized=" + std::to_string(nx) + "," +
-      std::to_string(ny) + "; no global event post";
-  return true;
+  if (!resolve(handle, bounds, width, height, nx, ny, target, error)) return false;
+  return local_click(target, nx, ny, delivery, error);
 }
 
 bool NativeInput::key_document(wm::NativeWindowHandle handle, document_preview::ViewBounds bounds,

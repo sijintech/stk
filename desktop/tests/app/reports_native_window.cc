@@ -37,6 +37,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <thread>
 
 using namespace stk;
 using io::Json;
@@ -134,7 +135,34 @@ io::Image marker()
 class Exercise {
  public:
   Exercise(wm::WindowManager &manager, wm::Window &window, Json &result, fs::path directory)
-      : manager_(manager), window_(window), screen_(window.screen()), result_(result), directory_(std::move(directory)) {}
+      : manager_(manager), window_(window), screen_(window.screen()), result_(result), directory_(std::move(directory))
+  {
+#if defined(__APPLE__) && defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES)
+    layout_observer_ = screen_.observe_layout([this](const wm::DrawContext &) { layout_epoch_.ready(); }, [this] {
+      layout_epoch_.invalidated();
+      native_input_.cancel_seek(); // Invalidate before the layout changes, even if it later returns to the same geometry.
+    });
+#endif
+  }
+  bool drain_native_seek() noexcept
+  {
+#if defined(__APPLE__) && defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES)
+    native_input_.cancel_seek();
+    const auto deadline = Clock::now() + std::chrono::seconds(3);
+    while (native_input_.seek_pending()) {
+      const auto result = native_input_.poll_cancelled_seek();
+      if (result) return (result->child_pid == 0 || result->reaped) && native_input_.child_cleanup_confirmed();
+      if (Clock::now() >= deadline) return false;
+      try { manager_.process(false); } catch (...) {} // Preserve cancellation/reaping even when the run is already failing.
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+#endif
+#if defined(__APPLE__) && defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES)
+    return native_input_.child_cleanup_confirmed();
+#else
+    return true;
+#endif
+  }
   void process()
   {
     const bool alive = manager_.process(true);
@@ -490,65 +518,121 @@ class Exercise {
     save(); process();
   }
 #  ifdef __APPLE__
-  void native_media_seek(int cycle, const std::string &phase, ui::Rect bounds, const Media &before,
+  void native_media_seek(int cycle, const std::string &phase, const std::string &session, ui::Rect bounds, const Media &before,
                          double fraction)
   {
     move_pointer({bounds.cx(), bounds.cy()});
     require(before.paused && before.duration_known && before.duration > 0 &&
         before.viewport_width > 0 && before.viewport_height > 0,
         "Native timeline lookup requires observed paused media geometry and duration");
+    const auto viewport_generation = layout_epoch_.freeze();
+    require(viewport_generation.has_value(), "Native seek requires this layout observer's ready state");
+    const auto lookup_began = Clock::now();
+    const reports_native_test::ax::Deadline seek_deadline(lookup_began + std::chrono::seconds(8));
     const reports_native_test::TimelineInput input{before.rect_x / before.viewport_width,
         before.rect_y / before.viewport_height, before.rect_width / before.viewport_width,
-        before.rect_height / before.viewport_height, before.current_time, before.duration, fraction};
+        before.rect_height / before.viewport_height, before.current_time, before.duration, fraction,
+        before.navigation_generation, *viewport_generation, seek_deadline};
+    const auto resources = media_session(session);
     // A first accessibility read may enable WebKit's tree asynchronously. Repeat
     // only an empty completed read, never a partially delivered input or a limit
     // failure. All successful input still has to pass unchanged DOM/OS gates.
-    const auto lookup_began = Clock::now();
-    for (int attempt = 0; attempt < 4; ++attempt) {
+    bool provider_all_empty = true;
+    auto finish = [&](reports_native_test::TimelineObservation &observed, std::string &delivery, std::string &error) {
+      for (;;) {
+        require(seek_deadline.permits(Clock::now()), "Bounded asynchronous AX seek expired before result consumption");
+        const auto state = native_input_.poll_seek(observed, delivery, error);
+        require(seek_deadline.permits(Clock::now()), "AX poll crossed the original seek deadline");
+        if (state != reports_native_test::TimelinePoll::Pending) return state == reports_native_test::TimelinePoll::Delivered;
+        require(seek_deadline.permits(Clock::now()), "Bounded asynchronous AX seek expired");
+        process(); // Keep the real UI/OS queue running; no read/wait/join on this thread.
+      }
+    };
+    try {
+      for (int attempt = 0; attempt < 4; ++attempt) {
+        require(seek_deadline.permits(Clock::now()), "Bounded provider AX seek expired");
+        require(layout_epoch_.matches(input.viewport_generation), "AX provider lookup belongs to an invalidated layout");
+        reports_native_test::TimelineObservation observed;
+        std::string delivery, error;
+        const bool candidate = native_input_.begin_provider_seek(window_.native_window_handle(), native_bounds(bounds),
+            window_.width(), window_.height(), input, resources, observed, error);
+        require(seek_deadline.permits(Clock::now()), "Provider AX query crossed the original seek deadline");
+        const bool sent = candidate && finish(observed, delivery, error);
+        provider_all_empty = provider_all_empty && observed.sliders == 0;
+        auto list_json = [](const reports_native_test::TimelineChildListObservation &value) {
+          return Json{{"type", value.type}, {"count", value.count}, {"over_budget", value.over_budget}};
+        };
+        Json nodes = Json::array();
+        for (const auto &node : observed.nodes) {
+          nodes.push_back({{"ordinal", node.ordinal}, {"depth", node.depth}, {"elapsed_ms", node.elapsed_ms},
+              {"category", node.category}, {"selected_role", node.selected_role},
+              {"legacy_role", node.legacy_role}, {"modern_role", node.modern_role},
+              {"legacy_selector", node.legacy_selector}, {"modern_children_selector", node.modern_children_selector},
+              {"modern_role_selector", node.modern_role_selector}, {"paged_count_selector", node.paged_count_selector},
+              {"paged_values_selector", node.paged_values_selector}, {"paged_count_observed", node.paged_count_observed},
+              {"paged_count", node.paged_count}, {"paged_count_over_budget", node.paged_count_over_budget},
+              {"selected_children", list_json(node.selected_children)}, {"legacy_children", list_json(node.legacy_children)},
+              {"modern_children", list_json(node.modern_children)}, {"diagnostic_exception", node.diagnostic_exception},
+              {"extra_getters_started", node.extra_getters_started}, {"extra_getters_complete", node.extra_getters_complete}});
+        }
+        result_["native_media_inputs"].push_back({{"cycle", cycle}, {"phase", phase},
+            {"lookup_elapsed_ms", observed.elapsed_ms}, {"diagnostic_elapsed_ms", observed.diagnostic_elapsed_ms},
+            {"diagnostics_timeout", observed.diagnostics_timeout}, {"attempts_elapsed_ms",
+                std::chrono::duration<double, std::milli>(Clock::now() - lookup_began).count()},
+            {"frame_number", window_.frames_drawn()}, {"ax_nodes", std::move(nodes)},
+            {"ax_nodes_truncated", observed.diagnostics_truncated},
+            {"action", "observed-timeline-click"}, {"lookup_attempt", attempt + 1},
+            {"lookup_complete", observed.lookup_complete}, {"visited_nodes", observed.visited_nodes},
+            {"deepest_node", observed.deepest_node}, {"sliders", observed.sliders},
+            {"time_matched_candidates", observed.candidates},
+            {"slider_screen_points_bottom_left", {observed.screen_x, observed.screen_y,
+                observed.screen_width, observed.screen_height}},
+            {"slider_range_value", {observed.minimum, observed.maximum, observed.value}},
+            {"target_fraction", fraction}, {"viewport_normalized_top_left",
+                {observed.normalized_x, observed.normalized_y}}, {"delivered", sent},
+            {"delivery", delivery}, {"error", error}, {"before", media_json(before)}});
+        save();
+        if (sent) { process(); return; }
+        require(!candidate && observed.lookup_complete && observed.candidates == 0, error);
+        if (attempt == 3) break;
+        // A frame can complete in milliseconds while WebContent still initializes
+        // its remote AX tree. Give each empty read a real scheduling interval,
+        // pumping this window's UI throughout; keep the same four lookup attempts.
+        const auto retry_after = Clock::now() + std::chrono::milliseconds(250);
+        do { frame(); } while (Clock::now() < retry_after);
+      }
+      // Only four completed empty provider reads can reach the single public-client attempt.
       reports_native_test::TimelineObservation observed;
       std::string delivery, error;
-      const bool sent = native_input_.seek_document(window_.native_window_handle(), native_bounds(bounds),
-          window_.width(), window_.height(), input, observed, delivery, error);
-      auto list_json = [](const reports_native_test::TimelineChildListObservation &value) {
-        return Json{{"type", value.type}, {"count", value.count}, {"over_budget", value.over_budget}};
-      };
-      Json nodes = Json::array();
-      for (const auto &node : observed.nodes) {
-        nodes.push_back({{"ordinal", node.ordinal}, {"depth", node.depth}, {"elapsed_ms", node.elapsed_ms},
-            {"category", node.category}, {"selected_role", node.selected_role},
-            {"legacy_role", node.legacy_role}, {"modern_role", node.modern_role},
-            {"legacy_selector", node.legacy_selector}, {"modern_children_selector", node.modern_children_selector},
-            {"modern_role_selector", node.modern_role_selector}, {"paged_count_selector", node.paged_count_selector},
-            {"paged_values_selector", node.paged_values_selector}, {"paged_count_observed", node.paged_count_observed},
-            {"paged_count", node.paged_count}, {"paged_count_over_budget", node.paged_count_over_budget},
-            {"selected_children", list_json(node.selected_children)}, {"legacy_children", list_json(node.legacy_children)},
-            {"modern_children", list_json(node.modern_children)}, {"diagnostic_exception", node.diagnostic_exception},
-            {"extra_getters_started", node.extra_getters_started}, {"extra_getters_complete", node.extra_getters_complete}});
-      }
-      result_["native_media_inputs"].push_back({{"cycle", cycle}, {"phase", phase},
-          {"lookup_elapsed_ms", observed.elapsed_ms}, {"diagnostic_elapsed_ms", observed.diagnostic_elapsed_ms},
-          {"diagnostics_timeout", observed.diagnostics_timeout}, {"attempts_elapsed_ms",
-              std::chrono::duration<double, std::milli>(Clock::now() - lookup_began).count()},
-          {"frame_number", window_.frames_drawn()}, {"ax_nodes", std::move(nodes)},
-          {"ax_nodes_truncated", observed.diagnostics_truncated},
-          {"action", "observed-timeline-click"}, {"lookup_attempt", attempt + 1},
-          {"lookup_complete", observed.lookup_complete}, {"visited_nodes", observed.visited_nodes},
-          {"deepest_node", observed.deepest_node}, {"sliders", observed.sliders},
-          {"time_matched_candidates", observed.candidates},
-          {"slider_screen_points_bottom_left", {observed.screen_x, observed.screen_y,
-              observed.screen_width, observed.screen_height}},
-          {"slider_range_value", {observed.minimum, observed.maximum, observed.value}},
-          {"target_fraction", fraction}, {"viewport_normalized_top_left",
-              {observed.normalized_x, observed.normalized_y}}, {"delivered", sent},
-          {"delivery", delivery}, {"error", error}, {"before", media_json(before)}});
-      save();
-      if (sent) { process(); return; }
-      require(observed.lookup_complete && observed.candidates == 0 && attempt < 3, error);
-      // A frame can complete in milliseconds while WebContent still initializes
-      // its remote AX tree. Give each empty read a real scheduling interval,
-      // pumping this window's UI throughout; keep the same four lookup attempts.
-      const auto retry_after = Clock::now() + std::chrono::milliseconds(250);
-      do { frame(); } while (Clock::now() < retry_after);
+      require(provider_all_empty, "A nonempty provider AX tree cannot authorize a client fallback");
+      require(seek_deadline.permits(Clock::now()), "Bounded AX seek expired before public client start");
+      require(layout_epoch_.matches(input.viewport_generation), "Public AX fallback belongs to an invalidated layout");
+      require(native_input_.begin_client_seek(window_.native_window_handle(), native_bounds(bounds), window_.width(),
+          window_.height(), input, resources, error), error);
+      const bool sent = finish(observed, delivery, error);
+      const auto &child = observed.public_client; const auto &reply = child.response;
+      result_["native_media_inputs"].push_back({{"cycle", cycle}, {"phase", phase}, {"action", "public-client-timeline-click"},
+          {"delivered", sent}, {"delivery", delivery}, {"error", error}, {"before", media_json(before)},
+          {"client_status", reports_native_test::ax::name(child.status)}, {"client_pid", child.child_pid},
+          {"client_reaped", child.reaped}, {"client_killed", child.killed}, {"client_ownership_lost", child.ownership_lost},
+          {"client_exit_code", child.exit_code}, {"client_signal", child.signal}, {"client_system_error", child.system_error},
+          {"client_stderr_bytes", child.stderr_bytes}, {"client_elapsed_ms", child.elapsed_ms},
+          {"api_status", reports_native_test::ax::name(reply.status)}, {"api_reason", reports_native_test::ax::name(reply.reason)},
+          {"api_phase", reports_native_test::ax::name(reply.phase)}, {"api_operation", reports_native_test::ax::name(reply.operation)},
+          {"api_attribute", reports_native_test::ax::name(reply.attribute)}, {"api_error", reply.api_error},
+          {"trusted", reply.trusted}, {"nodes", reply.nodes}, {"deepest", reply.deepest}, {"sliders", reply.sliders},
+          {"windows", reply.windows}, {"window_matches", reply.window_matches}, {"viewport_matches", reply.viewport_matches},
+          {"webareas", reply.webareas}, {"time_matched_candidates", reply.candidates},
+          {"native_session_revalidated", observed.public_client_revalidated},
+          {"slider_screen_points_bottom_left", {observed.screen_x, observed.screen_y, observed.screen_width, observed.screen_height}},
+          {"slider_range_value", {observed.minimum, observed.maximum, observed.value}}, {"target_fraction", fraction},
+          {"viewport_normalized_top_left", {observed.normalized_x, observed.normalized_y}}});
+      save(); require(sent, error); process();
+    }
+    catch (...) {
+      const bool drained = drain_native_seek();
+      result_["native_ax_cleanup_complete"] = drained;
+      throw;
     }
   }
 #  endif
@@ -782,6 +866,10 @@ class Exercise {
   wm::WindowManager &manager_; wm::Window &window_; wm::Screen &screen_;
   Json &result_; fs::path directory_;
   reports_native_test::ScrollGuard scroll_guard_;
+#if defined(__APPLE__) && defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES)
+  reports_native_test::ax::LayoutEpoch layout_epoch_;
+  wm::Screen::LayoutObserver layout_observer_;
+#endif
 };
 
 void run(const Options &options, Json &result, const fs::path &directory)
@@ -869,12 +957,17 @@ raise SystemExit(main())
   struct Cleanup {
     app::AppShell &shell; bridge::Client &client; wm::WindowManager &manager; wm::Window *window;
     RedrawTimer &timer;
+    Exercise &ui;
+    Json &result;
     ~Cleanup() {
+      const bool drained = ui.drain_native_seek();
+      result["native_ax_cleanup_complete"] = drained;
+      if (!drained) std::fputs("FAIL: native AX owned-child cleanup was not confirmed\n", stderr);
       timer.reset();
       shell.store().project().attach(nullptr); shell.store().set_bridge(nullptr); client.close();
       shell.store().viewer().close(); manager.close_window(window);
     }
-  } cleanup{shell, *client, *manager, window, redraw_timer};
+  } cleanup{shell, *client, *manager, window, redraw_timer, ui, result};
   shell.store().set_bridge(client.get()); app::BridgeStatus bridge_status(shell.store(), *client, manager.get());
   require(client->start(&error), error);
   ui.wait([&] { return client->state() == bridge::BridgeState::Ready; }, "Python bridge", 60);
@@ -1042,7 +1135,7 @@ raise SystemExit(main())
 #ifdef __APPLE__
       // Use the actual time slider's AX frame/value, not a fraction of the
       // video or an arrow sent to whichever document control happens to focus.
-      ui.native_media_seek(cycle, phase, bounds, original, late ? 0.80 : 0.07);
+      ui.native_media_seek(cycle, phase, session, bounds, original, late ? 0.80 : 0.07);
       auto observed = ui.observe_input(session, target);
 #else
       ui.native_media_key(cycle, phase, bounds, late ? wm::Key::RightArrow : wm::Key::LeftArrow,
@@ -1134,7 +1227,7 @@ raise SystemExit(main())
       if (reshown.current_time > 0.90) {
         const auto navigation = reshown.navigation_generation;
 #ifdef __APPLE__
-        ui.native_media_seek(cycle, "rewind-after-show", bounds, reshown, 0.07);
+        ui.native_media_seek(cycle, "rewind-after-show", session, bounds, reshown, 0.07);
 #else
         ui.native_media_key(cycle, "rewind-after-show", bounds, wm::Key::LeftArrow, "LeftArrow", reshown);
 #endif
@@ -1343,7 +1436,11 @@ int main(int argc, char **argv)
     directory = options.output / ("run-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
     require(fs::create_directory(directory), "Evidence run directory must be new");
     write(directory / "result.json", result.dump(2));
-    { gfx::Runtime runtime; run(options, result, directory); }
+    {
+      gfx::Runtime runtime;
+      run(options, result, directory);
+      require(result.value("native_ax_cleanup_complete", true), "Native AX child cleanup was not confirmed");
+    }
     // The window, bridge, manager and Runtime have now returned from normal destruction.
     // Engine static destructors and the final guarded leak gate belong to the separate spike.
     result["status"] = "passed";

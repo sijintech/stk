@@ -5,6 +5,12 @@
 #include "stk/wm/event.hh"
 #include <string>
 #include <vector>
+#include <memory>
+#include <cstdint>
+#include <optional>
+#ifdef __APPLE__
+#  include "reports_native_ax_process.hh"
+#endif
 
 namespace stk::reports_native_test {
 #ifdef __APPLE__
@@ -25,6 +31,8 @@ struct TimelineInput {
   // Video-element bounds normalized to the exact document viewport, top-left.
   double left = 0, top = 0, width = 0, height = 0;
   double current_time = 0, duration = 0, target_fraction = 0;
+  uint64_t navigation_generation = 0, viewport_generation = 0;
+  ax::Deadline deadline; // Same absolute seek budget, never serialized to the AX child.
 };
 // Fixed categories/counts only: never retain AX objects, labels, text or URLs.
 struct TimelineChildListObservation {
@@ -53,7 +61,10 @@ struct TimelineObservation {
   double screen_x = 0, screen_y = 0, screen_width = 0, screen_height = 0;
   double minimum = 0, maximum = 0, value = 0;
   double normalized_x = 0, normalized_y = 0;
+  bool public_client_attempted = false, public_client_revalidated = false;
+  ax::ProcessResult public_client;
 };
+enum class TimelinePoll { Pending, Delivered, Failed };
 #endif
 /** Test-only delivery to this application's exact native document child.
  * The viewport is in parent framebuffer pixels with a bottom-left origin;
@@ -71,11 +82,21 @@ class NativeInput {
                                  std::string &error);
   bool window_is_active(wm::NativeWindowHandle parent, WindowActivationObservation &observation,
                         std::string &error);
-  // Read only the verified WKWebView's bounded AX subtree to identify its unique
-  // time slider. Deliver ordinary local mouse events; never set an AX/DOM value.
-  bool seek_document(wm::NativeWindowHandle parent, document_preview::ViewBounds viewport,
+  // Candidate lookup only. poll_seek asynchronously revalidates native media before any local mouse input.
+  bool begin_provider_seek(wm::NativeWindowHandle parent, document_preview::ViewBounds viewport,
                      int framebuffer_width, int framebuffer_height, const TimelineInput &input,
-                     TimelineObservation &observation, std::string &delivery, std::string &error);
+                     std::shared_ptr<document_preview::ResourceSession> resources,
+                     TimelineObservation &observation, std::string &error);
+  // Called only after all original provider attempts completed empty. Never waits for a subprocess on the UI thread.
+  bool begin_client_seek(wm::NativeWindowHandle parent, document_preview::ViewBounds viewport,
+                         int framebuffer_width, int framebuffer_height, const TimelineInput &input,
+                         std::shared_ptr<document_preview::ResourceSession> resources, std::string &error);
+  TimelinePoll poll_seek(TimelineObservation &observation, std::string &delivery, std::string &error);
+  void cancel_seek() noexcept;
+  // Cleanup path: no AppKit/DOM call and no input. nullopt means the cancelled worker still owns cleanup.
+  std::optional<ax::ProcessResult> poll_cancelled_seek() noexcept;
+  bool seek_pending() const { return bool(client_seek_); }
+  bool child_cleanup_confirmed() const noexcept { return child_cleanup_confirmed_; }
 #endif
   bool click_document(wm::NativeWindowHandle parent, document_preview::ViewBounds viewport,
                       int framebuffer_width, int framebuffer_height,
@@ -84,5 +105,14 @@ class NativeInput {
   bool key_document(wm::NativeWindowHandle parent, document_preview::ViewBounds viewport,
                     int framebuffer_width, int framebuffer_height, wm::Key key,
                     std::string &delivery, std::string &error);
+ private:
+#ifdef __APPLE__
+  bool prepare_seek(wm::NativeWindowHandle parent, document_preview::ViewBounds viewport,
+                    int width, int height, const TimelineInput &input,
+                    std::shared_ptr<document_preview::ResourceSession> resources, bool public_client, std::string &error);
+  std::shared_ptr<void> client_seek_; // Cocoa ownership stays on the UI thread; the worker holds numeric DTOs only.
+  uint64_t seek_generation_ = 0;
+  bool child_cleanup_confirmed_ = true;
+#endif
 };
 }  // namespace stk::reports_native_test

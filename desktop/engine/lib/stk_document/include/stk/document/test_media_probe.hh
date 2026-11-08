@@ -39,6 +39,13 @@ bool probe_media(wm::NativeWindowHandle parent, std::string_view session_id,
 /** Retain the actual verified session so closing its scope can be checked against old URLs. */
 std::shared_ptr<ResourceSession> resource_session(wm::NativeWindowHandle parent,
                                                  std::string_view session_id, std::string &error);
+#ifdef __APPLE__
+/** UI-thread only: bind an input target to the unique ready session and its native navigation.
+ * expected_view is compared with the real WKWebView; no native object is returned or sent over IPC.
+ */
+bool matches_native_view(wm::NativeWindowHandle parent, std::string_view session_id,
+                         const void *expected_view, uint64_t navigation_generation);
+#endif
 /** Parse one bounded flat DOM snapshot. Failure leaves output unchanged; native generation is preserved. */
 bool parse_media_snapshot(std::string_view json, MediaSnapshot &media, std::string &error);
 
