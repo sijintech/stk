@@ -1,5 +1,17 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：输入传输与设备撤权有限切片已本地提交
+
+源码 main `4399f2fa6dfaba941922d2808ca023eba3766105` 已本地提交，尚未push；远端仍 `7ef5d21e`。前整个Desktop42487388780仍运行，终态前不推送。原四文档WIP和AOCI预存改动保留，最终交付状态见 `d1-input-transfer-20261108-18/root/closure.json` 与实际Git。
+
+新增真实两部署输入/撤权样例：同一1048599字节公开输入，部分会话1MiB后重开同ID/offset，完成SHA校验；B blob必须经原workspace.import人工批准才导入，完整TaskSpec另经批准。两边固定程序读取冻结输入并输出相同SHA，原Runtime清单、各一task/run/marker、program和worker清扫前退出。B仅撤本次desktop设备，热/冷客户端后续11类请求均401，节点仍在线、无新增action，原Runtime任务保持。不是断网、桥日志恢复、项目/用户授权、在途请求中断、已交付字节召回或pending上传字节不变证明。
+
+最终新模块及singleton联合28通过、零skip、14.81s；最小非system-site-packages包以-I installed复验11断言通过，场景6.045540141s、含清理8.1s，实际site-packages来源/模块SHA一致、清理干净。产品Python到7ef无差异，沿用已重建包，不把旧harness试跑当新字节；当前script46f83b43…/helpercf2b13c9…。独立终审关闭A额外queued任务假绿和迟到terminal延长局部截止，反例已入测试。暂存25040字节gitleaks零发现。
+
+7ef的Runtime42487388719于14:14:50Z整轮failure：11job成功、两Windows矩阵因新增Linux专用singleton测试在收集阶段引用不存在的SIGKILL而报错，未执行该矩阵测试。本提交改为函数体解析信号名称，缺SIGKILL的模块红绿反例及Linux原11项通过/5.73s；仍待新Windows CI。Docs42487388755完整部署成功，Secret42487388666成功。Desktop当前Linux三job成功，Mac已越过编译/CPU阶段、WindowsCPU运行，原生最终结果待出；不能继承旧头平台验收。
+
+root继续独占main、公共后端/契约、共享构建、审阅集成、四状态文档、认知与推送。实际Claude仍在独立stk-claude/claude/support做CL-NATIVE-PEER-14，只改peer_test.cc，候选尚未集成或目标OS验收；具体Windows空JSON根因仍未知。后续D1其余合同/故障与云端项目、文献实际点击、Synthrix正常装配、D2-D5和原八项保持；PET新专项后置。MuPRO/MuFerro、插件原生格式/MuPRO HDF5及有限S2c按已确认方向推进，真实许可/主机/小算例、扫描数值与提案持久形式仍待输入；HDF5仍需DAT完成验证。
+
 ## 2026-11-08 UTC：D1 元数据、Hub 单实例与丢结果重启已本地验收
 
 本地源码 `b517554a64f0049b681d4601299bf4b40817d6f5`、`2c9729b853a11cf6aa4bde6e650a9ae1ff3fd3ba`、`c5d8e503b00eded5d37f03326cbe878a5bbe793f`、`ddd7d7c286c306a25eb0d1640fdaa2ebe47404e7` 已提交；本节成文时未push，远端fd394e46。最终交付/推送和新CI见 `d1-hub-restart-20261108-12/root-integration/closure.json`，须先核真实Git与整轮Desktop终态。旧WIP及AOCI预存资产保留。

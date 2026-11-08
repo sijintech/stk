@@ -1,5 +1,11 @@
 # Codex / Claude worktree 协作约定
 
+## 2026-11-08 当前补充：root输入切片与Claude14
+
+源码 main `4399f2fa6dfaba941922d2808ca023eba3766105` 已本地提交，尚未push；远端仍 `7ef5d21e`。前整个Desktop42487388780仍运行，终态前不推送。原四文档WIP和AOCI预存改动保留，最终交付状态见 `d1-input-transfer-20261108-18/root/closure.json` 与实际Git。
+
+root新增input_transfer.py/INPUT_TRANSFER.md/测试并修singleton跨平台收集，最终28项与最小安装态11断言已过，独立审阅关闭两假绿。Claude14继续只写peer_test.cc，先交固定候选再由root审阅/构建/集成；尚未通过目标Windows验收。root保留共享构建与状态/认知独占；7ef的Runtime42487388719于14:14:50Z整轮failure：11job成功、两Windows矩阵因新增Linux专用singleton测试在收集阶段引用不存在的SIGKILL而报错，未执行该矩阵测试。本提交改为函数体解析信号名称，缺SIGKILL的模块红绿反例及Linux原11项通过/5.73s；仍待新Windows CI。Docs42487388755完整部署成功，Secret42487388666成功。Desktop当前Linux三job成功，Mac已越过编译/CPU阶段、WindowsCPU运行，原生最终结果待出；不能继承旧头平台验收。
+
 所有者最新决定：Codex 作为 root 总负责，Claude 在独立 worktree 配合文档和特定模块开发。
 本约定替代此前共用 main 工作树、Claude 仅做设计的安排；发布协议仍以当前版本为准，剩余待决见交接。
 
