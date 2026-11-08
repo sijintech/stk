@@ -287,71 +287,55 @@ def _field_meta(name, components):
     return meta
 
 
-def read_hdf5_image(path, selector, *, region=None, stride=None, max_bytes=DEFAULT_MAX_BYTES):
-    """Read the MuPRO HDF5 field ``selector`` (``/tNNNNNNNN/<field>``) of the local file ``path``.
-
-    Returns an :class:`~suan.data.model.ImageData` (``id`` and field name =
-    ``<field>``, ``time.step`` from the selector) holding one point field
-    ``(nz, ny, nx, nc)``. See the module docstring for the region/stride,
-    budget, link and error rules.
-    """
+def _read_options(selector, region, stride, max_bytes):
     group_name, step, field_name = _parse_selector(selector)
     wanted = _check_region(region)
     steps = _check_stride(stride)
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, Integral) or max_bytes < 1:
         raise ConnectorError("max_bytes must be a positive integer", "invalid_param")
-    try:
-        path = os.fspath(path)
-    except TypeError:
-        raise ConnectorError("path must be a file system path", "invalid_param") from None
-    if not isinstance(path, str) or not path or "\x00" in path:
-        raise ConnectorError("path must be a non-empty text path", "invalid_param")
-    h5py, np = _modules()
+    return group_name, step, field_name, wanted, steps
+
+
+def _read_open(stream, options, max_bytes, h5py, np, *, opened=None, changed=None):
+    """Read a caller-owned ordinary stream, without resolving a filename or closing the stream."""
     from suan.data.model import ImageData, Provenance, TimeInfo
-
-    stream, before, opened, changed = _open_pinned(path)
-    with stream:
-        try:
-            handle = h5py.File(stream, "r")
-        except (OSError, ValueError):
-            raise ConnectorError("The file is not a readable HDF5 file", "invalid_data") from None
-        with handle:
-            try:
-                group = _hard_member(h5py, handle, group_name, h5py.Group, "frame_not_found",
-                                     f"step group /{group_name}")
-                dataset = _hard_member(h5py, group, field_name, h5py.Dataset, "not_found",
-                                       f"field /{group_name}/{field_name}")
-                (nx, ny, nz, nc), chunk_bytes = _check_dataset(h5py, dataset)
-                window = _window(wanted, (nx, ny, nz))
-                sizes = tuple(len(range(lo, hi + 1, s)) for (lo, hi), s in zip(window, steps))
-                dtype = dataset.dtype.newbyteorder("=")
-                selected = sizes[0] * sizes[1] * sizes[2] * nc * dtype.itemsize
-                estimate = 2 * selected + chunk_bytes
-                if estimate > max_bytes:
-                    raise ConnectorError(f"Reading {sizes} x {nc} {dtype.name} needs about {estimate} bytes "
-                                         f"(buffer, transposed copy and one decoded chunk); max_bytes is "
-                                         f"{max_bytes}", "budget_exceeded")
-                buffer = np.empty((*sizes, nc), dtype=dtype)
-                selection = tuple(slice(lo, hi + 1, s) for (lo, hi), s in zip(window, steps)) + (slice(None),)
-                _read_hyperslab(dataset, buffer, selection)
-            except ConnectorError:
-                raise
-            except (OSError, ValueError, TypeError, KeyError, RuntimeError):
-                raise ConnectorError("The HDF5 file is damaged or uses unsupported storage", "invalid_data") \
-                    from None
-        after = os.fstat(stream.fileno())
-        changed_after = _change_time(stream.fileno())
+    group_name, step, field_name, wanted, steps = options
+    opened = os.fstat(stream.fileno()) if opened is None else opened
+    if not _stat.S_ISREG(opened.st_mode):
+        raise ConnectorError("The HDF5 stream is not a regular file", "invalid_data")
+    changed = _change_time(stream.fileno()) if changed is None else changed
     try:
-        current = os.lstat(path)
-    except OSError:
-        current = None
-    # The pinned descriptor's change time (POSIX st_ctime_ns, Windows FILE_BASIC_INFO.ChangeTime) before and
-    # after the read catches an in-place rewrite of the same size whose mtime was restored (os.utime); fstat
-    # and lstat pairs are each compared within their own API (lstat ctime on POSIX only).
-    if (current is None or _is_link(current) or changed_after != changed or not _same_file(opened, after)
-            or not _same_file(before, current, ctime=True)):
+        handle = h5py.File(stream, "r")
+    except (OSError, ValueError):
+        raise ConnectorError("The file is not a readable HDF5 file", "invalid_data") from None
+    with handle:
+        try:
+            group = _hard_member(h5py, handle, group_name, h5py.Group, "frame_not_found",
+                                 f"step group /{group_name}")
+            dataset = _hard_member(h5py, group, field_name, h5py.Dataset, "not_found",
+                                   f"field /{group_name}/{field_name}")
+            (nx, ny, nz, nc), chunk_bytes = _check_dataset(h5py, dataset)
+            window = _window(wanted, (nx, ny, nz))
+            sizes = tuple(len(range(lo, hi + 1, s)) for (lo, hi), s in zip(window, steps))
+            dtype = dataset.dtype.newbyteorder("=")
+            selected = sizes[0] * sizes[1] * sizes[2] * nc * dtype.itemsize
+            estimate = 2 * selected + chunk_bytes
+            if estimate > max_bytes:
+                raise ConnectorError(f"Reading {sizes} x {nc} {dtype.name} needs about {estimate} bytes "
+                                     f"(buffer, transposed copy and one decoded chunk); max_bytes is "
+                                     f"{max_bytes}", "budget_exceeded")
+            buffer = np.empty((*sizes, nc), dtype=dtype)
+            selection = tuple(slice(lo, hi + 1, s) for (lo, hi), s in zip(window, steps)) + (slice(None),)
+            _read_hyperslab(dataset, buffer, selection)
+        except ConnectorError:
+            raise
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+            raise ConnectorError("The HDF5 file is damaged or uses unsupported storage", "invalid_data") \
+                from None
+    after = os.fstat(stream.fileno())
+    changed_after = _change_time(stream.fileno())
+    if changed_after != changed or not _same_file(opened, after):
         raise ConnectorError("The HDF5 file changed while it was read", "invalid_data")
-
     values = np.ascontiguousarray(buffer.transpose(2, 1, 0, 3))
     del buffer
     origin = tuple(float(lo) for lo, _ in window)
@@ -359,4 +343,33 @@ def read_hdf5_image(path, selector, *, region=None, stride=None, max_bytes=DEFAU
                       id=field_name, time=TimeInfo(step=step),
                       provenance=Provenance(agent={"reader": READER}))
     image.add_field(field_name, values, **_field_meta(field_name, nc))
+    return image
+
+
+def _read_hdf5_stream(stream, selector, *, region=None, stride=None, max_bytes=DEFAULT_MAX_BYTES):
+    """Internal FileSource adapter entry: caller owns the anonymous, verified temporary file."""
+    options = _read_options(selector, region, stride, max_bytes)
+    h5py, np = _modules()
+    return _read_open(stream, options, max_bytes, h5py, np)
+
+
+def read_hdf5_image(path, selector, *, region=None, stride=None, max_bytes=DEFAULT_MAX_BYTES):
+    """Read one explicit MuPRO HDF5 field from a pinned local ordinary file. See module rules."""
+    options = _read_options(selector, region, stride, max_bytes)
+    try:
+        path = os.fspath(path)
+    except TypeError:
+        raise ConnectorError("path must be a file system path", "invalid_param") from None
+    if not isinstance(path, str) or not path or "\x00" in path:
+        raise ConnectorError("path must be a non-empty text path", "invalid_param")
+    h5py, np = _modules()
+    stream, before, opened, changed = _open_pinned(path)
+    with stream:
+        image = _read_open(stream, options, max_bytes, h5py, np, opened=opened, changed=changed)
+    try:
+        current = os.lstat(path)
+    except OSError:
+        current = None
+    if current is None or _is_link(current) or not _same_file(before, current, ctime=True):
+        raise ConnectorError("The HDF5 file changed while it was read", "invalid_data")
     return image

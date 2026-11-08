@@ -7,9 +7,8 @@ metadata-only hash memoization. Temporary bytes are removed on every exit.
 Only the reader's selected arrays use the separate allocation budget.
 """
 import hashlib
-from pathlib import Path
 import re
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryFile
 
 from ..api import ConnectorError
 from ..files import check_path
@@ -49,21 +48,23 @@ def fingerprint(source, path, selector, *, check=None):
 def read(source, path, selector, *, expected_sha256, region=None, stride=None,
          max_bytes=256 * 1024 * 1024, check=None):
     """Read only bytes matching the fingerprint that planned the caller's execution."""
-    from .hdf5 import READER, _parse_selector, read_hdf5_image
+    from .hdf5 import READER, _parse_selector, _read_hdf5_stream
     from suan.data.model import FrameRef, Provenance, SourceRef
     _parse_selector(selector)
     path = check_path(path)
     if not isinstance(expected_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
         raise ConnectorError("A planned content SHA-256 is required", "invalid_param")
-    with TemporaryDirectory(prefix="stk-mupro-hdf5-") as temporary:
-        local = Path(temporary) / "source.h5"
-        with local.open("xb") as target:
-            sha, size = _stream(source, path, destination=target, check=check)
+    # POSIX unlinks this file immediately; Windows opens it with delete-on-close.
+    # Closing descriptors on worker death also releases the private source copy.
+    with TemporaryFile(mode="w+b", prefix="stk-mupro-hdf5-") as target:
+        sha, size = _stream(source, path, destination=target, check=check)
         if sha != expected_sha256:
             raise ConnectorError("The MuPRO HDF5 source changed after its content was planned", "invalid_data")
         if check is not None:
             check()
-        image = read_hdf5_image(local, selector, region=region, stride=stride, max_bytes=max_bytes)
+        target.flush()
+        target.seek(0)
+        image = _read_hdf5_stream(target, selector, region=region, stride=stride, max_bytes=max_bytes)
         if check is not None:
             check()
     image.provenance = Provenance(activity={"kind": "import", "id": None},

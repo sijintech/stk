@@ -44,8 +44,9 @@ promising an operating-system snapshot or locking an external producer.
 
 `suan.connectors.mupro.source.fingerprint(source, path, selector)` hashes actual stream bytes, with
 no metadata hash shortcut. `source.read(..., expected_sha256=...)` streams the exact input into a
-private temporary file, verifies the planned SHA, then invokes the local reader. Temporary bytes are
-removed on success, failure or cancellation. Both operations cap the source at 1 GiB and check
+private temporary file, verifies the planned SHA, then invokes the same selected-field reader on
+that open stream. POSIX unlinks the temporary file at creation; Windows uses delete-on-close.
+Closing handles also releases the copy when the worker is killed. Both operations cap the source at 1 GiB and check
 cancellation between chunks. A remote FileSource needs no local path. Returned provenance identifies
 the original relative path/SHA; a single frame's `SourceRef` binds that path, reader, size, SHA and
 native selector, rather than the temporary filename.

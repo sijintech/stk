@@ -107,15 +107,15 @@ def test_file_source_without_local_path_or_trusted_hash(tmp_path, monkeypatch):
     planned = adapter.fingerprint(Remote(), "run.h5", "/t00000004/Polar")
     seen = []
     from suan.connectors.mupro import hdf5
-    original = hdf5.read_hdf5_image
+    original = hdf5._read_hdf5_stream
 
-    def observed(path, *args, **kwargs):
-        seen.append(Path(path))
-        return original(path, *args, **kwargs)
+    def observed(stream, *args, **kwargs):
+        seen.append(stream)
+        return original(stream, *args, **kwargs)
 
-    monkeypatch.setattr(hdf5, "read_hdf5_image", observed)
+    monkeypatch.setattr(hdf5, "_read_hdf5_stream", observed)
     image = adapter.read(Remote(), "run.h5", planned["selector"], expected_sha256=planned["sha256"])
-    assert image.time.step == 4 and seen and not seen[0].exists()
+    assert image.time.step == 4 and seen and seen[0].closed
 
 
 def test_source_limit_and_cancellation_precede_hdf5_parse(tmp_path, monkeypatch):
@@ -142,26 +142,75 @@ def test_private_copy_removed_on_failed_read(tmp_path, monkeypatch, failure):
     expected = hashlib.sha256(path.read_bytes()).hexdigest()
     if failure == "hash":
         expected = "0" * 64
-    created, temporary = [], adapter.TemporaryDirectory
+    created, temporary = [], adapter.TemporaryFile
 
-    def private_directory(*args, **kwargs):
-        directory = temporary(*args, dir=tmp_path, **kwargs)
-        created.append(Path(directory.name))
-        return directory
+    def private_file(*args, **kwargs):
+        stream = temporary(*args, dir=tmp_path, **kwargs)
+        created.append(stream)
+        return stream
 
     def cancel():
         if failure == "cancel":
             raise Cancelled("test cancellation")
 
-    monkeypatch.setattr(adapter, "TemporaryDirectory", private_directory)
+    monkeypatch.setattr(adapter, "TemporaryFile", private_file)
     if failure == "limit":
         monkeypatch.setattr(adapter, "FILE_LIMIT", 8)
     with pytest.raises((Cancelled, ConnectorError)):
         adapter.read(LocalFiles(tmp_path), "run.h5", "/t00000002/Polar", expected_sha256=expected, check=cancel)
-    assert created and all(not path.exists() for path in created)
+    assert created and all(stream.closed for stream in created)
 
 
-def test_selected_array_allocation_respects_evaluation_budget(tmp_path):
+def test_private_copy_does_not_survive_worker_kill(tmp_path):
+    import subprocess
+    import sys
+    import time
+    write_file(tmp_path / "run.h5")
+    temporary = tmp_path / "private-temp"
+    temporary.mkdir()
+    ready = tmp_path / "ready"
+    script = r'''
+import sys, threading
+from pathlib import Path
+from suan.connectors.files import LocalFiles
+from suan.connectors.mupro import source, hdf5
+src = LocalFiles(sys.argv[1])
+planned = source.fingerprint(src, "run.h5", "/t00000002/Polar")
+def blocked(stream, *args, **kwargs):
+    assert stream.read(8) == b"\x89HDF\r\n\x1a\n"
+    Path(sys.argv[2]).write_text("ready")
+    threading.Event().wait(120)
+hdf5._read_hdf5_stream = blocked
+source.read(src, "run.h5", "/t00000002/Polar", expected_sha256=planned["sha256"])
+'''
+    env = {"STK_TOKEN_PLAN_API_KEY": "", "PYTHONDONTWRITEBYTECODE": "1",
+           "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+           "TMPDIR": str(temporary), "TMP": str(temporary), "TEMP": str(temporary)}
+    for name in ("PATH", "SYSTEMROOT"):
+        if name in os.environ:
+            env[name] = os.environ[name]
+    child = subprocess.Popen([sys.executable, "-c", script, str(tmp_path), str(ready)],
+                             env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 30
+        while not ready.exists() and child.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.exists(), "worker must reach reading the verified private copy"
+        child.kill()
+        child.wait(timeout=10)
+        assert list(temporary.iterdir()) == []
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.communicate(timeout=10)
+
+
+def test_selected_array_allocation_respects_evaluation_budget(tmp_path, monkeypatch):
+    import importlib
+    from suan.connectors.mupro import hdf5
+    # Isolate the deterministic pre-allocation limit from the independent, process-wide RSS limit.
+    monkeypatch.setattr(importlib.import_module("suan.graph.evaluator"), "_rss", lambda: 0)
+    monkeypatch.setattr(hdf5, "_read_hyperslab", lambda *a: pytest.fail("over-budget values were read"))
     # The selected 256*256*3*8 bytes require twice that during transpose (>1 MiB).
     with h5py.File(tmp_path / "run.h5", "w") as f:
         f.create_dataset("t00000002/Polar", data=np.zeros((256, 256, 1, 3)))
