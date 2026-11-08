@@ -5,6 +5,12 @@ Existing DAT readers and MuFerro task verification retain their contracts. The p
 connector 0.2.0 additionally discovers native fields in the selected case's `run.h5`.
 Reading an HDF5 field does not establish solver success or scientific validity.
 
+`run.h5` is a reserved optional output name. Submission and compute-side preflight refuse
+a case directory that already contains it, before upload or solver execution, so an earlier
+run's container cannot be collected as a new result. It remains optional: DAT completion
+verification and its required artifacts are unchanged. Other HDF5 input names are not
+reserved by this rule.
+
 ## Native field
 
 The caller explicitly supplies `/tNNNNNNNN/<field>`: eight ASCII decimal digits and a field name

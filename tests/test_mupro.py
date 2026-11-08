@@ -432,6 +432,43 @@ def clear_outputs(folder):
             path.unlink()
 
 
+def test_cli_refuses_stale_native_hdf5_before_upload(tmp_path, monkeypatch):
+    case = tmp_path / "case16"
+    write_case(case)
+    previous = b"previous native HDF5 output"
+    (case / "run.h5").write_bytes(previous)
+    client = FakeClient()
+    result = invoke(client, monkeypatch, ["submit", "--workspace", WORKSPACE, "--input", str(case)])
+    assert result.exit_code == 1 and "already holds muFerro outputs" in result.output
+    assert "run.h5" in result.output and "clean case directory" in result.output
+    assert client.uploads == [] and client.submitted == []
+    assert (case / "run.h5").read_bytes() == previous
+
+
+def test_other_hdf5_input_names_are_not_reserved_outputs(tmp_path):
+    from suan.mupro.run import check_case
+    write_case(tmp_path)
+    (tmp_path / "material.h5").write_bytes(b"input coefficients")
+    (tmp_path / "Polar.in").write_bytes(b"restart input")
+    check_case(read_case(tmp_path), tmp_path, 1)
+
+
+@pytest.mark.server
+def test_node_refuses_stale_native_hdf5_before_solver(node, tmp_path):
+    work, _ = node
+    sdk = make_fake_sdk(tmp_path / "sdk")
+    case = work / "case"
+    write_case(case)
+    previous = b"previous native HDF5 output"
+    (case / "run.h5").write_bytes(previous)
+    code, record = launch(sdk, "--case-dir", "case")
+    assert (code, record["state"], record["classification"]) == (2, "failed", "configuration")
+    assert "run.h5" in record["reason"] and "clean case directory" in record["reason"]
+    assert record["command"] == [] and record["exit_code"] is None
+    assert not (case / "fake-muferro.json").exists()
+    assert (case / "run.h5").read_bytes() == previous
+
+
 @pytest.mark.server
 def test_run_example_single_rank_sets_threads_and_verifies(node, tmp_path, monkeypatch):
     work, _ = node

@@ -24,7 +24,7 @@ def test_upload_start_reuses_the_original_request_across_states_and_restart(tmp_
         (source / "data.txt").write_text("one upload", encoding="utf-8")
     state = tmp_path / "state"
     launches = []
-    manager = TransferManager(state, lambda *args: None, lambda *args: SimpleNamespace(kind=kind))
+    manager = TransferManager(state, lambda *args: None, lambda *args: SimpleNamespace(kind=kind, server_key=f"{kind}:test"))
     monkeypatch.setattr(manager, "_launch", launches.append)
     restarted = None
     params = {"connection": kind + ":test", "workspace_id": "workspace", "source": source,
@@ -47,7 +47,7 @@ def test_upload_start_reuses_the_original_request_across_states_and_restart(tmp_
         record["state"] = "queued"
         manager.save(record)
         manager.stop()
-        restarted = TransferManager(state, lambda *args: None, lambda *args: SimpleNamespace(kind=kind))
+        restarted = TransferManager(state, lambda *args: None, lambda *args: SimpleNamespace(kind=kind, server_key=f"{kind}:test"))
         monkeypatch.setattr(restarted, "_launch", launches.append)
         repeated = restarted.start_upload(**params)
         assert repeated["id"] == first["id"] and repeated["state"] == "interrupted"
@@ -62,7 +62,7 @@ def test_upload_start_reuses_the_original_request_across_states_and_restart(tmp_
 def test_upload_start_same_key_keeps_raw_request_identity(tmp_path, monkeypatch, kind):
     source = tmp_path / "input.txt"
     source.write_text("one upload", encoding="utf-8")
-    manager = TransferManager(tmp_path / "state", lambda *args: None, lambda *args: SimpleNamespace(kind=kind))
+    manager = TransferManager(tmp_path / "state", lambda *args: None, lambda *args: SimpleNamespace(kind=kind, server_key=f"{kind}:test"))
     launches = []
     monkeypatch.setattr(manager, "_launch", launches.append)
     params = {"connection": kind + ":test", "workspace_id": "workspace", "source": source,
@@ -89,7 +89,7 @@ def test_upload_start_same_key_keeps_raw_request_identity(tmp_path, monkeypatch,
 def test_concurrent_upload_start_with_the_same_key_launches_once(tmp_path, monkeypatch, kind):
     source = tmp_path / "input.txt"
     source.write_text("one upload", encoding="utf-8")
-    manager = TransferManager(tmp_path / "state", lambda *args: None, lambda *args: SimpleNamespace(kind=kind))
+    manager = TransferManager(tmp_path / "state", lambda *args: None, lambda *args: SimpleNamespace(kind=kind, server_key=f"{kind}:test"))
     launches = []
     monkeypatch.setattr(manager, "_launch", launches.append)
     params = {"connection": kind + ":test", "workspace_id": "workspace", "source": source,
@@ -109,7 +109,7 @@ def test_hub_import_budget_is_checked_before_creating_or_launching_a_transfer(tm
     source.mkdir()
     for index in range(8):
         (source / (str(index) + "-" + "x" * 40 + ".txt")).write_text("input", encoding="utf-8")
-    manager = TransferManager(tmp_path / "state", lambda *args: None, lambda *args: SimpleNamespace(kind="hub"))
+    manager = TransferManager(tmp_path / "state", lambda *args: None, lambda *args: SimpleNamespace(kind="hub", server_key="hub:test"))
     launches = []
     monkeypatch.setattr(manager, "_launch", launches.append)
     monkeypatch.setattr(transfers, "IMPORT_REQUEST_BYTES", 512)
@@ -125,7 +125,7 @@ def test_hub_import_budget_is_checked_before_creating_or_launching_a_transfer(tm
 def test_an_old_hub_journal_with_no_original_request_keeps_a_key_conflict(tmp_path, monkeypatch):
     source = tmp_path / "input.txt"
     source.write_text("one upload", encoding="utf-8")
-    manager = TransferManager(tmp_path / "state", lambda *args: None, lambda *args: SimpleNamespace(kind="hub"))
+    manager = TransferManager(tmp_path / "state", lambda *args: None, lambda *args: SimpleNamespace(kind="hub", server_key="hub:test"))
     launches = []
     monkeypatch.setattr(manager, "_launch", launches.append)
     params = {"connection": "hub:test", "workspace_id": "workspace", "source": source,
@@ -161,7 +161,7 @@ def test_resume_after_failure_event_waits_for_old_worker_and_restarts(tmp_path, 
             failed.set()
             assert release.wait(10)
 
-    manager = TransferManager(tmp_path / "state", emit, lambda *args: SimpleNamespace(kind="runtime"))
+    manager = TransferManager(tmp_path / "state", emit, lambda *args: SimpleNamespace(kind="runtime", server_key="runtime:test"))
 
     def download(record, backend):
         attempts.append(record["id"])

@@ -51,6 +51,9 @@ ENERGY_ROW = re.compile(r"^\s*kt:\s*(\d+)\s+energy:\s*(.*?)\s*$")
 _FORTRAN_EXPONENT = re.compile(r"(?<=[0-9.])([+-]\d{3})$")
 # muFerro appends to an existing energy trace and progress log (output.f90:31-43, 85-86).
 RUN_OUTPUTS = ("energy_out.dat", "mupro_progress.jsonl", "mupro_completion.json")
+# Optional native output: reserve its name during preflight without making it
+# a required DAT completion artifact for existing solvers and result collection.
+OPTIONAL_RUN_OUTPUTS = ("run.h5",)
 MAX_INCLUDE_DEPTH = 16  # muprosdk library/L0_Base/toml.f90 max_include_depth
 
 
@@ -153,7 +156,8 @@ def check_case(case, folder, ranks):
     # A rerun in place appends to the old trace and fails verification after using its allocation.
     # Polar.in is a restart input, not an output.
     names = [path.name for path in Path(folder).iterdir()]
-    stale = [name for name in RUN_OUTPUTS if name in names] + sorted(name for name in names if FRAME.search(name))
+    stale = [name for name in (*RUN_OUTPUTS, *OPTIONAL_RUN_OUTPUTS) if name in names]
+    stale += sorted(name for name in names if FRAME.search(name))
     if stale:
         raise MuproError("The case directory already holds muFerro outputs (" + ", ".join(stale[:5])
                          + "); submit a clean case directory")

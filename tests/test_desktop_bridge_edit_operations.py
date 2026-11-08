@@ -246,7 +246,7 @@ def test_edit_receipts_are_discoverable_but_do_not_expand_agent_tools(inproc):  
     catalog = harness.call("script.catalog")["operations"]
     assert {APPLY, GET} <= set(hello["methods"]) & set(catalog)
     assert OPERATIONS[APPLY][0] == "project_edit" and OPERATIONS[GET][0] == "read"
-    assert AGENT_LEVELS == ("read", "record", "model", "draft")
+    assert AGENT_LEVELS == ("read", "record", "model", "draft", "prepare_run")
     assert not {APPLY, GET} & {operation for operations in TOOL_USES.values() for operation in operations}
     assert "scope" not in catalog[APPLY]["params"]["properties"]
     assert "scope" not in catalog[GET]["params"]["properties"]

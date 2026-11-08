@@ -182,7 +182,8 @@ def test_new_methods_are_discoverable_without_expanding_agent_tool_permissions(i
         "materials.jobs.curves": "read", "materials.jobs.recover": "record"}
     assert all(levels.OPERATIONS[name][1] for name in NEW_METHODS)
     assert not NEW_METHODS & {operation for operations in levels.TOOL_USES.values() for operation in operations}
-    assert levels.AGENT_LEVELS == ("read", "record", "model", "draft")
+    assert levels.AGENT_LEVELS == ("read", "record", "model", "draft", "prepare_run")
+    assert levels.TOOL_USES["prepare_muferro_run"] == ["project.workflow_runs.prepare"]
     assert not h.violations
 
 

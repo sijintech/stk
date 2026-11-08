@@ -1,12 +1,12 @@
 # D1 实施前的最小契约与兼容门清单
 
-任务卡：CL-D1-01（见[协作约定](agent-collaboration.md#当前任务卡)）。状态：**这是实施前的清单和建议。D1 两部署验收尚未执行。**
+任务卡：CL-D1-01（见[协作约定](agent-collaboration.md#当前任务卡)）。状态：**D1 两部署联合验收仍在实施；下列新进度优先于历史基线。**
 本文不发布新 schema，不改产品代码或数据库格式，也不替所有者选择 D3 领域、剩余未决事项或 PET 新专项。
 2026-11-07 所有者对原三项待决作了新回答，root 已把它们写入任务卡并要求纳入本清单，见 §6。
 
-**基线：** `claude/support` 分支的 `37d26464591f9191986459f4d70b7320e68f5555`。
-三份设计的直接证据基线是 `535b0d63d15521ea7d4294ddfce2ac68a3555667`。两者在 `suan/`、`desktop/`、`tests/` 和 `pyproject.toml` 上没有差异（`git diff --stat` 输出为空），所以设计中的源码定位仍然有效。
-下文的 `路径:行` 都按本基线读取。
+**历史基线：** 初稿来自 `claude/support` 的 `37d26464591f9191986459f4d70b7320e68f5555`；三份设计当时以 `535b0d63d15521ea7d4294ddfce2ac68a3555667` 为证据，两头当时的产品代码相同。下文未更新的 `路径:行` 仅定位该历史版本，不能据此声称当前源码仍相同。
+
+**2026-11-08 进度核定：** 已推主线 `ec32a182` 含 HDF5 连接器和 MuPRO 智能体本地准备、完整计划审阅及人工单次首次批准；发布契约分别见 [MuPRO HDF5/1](../specs/mupro-hdf5-1.md) 和 [agent MuFerro run/1](../specs/agent-muferro-run-1.md)。当前 S2c 只支持桌面明确选择的直连/SSH Runtime，仍不支持 Hub 准备。root 已选择 R1 的 (a)，Claude 在独立 worktree 开发真实 CLI 双部署 harness。root 从该已提交源码独立安装 `.[server,control,test]`，四类入口/后端导入无 GUI 或科学计算模块，已安装包的 Hub CLI 20 项回归通过；这还不等于新 harness 的两部署比较、云端项目服务或真实 MuPRO 验收。证据见 `d1-parity-20261108-08/root/minimal-imports.json` 和 `minimal-hub-cli.xml`，最终状态以运行验收为准。
 
 **输入：**
 - [共享架构](../design/shared-backend-architecture.md)
@@ -161,7 +161,7 @@ ID 前缀 X 是本文编号；括号里给出对应的[跨端验收](../design/d
 ## 6. 本轮新决定纳入的兼容门
 
 **来源：** 2026-11-07 所有者对原三项待决的回答，以及首个专业软件的选择。root 把它们写进了 CL-D1-01 任务卡的"本轮新决定"。
-这些方向已获准，但都**尚未实现或发布**，所以下面每一行仍按 §0 的标签分类。
+方向已获准；HDF5 读取/发现/附加收集和有限 S2c 已有实现及发布扩展，真实软件与 D1 两部署联合验收仍有缺口。下面按当前事实逐项分类，不能用初稿的“均未实现”覆盖已交付能力。
 
 | 原待决或新问题 | 所有者的回答 | 本文如何处理 |
 |---|---|---|
@@ -190,12 +190,12 @@ root 描述的链条是：软件发现 → 能力预检 → 冻结输入 → 显
 | ID | 门 | 现状与类别 | 测试入口 / 退出证据 |
 |---|---|---|---|
 | F-1 | 新格式通过现有插件机制接入：connector 和 inputs 两类 entry point，在 `info().capabilities` 中声明带版本的读取器；不改 `API_VERSION` | 已发布：[connector 接口 §13](../specs/stk-data-format-v1.md#13-connector-interface-suanconnectorsapipy-api_version--1)；`suan/connectors/api.py:31-32`。现行实现：优先级、白名单 `connectors.allow`，坏插件不拖垮注册表（`suan/connectors/registry.py:27-32,80-135`） | 现有 connector 测试；新增读取器后，旧注册表诊断结果不变 |
-| F-2 | MuPRO 的 HDF5 是**由插件读取的原生格式**，与 STK 自己写出的 VTKHDF + STK profile 容器分开；不强制转换 | 已发布：[data format v1 §10](../specs/stk-data-format-v1.md#10-on-disk-container-vtkhdf--stk-profile) 规定原生格式经 connector 可读、从不要求转换。读取器名称和版本属拟议（例如在 `mupro.dat@1` 之外另加一个 HDF5 读取器） | 用真实 MuPRO 输出验证：数据集种类、字段描述和单位符合 §2–4，单位不猜。Polar 的单位仍是 §14 写明的待定问题 |
+| F-2 | MuPRO 的 HDF5 由插件读取，与 VTKHDF + STK profile 分开，不强制转换 | 已发布 `mupro.hdf5@1` / `stk.source.mupro_hdf5@1`；连接器 0.2.0 从选定案例的 `run.h5` 发现 `hdf5:<field>`，保留 selector、原 dtype 和容器 SHA。见 [MuPRO HDF5/1](../specs/mupro-hdf5-1.md) | 合成读取/发现/CLI 原值回归已记录；真实 MuPRO 输出仍待资产。单位、六分量意义和求解成功不推断 |
 | F-3 | 旧的 `.dat` 运行和已有项目保持可读 | 现行实现：帧文件规则 `FRAME`（`suan/mupro/run.py:48`）和 `mupro.dat@1` 读取器 | 旧结果表、旧运行目录的回归读取 |
-| F-4 | 输出清理与最终状态选取覆盖 HDF5 | **缺口：** 运行前的陈旧输出检测只认 `RUN_OUTPUTS` 和 `.dat` 帧（`suan/mupro/run.py:53,156`）。`final_state` 把 `case/` 下所有非帧文件都选上（`suan/workflows/muferro.py:121-135`），HDF5 文件会全部计入"最多 100 个文件、256 MiB"的分析输入上限。见 R8 | 两个反例：上一轮的 HDF5 输出被识别为陈旧；最终状态选取不超过上限 |
+| F-4 | 陈旧输出预检与最终状态输入覆盖 HDF5 | root 已复现 CLI 和计算侧均会接受遗留 `run.h5`，本轮把该已发布输出名加入可选产物预检；不把它加入 DAT 必需完成文件。最终状态保留完整 HDF5 容器；工作流收集/下游快照按 100 文件/256 MiB 拒绝超限，不自动裁剪 | 两条旧输出反例及其他 HDF5 输入名仍可用的对照；最终联合结果见运行验收。HDF5-only 完成仍未实现 |
 | F-5 | 读取 HDF5 的节点必须真的装了 h5py；缺依赖时声明读取器不可用，而不是运行到一半才失败 | **缺口：** h5py 是可选依赖（`pyproject.toml:61`），只在 `science`、`desktop`、`visualization` extras 中；`server` extra 为空（`pyproject.toml:86-94`） | 在只装 `.[server]` 的节点上检查能力声明 |
 | F-6 | HDF5 库版本兼容 | unknown：实际求解器使用的 HDF5 版本和输出特性尚未核实，不能从目录名推断 ABI 或可读性 | 记录求解器及读取端版本，用固定版本的 h5py 读取一份真实 MuPRO 输出 |
-| F-7 | 核验合同 | 拟议：如果 HDF5 改变了输出合同，就新增一个核验版本，`stk-mupro-1` 保持不变 | 新旧运行各核验一次 |
+| F-7 | 核验合同 | 已发布 HDF5/1 读取与附加收集，仍要求 `stk-mupro-1` 的 DAT 完成核验；读取 HDF5 不代表求解成功。新增 `run.h5` 陈旧产物预检不改变必需完成文件 | HDF5-only 求解完成须取得真实输出和版本化核验合同后另验，不能据读取通过宣称实现 |
 | F-8 | 电场扫描参数 | **依赖决定：** 由插件显式声明扫描参数，STK 不提供默认值；具体数值由研究任务给定，尚未确定 | 声明缺参数时拒绝准备运行；参数随冻结计划保存 |
 | F-9 | S3 合作方训练数据：插件定义的格式先映射到现有 `stk.dataset/1` 目录，或经版本化扩展后再接入；训练冻结 capsule `stk.materials-training-input/1` 不变；来源、许可、敏感级别和合成标记必须保留 | 现行实现：`stk.dataset/1` 契约与校验器（`suan/materials/datasets.py:21`）；训练 capsule（`suan/materials/inputs.py:20`）；[materials-training-1](../specs/materials-training-1.md)。**缺口：** 还没有从插件格式导入 `stk.dataset/1` 的接口；connector API 面向仿真输出读取，不能直接充当训练数据导入 | 一份插件格式样本导入后通过现有 `stk.dataset/1` 校验器，数据卡保留上述字段。MuFerro 生成的 P–E 回线数据集同时受 F-8 约束 |
 
@@ -205,12 +205,12 @@ root 描述的链条是：软件发现 → 能力预检 → 冻结输入 → 显
 
 | ID | 门 | 现状与类别 | 测试入口 / 退出证据 |
 |---|---|---|---|
-| A-1 | 只放开 `prepare_run` 一级，且只给一个工具；`submit_run`、`project_edit`、`external_network` 仍对智能体禁止 | 现行实现：`AGENT_LEVELS` 只有 read、record、model、draft（`suan/agent/levels.py:17-18`）；测试锁定工具只用这四级（`tests/test_agent.py:243`）。拟议的工具是 `prepare_sweep_run` | 把 `tests/test_agent.py:243` 改成新的**精确**集合，而不是放宽为"任意级别" |
-| A-2 | 准备时不发起网络连接，只写本地冻结计划 | 拟议，设计要求用测试固定。现行实现：`WorkflowRuns.prepare` 带 `expected_revision`，只写冻结计划（`suan/project/workflow_runs.py:103`） | 新测试：准备期间零网络连接、零 Runtime 请求 |
-| A-3 | 开始只经人在卡片上 `decide(start)`：重读计划，`sha256` 相同、状态仍为 `prepared`、行没有变化；`approval_decided` 先于开始写入 | 拟议。现行实现：`WorkflowRuns.start` 没有计划摘要参数，并且允许认领"已准备或已停止"的运行（`suan/project/workflow_runs.py:548-564`）。所以摘要核对必须放在 `decide` 中；运行停止后重放同一批准不能再次开始，见 R9 | 反例：同一批准只能开始一次；计划被改动后批准被拒绝 |
-| A-4 | 智能体侧的批准不替代 Hub 复核或资源准入 | 现行实现：Hub 复核策略（`suan/control/policy.py:186-207`） | 经 Hub 时，高资源或非模板请求在桌面批准后仍进入 Hub 复核 |
+| A-1 | 只给明确工具 `prepare_run`，不放开智能体提交或修改 | 现行实现：`AGENT_LEVELS` 增加 `prepare_run`，唯一注册工具为 `prepare_muferro_run@1`；参数恰工作流、1–100 个既有案例行及原修订。旧会话冻结头不增权，`submit_run` 不进智能体 | `tests/test_agent.py` 的精确集合、`tests/test_agent_muferro_prepare.py` 的领域/参数/回放反例；不是放行该级别的任意工具 |
+| A-2 | 准备只冻结本地计划和待批准项 | 现行实现：`prepare_muferro_run` 仅取桌面明确冻结的目标，调用本地 `WorkflowRuns.prepare`；不调用 `MuFerro.prepare`、上传、Runtime 或执行器，也不为模型补主机/资源 | `tests/test_agent_muferro_prepare.py`；真实 Runtime 的准备后零任务检查见 `tests/test_agent_muferro_acceptance.py` |
+| A-3 | 完整计划复核后人工单次批准首次开始 | 已发布 `project.agent.run_plan/run_decide/run_observe`，仅桌面。目标、会话停止及本进程容量先准入，再持久消费决定；后台 `WorkflowRuns.start(approval=...)` 在追加 started 同一 IMMEDIATE 事务核计划/请求 SHA、修订、归档及任何历史 started。消费和 claim 是两事务，未知不得重派；省略 approval 的普通人工重启独立 | `tests/test_agent_run_bridge.py`、`tests/test_agent_run_approvals.py`、`tests/test_workflow_run_approval.py` 和 `tests/test_workflow_target_binding.py`；包含停止后重放、手工抢先启动、多进程竞争及真实后端端点绑定 |
+| A-4 | 桌面批准不能替代 Hub 复核或资源准入 | Hub 复核仍按现有策略实施；当前 MuPRO 准备明确拒绝 Hub，只支持直连/SSH。不能把一般任务的 Hub 双部署 harness 算成 S2c 经 Hub 已验 | 将来扩展 Hub 准备须独立处理审核暂停及原身份恢复，保留非模板/高资源复核 |
 | A-5 | 数据与模型边界不变：规划只用本机或机构内模型；子请求只有在读过的数据全部公开时才可外发；不改端点或密钥 | 已决定（2026-10-09 的决定 2、4） | 现有智能体测试；扩展后重跑 `tests/test_agent.py`、`tests/test_agent_sessions.py`、`tests/test_agent_muferro_acceptance.py` |
-| A-6 | "本地轻量计算自动开始"不在本次授权内 | **依赖决定：** 原设计要求先能判定本地还是集群后端；目前只能从冻结的 `simulation.options` 推断（`suan/mupro/spec.py:17-23`） | 见 R9 |
+| A-6 | 本地或集群的 MuPRO 首次执行都须人工批准 | 当前扩展只允许本地准备，未授权智能体自动开始轻量计算。桌面显式资源和完整计划门保留 | R9；资源选择不等于开始授权，刷新/重开/恢复不自动派发 |
 
 ### 6.4 与 D1 两部署的交点
 
@@ -233,14 +233,14 @@ root 描述的链条是：软件发现 → 能力预检 → 冻结输入 → 显
 
 | ID | 问题 | 本文建议 | 影响 |
 |---|---|---|---|
-| R1 | D1 第一片是只用 harness 编排现有入口（§1.1 的 (a)），还是同时新增统一装配入口（(b)） | 先做 (a)，再按 (a) 的比较结果设计 (b) | (b) 一旦先做，CLI 名称和参数会提前固化 |
+| R1 | D1 第一片先编排现有入口，还是同时新增统一装配入口 | root 已选择 (a)：Claude 的 CL-D1-PARITY-11 只新增双部署 harness、说明与测试，先比较真实现有 CLI。统一入口 (b) 留到语义比较后设计 | 未新增或发布角色装配 CLI；两个 Runtime 不共享状态、authority 或恢复 key |
 | R2 | 云端角色的项目语义由什么承载：同一 SQLite ProjectStore 加 HTTP 应用服务，还是 PostgreSQL 仓储适配 | 不在本文选择；先把项目语义的双部署比较列为 D1 后续片 | 决定 G1-5 何时关闭，也决定 X8 能否跨部署验证 |
 | R3 | 授权模型：Hub 现在是设备级授权，D1 是否引入按项目或用户的作用域 | D1 先声明现状差异，不扩大开放范围；按项目授权进 D2 前置 | 关闭 X5 的②③；与 Synthrix 的 `authz` 迁移相关 |
 | R4 | `@python` 与 `{python}` 不对称（G1-3）是只在 harness 中规避，还是把 `demo-field` 模板改用 `{python}` | 只在 harness 中规避；改模板会改变已发布模板，须单独审 | 影响 Hub 模板的精确匹配和既有测试 |
 | R5 | 冲突分类依赖英文消息子串（C-5）。是否在 D1 引入版本化的稳定冲突码 | 不在 D1 改；先补一条"文本 → `conflict`"的回归测试锁住现状 | 防止改错误文本时无声地破坏客户端 |
 | R6 | 两个测试缺口：(1) Hub 没有进程级单实例锁，也没有双实例测试；(2) Hub 进程在有未完成 action 时重启，没有直接测试 | 在 D1 harness 中补这两个反例；Hub 是否加锁由 root 决定 | 影响 C-11 和 X7 能否在部署 B 上闭合 |
 | R7 | MuFerro 的 `--license-dir`、`--sdk-prefix`、`--env-script` 路径都写进 argv（`suan/mupro/spec.py:35-40`），因而随 TaskSpec 存进 Runtime 库和项目运行计划；直连 `task.get` 能看到，Hub 投影会去掉 | 这些是节点本地路径，不是秘密（许可内容从不读取）。建议先列为已知现状；是否改为节点本地配置由 root 决定 | 影响 P-2，以及任何把 TaskSpec 原文导出或送入模型的路径 |
-| R8 | 引入 HDF5 后，旧输出清理和最终状态选取都只认 `.dat` 帧（F-4） | 在 HDF5 试点中同时补"上一轮 HDF5 输出被识别为陈旧"和"最终状态选取不超过 100 个文件、256 MiB"两个反例 | 不补的话，旧输出可能混入新运行，或分析输入超出上限 |
-| R9 | S2c 的两个边界：(1) 运行停止后重放 `decide(start)` 是否会在没有新批准的情况下再次开始（A-3）；(2) "本地轻量计算自动开始"是否在这次授权内（A-6） | (1) 加反例：同一批准只能开始一次；(2) 不在本次授权内，按原设计仍需判定本地/集群后端，等所有者或 root 确认 | 防止批准被重复使用，也防止把"扩展权限"读成"自动执行" |
+| R8 | HDF5 陈旧输出及最终状态输入边界 | 本轮已用 CLI 和制造求解器复现 `run.h5` 遗留混入，补可选输出预检及反例；不把所有 `.h5` 都当输出，也不把可选文件变成 DAT 必需文件。最终状态的文件/字节上限继续保留 | 不证明 HDF5-only 完成或真实许可运行；最终测试与提交见运行验收 |
+| R9 | 同一批准不能重复启动；扩权不等于自动执行 | 已实现：消费一次后只观察原证据，任何历史 started 都使批准首次 claim 失败；消费前已有手工 started 会拒绝消费并保持待决；决定已消费后的手工竞争启动才观察为 other_start，不能冒充原批准。未授权本地轻量自动开始 | 决定先落盘、claim 同事务复核；两事务间崩溃保留 uncertain，不用新 ID 或换路径补发 |
 
 原三项待决的现状见 §6 开头。仍未决的是：电场扫描的具体参数，以及保存分析修改提案的持久形式。这两项和 PET 新专项，本文都不代为选择。
