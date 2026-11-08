@@ -75,7 +75,7 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
 
 ### CL-MUPRO-H5-01：MuPRO 原生 HDF5 独立读取模块
 
-- **状态：初稿 `760b7ae1` 已提交 Claude 分支；root 复现 selector 尾换行和恢复 mtime 后漏检两项问题，Claude 修正中，尚未合入 main。**
+- **状态：Claude 最终 `73abd757fcbaa29fbeb72993e6df930ea581aaa3` 已由 root 选择性集成 main `56f51af7`。读取器边界修正已验，真实 MuPRO/Windows 尚未验。**
 - **基线：** `claude/support` 文档头 `9590d21b`；该头产品源码与 root `37d26464` 相同。
 - **唯一写入范围：** 新增 `suan/connectors/mupro/hdf5.py` 和 `tests/test_mupro_hdf5.py`，另作独立提交。
 - **目标：** 提供惰性加载的只读 MuPRO HDF5 适配，显式选择 `/tNNNNNNNN/<field>`；
@@ -87,6 +87,12 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
   这是独立读取子模块；root 审查后再接既有 FileSource、connector 和图节点，不把合成数据当真实 MuPRO 运行。
 - **交接：** 只提交上述两文件，附完整 SHA、接口、实际测试/扫描和限制；不推送，不拷贝 AOCI baseline。
 
-root 跟进 `6f4de650` 的整个 Desktop CI 与既有记录/AOCI 债务，同时按最新决定优先 MuPRO/MuFerro 执行器与 HDF5 试点；
+### CL-H5-REVIEW-02：HDF5 接入只读交叉审查
+
+- **状态：Claude 已交付主审查结果：命名副本在强杀后遗留已由 root 修正为 `3579aea1` 并通过实际子进程测试；附加兼容性复核尚待回报。** 基线 root `56f51af7`，Claude 保持独立工作树；只读 root 的本批 adapter/node/context/测试和 HDF5 契约。
+- **目标：** 核对实际字节与规划键、FileSource 边界、取消和私有副本清理、dtype/轴序及兼容性。先交具体反例与证据，root 负责修正。
+- **写入范围：** 不改产品源码、文档、认知资产，不提交或推送；可在独立外部临时目录做合成探测。
+
+root 已核对 `6f4de650` 整个 Desktop 失败终态；继续按最新决定优先 MuPRO/MuFerro 执行器与 HDF5 试点，
 原生文献 UI、Synthrix 正常装配/桌面入口及 D1-D5 保留在队列，按真实依赖推进。
 其他模块仍须 root 明确路径和验收后再派发。

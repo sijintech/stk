@@ -1,5 +1,17 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：MuPRO HDF5 读取、来源与图接入
+
+读取器由 Claude 独立树 `73abd757` 交付，root 审查并接入 FileSource 和 `stk.source.mupro_hdf5@1`；源码已提交 main `56f51af70d576837426f63c12694941b0ea7cfcd`。
+root复现的selector尾换行、原地改写后恢复mtime已修；Windows采用HANDLE ChangeTime，POSIX同API ctime，无法核验时报错。
+独立复核还补了压缩chunk分配估算、未写入数据/缺chunk及过滤器边界；没有用此读取器替代MuFerro完成验证。
+root新增实际FileSource流SHA与私有副本校验，NodeContext返回规划指纹副本；新增显式节点及同步目录/规格/技能参考。
+首轮图模式样本失败已修；联合回归曾2失败（selector放错agent字段、旧节点数量），改为SourceRef及6节点后最终匿名文件修正后305通过/3跳过。
+真实CLI合成HDF5读取及NPY导出成功，180个float32值与原数组全部一致。实际MuPRO与UI/目标OS未验，旧离屏SIG11保留。
+暂存74.83KB gitleaks零发现；四状态文档旧WIP保留，正式认知收口及最终CI状态见本批closure，不借旧aligned证明后改字节。
+
+补充修正 main `3579aea16ff9249fdb688012575576f1aeea8fb4`：交叉审查确认强杀worker遗留命名副本，已改匿名/关闭即删除的临时文件，共享同一读取核心；真实子进程强杀清理测试通过，CLI无缓存复验180值一致。
+
 ## 2026-11-08 UTC：试点文档集成与读取器审查
 
 main `f6a75f84` 集成9份试点/分工/D1文档；检查73个链接/锚点、暂存gitleaks56.67KB零发现，仅提交四状态文档新增前缀，保留原WIP。

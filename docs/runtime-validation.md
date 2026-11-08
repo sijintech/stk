@@ -1,5 +1,20 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：MuPRO HDF5 显式源的回归和真实CLI
+
+- 源码：main `56f51af70d576837426f63c12694941b0ea7cfcd`，16文件；Claude读取器来源`73abd757fcbaa29fbeb72993e6df930ea581aaa3`，仅选择其两项分配文件，root新增来源/图接入。
+- 全部测试KEY为空、MODEL未设置，无收费模型或求解器请求。匿名文件修正后联合`root-hdf5-joint-04.xml`：305 pass/3 skip，68.13s；前增量局部68 pass，不用于覆盖后改。
+- 三skip：Windows HANDLE专属（Linux未跑）；128³性能例需STK_PERF=1；旧离屏probe子进程signal11。没有用skip或软件渲染故障声称目标平台通过。
+- 联合02的2 fail/298 pass/3 skip保留：原agent不支持selector字段、轻量catalog旧5节点断言；已改SourceRef和6节点。图基础前两轮模式样本失败亦保留，03为78 pass。
+- 实际CLI：`root-hdf5-cli-01/`，`suan graph run`退出0，读取`/t00001000/Polar`并导出NPY；`verification.json`核180值全部相等、shape[5,4,3,3]、float32及来源摘要。合成数据非MuPRO求解结果。
+- 新源回归覆盖裁采/时间/单位、容器内selector隔离与磁盘缓存、规划后同大小恢复mtime改写拒绝、无本地路径的FileSource，以及摘要不符/坏格式/取消/超限的私有副本清理。
+- 暂存gitleaks8.30.1按`.gitleaks.toml`扫描约74.83KB、零发现（`gitleaks-root-hdf5-code-01.json`）。旧四文档WIP不连带暂存。
+- push门：再次GET Desktop42442318655，6f4de650/completed/failure、04:24:48Z；前整轮已结束。6dd627e4的Runtime42447661806、Docs42447661827和Secret42447661807均success；新代码尚未触发CI。
+- 限制：读取文件≤1GiB、选择数组和chunk估算≤256MiB（还受评价内存限额）；非RSS保证。真实程序/许可/算例未就绪，无新产品UI或点击证据；自动run发现/收集、S2c与D1仍待续接。
+- 证据根：`/home/mnemora/.local/state/stk-validation/worktree-coordination-20261107-01/`；最终审查、AOCI/推送/新CI结果由该目录本批closure绑定。
+
+补充修正 main `3579aea16ff9249fdb688012575576f1aeea8fb4`：交叉审查确认强杀worker遗留命名副本，已改匿名/关闭即删除的临时文件，共享同一读取核心；真实子进程强杀清理测试通过，CLI无缓存复验180值一致。
+
 ## 2026-11-08 UTC：试点计划交付与前置 CI 终态
 
 文档提交 `f6a75f846d2643e993af192cfb867ca19a9d3fb2`（9文件），73个相对链接/锚点、围栏和暂存空白检查通过；gitleaks8.30.1扫描56.67KB零发现。

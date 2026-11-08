@@ -50,6 +50,11 @@ Closing handles also releases the copy when the worker is killed. Both operation
 cancellation between chunks. A remote FileSource needs no local path. Returned provenance identifies
 the original relative path/SHA; a single frame's `SourceRef` binds that path, reader, size, SHA and
 native selector, rather than the temporary filename.
+The copy uses the host's default temporary filesystem; on tmpfs its bytes consume memory outside
+the selected-array estimate and the evaluator's process-RSS accounting. The separate 1 GiB source
+cap still applies. Fingerprinting reads the complete source even on cache hits; cache misses read
+it once more to create the verified copy. Chunk decoding itself has no cooperative cancel hook;
+the graph worker may be terminated to interrupt it.
 
 The graph node requires `binding` and `selector`; `path` defaults to `run.h5`. Optional `extent` is
 `[i0,i1,j0,j1,k0,k1]` with nullable, nonnegative inclusive endpoints; `stride` defaults to `[1,1,1]`.

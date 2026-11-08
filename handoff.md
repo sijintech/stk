@@ -1,5 +1,17 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：HDF5 显式数据源已集成
+
+读取器由 Claude 独立树 `73abd757` 交付，root 审查并接入 FileSource 和 `stk.source.mupro_hdf5@1`；源码已提交 main `56f51af70d576837426f63c12694941b0ea7cfcd`。
+已发布 [MuPRO HDF5/1](docs/specs/mupro-hdf5-1.md)：显式字段/步号，保留 dtype/原值及未知单位；实际流 SHA 绑定规划键，私有副本验完再读并清理。
+联合回归305通过/3跳过（匿名文件修正后联合04）；真实CLI合成HDF5到NPY的180个float32值全部相等。跳过含Windows HANDLE专属、性能及旧离屏SIG11，不能称跨平台/渲染通过。
+Claude 当前任务 CL-H5-REVIEW-02 为只读交叉审查；本轮尚待最终反馈，不改root树。根状态文档/AOCI/最终推送与CI由root收口。
+下一步继续自动HDF5结果发现/原任务收集、S2c冻结授权与人工单次批准、D1和原生文献/CI旧问题；目前仅显式分析数据源已实现。
+真实MuPRO程序/许可/算例仍未就绪，已询问计算主机与目录；没有执行求解器或模型，也没有新UI点击验收。原八项和分析提案持久形式待决保留。
+推送前已复核前代码头6f4de650整轮Desktop终态failure；6dd627e4的Runtime/Docs/Secret均success。新代码CI尚未触发，最终结果看本批closure。
+
+补充修正 main `3579aea16ff9249fdb688012575576f1aeea8fb4`：交叉审查确认强杀worker遗留命名副本，已改匿名/关闭即删除的临时文件，共享同一读取核心；真实子进程强杀清理测试通过，CLI无缓存复验180值一致。
+
 ## 2026-11-08 UTC：试点计划已提交，前置 Desktop CI 已结束
 
 试点与审阅后的 D1 清单已提交 main `f6a75f846d2643e993af192cfb867ca19a9d3fb2`（9文件）；73个文档链接/锚点和暂存56.67KB gitleaks零发现，原四文档WIP保留。
