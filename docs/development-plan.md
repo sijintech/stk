@@ -1,5 +1,12 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：新 Runtime 全绿与上传 CLI 最终发布门
+
+1. 远端4d6426fb的Runtime42531177232已success，13job全部成功；Docs实际部署/Secret成功。整个Desktop42531177137仍运行，必须整轮终态后才push本地6c481e59及交付记录；不以CPU或包job替代原生验收。
+2. candidate3作者219项、root独立源码副本228项零skip，76个worker反例及11组读取边界通过；其中root九例共同后端修复已单独提交、67项回归通过。最终无覆盖发布检查仍有硬链接失败后exists/replace覆盖窗口，实际Claude同六路径修第四版。旧候选不覆盖；candidate3未集成，wheel仅离线构建未安装，最终最小安装/真实上传证据未完成。
+3. 继续Mac原生诊断、文献目标OS/GPU与D1剩余合同/故障、云端项目、Synthrix正常接线和原八项/D2–D5。MuPRO真实资产/扫描/提案形式不代选，HDF5需DAT、PET后置和P1/P2未激活保持；交付见37/closure.json，保旧WIP。
+
+
 ## 2026-11-08 UTC：修复上传 CLI 所依赖的共同传输启动路径
 
 1. 远端4d6426fb已启动新Desktop42531177137和Runtime42531177232；两者仍运行，Docs部署/Secret成功。继续跟踪新头原生视频诊断及跨平台回归，不能提前宣称已绿。

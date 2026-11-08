@@ -1,5 +1,12 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：Runtime 全绿，上传候选通过联合回归后补无覆盖发布
+
+4d的Runtime42531177232已22:57:35Z success且13job全成功，Docs部署/Secret成功；完整Desktop仍live，root本地6c481e59/13337fde暂不push。候选3作者219项零skip/97.41s，root133提交归档加六SHA覆盖的独立源码228项零skip/95.20s，差9为共同后端新回归。root初次遗漏随附examples/runtime造成2例部署失败，226通过；补同133的样例后完整重跑通过，无产品源变化，初稿保留。
+
+76个worker反例及11组读取边界通过后，最终发布检查发现SidecarHolder在link不支持时先exists再replace可覆盖新出现侧记；前提为不参与租约的写入者，未证明两个合规worker并发。已交实际Claude第四版修订卡并观察开始修改，保留candidate3六SHA/diff/旧红绿与离线wheel。尚未接受、集成或安装此候选。完整证据和CI见 `root-delivery-20261108-37/closure.json`；原路线/待决及旧WIP保留。
+
+
 ## 2026-11-08 UTC：共同传输恢复跳过坏状态，上传第三版继续修订
 
 root以6c481e59本地提交TransferManager._recover的一行字符串类型守卫及九例启动/恢复/GC回归。实际坏数组/对象状态在旧源码造成8个TypeError，控制例通过；新源码五模块67通过、零skip、35.54s，独立固定副本及当前两SHA终审无实质发现。坏日志字节、mtime与锁保留，正常任务仍以原key/request/endpoint标interrupted，构造不派发或联系后端；原显式resume与旧FINAL清理控制保留。不扩大恢复执行或身份权限。暂存扫描零发现，尚未push，等待4d整个Desktop42531177137终态。

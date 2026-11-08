@@ -1,5 +1,12 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：4d Runtime 十三项全绿，Claude 第四版发布修正继续
+
+远端仍4d6426fb；Runtime42531177232已22:57:35Z success，13job逐项全部completed/success，Docs42531177195部署和Secret42531177130成功。整个Desktop42531177137仍运行，Mac/Windows处CPU测试、Linux构建中，两个Linux包job成功；Windows原生尚未创建，不能提前解push门。root本地6c481e59坏日志启动修复及13337fde状态提交未push，67项零skip通过及独立终审证据见 `transfer-startup-20261108-36/closure.json`。
+
+实际Claude同一会话/独立六路径已冻结candidate3：作者九模块219项零skip，root已提交133归档加六SHA覆盖的独立源码副本228项零skip、95.20s，差9为root共同后端新回归。76个worker反例和11组读取边界通过，但最终检查复现不支持硬链接时fallback覆盖式替换违背侧记无覆盖约定。candidate3未接受、未集成；离线wheel仅已构建，未安装。作者已接第四版修订卡并开始同六路径改进；保留全部旧候选/红绿证据，最终安装及实际上传仍待验。原八项/D1–D5、MuPRO待决、HDF5仍需DAT、PET后置与P1/P2未启用保持；当前最终身份/CI/证据见 `root-delivery-20261108-37/closure.json`，旧WIP保留。
+
+
 ## 2026-11-08 UTC：坏传输日志启动隔离已本地修复，4d 新 CI 运行中
 
 远端main已推4d6426fb，含真实PDFium/E5 CPU界面验收和桌面回归修复；新Desktop42531177137、Runtime42531177232仍运行，Docs42531177195及Secret42531177130已成功。root本地新增6c481e59：传输恢复先验state为字符串，坏数组/对象状态不再阻断整个Bridge/上传worker启动，保原坏日志/锁和正常原身份恢复。旧源码新9例8个TypeError失败/1控制通过；修后五相关模块67通过、零skip、35.54s，独立终审0实质发现。未push此修复，须等前整个Desktop终态；证据及最终身份见 `transfer-startup-20261108-36/closure.json`。

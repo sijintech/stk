@@ -1,5 +1,16 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：4d Runtime 终态与上传 candidate3 独立源码验收边界
+
+[Runtime42531177232](https://github.com/sijintech/stk/actions/runs/42531177232)已22:57:35Z completed/success；实际查询13job均completed/success，含Linux3.11/3.12/3.14、Windows3.11/3.12、文献三版本、peer-macos、独立联邦、网页及协议组。Docs42531177195实际部署与Secret42531177130成功。整个[Desktop42531177137](https://github.com/sijintech/stk/actions/runs/42531177137)仍运行，Mac/Windows CPU测试、Linux构建，两个Linux包job成功；Windows原生尚未创建。结果绑定4d，不能验证本地6c修复或未集成CLI；等待门仍关闭。
+
+candidate3六文件来自作者冻结manifest（module95ce76b2…），root复制前/复制后/原树再核SHA一致。作者九模块219/219零skip/97.41s；root用13337fde已提交归档加同六文件覆盖、共同backend54d47290…，九模块228/228零skip/95.20s（case合计93.578s），差9恰共同后端新回归。root初次226通过/2失败均因独立副本漏带examples/runtime/run_demo.py，补同提交样例后完整重跑，未改产品代码，初次XML/log与closure保留。当前source-validation.json绑定两份完整XML及所有来源摘要。
+
+独立worker76例、54自有stdlib child全回收，旧b3中断/指数溢出红例转绿，未调用无超时wait；只读R1/R2/R3另11组通过。它们不代真实worker/网络/安装态；真实loopback路径来自上述九模块。root共同依赖54d跳坏日志，而peer仍531旧依赖，不能冒称peer已修。
+
+最终纯文件发布反例仍确认：真实namespace租约持有时，注入EOPNOTSUPP并在exists观察False后让不参与租约的写者放入合法旧侧记，fallback的os.replace覆盖旧字节且采用新身份；正常link已有文件保护及不支持link/无并发者两控制保留。此为无覆盖发布不变量缺口，不证明两个合规worker可并发。candidate3未接受/集成；离线wheel构建成功但未安装，实际Claude按第四版卡在同六路径修复，旧冻结证据保留。证据 `d1-hub-upload-cli-20261108-21/root/author-candidate3-20261108-36/`、`root/sidecar-publication-candidate3-upload_readonly_review/` 及37/closure.json。KEY空/MODEL未设，未发收费请求；无新增UI点击验收，旧WIP保留。
+
+
 ## 2026-11-08 UTC：坏传输日志的启动隔离与真实共同后端回归
 
 本地源码6c481e59、远端4d6426fb；本修复未push，等待前整个[Desktop42531177137](https://github.com/sijintech/stk/actions/runs/42531177137)终态。该新头[Runtime42531177232](https://github.com/sijintech/stk/actions/runs/42531177232)仍运行，Docs42531177195已实际部署成功、Secret42531177130成功，不能把它们当整个Desktop通过。
