@@ -81,7 +81,7 @@ bool attribute(Probe &p, AXUIElementRef e, CFStringRef name, ax::Attribute categ
   if (*error != kAXErrorSuccess) return p.apiFail(*error);
   return raw ? true : p.reject(ax::Reason::NullValue);
 }
-enum class Role { Window, Group, ScrollArea, WebArea, Slider, Other };
+using Role = ax::TreeRole;
 bool role(Probe &p, AXUIElementRef e, ax::Phase phase, Role &out) {
   Owned<CFTypeRef> value;
   if (!attribute(p, e, kAXRoleAttribute, ax::Attribute::Role, phase, value)) return false;
@@ -201,15 +201,20 @@ bool run(Probe &p, const ax::Request &q) {
       pending.push_back({Owned<AXUIElementRef>((AXUIElementRef)CFRetain(raw)), index, next.depth + 1});
     }
   }
-  size_t viewport = ax::kNodeLimit, webarea = ax::kNodeLimit, slider = ax::kNodeLimit;
-  for (size_t i = 0; i < nodes.size(); ++i)
-    if (nodes[i].role == Role::Group && ax::same_rect(nodes[i].rect, q.viewport)) { ++r.viewport_matches; viewport = i; }
-  if (r.viewport_matches != 1) return p.reject(r.viewport_matches ? ax::Reason::MultipleViewports : ax::Reason::NoViewport);
-  for (size_t i = 0; i < nodes.size(); ++i)
-    if (nodes[i].role == Role::WebArea && descendant(nodes, i, viewport)) { ++r.webareas; webarea = i; }
-  if (r.webareas != 1) return p.reject(r.webareas ? ax::Reason::MultipleWebareas : ax::Reason::NoWebarea);
-  if (!ax::contains(nodes[webarea].rect, q.video)) return p.reject(ax::Reason::WebareaGeometry);
-  if (!same_window(p, nodes[viewport].element.p, window.p) || !same_window(p, nodes[webarea].element.p, window.p)) return false;
+  std::vector<ax::TreeNode> topology;
+  topology.reserve(nodes.size());
+  for (const auto &node : nodes) topology.push_back({node.parent, node.role, node.rect});
+  const auto selected = ax::select_viewport(q, topology);
+  r.viewport_matches = selected.matches; r.viewport_chains = selected.chains;
+  r.viewport_chain_length = selected.chain_length; r.webareas = selected.webareas;
+  if (!selected.complete) return p.reject(selected.reason);
+  const size_t viewport = selected.viewport, webarea = selected.webarea;
+  size_t slider = ax::kNodeLimit;
+  // Every coextensive wrapper in the proven chain must refer to this exact own window.
+  for (const auto &node : nodes)
+    if (node.role == Role::Group && ax::same_rect(node.rect, q.viewport) &&
+        !same_window(p, node.element.p, window.p)) return false;
+  if (!same_window(p, nodes[webarea].element.p, window.p)) return false;
   for (size_t i = 0; i < nodes.size(); ++i) {
     const Node &node = nodes[i];
     if (node.role != Role::Slider || !descendant(nodes, i, webarea)) continue;
@@ -249,7 +254,7 @@ int main(int argc, char *[]) {
   else if (read_request(probe, request)) run(probe, request);
   probe.check(); probe.response.elapsed_ms = probe.elapsed();
   auto bytes = ax::encode(probe.response);
-  // Fixed 248 bytes: no arbitrary text, label, URL, stderr diagnostics or private tokens.
+  // Fixed numeric wire: no arbitrary text, label, URL, stderr diagnostics or private tokens.
   size_t sent = 0;
   while (sent < bytes.size()) {
     const ssize_t n = write(STDOUT_FILENO, bytes.data() + sent, bytes.size() - sent);

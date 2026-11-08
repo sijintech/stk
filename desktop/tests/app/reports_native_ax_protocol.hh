@@ -14,7 +14,7 @@ namespace stk::reports_native_test::ax {
 static_assert(sizeof(double) == sizeof(uint64_t) && std::numeric_limits<double>::is_iec559);
 // Test-only, fixed-size numeric wire. Never carries paths, labels, URLs, text or a session token.
 constexpr size_t kNodeLimit = 256, kDepthLimit = 16, kWindowLimit = 16;
-constexpr size_t kRequestBytes = 19 * 8, kResponseBytes = 31 * 8;
+constexpr size_t kRequestBytes = 19 * 8, kResponseBytes = 33 * 8;
 // Host-only absolute budget. Passing it through phases cannot restart the clock.
 class Deadline {
  public:
@@ -41,14 +41,26 @@ struct Request {
   Rect window, viewport, video; // Public AX top-left screen points, never backing pixels.
   double current_time = 0, duration = 0;
 };
+enum class TreeRole { Window, Group, ScrollArea, WebArea, Slider, Other, Count };
+struct TreeNode { size_t parent = kNodeLimit; TreeRole role = TreeRole::Other; Rect rect; };
 enum class Status : uint64_t { Success, Rejected, ApiError, Deadline, ParentChanged, InvalidRequest, Count };
 enum class Reason : uint64_t {
   Unique, NotCompleted, ParentChanged, Deadline, InvalidRequest, NotParent, ApplicationUnavailable,
   ApiError, NullValue, RoleType, FrameType, FrameEncoding, InvalidFrame, ArrayBudget,
   ArrayChanged, WindowAssociation, NumericType, WindowType, WindowRole, MultipleWindows, NoWindow,
   TreeBudget, SharedTree, TreeDepth, ChildType, MultipleViewports, NoViewport, MultipleWebareas,
-  NoWebarea, WebareaGeometry, EnabledType, MultipleSliders, NoSlider, GeometryChanged, WindowsChanged, Count
+  NoWebarea, WebareaGeometry, EnabledType, MultipleSliders, NoSlider, GeometryChanged, WindowsChanged,
+  WebareaAssociation, Count
 };
+struct ViewportSelection {
+  bool complete = false;
+  Reason reason = Reason::NoViewport;
+  size_t viewport = kNodeLimit, webarea = kNodeLimit;
+  uint64_t matches = 0, chains = 0, chain_length = 0, webareas = 0;
+};
+// A complete parent-before-child tree. Coextensive wrappers must form one strict ancestor chain;
+// the outer subtree has exactly one WebArea and it must lie below the innermost matching Group.
+ViewportSelection select_viewport(const Request &request, std::span<const TreeNode> nodes);
 enum class Phase : uint64_t { None, Window, Tree, Bind, Slider, Recheck, Count };
 enum class Operation : uint64_t { None, Attribute, AttributeCount, Array, Count };
 enum class Attribute : uint64_t { None, Role, Position, Size, Windows, Children, Window, Enabled, Min, Max, Value, Count };
@@ -63,7 +75,8 @@ struct Response {
   uint64_t request_generation = 0, navigation_generation = 0, viewport_generation = 0;
   double elapsed_ms = 0;
   uint64_t calls = 0, nodes = 0, tree_nodes = 0, deepest = 0, windows = 0, window_matches = 0;
-  uint64_t viewport_matches = 0, webareas = 0, sliders = 0, candidates = 0, leaf_no_value = 0, leaf_unsupported = 0;
+  uint64_t viewport_matches = 0, viewport_chains = 0, viewport_chain_length = 0;
+  uint64_t webareas = 0, sliders = 0, candidates = 0, leaf_no_value = 0, leaf_unsupported = 0;
   Rect slider;
   double minimum = 0, maximum = 0, value = 0;
 };

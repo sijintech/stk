@@ -4,10 +4,11 @@
 #include <bit>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 namespace stk::reports_native_test::ax {
 namespace {
-constexpr uint64_t kRequestMagic = 0x53544b4158520001ULL, kResponseMagic = 0x53544b4158530001ULL;
+constexpr uint64_t kRequestMagic = 0x53544b4158520001ULL, kResponseMagic = 0x53544b4158530002ULL;
 template<size_t N> void word(std::array<uint8_t, N> &bytes, size_t &at, uint64_t value) {
   for (int shift = 56; shift >= 0; shift -= 8) bytes[at++] = uint8_t(value >> shift);
 }
@@ -62,6 +63,58 @@ bool matching_slider(const Request &r, Rect f, double lo, double hi, double valu
   const double ratio = offset / span;
   return std::isfinite(ratio) && std::abs(ratio - r.current_time / r.duration) <= .01 + .10 / r.duration;
 }
+ViewportSelection select_viewport(const Request &q, std::span<const TreeNode> nodes) {
+  ViewportSelection out;
+  const auto reject = [&](Reason reason) { out.reason = reason; return out; };
+  if (!valid_request(q)) return reject(Reason::InvalidRequest);
+  if (nodes.empty() || nodes.size() > kNodeLimit) return reject(Reason::TreeBudget);
+  std::array<size_t, kNodeLimit> depths{};
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    const auto &node = nodes[i];
+    if (size_t(node.role) >= size_t(TreeRole::Count)) return reject(Reason::RoleType);
+    if (i == 0) {
+      if (node.parent != kNodeLimit || node.role != TreeRole::Window) return reject(Reason::WindowRole);
+      if (!same_rect(node.rect, q.window)) return reject(Reason::GeometryChanged);
+    }
+    else {
+      if (node.parent >= i) return reject(Reason::SharedTree);
+      depths[i] = depths[node.parent] + 1;
+      if (depths[i] > kDepthLimit) return reject(Reason::TreeDepth);
+    }
+    if (node.role != TreeRole::Other && !valid_rect(node.rect)) return reject(Reason::InvalidFrame);
+  }
+  const auto below = [&](size_t child, size_t ancestor) {
+    for (size_t step = 0; step <= kDepthLimit && child < nodes.size(); ++step) {
+      if (child == ancestor) return true;
+      child = nodes[child].parent;
+    }
+    return false;
+  };
+  std::vector<size_t> groups;
+  for (size_t i = 0; i < nodes.size(); ++i)
+    if (nodes[i].role == TreeRole::Group && same_rect(nodes[i].rect, q.viewport)) groups.push_back(i);
+  out.matches = groups.size();
+  if (groups.empty()) return reject(Reason::NoViewport);
+  size_t innermost = kNodeLimit;
+  for (const auto group : groups) {
+    bool has_matching_descendant = false;
+    for (const auto other : groups)
+      if (other != group && below(other, group)) { has_matching_descendant = true; break; }
+    if (!has_matching_descendant) { ++out.chains; innermost = group; }
+  }
+  if (out.chains != 1) return reject(Reason::MultipleViewports);
+  for (const auto group : groups) if (below(innermost, group)) ++out.chain_length;
+  if (out.chain_length != out.matches) return reject(Reason::MultipleViewports);
+  const auto outermost = groups.front();
+  size_t webarea = kNodeLimit;
+  for (size_t i = 0; i < nodes.size(); ++i)
+    if (nodes[i].role == TreeRole::WebArea && below(i, outermost)) { ++out.webareas; webarea = i; }
+  if (out.webareas != 1) return reject(out.webareas ? Reason::MultipleWebareas : Reason::NoWebarea);
+  if (!below(webarea, innermost)) return reject(Reason::WebareaAssociation);
+  if (!contains(nodes[webarea].rect, q.video)) return reject(Reason::WebareaGeometry);
+  out.viewport = innermost; out.webarea = webarea; out.reason = Reason::Unique;
+  out.complete = true; return out;
+}
 RequestWire encode(const Request &r) {
   RequestWire bytes{}; size_t at = 0;
   for (auto value : {kRequestMagic, r.parent_pid, r.request_generation, r.navigation_generation, r.viewport_generation}) word(bytes, at, value);
@@ -75,7 +128,8 @@ ResponseWire encode(const Response &r) {
        r.request_generation, r.navigation_generation, r.viewport_generation}) word(bytes, at, value);
   real(bytes, at, r.elapsed_ms);
   for (auto value : {r.calls, r.nodes, r.tree_nodes, r.deepest, r.windows, r.window_matches, r.viewport_matches,
-       r.webareas, r.sliders, r.candidates, r.leaf_no_value, r.leaf_unsupported}) word(bytes, at, value);
+       r.viewport_chains, r.viewport_chain_length, r.webareas, r.sliders, r.candidates,
+       r.leaf_no_value, r.leaf_unsupported}) word(bytes, at, value);
   rect(bytes, at, r.slider); real(bytes, at, r.minimum); real(bytes, at, r.maximum); real(bytes, at, r.value);
   return bytes;
 }
@@ -103,12 +157,14 @@ bool decode(std::span<const uint8_t> bytes, Response &response) {
   r.request_generation = word(bytes, at); r.navigation_generation = word(bytes, at); r.viewport_generation = word(bytes, at);
   r.elapsed_ms = real(bytes, at);
   uint64_t *counts[] = {&r.calls, &r.nodes, &r.tree_nodes, &r.deepest, &r.windows, &r.window_matches,
-      &r.viewport_matches, &r.webareas, &r.sliders, &r.candidates, &r.leaf_no_value, &r.leaf_unsupported};
+      &r.viewport_matches, &r.viewport_chains, &r.viewport_chain_length, &r.webareas,
+      &r.sliders, &r.candidates, &r.leaf_no_value, &r.leaf_unsupported};
   for (auto *count : counts) *count = word(bytes, at);
   r.slider = rect(bytes, at); r.minimum = real(bytes, at); r.maximum = real(bytes, at); r.value = real(bytes, at);
   if (!std::isfinite(r.elapsed_ms) || r.elapsed_ms < 0 || r.calls > 100000 || r.nodes > kNodeLimit ||
       r.tree_nodes > kNodeLimit || r.deepest > kDepthLimit || r.windows > kWindowLimit ||
-      r.window_matches > kWindowLimit || r.viewport_matches > kNodeLimit || r.webareas > kNodeLimit ||
+      r.window_matches > kWindowLimit || r.viewport_matches > kNodeLimit ||
+      r.viewport_chains > r.viewport_matches || r.viewport_chain_length > r.viewport_matches || r.webareas > kNodeLimit ||
       r.sliders > kNodeLimit || r.candidates > kNodeLimit || r.leaf_no_value > kNodeLimit || r.leaf_unsupported > kNodeLimit ||
       !std::isfinite(r.slider.x) || !std::isfinite(r.slider.y) || !std::isfinite(r.slider.width) ||
       !std::isfinite(r.slider.height) || !std::isfinite(r.minimum) || !std::isfinite(r.maximum) || !std::isfinite(r.value)) return false;
@@ -118,9 +174,12 @@ bool accepted(const Request &q, const Response &r) {
   return valid_request(q) && r.status == Status::Success && r.reason == Reason::Unique && r.api_error == 0 &&
       r.request_generation == q.request_generation && r.navigation_generation == q.navigation_generation &&
       r.viewport_generation == q.viewport_generation && std::isfinite(r.elapsed_ms) && r.elapsed_ms >= 0 && r.elapsed_ms < 2000 &&
-      r.windows > 0 && r.windows <= kWindowLimit && r.window_matches == 1 && r.viewport_matches == 1 &&
+      r.windows > 0 && r.windows <= kWindowLimit && r.window_matches == 1 &&
+      r.viewport_matches >= 1 && r.viewport_matches <= kNodeLimit && r.viewport_chains == 1 &&
+      r.viewport_chain_length == r.viewport_matches && r.viewport_chain_length + 2 <= r.deepest &&
       r.webareas == 1 && r.candidates == 1 && r.sliders >= 1 && r.sliders <= kNodeLimit &&
-      r.tree_nodes >= 3 && r.tree_nodes <= kNodeLimit && r.nodes == r.windows + r.tree_nodes &&
+      r.tree_nodes >= r.viewport_matches + r.webareas + r.sliders + 1 && r.tree_nodes <= kNodeLimit &&
+      r.nodes == r.windows + r.tree_nodes &&
       r.nodes <= kNodeLimit && r.deepest <= kDepthLimit &&
       matching_slider(q, r.slider, r.minimum, r.maximum, r.value);
 }
@@ -130,7 +189,8 @@ std::string_view name(Reason v) {
     "target_is_not_real_parent","application_unavailable","ax_api_error","null_value","role_type","frame_type","frame_encoding",
     "invalid_frame","array_budget","array_changed","window_association","numeric_type","window_type","window_role","multiple_windows",
     "no_window","tree_budget","shared_tree","tree_depth","child_type","multiple_viewports","no_viewport","multiple_webareas",
-    "no_webarea","webarea_geometry","enabled_type","multiple_sliders","no_slider","geometry_changed","windows_changed"};
+    "no_webarea","webarea_geometry","enabled_type","multiple_sliders","no_slider","geometry_changed","windows_changed",
+    "webarea_outside_viewport_chain"};
   static_assert(std::size(n) == size_t(Reason::Count)); return enum_name(v,n);
 }
 std::string_view name(Phase v) { static constexpr const char *n[] = {"none","window","tree","bind","slider","recheck"}; return enum_name(v,n); }

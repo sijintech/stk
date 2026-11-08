@@ -622,6 +622,7 @@ class Exercise {
           {"api_attribute", reports_native_test::ax::name(reply.attribute)}, {"api_error", reply.api_error},
           {"trusted", reply.trusted}, {"nodes", reply.nodes}, {"deepest", reply.deepest}, {"sliders", reply.sliders},
           {"windows", reply.windows}, {"window_matches", reply.window_matches}, {"viewport_matches", reply.viewport_matches},
+          {"viewport_chains", reply.viewport_chains}, {"viewport_chain_length", reply.viewport_chain_length},
           {"webareas", reply.webareas}, {"time_matched_candidates", reply.candidates},
           {"native_session_revalidated", observed.public_client_revalidated},
           {"slider_screen_points_bottom_left", {observed.screen_x, observed.screen_y, observed.screen_width, observed.screen_height}},

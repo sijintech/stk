@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 #ifndef _WIN32
 #  include <cerrno>
 #  include <signal.h>
@@ -36,9 +37,107 @@ ax::Response response(const ax::Request &q) {
   r.request_generation = q.request_generation; r.navigation_generation = q.navigation_generation;
   r.viewport_generation = q.viewport_generation; r.elapsed_ms = 12; r.calls = 20;
   r.windows = 1; r.window_matches = 1; r.viewport_matches = 1; r.webareas = 1;
+  r.viewport_chains = 1; r.viewport_chain_length = 1;
   r.sliders = 1; r.candidates = 1; r.tree_nodes = 4; r.nodes = 5; r.deepest = 3;
   r.slider = {q.video.x + 10, q.video.y + q.video.height - 12, q.video.width * .75, 4};
   r.minimum = 0; r.maximum = 6; r.value = 3; return r;
+}
+void topology_cases(const ax::Request &q, const ax::Response &good) {
+  using Role = ax::TreeRole;
+  using Node = ax::TreeNode;
+  const std::vector<Node> single = {{ax::kNodeLimit, Role::Window, q.window},
+      {0, Role::Group, q.viewport}, {1, Role::WebArea, q.viewport}, {2, Role::Slider, good.slider}};
+  auto selected = ax::select_viewport(q, single);
+  check(selected.complete && selected.reason == ax::Reason::Unique && selected.viewport == 1 &&
+      selected.webarea == 2 && selected.matches == 1 && selected.chains == 1 &&
+      selected.chain_length == 1 && selected.webareas == 1, "single viewport topology rejected");
+  // Independently specified nested wrappers: raw matches stay four, logical viewport is one.
+  const std::vector<Node> nested = {{ax::kNodeLimit, Role::Window, q.window},
+      {0, Role::Group, q.viewport}, {1, Role::Group, q.viewport}, {2, Role::Group, q.viewport},
+      {3, Role::Group, q.viewport}, {4, Role::WebArea, q.viewport}, {5, Role::Slider, good.slider}};
+  selected = ax::select_viewport(q, nested);
+  check(selected.complete && selected.viewport == 4 && selected.webarea == 5 &&
+      selected.matches == 4 && selected.chains == 1 && selected.chain_length == 4 && selected.webareas == 1,
+      "four nested wrappers were not proven as one viewport");
+  auto nested_response = good;
+  nested_response.viewport_matches = 4; nested_response.viewport_chain_length = 4;
+  nested_response.tree_nodes = 7; nested_response.nodes = 8; nested_response.deepest = 6;
+  ax::Response roundtrip;
+  check(ax::decode(ax::encode(nested_response), roundtrip) && ax::accepted(q, roundtrip) &&
+      roundtrip.viewport_matches == 4 && roundtrip.viewport_chains == 1 && roundtrip.viewport_chain_length == 4,
+      "nested proof was not retained by wire and acceptance");
+  const auto reject = [&](const std::vector<Node> &tree, ax::Reason reason, const char *message) {
+    const auto result = ax::select_viewport(q, tree);
+    check(!result.complete && result.reason == reason && result.viewport == ax::kNodeLimit &&
+        result.webarea == ax::kNodeLimit, message);
+  };
+  auto bad = nested; bad[4].parent = 0;
+  reject(bad, ax::Reason::MultipleViewports, "sibling viewport branch accepted");
+  bad = nested; bad.push_back({2, Role::Group, q.viewport});
+  reject(bad, ax::Reason::MultipleViewports, "inner fork accepted");
+  bad = nested; bad.push_back({1, Role::WebArea, q.viewport});
+  reject(bad, ax::Reason::MultipleWebareas, "extra outer WebArea ignored");
+  bad = nested; bad[5].parent = 1;
+  reject(bad, ax::Reason::WebareaAssociation, "WebArea outside inner wrapper accepted");
+  bad = nested; bad[5].role = Role::Other;
+  reject(bad, ax::Reason::NoWebarea, "missing WebArea accepted");
+  bad = single; bad[1].rect.width -= 1;
+  reject(bad, ax::Reason::NoViewport, "nonmatching Group geometry accepted");
+  bad = nested; bad[5].rect = q.video; bad[5].rect.width -= 1;
+  reject(bad, ax::Reason::WebareaGeometry, "clipped video accepted");
+  bad = nested; bad[4].parent = 4;
+  reject(bad, ax::Reason::SharedTree, "self-parent cycle accepted");
+  bad = nested; bad[2].parent = 4;
+  reject(bad, ax::Reason::SharedTree, "out-of-order parent accepted");
+  bad = nested; bad[4].parent = ax::kNodeLimit;
+  reject(bad, ax::Reason::SharedTree, "second tree root accepted");
+  bad = nested; bad[0].role = Role::Group;
+  reject(bad, ax::Reason::WindowRole, "foreign root role accepted");
+  bad = nested; bad[0].rect.x += 1;
+  reject(bad, ax::Reason::GeometryChanged, "wrong window geometry accepted");
+  bad = nested; bad[1].role = Role::Count;
+  reject(bad, ax::Reason::RoleType, "unknown role accepted");
+  bad = nested; bad[1].rect.width = std::numeric_limits<double>::quiet_NaN();
+  reject(bad, ax::Reason::InvalidFrame, "nonfinite frame accepted");
+  reject({}, ax::Reason::TreeBudget, "empty tree accepted");
+  bad.assign(ax::kNodeLimit + 1, Node{});
+  reject(bad, ax::Reason::TreeBudget, "oversized tree accepted");
+  bad = {{ax::kNodeLimit, Role::Window, q.window}};
+  for (size_t i = 1; i <= ax::kDepthLimit + 1; ++i) bad.push_back({i - 1, Role::Other, {}});
+  reject(bad, ax::Reason::TreeDepth, "depth budget accepted");
+  // Transparent intermediate roles do not break a genuine ancestor chain.
+  const std::vector<Node> transparent = {{ax::kNodeLimit, Role::Window, q.window},
+      {0, Role::Group, q.viewport}, {1, Role::Other, {}}, {2, Role::Group, q.viewport},
+      {3, Role::WebArea, q.viewport}, {4, Role::Slider, good.slider}};
+  selected = ax::select_viewport(q, transparent);
+  check(selected.complete && selected.matches == 2 && selected.chain_length == 2 &&
+      selected.viewport == 3 && selected.webarea == 4, "intermediate transparent role broke ancestry");
+  auto depth_response = good;
+  depth_response.viewport_matches = 14; depth_response.viewport_chain_length = 14;
+  depth_response.tree_nodes = 17; depth_response.nodes = 18; depth_response.deepest = 16;
+  check(ax::accepted(q, depth_response), "maximum-depth wrapper proof rejected");
+  depth_response.viewport_matches = 15; depth_response.viewport_chain_length = 15;
+  depth_response.tree_nodes = 18; depth_response.nodes = 19;
+  check(!ax::accepted(q, depth_response), "wrapper chain too deep for WebArea and slider accepted");
+  for (int mutation = 0; mutation < 5; ++mutation) {
+    auto r = nested_response;
+    switch (mutation) {
+      case 0: r.viewport_chains = 0; break;
+      case 1: r.viewport_chains = 2; break;
+      case 2: r.viewport_chain_length = 3; break;
+      case 3: r.viewport_matches = 0; break;
+      case 4: r.tree_nodes = 4; r.nodes = 5; break;
+    }
+    check(!ax::accepted(q, r), "missing/branched/impossible topology proof accepted");
+  }
+  auto bytes = ax::encode(nested_response); bytes[7] = 1;
+  check(!ax::decode(bytes, roundtrip), "old response version accepted");
+  check(!ax::decode(std::span(bytes.data(), bytes.size() - 16), roundtrip), "old response size accepted");
+  bytes = ax::encode(nested_response);
+  check(!ax::decode(std::span(bytes.data(), bytes.size() - 1), roundtrip), "truncated response accepted");
+  auto impossible = good; impossible.viewport_chains = 2;
+  check(!ax::decode(ax::encode(impossible), roundtrip), "impossible chain count decoded");
+  std::cout << "PASS: viewport ancestor-chain proof and hostile topology rejection\n";
 }
 #ifndef _WIN32
 int fake(const std::string &mode, const char *path) {
@@ -103,6 +202,7 @@ int main(int argc, char **argv) {
 #endif
   try {
     const auto q = request(); const auto good = response(q);
+    topology_cases(q, good);
     ax::LayoutEpoch layout;
     check(!layout.freeze(), "unobserved layout was freezeable");
     layout.ready(); const auto token = layout.freeze(); check(token.has_value(), "ready layout not freezeable");
