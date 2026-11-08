@@ -132,10 +132,16 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
 
 ### CL-S2C-EXECUTOR-08：将批准传入后台执行器
 
-- **状态：已派发，尚未集成。** Claude独立树从`867eef9b`继续，仅写`suan/desktop_bridge/workflow_runs.py`及新`tests/test_workflow_run_executor_approval.py`；root不并发修改这两路径。
+- **当前状态：** Claude `8577335ad0fe693321215e55397df4b38a6aeb65` 已选择集成 main `c39f31e4`；root 独立联合32项通过。后续目标绑定、工具与原生接线由 root 统一交付，原任务记录保留如下。
+
+- **原任务范围：** Claude独立树从`867eef9b`继续，仅写`suan/desktop_bridge/workflow_runs.py`及新`tests/test_workflow_run_executor_approval.py`；当时两路径由其独占，集成后由root接线。
 - **接口与验收：** `WorkflowRunExecutor.start(store, run_id, *, approval=None)`；省略时原行为不变，非空须经store原子首次启动门，不能因已有活job就返回批准成功。保留容量/关闭检查、线程失败stop及原手工重启；真实SQLite/受控线程覆盖错绑定、并发、线程失败和已启动拒绝。
 - **边界：** 不新增工具、桥路由或权限，不改并发上限/CMake/全局状态/AOCI，不运行Runtime、许可软件或模型；暂存扫描后只提交两文件，由root审查、集成和推送。不得另向peer委派。
 
 root 已核对 `6f4de650` 整个 Desktop 失败终态；继续按最新决定优先 MuPRO/MuFerro 执行器与 HDF5 试点，
 原生文献 UI、Synthrix 正常装配/桌面入口及 D1-D5 保留在队列，按真实依赖推进。
 其他模块仍须 root 明确路径和验收后再派发。
+
+- **后续 CL-S2C-PREPARE-09：** Claude 在自己的 worktree 交付 `6d9d0e08deebe194bb03c1f42e165e02051403b0`，仅新增 `suan/agent/muferro_runs.py` 与 `tests/test_agent_muferro_prepare.py`。模块支持既有 MuFerro 案例行，使用桌面冻结目标，只冻结本地计划并生成首次批准项；自身不注册工具、不联系 Runtime。Claude 最终联合61项通过，领域门/回放门红例分别4项和2项失败，恢复后扫描通过。root 集成时另补混合 frozen step 的回放边界及测试。
+- **后续 CL-S2C-WIRE-REVIEW-10：** Claude 只读复核 root 集成后的 helper 边界与新增契约，外部交审阅证据，不改业务或认知文件、不提交推送。
+- **root 原生辅助任务：** 另一 Codex 代理在独立 detached worktree `/home/mnemora/xcheng/sijin/stk-native-runs` 交付卡片控制器/UI/双语及 CPU 用例 `6f009292`、`52bb7b4d`。root 审查并修正陈旧计划拒绝入口、历史状态标签及真实指针点击用例，负责共享 CMake/最终构建。此辅助代理不是 Claude，Claude 的模块归属和独立 worktree 不变。

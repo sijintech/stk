@@ -379,7 +379,7 @@ class ProjectSessions:
 
     def agent(self, action, params):
         """Agent sessions (format 13, docs/design/agent-harness.md). ``start`` answers in the background; read the
-        session for its steps. Nothing here applies drafts, prepares or starts runs, or labels data."""
+        session for its steps. Local MuPRO preparation and desktop single-use run decisions remain separate."""
         from suan.agent import audit, levels, tools as agent_tools
         if action == "tools":
             with self._operation():
@@ -414,6 +414,22 @@ class ProjectSessions:
                 return agents.decide(store, params["session_id"], params["item_id"], params["decision"],
                                      draft_sha256=params["draft_sha256"], expected_revision=params["expected_revision"],
                                      by=_person())
+            elif action == "run_target":
+                if "simulation" in params:
+                    view = agents.configure_run_target(store, params["session_id"], params["simulation"], by=_person())
+                else:
+                    view = sessions.get(params["session_id"])
+            elif action == "run_plan":
+                from suan.agent.run_approvals import RunApprovals
+                return RunApprovals(store).review(params["session_id"], params["item_id"])
+            elif action == "run_decide":
+                return agents.decide_run(store, params["session_id"], params["item_id"], params["decision"],
+                                         plan_sha256=params["plan_sha256"], expected_revision=params["expected_revision"],
+                                         by=_person())
+            elif action == "run_observe":
+                from suan.agent.run_approvals import RunApprovals
+                return {"receipt": RunApprovals(store).observe(params["session_id"], params["item_id"]),
+                        "revision": store.info()["revision"]}
             elif action == "list":
                 return sessions.list(offset=params.get("offset", 0), limit=params.get("limit", 50))
             elif action == "objects":
@@ -426,7 +442,11 @@ class ProjectSessions:
                         "chain_sha256": report["chain_sha256"], "verify": report}
             else:
                 raise ProjectError(f"Unknown agent action {action}")
-            return {**view, "running": agents.running(store, params["session_id"])}
+            from suan.agent.run_approvals import RunApprovals
+            from suan.agent.run_targets import selected
+            return {**view, "running": agents.running(store, params["session_id"]),
+                    "run_target": selected(store, params["session_id"]),
+                    "run_approvals": RunApprovals(store).cards(params["session_id"])}
 
     def local_models(self, action, params):
         """One-click local models (docs/design/model-gateway.md, S1c). Changes are for the person at this computer:

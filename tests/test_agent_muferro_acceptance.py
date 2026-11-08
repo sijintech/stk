@@ -87,6 +87,49 @@ def wait(h, handle, session_id, timeout=60):
     return view
 
 
+def test_agent_prepares_existing_case_then_human_first_start_runs_once(scan, monitor):
+    """Real Runtime and manufactured MuFerro, with scripted planner replies and strict bridge messages."""
+    s = scan
+    h, store, handle = s["h"], s["store"], s["handle"]
+    gateway = h.bridge.projects.models
+    gateway.endpoints.add("laptop", "Laptop", "http://127.0.0.1:9/v1", ["qwen"])
+    model = Model()
+    gateway[ADAPTER] = model
+    sid = str(uuid4())
+    params = {"handle": handle, "session_id": sid}
+    model.turns = [call("prepare_muferro_run", {"workflow_id": s["workflow"], "rows": [s["rows"][0]],
+                    "expected_revision": store.info()["revision"]}), final("请读取完整计划，再批准开始运行。")]
+    h.call("project.agent.create", {**params, "turn_id": str(uuid4()), "text": "运行已保存的第一个 MuFerro 算例。",
+           "configuration": {"adapter": ADAPTER, "model": "qwen"}})
+    h.call("project.agent.run_target", {**params, "simulation": {"connection": s["connection"],
+                                                               "options": {"launcher": "none"}}})
+    h.call("project.agent.start", params)
+    view = wait(h, handle, sid)
+    assert len(view["run_approvals"]) == 1 and len(view["awaiting"]) == 1
+    item = view["run_approvals"][0]["item"]
+    assert s["client"].tasks() == [] and monitor == ["WorkflowRuns.prepare"]
+    assert not store.agent_sessions.objects(sid)
+    sources = next(e["sources"] for e in view["events"] if e["kind"] == "tool_result")
+    assert sources[0]["kind"] == "workflow_run" and sources[0]["label"] == "private"
+    args = {**params, "item_id": item["item_id"]}
+    decision = {**args, "decision": "start", "plan_sha256": item["plan_sha256"],
+                "expected_revision": item["expected_revision"]}
+    assert h.error("project.agent.run_decide", decision)["code"] == "conflict"
+    plan = h.call("project.agent.run_plan", args)["run"]
+    assert [r["id"] for r in plan["rows"]] == [s["rows"][0]]
+    assert plan["simulation"]["connection"] == s["connection"] and s["client"].tasks() == []
+    first = h.call("project.agent.run_decide", decision)
+    assert first["receipt"]["outcome"] == "started"
+    completed = settled(s, item["run_id"], timeout=90)
+    assert all(t["status"] == "succeeded" for t in completed["tasks"])
+    count = len(s["client"].tasks())
+    assert count == 1 and len(s["worker"].files) == 1
+    assert h.call("project.agent.run_observe", args)["receipt"]["outcome"] == "started"
+    replay = h.call("project.agent.run_decide", decision)
+    assert replay["receipt"]["run_status"] == "stopped" and len(s["client"].tasks()) == count
+    assert h.call("project.agent.get", params)["awaiting"] == []
+
+
 def test_the_agent_proposes_a_scan_a_person_runs_it_and_the_agent_analyses_the_results(scan, monitor):
     s = scan
     h, store, handle = s["h"], s["store"], s["handle"]

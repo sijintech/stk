@@ -639,6 +639,8 @@ start(store, session_id):                         # 处理未处理的发言；�
 
 ## 进度
 
+- **S2c MuPRO 首次启动扩展（2026-11-08，接线与验收中）**：所有者已授权智能体本地准备 MuPRO/MuFerro 计划，桌面明确选择 Runtime/资源，并在完整计划复核后人工单次批准。实现与发布边界见 [MuPRO 运行批准/1](../specs/agent-muferro-run-1.md)。既有案例行也可准备；不依赖 AI 新建行。旧会话保留原冻结提示与工具。开始决定先持久消费再派发，未知只查询原证据；运行卡不走旧草案的失败后可再批准路径。当前具体测试、UI 与真实许可限制以运行验收最新记录为准；下文 v1 禁准备和 S2c 待决定段落为历史设计，不覆盖本次授权与扩展。
+
 - **S2a（已交付，2026-10-09）**：
   - 格式 13：`project_agent_sessions`、`project_agent_events`、`project_agent_objects`，并重建 `project_labels` 以加入“结构公开”（`structure`）；
     `Labels.label/structure_public`、`project.labels.list` 的 `include_structure`、脚本 `mark_structure_public`；

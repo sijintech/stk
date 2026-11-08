@@ -4,6 +4,7 @@
 
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 
 namespace stk::app {
@@ -39,6 +40,8 @@ class ProjectAgent {
   bool supported() const;
   /** The service takes a person's decision on a session's draft (desktop only). */
   bool decide_supported() const;
+  /** Desktop-only preparation and one-use run approvals; older bridges keep the existing assistant. */
+  bool runs_supported() const;
   bool busy() const { return busy_; }
   uint64_t version() const { return version_; }
   const std::string &error() const { return error_; }
@@ -60,6 +63,17 @@ class ProjectAgent {
   bool running() const { return view_.value("running", false); }
   /** Save ``text`` as the selected session's next message (or a new session's first) and start the agent. */
   bool ask(const std::string &text);
+  /** Save a message, explicitly set (or clear with null) its preparation target, then start. */
+  bool ask(const std::string &text, const io::Json &simulation);
+  bool set_run_target(const io::Json &simulation);
+  bool target_pending() const { return pending_targets_.count(selected_) != 0; }
+  /** Cards include consumed decisions and locally uncertain calls, so Observe remains available. */
+  io::Json run_cards() const;
+  bool read_run_plan(const io::Json &item);
+  const io::Json *run_plan(const io::Json &item) const;
+  bool can_decide_run(const io::Json &item, const std::string &decision) const;
+  bool decide_run(const io::Json &item, const std::string &decision);
+  bool observe_run(const io::Json &item);
   /** Answer the message that waits (after a refusal, or when a run was lost). */
   bool start();
   bool cancel();
@@ -87,15 +101,20 @@ class ProjectAgent {
   double wake_scheduled = 0;
 
  private:
-  bool call(const std::string &method, io::Json params, std::function<void(const io::Json &)> done);
+  bool call(const std::string &method, io::Json params, std::function<void(const io::Json &)> done,
+            std::function<void()> failed = {});
   bool read(const std::string &method, io::Json params, bool &flight, std::function<void(const io::Json &)> done,
             std::function<void()> failed = {});
   void adopt(const io::Json &view);
+  bool ask_impl(const std::string &text, std::optional<io::Json> simulation);
+  bool configure_target(const io::Json &simulation, bool start_after);
+  bool current_run_item(const io::Json &item, bool awaiting) const;
+  std::string run_key(const io::Json &item) const;
 
   AppStore &store_;
   ProjectState &project_;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
-  uint64_t epoch_ = 0, version_ = 0;
+  uint64_t epoch_ = 0, version_ = 0, selection_ = 0;
   bool busy_ = false;
   std::string error_;
   io::Json route_ = io::Json::object(), sessions_ = io::Json::array(), view_ = io::Json::object();
@@ -105,9 +124,12 @@ class ProjectAgent {
   bool route_asked_ = false, list_asked_ = false;
   bool view_reading_ = false, view_pending_ = false, owner_reading_ = false, session_reading_ = false, was_running_ = false;
   bool start_pending_ = false;  // a saved message whose start was refused while the project was busy
+  std::set<std::string> pending_targets_; // unconfirmed Set/Clear, retained across session selection changes
   std::string selected_, sent_;
   std::map<std::string, io::Json> owners_;          // "kind:id" -> {owner} (or {owner: null, failed: true})
   std::map<std::string, io::Json> session_views_;   // session ID -> its view (the sessions of tracked drafts)
+  // Transient only: never restored as execution permission or a reviewed plan.
+  std::map<std::string, io::Json> run_plans_, run_actions_;
   struct Attempt { std::string text, session_id, turn_id; bool create = false; } attempt_;
   double due_ = 0;
 };

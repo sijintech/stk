@@ -1,6 +1,6 @@
-"""The agent's tools (docs/design/agent-harness.md): a fixed registry at the read, record, model and draft levels.
+"""The agent's fixed tools, including bounded local preparation of MuPRO workflow plans.
 
-Nothing here can change the project's revision, labels or settings, prepare or start a run, or connect anywhere: those
+Nothing here can change the project's revision, labels or settings, start a run, or connect anywhere: those
 operations are not tools (suan/agent/levels.py lists every scripting operation and why the agent does not use it).
 A tool works on the store directly, never through the script catalog, and returns bounded JSON for the model, the
 objects it made and the data sources it read (computed here, never declared by the model).
@@ -454,6 +454,13 @@ def capture_run_results(context, arguments):
     return capture_rows(context, {"table_id": table_id, "record_ids": results, "field_ids": field_ids})
 
 
+def prepare_muferro_run(context, arguments):
+    from .muferro_runs import prepare_muferro_run as prepare
+    data = prepare(context, arguments)
+    return ToolResult("ok", data, sources=[{"kind": "workflow_run", "id": data["item"]["run_id"]},
+                                          {"kind": "table", "id": muferro.TABLE_ID}])
+
+
 REGISTRY = {tool.name: tool for tool in (
     Tool("project_outline", 1, "The project's parameter tables (fields with types and units, row counts, data label: "
          "public, structure or private) and workflows (steps, parameter table). Reads no values.",
@@ -501,6 +508,14 @@ REGISTRY = {tool.name: tool for tool in (
          "fields) as an immutable context and return their values.",
          {"type": "object", "properties": {"run_id": _uuid_schema()}, "required": ["run_id"],
           "additionalProperties": False}, capture_run_results,
+         {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}),
+    Tool("prepare_muferro_run", 1, "Freeze a MuPRO/MuFerro workflow for 1–100 existing case rows at the given "
+         "revision, using only the Runtime and resources selected by the person on the desktop. Returns a pending "
+         "first-start card. No upload, submission or execution; stop and ask the person to read and approve the plan.",
+         {"type": "object", "properties": {"workflow_id": _uuid_schema(),
+          "rows": {"type": "array", "items": _uuid_schema(), "minItems": 1, "maxItems": 100, "uniqueItems": True},
+          "expected_revision": {"type": "integer", "minimum": 0}},
+          "required": ["workflow_id", "rows", "expected_revision"], "additionalProperties": False}, prepare_muferro_run,
          {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}),
 )}
 

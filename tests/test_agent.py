@@ -260,7 +260,7 @@ def test_the_service_runs_agent_sessions_for_scripts_and_the_desktop(inproc, pro
     h.bridge.projects.models[PLANNER] = planner
     assert {tool["name"] for tool in h.call("project.agent.tools", {"handle": handle})["tools"]} == set(tools.REGISTRY) == {
         "project_outline", "capture_rows", "table_statistics", "propose_sweep", "ask_about_context", "draft_status",
-        "find_runs", "capture_run_results"}
+        "find_runs", "capture_run_results", "prepare_muferro_run"}
     session_id, turn_id = str(uuid4()), str(uuid4())
     created = h.call("project.agent.create", {"handle": handle, "session_id": session_id, "turn_id": turn_id,
                                               "text": "What is in this project?",

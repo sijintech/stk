@@ -5,6 +5,7 @@
 #include "stk/app/jobs_spec.hh"
 #include "stk/app/project_state.hh"
 
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 
@@ -19,6 +20,16 @@ std::string new_uuid()
   const auto hex = new_idempotency_key();
   return hex.substr(0, 8) + "-" + hex.substr(8, 4) + "-" + hex.substr(12, 4) + "-" + hex.substr(16, 4) + "-" + hex.substr(20);
 }
+
+bool same_run_item(const Json &a, const Json &b)
+{
+  if (!a.is_object() || !b.is_object()) { return false; }
+  for (const auto *key : {"item_id", "kind", "run_id", "plan_sha256", "request_sha256", "expected_revision"}) {
+    if (!a.contains(key) || !b.contains(key) || a.at(key) != b.at(key)) { return false; }
+  }
+  return io::get_string(a, "kind") == "start_run" && !io::get_string(a, "item_id").empty() &&
+      !io::get_string(a, "plan_sha256").empty();
+}
 }  // namespace
 
 void ProjectAgent::reset()
@@ -29,8 +40,10 @@ void ProjectAgent::reset()
   route_ = Json::object(); sessions_ = Json::array(); view_ = Json::object(); verification_ = Json::object();
   route_loaded_ = list_loaded_ = route_reading_ = list_reading_ = route_asked_ = list_asked_ = false;
   view_reading_ = view_pending_ = owner_reading_ = session_reading_ = was_running_ = start_pending_ = false;
+  pending_targets_.clear();
   selected_.clear(); sent_.clear();
-  owners_.clear(); session_views_.clear();
+  owners_.clear(); session_views_.clear(); run_plans_.clear(); run_actions_.clear();
+  ++selection_;
   attempt_ = {};
   due_ = wake_scheduled = 0;
 }
@@ -53,7 +66,18 @@ bool ProjectAgent::decide_supported() const
   return hello && hello->has_method("project.agent.decide");
 }
 
-bool ProjectAgent::call(const std::string &method, Json params, std::function<void(const Json &)> done)
+bool ProjectAgent::runs_supported() const
+{
+  const auto hello = supported() ? store_.bridge()->hello_info() : std::nullopt;
+  for (const auto *method : {"project.agent.run_target", "project.agent.run_plan", "project.agent.run_decide",
+       "project.agent.run_observe"}) {
+    if (!hello || !hello->has_method(method)) { return false; }
+  }
+  return true;
+}
+
+bool ProjectAgent::call(const std::string &method, Json params, std::function<void(const Json &)> done,
+                        std::function<void()> failed)
 {
   if (!supported() || busy_ || project_.busy()) { return false; }
   const auto handle = project_.project()->handle;
@@ -62,20 +86,28 @@ bool ProjectAgent::call(const std::string &method, Json params, std::function<vo
   error_.clear();
   const std::weak_ptr<bool> weak = alive_;
   const auto epoch = epoch_;
+  const auto selection = selection_;
   bridge::CallOptions options;
   options.retry = bridge::CallOptions::Retry::Never;  // starting the agent is never repeated blindly
-  store_.bridge()->call(method, params, options).then([this, weak, epoch, handle, done = std::move(done)](bridge::Result<Json> result) {
+  store_.bridge()->call(method, params, options).then([this, weak, epoch, selection, handle, done = std::move(done),
+                                                     failed = std::move(failed)](bridge::Result<Json> result) {
     if (!weak.lock() || epoch != epoch_ || !project_.project() || project_.project()->handle != handle) { return; }
     busy_ = false;
+    // Even switching away and back invalidates a chained create/target/start or decision callback.
+    if (selection != selection_) {
+      view_pending_ = !selected_.empty(); list_asked_ = false;
+      ++version_; store_.changed(); return;
+    }
     if (!result.ok()) {
       error_ = result.error().message;
       store_.log(error_);
       view_pending_ = !selected_.empty();  // the session may have changed anyway (a lost reply)
       list_asked_ = false;                 // a lost create may have made a session
+      if (failed) { failed(); }
     }
     else {
       try { done(result.value()); }
-      catch (const std::exception &exc) { error_ = exc.what(); }
+      catch (const std::exception &exc) { error_ = exc.what(); if (failed) { failed(); } }
     }
     ++version_;
     store_.changed();
@@ -126,6 +158,9 @@ void ProjectAgent::adopt(const Json &view)
   if (was_running_ && !running) { list_asked_ = false; session_views_.erase(id); }  // it stopped: its summary changed
   was_running_ = running;
   view_ = view;
+  for (auto &[key, action] : run_actions_) {
+    if (key == selected_ + "\n" + io::get_string(action.at("item"), "item_id")) { action["observed"] = false; }
+  }
 }
 
 bool ProjectAgent::load_route()
@@ -150,6 +185,10 @@ void ProjectAgent::select(const std::string &session_id)
 {
   if (session_id == selected_) { return; }
   selected_ = session_id;
+  ++selection_;
+  start_pending_ = false;
+  attempt_ = {};
+  run_plans_.clear();
   view_ = Json::object(); verification_ = Json::object();
   was_running_ = false;
   view_pending_ = !session_id.empty();
@@ -158,6 +197,17 @@ void ProjectAgent::select(const std::string &session_id)
 }
 
 bool ProjectAgent::ask(const std::string &text)
+{
+  return ask_impl(text, std::nullopt);
+}
+
+bool ProjectAgent::ask(const std::string &text, const Json &simulation)
+{
+  if (!runs_supported() || (!simulation.is_null() && !simulation.is_object())) { return false; }
+  return ask_impl(text, simulation);
+}
+
+bool ProjectAgent::ask_impl(const std::string &text, std::optional<Json> simulation)
 {
   if (text.empty() || running() || io::get_string(view_, "state") == "ended") { return false; }
   // A lost reply then a second click with the same text sends the same IDs, which the service answers with the
@@ -169,20 +219,166 @@ bool ProjectAgent::ask(const std::string &text)
   }
   const auto session_id = attempt_.session_id;
   const Json params = {{"session_id", session_id}, {"turn_id", attempt_.turn_id}, {"text", text}};
-  return call(create ? "project.agent.create" : "project.agent.say", params, [this, session_id, text](const Json &result) {
+  return call(create ? "project.agent.create" : "project.agent.say", params,
+              [this, session_id, text, simulation = std::move(simulation)](const Json &result) {
+    if (io::get_string(result.value("session", Json::object()), "id") != session_id) {
+      throw std::runtime_error("The saved message reply belongs to another session");
+    }
     attempt_ = {};
     sent_ = text;
-    selected_ = session_id;
+    select(session_id);
     adopt(result);
     list_asked_ = false;
     busy_ = false;
-    if (!start()) { start_pending_ = true; }  // the project was busy: start once it is not
+    if (simulation) { pending_targets_.insert(session_id); configure_target(*simulation, true); }
+    else if (!start()) { start_pending_ = true; }  // legacy saved message: resume when the project is not busy
+  });
+}
+
+bool ProjectAgent::configure_target(const Json &simulation, const bool start_after)
+{
+  if (!runs_supported() || selected_.empty() || running() ||
+      (!simulation.is_null() && !simulation.is_object())) { return false; }
+  const auto session = selected_;
+  const bool already_pending = target_pending();
+  start_pending_ = false;  // an explicit target action never resumes an older deferred start
+  pending_targets_.insert(session);  // before dispatch; failures and lost/stale replies cannot restore Continue
+  const bool sent = call("project.agent.run_target", {{"session_id", selected_}, {"simulation", simulation}},
+              [this, start_after](const Json &result) {
+    if (io::get_string(result.value("session", Json::object()), "id") != selected_) {
+      throw std::runtime_error("The preparation target reply belongs to another session");
+    }
+    adopt(result);
+    pending_targets_.erase(selected_);
+    if (start_after) { start(); }  // failure leaves an explicit Continue action, never a refresh-triggered start
+  });
+  if (!sent && !already_pending) { pending_targets_.erase(session); }
+  return sent;
+}
+
+bool ProjectAgent::set_run_target(const Json &simulation)
+{
+  return configure_target(simulation, false);
+}
+
+std::string ProjectAgent::run_key(const Json &item) const
+{
+  return selected_ + "\n" + io::get_string(item, "item_id");
+}
+
+Json ProjectAgent::run_cards() const
+{
+  Json cards = Json::array();
+  if (!runs_supported() || selected_.empty()) { return cards; }
+  for (const auto &card : view_.value("run_approvals", Json::array())) {
+    if (card.is_object() && card.value("item", Json()).is_object()) { cards.push_back(card); }
+  }
+  for (const auto &item : view_.value("awaiting", Json::array())) {
+    if (io::get_string(item, "kind") != "start_run") { continue; }
+    if (std::none_of(cards.begin(), cards.end(), [&](const auto &card) { return same_run_item(card.at("item"), item); })) {
+      cards.push_back({{"item", item}, {"decision", nullptr}, {"receipt", nullptr}});
+    }
+  }
+  for (const auto &[key, action] : run_actions_) {
+    if (key != selected_ + "\n" + io::get_string(action.at("item"), "item_id")) { continue; }
+    auto found = std::find_if(cards.begin(), cards.end(), [&](const auto &card) {
+      return same_run_item(card.at("item"), action.at("item"));
+    });
+    if (found == cards.end()) { cards.push_back(action); }
+    else {
+      // A durable receipt wins over a stale local pending marker. A local decision still closes the buttons.
+      if (!found->value("decision", Json()).is_object()) { (*found)["decision"] = action.at("decision"); }
+      if (!found->value("receipt", Json()).is_object() || action.value("observed", false)) {
+        (*found)["receipt"] = action.at("receipt");
+      }
+    }
+  }
+  return cards;
+}
+
+bool ProjectAgent::current_run_item(const Json &item, const bool awaiting) const
+{
+  if (!runs_supported() || selected_.empty() || !same_run_item(item, item)) { return false; }
+  if (awaiting) {
+    for (const auto &entry : view_.value("awaiting", Json::array())) {
+      if (same_run_item(entry, item)) { return true; }
+    }
+    return false;
+  }
+  for (const auto &card : run_cards()) { if (same_run_item(card.at("item"), item)) { return true; } }
+  return false;
+}
+
+bool ProjectAgent::read_run_plan(const Json &item)
+{
+  if (!current_run_item(item, false)) { return false; }
+  const auto key = run_key(item);
+  run_plans_.erase(key);
+  return call("project.agent.run_plan", {{"session_id", selected_}, {"item_id", item.at("item_id")}},
+              [this, key, item](const Json &result) {
+    if (!same_run_item(result.at("item"), item) ||
+        io::get_string(result.at("run"), "plan_sha256") != io::get_string(item, "plan_sha256")) {
+      throw std::runtime_error("The frozen run plan does not match this approval");
+    }
+    // Keep the complete result. The editor renders every line; no excerpt can unlock approval.
+    run_plans_[key] = result;
+  });
+}
+
+const Json *ProjectAgent::run_plan(const Json &item) const
+{
+  const auto found = run_plans_.find(run_key(item));
+  return found != run_plans_.end() && same_run_item(found->second.at("item"), item) ? &found->second : nullptr;
+}
+
+bool ProjectAgent::can_decide_run(const Json &item, const std::string &decision) const
+{
+  if ((decision != "start" && decision != "decline") || busy_ || project_.busy() || running() ||
+      !current_run_item(item, true) ||
+      (decision == "start" && (target_pending() || !run_plan(item) ||
+        io::get_int(item, "expected_revision", -1) != project_.project()->revision))) { return false; }
+  for (const auto &card : run_cards()) {
+    if (same_run_item(card.at("item"), item)) {
+      return card.value("decision", Json()).is_null() && card.value("receipt", Json()).is_null();
+    }
+  }
+  return false;
+}
+
+bool ProjectAgent::decide_run(const Json &item, const std::string &decision)
+{
+  if (!can_decide_run(item, decision)) { return false; }
+  const auto key = run_key(item);
+  // Install before dispatch: even a lost reply, a session switch or a closed awaiting card only permits Observe.
+  run_actions_[key] = {{"item", item}, {"decision", {{"decision", decision}}},
+                       {"receipt", {{"outcome", "pending"}}}};
+  const bool sent = call("project.agent.run_decide", {{"session_id", selected_}, {"item_id", item.at("item_id")},
+      {"decision", decision}, {"plan_sha256", item.at("plan_sha256")}, {"expected_revision", item.at("expected_revision")}},
+      [this, key](const Json &result) {
+    run_actions_.at(key)["receipt"] = result.at("receipt");
+    run_actions_.at(key)["observed"] = true;
+    view_pending_ = true; list_asked_ = false;
+  }, [this, key] { run_actions_.at(key)["receipt"] = {{"outcome", "uncertain"}, {"ok", false}}; });
+  if (!sent) { run_actions_.erase(key); }
+  return sent;
+}
+
+bool ProjectAgent::observe_run(const Json &item)
+{
+  if (!current_run_item(item, false)) { return false; }
+  const auto key = run_key(item);
+  return call("project.agent.run_observe", {{"session_id", selected_}, {"item_id", item.at("item_id")}},
+              [this, key, item](const Json &result) {
+    auto &action = run_actions_[key];
+    if (action.empty()) { action = {{"item", item}, {"decision", nullptr}}; }
+    action["receipt"] = result.at("receipt"); action["observed"] = true;
+    view_pending_ = true; list_asked_ = false;
   });
 }
 
 bool ProjectAgent::start()
 {
-  if (selected_.empty()) { return false; }
+  if (selected_.empty() || target_pending()) { return false; }
   start_pending_ = false;
   return call("project.agent.start", {{"session_id", selected_}}, [this](const Json &result) {
     adopt(result);

@@ -11,9 +11,11 @@ Rules this module keeps:
   data sources are computed by the tool, never taken from the model.
 - Every planner turn is checked against the network setting and the data boundary (``ModelGateway.admit_planner``):
   in v1 planner turns stay on this computer or the organization's network.
-- Nothing here applies drafts, prepares or starts runs, labels data or changes settings: no tool does.
+- Only the MuPRO tool prepares a local plan. Starting it consumes a separate desktop decision once; no tool starts
+  runs, applies drafts, labels data or changes settings.
 """
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 import threading
 import time
 from uuid import UUID, uuid5
@@ -58,6 +60,7 @@ class AgentExecutor:
         self.tool_names = tool_names
         self.limits = {**LIMITS, **(limits or {})}
         self.services = {"requests": requests, "gateway": gateway, "local": local, **(services or {})}
+        self.services["agent_run_target"] = self.run_target
         self._runs = {}
         self._guard = threading.Lock()
         self._closing = threading.Event()
@@ -134,6 +137,72 @@ class AgentExecutor:
 
     def running(self, store, session_id):
         return (str(store.directory), session_id) in self._runs
+
+    @contextmanager
+    def _human_run_action(self, store, session_id):
+        with self._guard:
+            if self._closing.is_set():
+                raise ProjectError("The agent service is shutting down")
+            if (str(store.directory), session_id) in self._runs:
+                raise AgentBusy("The agent session is running; decide when it has stopped")
+            lock = _RequestLock(store, session_id, "agent-locks")
+        try:
+            yield
+        finally:
+            lock.release()
+
+    def configure_run_target(self, store, session_id, value, *, by):
+        from . import run_targets
+        with self._human_run_action(store, session_id):
+            freeze = self.services.get("freeze_run_target")
+            if value is not None and freeze is None:
+                raise ProjectError("The desktop has no workflow execution service")
+            target = None if value is None else freeze(value)
+            run_targets.save(store, session_id, target, by=by)
+        return store.agent_sessions.get(session_id)
+
+    def run_target(self, store, session_id):
+        from . import run_targets
+        target = run_targets.selected(store, session_id)
+        freeze = self.services.get("freeze_run_target")
+        if target is None or freeze is None:
+            raise ProjectError("Choose the MuPRO Runtime and resources explicitly on the desktop first")
+        current = run_targets.simulation(freeze(target))
+        if digest(current) != digest(target):
+            raise RevisionConflict("The selected Runtime endpoint changed; choose and review it again")
+        return target
+
+    def decide_run(self, store, session_id, item_id, decision, *, plan_sha256, expected_revision, by):
+        """A desktop decision: consume once, then claim that exact original run; never retry dispatch."""
+        from .run_approvals import RunApprovals
+        if type(decision) is not str or decision not in ("start", "decline"):
+            raise ProjectError("A run decision is start or decline")
+        with self._human_run_action(store, session_id):
+            ledger = RunApprovals(store)
+            review = ledger.review(session_id, item_id)
+            existing = ledger.decision(session_id, item_id)
+            parameters = {"plan_sha256": plan_sha256, "expected_revision": expected_revision,
+                          "by": by.get("user") or "local-user"}
+            if decision == "decline" or existing is not None:
+                ledger.consume(session_id, item_id, decision, **parameters)
+            else:
+                executor = self.services.get("workflow_executor")
+                if executor is None:
+                    raise ProjectError("The desktop has no workflow execution service")
+                target = self.run_target(store, session_id)
+                if digest(target) != digest(review["run"].get("simulation")):
+                    raise RevisionConflict("The Runtime or resources differ from this frozen plan; prepare again")
+                with executor.first_start_slot(store, review["item"]["run_id"]):
+                    claimed = ledger.consume(session_id, item_id, decision, **parameters)
+                    if claimed["dispatch"]:
+                        try:
+                            executor.start(store, review["item"]["run_id"], approval=claimed["decision"]["approval"])
+                        except Exception as exc:  # the decision stays consumed; only original evidence may recover
+                            store.agent_sessions.append(session_id, "approval_receipt", {
+                                "item_id": item_id, "run_id": review["item"]["run_id"], "ok": False,
+                                "outcome": "uncertain", "error": "Run dispatch did not return a confirmed result",
+                                "code": type(exc).__name__, "at": time.time()}, turn=review["item"]["source_turn"])
+            return {"receipt": ledger.observe(session_id, item_id), "revision": store.info()["revision"]}
 
     def cancel(self, store, session_id):
         """Record the intent, then stop the current model turn (a local model confirms; others become uncertain) and
@@ -378,7 +447,8 @@ class AgentExecutor:
             text, truncated = tools_module.content(tool_call["name"], result)
         # Each source with its label as it was when the data entered the session (the boundary is checked with the
         # labels as they are when each planner turn is sent).
-        sources = [{**source, "label": run.store.labels.label("table", source["id"])} for source in result.sources]
+        sources = [{**source, "label": run.store.labels.label("table", source["id"])
+                    if source["kind"] in ("table", "table_structure") else "private"} for source in result.sources]
         sessions.append(session_id, "tool_result", {
             "call_id": tool_call["id"], "status": result.status, "content": text, "content_sha256": digest(text),
             "truncated": truncated, "objects": [{"kind": kind, "id": identity} for kind, identity in result.objects],

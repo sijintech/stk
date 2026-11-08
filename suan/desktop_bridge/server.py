@@ -11,6 +11,7 @@ on Windows; the OS drops it when the process dies). A second bridge raises ``bus
 process it answers every request with that error (:func:`refuse`) and exits with status 3.
 """
 import math
+from contextvars import ContextVar
 import os
 from pathlib import Path
 import platform
@@ -174,21 +175,26 @@ class Bridge:
         self.closed = threading.Event()
         self.inspected = {}
         self.connections = ConnectionStore(self.state_dir)
+        self._workflow_target = ContextVar("stk_workflow_target", default=None)
         self.graphs = GraphService(self.cache_dir, self.connections, self.emit)
         self.analysis_executor = AnalysisRunExecutor(self.graphs.worker, self.graphs.blobs.root)
         # Workflow runs register outputs as ordinary edits in the background; open handles hear about them.
         self.workflow_executor = WorkflowRunExecutor(self.analysis_executor, changed=self._announce,
-                                                     scripting=self._workflow_scripting, poll_seconds=_poll_seconds())
+                                                     bound_scripting=self._workflow_scripting, poll_seconds=_poll_seconds())
         from suan.skills.user_catalog import UserSkillLibrary
         self.skill_library = UserSkillLibrary(root=self.state_dir / "skills")
         self.projects = ProjectSessions(self.state_dir, analysis_executor=self.analysis_executor,
                                         workflow_executor=self.workflow_executor, skill_catalog=self._skill_catalog)
         self.projects.local.emit = self.emit
         self._local_started = False
-        self.project_runs = ProjectRuns(self.projects, self.connections.backend)
+        self.project_runs = ProjectRuns(self.projects, self._bound_backend)
+        self.projects.agents.services.update({"workflow_executor": self.workflow_executor,
+                                             "freeze_run_target": self._freeze_agent_run_target})
+        self._agent_run_reviews = {}
+        self._agent_run_review_lock = threading.Lock()
         self.ui = UIRequests(self.emit)
         self.scripts = ScriptSessions(self.emit, self.script_call)
-        self.transfers = TransferManager(self.state_dir, self.emit, self.connections.backend)
+        self.transfers = TransferManager(self.state_dir, self.emit, self._bound_backend)
         # Materials prediction models (S3): datasets, training on this computer, a registry and prediction.
         self._materials = None
         self._materials_lock = threading.RLock()
@@ -404,6 +410,10 @@ class Bridge:
             "project.agent.verify": lambda p, c: self.projects.agent("verify", p),
             "project.agent.export": lambda p, c: self.projects.agent("export", p),
             "project.agent.decide": self.decide_agent_item,
+            "project.agent.run_target": self.agent_run_target,
+            "project.agent.run_plan": self.agent_run_plan,
+            "project.agent.run_decide": self.agent_run_decide,
+            "project.agent.run_observe": lambda p, c: self.projects.agent("run_observe", p),
             "models.local.recommendations": lambda p, c: self.projects.local_models("recommendations", p),
             "models.local.install": lambda p, c: self.projects.local_models("install", p),
             "models.local.import": lambda p, c: self.projects.local_models("import", p),
@@ -517,13 +527,65 @@ class Bridge:
         return {**params, "simulation": {"connection": simulation["connection"], "connection_identity": backend.server_key,
                                          "options": simulation.get("options", {})}}
 
-    def _workflow_scripting(self, store, cancelled):
+    def _freeze_agent_run_target(self, value):
+        from suan.agent.run_targets import simulation
+        from suan.mupro.spec import muferro_spec
+        from suan.runtime.models import TaskSpec
+        if (type(value) is not dict or not {"connection", "options"} <= set(value)
+                or set(value) - {"connection", "connection_identity", "options"}
+                or type(value["connection"]) is not str
+                or not (value["connection"] == "local" or value["connection"].startswith("runtime:"))
+                or type(value["options"]) is not dict):
+            raise BridgeError("invalid_params", "Choose an explicit direct or SSH Runtime and MuPRO resources")
+        try:
+            TaskSpec(**muferro_spec("0" * 32, case_dir="case", **value["options"]))
+        except (TypeError, ValueError) as exc:
+            raise BridgeError("invalid_params", str(exc)) from None
+        return simulation(self._simulation_identity({"simulation": value})["simulation"])
+
+    def agent_run_target(self, params, context):
+        result = self.projects.agent("run_target", params)
+        if "simulation" in params:
+            with self._agent_run_review_lock:
+                self._agent_run_reviews = {k: v for k, v in self._agent_run_reviews.items() if k[0] != params["handle"]}
+        return result
+
+    def agent_run_plan(self, params, context):
+        result = self.projects.agent("run_plan", params)
+        # Do not mark a partial/oversized response as inspected. This process
+        # receipt is a review precondition, not authentication of the human.
+        if len(encode_message({"id": 0, "result": result})) > self.max_line - 256:
+            raise BridgeError("result_too_large", "The complete frozen run plan exceeds the bridge response limit")
+        key = (params["handle"], params["session_id"], params["item_id"])
+        with self._agent_run_review_lock:
+            self._agent_run_reviews[key] = {"plan_sha256": result["item"]["plan_sha256"],
+                                            "expected_revision": result["item"]["expected_revision"]}
+            while len(self._agent_run_reviews) > 64:
+                self._agent_run_reviews.pop(next(iter(self._agent_run_reviews)))
+        return result
+
+    def agent_run_decide(self, params, context):
+        key = (params["handle"], params["session_id"], params["item_id"])
+        shown = {"plan_sha256": params["plan_sha256"], "expected_revision": params["expected_revision"]}
+        with self._agent_run_review_lock:
+            reviewed = self._agent_run_reviews.get(key) == shown
+        if params["decision"] == "start" and not reviewed:
+            raise BridgeError("conflict", "Read the complete frozen run plan in this desktop before approving its start")
+        return self.projects.agent("run_decide", params)
+
+    def _workflow_scripting(self, store, cancelled, *, simulation=None):
         """The console's stk API on an open handle of ``store`` (remote workflow steps, W5)."""
         from suan.scripting import API
         handles = self.projects.handles_of(store)
         if not handles:
             raise BridgeError("not_found", "The project is no longer open")
-        api = API(lambda operation, values: self.script_call(operation, values, cancelled))
+        def dispatch(operation, values):
+            token = self._workflow_target.set(simulation)
+            try:
+                return self.script_call(operation, values, cancelled)
+            finally:
+                self._workflow_target.reset(token)
+        api = API(dispatch)
         api._project_handle = sorted(handles)[0]
         return api
 
@@ -763,7 +825,17 @@ class Bridge:
     # -- helpers ------------------------------------------------------------------------------
 
     def _backend(self, params):
-        return self.connections.backend(params["connection"], params.get("node"))
+        return self._bound_backend(params["connection"], params.get("node"))
+
+    def _bound_backend(self, connection, node=None):
+        """Validate the frozen workflow target on the exact backend instance that will perform I/O."""
+        target = self._workflow_target.get()
+        if target is not None and (connection != target["connection"] or node is not None):
+            raise BridgeError("conflict", "The workflow cannot access another Runtime target")
+        backend = self.connections.backend(connection, node)
+        if target is not None and backend.server_key != target["connection_identity"]:
+            raise BridgeError("conflict", "The Runtime endpoint changed after workflow preparation")
+        return backend
 
     def _hub(self, params):
         connection = params["connection"]

@@ -20,6 +20,7 @@ run as progress, so after STK stops following it (closing, restart) starting the
 task still running on the Runtime instead of submitting another. Cancelling the run cancels them.
 """
 import json
+from contextlib import contextmanager
 import logging
 import os
 from pathlib import Path
@@ -95,6 +96,7 @@ class _Job:
         self.remote = {}  # (step, row) -> {"attempt", "simulation_run_id", "state", "errors"} being followed
         self.tried = set()  # tasks attempted since this start; failures wait for the next explicit start
         self.api = None
+        self.simulation = None
 
 
 def _code(error):
@@ -110,13 +112,14 @@ def _code(error):
 
 
 class WorkflowRunExecutor:
-    def __init__(self, analysis_executor, *, changed=None, scripting=None, poll_seconds=15.0):
+    def __init__(self, analysis_executor, *, changed=None, scripting=None, bound_scripting=None, poll_seconds=15.0):
         """``changed(store)`` announces the project edits a run makes (registered outputs).
         ``scripting(store, cancelled)`` returns the console's ``stk`` API bound to an open handle of that
         project, for remote steps; ``poll_seconds`` is how often submitted Runtime tasks are read."""
         self.analysis = analysis_executor
         self.changed = changed or (lambda store: None)
         self.scripting = scripting
+        self.bound_scripting = bound_scripting
         self.poll_seconds = poll_seconds
         self.executor_id = str(uuid4())
         self._lock, self._closing = threading.RLock(), threading.Event()
@@ -127,6 +130,22 @@ class WorkflowRunExecutor:
         return os.path.normcase(str(store.path)), store._project_id, run_id
 
     # ---- service methods ----
+
+    @contextmanager
+    def first_start_slot(self, store, run_id):
+        """Check local admission before consuming an approval, retaining the slot lock through start.
+
+        The caller is a trusted desktop adapter; the store still arbitrates other
+        processes and manual starts in its own first-start transaction.
+        """
+        with self._lock:
+            if self._closing.is_set():
+                raise BridgeError("shutting_down", "Workflow executor is closed")
+            if self._key(store, run_id) in self._jobs:
+                raise BridgeError("conflict", "This workflow run is already executing")
+            if len(self._jobs) >= MAX_ACTIVE_RUNS:
+                raise BridgeError("busy", "The local executor has reached its 4-workflow-run limit")
+            yield
 
     def start(self, store, run_id, *, approval=None):
         """Claim a prepared or stopped run and execute its unfinished tasks in the background.
@@ -221,6 +240,7 @@ class WorkflowRunExecutor:
         failure = None
         try:
             plan = runs.get(job.run_id)
+            job.simulation = plan.get("simulation")
             needs = self._needs(plan)
             while True:
                 progressed = False
@@ -315,12 +335,16 @@ class WorkflowRunExecutor:
     def _api(self, job, *, cancellable=True):
         """The console's stk API on an open handle of this project; console calls stop when the run is
         cancelled, except the one that cancels a Runtime task (``cancellable=False``)."""
-        if self.scripting is None:
+        if self.scripting is None and self.bound_scripting is None:
             raise BridgeError("unsupported", "This service cannot run remote workflow steps")
+        def create(cancel):
+            if self.bound_scripting is not None:
+                return self.bound_scripting(job.store, cancel, simulation=job.simulation)
+            return self.scripting(job.store, cancel)
         if not cancellable:
-            return self.scripting(job.store, threading.Event())
+            return create(threading.Event())
         if job.api is None:
-            job.api = self.scripting(job.store, job.cancel)
+            job.api = create(job.cancel)
         return job.api
 
     def _console(self, job, call):

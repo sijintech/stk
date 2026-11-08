@@ -28,6 +28,7 @@ import hashlib
 import os
 from pathlib import Path
 import threading
+from contextvars import copy_context
 import time
 import uuid
 
@@ -97,6 +98,12 @@ class TransferManager:
         record["updated_at"] = now()
         atomic_json(self._path(record["id"]), record)
 
+    def _record_backend(self, record):
+        backend = self.backend_for(record["connection"], record.get("node"))
+        if record.get("connection_identity") is not None and backend.server_key != record["connection_identity"]:
+            raise BridgeError("conflict", "The transfer Runtime endpoint changed; restore the original connection")
+        return backend
+
     def _recover(self):
         cutoff = time.time() - KEEP_FINISHED_SECONDS
         for path in self.root.glob("*.json"):
@@ -154,6 +161,7 @@ class TransferManager:
     def _new(self, kind, key=None, request=None, **fields):
         record = {"id": self.keyed_id(kind, key) if key is not None else uuid.uuid4().hex, "kind": kind,
                   "state": "queued", "bytes_done": 0, "files_done": 0, "created_at": now(), **fields}
+        record["connection_identity"] = self.backend_for(fields["connection"], fields.get("node")).server_key
         if key is not None:
             record["idempotency_key"] = key
             record["request"] = request
@@ -314,7 +322,7 @@ class TransferManager:
         action = record.get("action") or {}
         if record["kind"] == "upload" and action.get("state") == "review":
             try:  # a cancelled upload must not be imported later by an approval
-                backend = self.backend_for(record["connection"], record.get("node"))
+                backend = self._record_backend(record)
                 record["action"] = summary(backend.reject(action["id"]))
             except BridgeError:
                 pass
@@ -323,7 +331,7 @@ class TransferManager:
             for item in record["items"]:
                 if not item["done"] and item.get("upload_id"):
                     try:
-                        self.backend_for(record["connection"], record.get("node")).upload_abort(
+                        self._record_backend(record).upload_abort(
                             record["workspace_id"], item["upload_id"])
                     except BridgeError:
                         pass
@@ -346,7 +354,8 @@ class TransferManager:
     # -- running --------------------------------------------------------------------------------
 
     def _launch(self, transfer_id):
-        thread = threading.Thread(target=self._run, args=(transfer_id,), daemon=True,
+        context = copy_context()  # retain this workflow's frozen-target guard in the transfer worker
+        thread = threading.Thread(target=context.run, args=(self._run, transfer_id), daemon=True,
                                   name=f"stk-transfer-{transfer_id[:8]}")
         with self.lock:
             self.threads[transfer_id] = thread
@@ -408,7 +417,7 @@ class TransferManager:
         self.save(record)
         self._notify(record, force=True)
         try:
-            backend = self.backend_for(record["connection"], record.get("node"))
+            backend = self._record_backend(record)
             if record["kind"] == "upload":
                 self._upload(record, backend)
             else:

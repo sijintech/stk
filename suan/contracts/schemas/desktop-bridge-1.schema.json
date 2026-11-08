@@ -8473,7 +8473,7 @@
         }
       },
       "project.agent.start": {
-        "description": "Answer the session's unanswered message in the background; read the session for its steps. Repeated calls never resend. The agent saves drafts at most: it never applies them, prepares or starts runs, or labels data.",
+        "description": "Answer the session message once in the background. MuPRO preparation is local and requires desktop-selected resources; starting the prepared run needs a separate human decision.",
         "params": {
           "type": "object",
           "properties": {
@@ -16447,6 +16447,188 @@
         "result": {
           "$ref": "#/$defs/literatureOperationResult"
         }
+      },
+      "project.agent.run_target": {
+        "description": "Desktop-only explicit session execution target. Omission reads; null clears. No run is prepared or started.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "simulation": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "connection": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "options": {
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "connection",
+                    "options"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "handle",
+            "session_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/agentSessionView"
+        }
+      },
+      "project.agent.run_plan": {
+        "description": "Desktop-only complete frozen plan for the original approval; marks it inspected in this bridge process.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "item_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "session_id",
+            "item_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "item": {
+              "$ref": "#/$defs/agentRunApproval"
+            },
+            "run": {
+              "$ref": "#/$defs/projectWorkflowRun"
+            }
+          },
+          "required": [
+            "item",
+            "run"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.agent.run_decide": {
+        "description": "Desktop-only single-use first-start decision after complete plan review. Uncertain dispatch is consumed permanently; never automatically replay.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "item_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "decision": {
+              "enum": [
+                "start",
+                "decline"
+              ]
+            },
+            "plan_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "handle",
+            "session_id",
+            "item_id",
+            "decision",
+            "plan_sha256",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "receipt": {
+              "type": "object"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "receipt",
+            "revision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.agent.run_observe": {
+        "description": "Desktop-only original approval evidence, never dispatch, recovery or cancellation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "item_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "session_id",
+            "item_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "receipt": {
+              "type": "object"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "receipt",
+            "revision"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -23234,6 +23416,46 @@
             "output_tokens"
           ],
           "additionalProperties": false
+        },
+        "run_target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/agentRunTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_approvals": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "properties": {
+              "item": {
+                "$ref": "#/$defs/agentRunApproval"
+              },
+              "decision": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "receipt": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "item",
+              "decision",
+              "receipt"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -31732,6 +31954,79 @@
           "additionalProperties": false
         }
       ]
+    },
+    "agentRunTarget": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "connection_identity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "connection",
+        "connection_identity",
+        "options"
+      ],
+      "additionalProperties": false
+    },
+    "agentRunApproval": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "kind": {
+          "const": "start_run"
+        },
+        "run_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "plan_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "request_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_event_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source_turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_call_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "item_id",
+        "kind",
+        "run_id",
+        "plan_sha256",
+        "request_sha256",
+        "expected_revision",
+        "source_event_id",
+        "source_turn",
+        "source_call_id"
+      ],
+      "additionalProperties": false
     }
   }
 }

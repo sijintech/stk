@@ -608,6 +608,10 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.agent.objects` | `{handle, kind, object_id}` | `{owner}` |
 | `project.agent.verify` / `export` | `{handle, session_id}` | the check / `stk.agent-log/1` |
 | `project.agent.decide` (desktop only) | `{handle, session_id, item_id, decision: apply/discard, draft_sha256, expected_revision}` | `{receipt, revision}`; `project.changed` when applied |
+| `project.agent.run_target` (desktop only) | `{handle, session_id, simulation?: null / {connection, options}}` | `agentSessionView`; explicit target selection, no execution |
+| `project.agent.run_plan` (desktop only) | `{handle, session_id, item_id}` | `{item, run}`; complete original frozen plan |
+| `project.agent.run_decide` (desktop only) | `{handle, session_id, item_id, decision: start/decline, plan_sha256, expected_revision}` | `{receipt, revision}`; single-use first start |
+| `project.agent.run_observe` (desktop only) | `{handle, session_id, item_id}` | `{receipt, revision}`; original evidence only |
 | `modules.list` / `modules.detect` | `{}` / `{id?}` | `{root, platform, modules: [{id, name, kind, scale, state: missing/detected/installed/installing, version, programs, prefix, installable, job, ...}]}` |
 | `modules.install` / `cancel` (desktop only) | `{id}` | `{job}`; progress as `modules.progress` events |
 | `modules.remove` (desktop only) | `{id}` | the listing; only modules STK installed |
@@ -1413,16 +1417,22 @@ anything is claimed), are claimed before sending and sent once (an uncertain out
 settled as uncertain by `recover` or the next `start` and never resent. Tool calls carry the executor's own IDs
 (the model's are kept as `model_id`); every recorded call gets a result, and each result's `sources` record the
 data label at that moment; a call left without a result by a lost executor is run again by the next `start` with
-the same ID (same objects, its request never sent twice). Tools are a fixed registry at the read, record, model and
-draft levels: `project_outline`, `capture_rows`, `table_statistics`, `propose_sweep` and `ask_about_context` (each
+the same ID (same objects, its request never sent twice). Tools are a fixed registry at the read, record, model,
+draft and bounded MuPRO preparation levels: `project_outline`, `capture_rows`, `table_statistics`, `propose_sweep` and `ask_about_context` (each
 makes one request through the request executor, on a running model chosen like `models.route`; to an external
 endpoint only when every source the session has read is public, checked again before sending by
-`ModelGateway.admit_sources`), `draft_status`, `find_runs`, `capture_run_results`; the agent never applies drafts,
-prepares or starts runs, labels data or changes settings. A turn that leaves drafts to review ends with
+`ModelGateway.admit_sources`), `draft_status`, `find_runs`, `capture_run_results`, and `prepare_muferro_run`.
+The last tool freezes a local plan using explicit desktop-selected resources; a separate human decision starts it.
+It never uploads or submits. The agent never applies drafts, starts runs, labels data or changes settings.
+See [MuPRO first-start extension](agent-muferro-run-1.md) for exact binding and crash behavior; old frozen sessions
+keep their original tools and prompts. A turn that leaves drafts to review ends with
 `awaiting_user` items (`apply_draft`, then `run_rows` once applied); before the next message is answered, `observed`
 records what people did about them. `get` adds `usage` (planner turns and the session's requests). A session view holds at most 1000 events: `get` pages with `offset`/`limit`, and
 without them (and in every other view) shows the newest 1000 with `total`. `export` and its check read the log once.
-At most one running session per project and two per service (`busy`). Sessions never change the revision. All `project.agent.*` methods except `decide` are in the script catalog.
+At most one running session per project and two per service (`busy`). Sessions never change the revision.
+`decide` and the four `run_target/run_plan/run_decide/run_observe` methods are desktop-only; other
+`project.agent.*` methods are in the script catalog. Session views optionally add the selected `run_target` and
+up to 20 pending/recent `run_approvals` cards, independent of event pagination.
 `project.agent.decide` is the person's decision on an `apply_draft` item from the desktop (scripts get `unsupported`):
 it checks the item is open, the draft pending with the digest shown and `base_revision == expected_revision ==` the
 current revision, records `approval_decided` (this computer's user and host, `authenticated: false`), applies or

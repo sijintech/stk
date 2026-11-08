@@ -10,12 +10,15 @@
 #include "stk/app/project_table_view.hh"
 #include "stk/app/shell.hh"
 #include "stk/wm/window.hh"
+#include "stk/ui/utf8.hh"
 #include "archive_controls.hh"
 #include "model_gate.hh"
 #include "project_context_picker.hh"
 #include "project_navigation.hh"
 #include "project_labels.hh"
 #include "editor_text.hh"
+#include "simulation_target.hh"
+#include "stk/app/jobs_state.hh"
 
 #include <algorithm>
 #include <chrono>
@@ -137,6 +140,32 @@ ui::LogBuffer wrapped_text(std::string text, const float width, EditorContext &c
     }
   }
   else { result.append(text); }
+  return result;
+}
+
+/** LogView scrolls vertically only. Wrap on UTF-8 boundaries without dropping even a space inside a JSON value. */
+std::optional<ui::LogBuffer> frozen_plan_text(const std::string &text, const float width, EditorContext &ctx)
+{
+  if (!ctx.ui || width <= 0) { return std::nullopt; }
+  ui::LogBuffer result(std::numeric_limits<size_t>::max());
+  size_t begin = 0;
+  float used = 0;
+  for (size_t p = 0; p < text.size();) {
+    const size_t next = ui::utf8::next(text, p);
+    if (text[p] == '\n') {
+      result.append(text.substr(begin, p - begin) + "\n"); begin = next; used = 0;
+    }
+    else {
+      const float advance = ctx.ui->measurer().width(std::string_view(text).substr(p, next - p), ctx.ui->style().mono);
+      if (advance > width) { return std::nullopt; }  // cannot show a complete glyph: never unlock approval
+      if (used + advance > width && p > begin) {
+        result.append(text.substr(begin, p - begin) + "\n"); begin = p; used = 0;
+      }
+      used += advance;
+    }
+    p = next;
+  }
+  if (begin < text.size()) { result.append(text.substr(begin) + "\n"); }
   return result;
 }
 
@@ -273,7 +302,12 @@ class AIEditor final : public Editor {
  private:
   /** ``endpoint`` is a model endpoint ID (empty: the built-in Token Plan). ``automatic``: the service chooses the
    * endpoint and model for each question (models.route, S1d); the default where the service offers it. */
-  struct Draft { std::string text, model, endpoint, agent_text; bool model_initialized = false, automatic = true; int intent = 0; };
+  struct Draft {
+    std::string text, model, endpoint, agent_text;
+    bool model_initialized = false, automatic = true, allow_prepare = false;
+    int intent = 0;
+    SimulationTarget run_target;  // draft controls only; never restored as an active authorization
+  };
   static constexpr int kAgentIntent = 3;
 
   /** An automatically routed question in flight (S1d): its ranked candidates, those tried, and what it waits for.
@@ -1228,9 +1262,11 @@ class AIEditor final : public Editor {
                             {{"user", io::get_string(by, "user")}, {"host", io::get_string(by, "host")}}));
       }
       else if (kind == "approval_receipt") {
-        line(!event.value("ok", false) ? catalog.format("ai.agent.receipt_failed", {{"error", io::get_string(event, "error")}}) :
+        const auto outcome = io::get_string(event, "outcome");
+        if (!outcome.empty()) { line(std::string(catalog.tr_or("ai.agent.run.outcome." + outcome, outcome))); }
+        else { line(!event.value("ok", false) ? catalog.format("ai.agent.receipt_failed", {{"error", io::get_string(event, "error")}}) :
              event.contains("applied_revision") ? catalog.format("ai.agent.receipt_ok", {{"revision", std::to_string(io::get_int(event, "applied_revision", -1))}})
-                                                : std::string(ctx.tr("ai.agent.receipt_done")));
+                                                : std::string(ctx.tr("ai.agent.receipt_done"))); }
       }
       else if (kind == "policy" && event.contains("fallback")) {
         line(catalog.format("ai.agent.fallback", {{"model", io::get_string(event.at("fallback"), "model")}}));
@@ -1249,11 +1285,14 @@ class AIEditor final : public Editor {
     auto &agent = state.agent();
     const auto &catalog = ctx.store.catalog();
     const std::string handle = state.project()->handle;
-    if (agent_opening_ != handle) { agent_opening_ = handle; shown_agent_.clear(); agent_timeline_.clear(); agent_navigation_error_.clear(); }
+    if (agent_opening_ != handle) {
+      agent_opening_ = handle; shown_agent_.clear(); agent_timeline_.clear(); agent_navigation_error_.clear();
+      draft.allow_prepare = false;  // reopening a project restores its text, never permission to prepare
+    }
     poll_agent(ctx, agent);
     const bool enabled = !state.busy() && !agent.busy();
     intent_dropdown(layout, ctx, state, draft);
-    hint(layout, ctx, "ai.agent.intro");
+    hint(layout, ctx, agent.runs_supported() ? "ai.agent.intro_runs" : "ai.agent.intro");
     if (!agent.error().empty()) { layout.paragraph(agent.error()); }
     if (!agent_navigation_error_.empty()) { layout.paragraph(agent_navigation_error_); }
     // The planner: a model on this computer or the organization's network (v1), chosen by the service.
@@ -1300,6 +1339,7 @@ class AIEditor final : public Editor {
       const float height = ctx.draw ? float(ctx.draw->rect.height()) : 800.0f;
       layout.log_view("ai_agent_timeline", agent_timeline_, std::clamp(height / unit - 24.0f, 6.0f, 22.0f));
       agent_cards(layout, ctx, state, view);
+      agent_run_cards(layout, ctx, state);
       const auto usage = view.value("usage", Json::object());
       if (!usage.empty()) {
         const auto planner = usage.value("planner", Json::object()), requests = usage.value("requests", Json::object());
@@ -1312,7 +1352,7 @@ class AIEditor final : public Editor {
       actions.button("ai_agent_cancel", ctx.tr("discussion.requests.cancel"), [&agent] { agent.cancel(); })
           .disable(!enabled || !running);
       actions.button("ai_agent_continue", ctx.tr("ai.agent.continue"), [&agent] { agent.start(); })
-          .disable(!enabled || running || state_name != "ready").tip(ctx.tr("ai.agent.continue.tip"));
+          .disable(!enabled || running || state_name != "ready" || agent.target_pending()).tip(ctx.tr("ai.agent.continue.tip"));
       if (auto *record = layout.panel("ai_agent_record", ctx.tr("ai.agent.record"), false)) {
         record->paragraph(catalog.format("ai.agent.chain", {{"events", std::to_string(io::get_int(view, "total", 0))},
             {"digest", io::get_string(view, "chain_sha256").substr(0, 16)}}));
@@ -1331,16 +1371,132 @@ class AIEditor final : public Editor {
     }
     else if (!agent.selected().empty()) { layout.paragraph(ctx.tr("ai.loading")); }
     layout.separator();
+    Json simulation = nullptr;
+    bool target_valid = true;
+    std::string connection;
+    std::optional<Json> options;
+    if (agent.runs_supported()) {
+      layout.checkbox("ai_agent_allow_prepare", ctx.tr("ai.agent.run.allow_prepare"), ui::bind(draft.allow_prepare))
+          .disable(!enabled || running).tip(ctx.tr("ai.agent.run.allow_prepare.tip"));
+      if (draft.allow_prepare) {
+        auto &target = layout.box();
+        hint(target, ctx, "ai.agent.run.target_hint");
+        connection = draft.run_target.runtime_controls(target, ctx);
+        options = draft.run_target.options_controls(target, ctx, "muferro/1");
+        target_valid = draft.run_target.matches(ctx.store.jobs(), connection, options);
+        if (target_valid) { simulation = {{"connection", connection}, {"options", *options}}; }
+      }
+      else { hint(layout, ctx, "ai.agent.run.disabled"); }
+      const auto configured = agent.view().value("run_target", Json());
+      if (configured.is_object()) {
+        layout.paragraph(catalog.format("ai.agent.run.configured", {
+            {"runtime", SimulationTarget::runtime_name(ctx, io::get_string(configured, "connection"))}}));
+      }
+      if (agent.target_pending()) { hint(layout, ctx, "ai.agent.run.target_pending"); }
+      if (!agent.selected().empty()) {
+        const auto session = agent.selected();
+        layout.button("ai_agent_set_target", ctx.tr(draft.allow_prepare ? "ai.agent.run.set_target" : "ai.agent.run.clear_target"),
+            [&agent, &state, &draft, store = &ctx.store, handle, session, simulation, connection, options] {
+          if (!state.project() || state.project()->handle != handle || agent.selected() != session) { return; }
+          if (!simulation.is_null() && (!draft.allow_prepare || !draft.run_target.matches(store->jobs(), connection, options))) { return; }
+          agent.set_run_target(simulation);
+        }).disable(!enabled || running || !target_valid);
+      }
+    }
     // A message the service saved is no longer a draft (the same words typed again stay in the box).
     if (const auto sent = agent.take_sent(); !sent.empty() && sent == draft.agent_text) { draft.agent_text.clear(); }
     auto &input = layout.text_area("ai_agent_text/" + handle, ui::bind(draft.agent_text), {.max_length = 8192, .visible_lines = 3});
     const bool has_text = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
         !ctx.ui->edit_state()->text().empty() : !draft.agent_text.empty();
     const bool new_session = agent.selected().empty();
-    layout.button("ai_agent_send", ctx.tr(new_session ? "ai.agent.start" : "ai.agent.say"), [&agent, &state, handle, &draft] {
-      if (state.project() && state.project()->handle == handle) { agent.ask(draft.agent_text); }
+    const auto session = agent.selected();
+    const bool with_target = agent.runs_supported();
+    layout.button("ai_agent_send", ctx.tr(new_session ? "ai.agent.start" : "ai.agent.say"),
+        [&agent, &state, store = &ctx.store, handle, session, &draft, with_target, simulation, connection, options] {
+      if (!state.project() || state.project()->handle != handle || agent.selected() != session) { return; }
+      if (with_target) {
+        if (draft.allow_prepare != !simulation.is_null() ||
+            (!simulation.is_null() && !draft.run_target.matches(store->jobs(), connection, options))) { return; }
+        agent.ask(draft.agent_text, simulation);
+      }
+      else { agent.ask(draft.agent_text); }
     }).disable(!enabled || !has_text || running || state_name == "ready" || state_name == "ended" ||
-               (new_session && !choice.is_object()));
+               !target_valid || (new_session && !choice.is_object()));
+  }
+
+  void agent_run_cards(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
+  {
+    auto &agent = state.agent();
+    if (!agent.runs_supported()) { return; }
+    const auto handle = state.project()->handle, session = agent.selected();
+    const auto &catalog = ctx.store.catalog();
+    const bool enabled = !state.busy() && !agent.busy();
+    // Buffers are transient and tied to the displayed opening/session and exact complete result.
+    const auto origin = handle + "\n" + session;
+    if (run_plan_origin_ != origin) {
+      run_plan_origin_ = origin; run_plan_text_.clear(); run_plan_logs_.clear(); run_plan_readable_.clear();
+    }
+    for (const auto &entry : agent.run_cards()) {
+      const auto item = entry.at("item");
+      const auto id = io::get_string(item, "item_id"), sha = io::get_string(item, "plan_sha256");
+      auto &card = layout.box();
+      card.paragraph(catalog.format("ai.agent.run.card", {{"run", io::get_string(item, "run_id")}}));
+      card.paragraph(catalog.format("ai.agent.run.digest", {{"digest", sha},
+          {"revision", std::to_string(io::get_int(item, "expected_revision", -1))}}));
+      const auto bound = [&state, &agent, handle, session] {
+        return state.project() && state.project()->handle == handle && agent.selected() == session;
+      };
+      card.button("ai_agent_run_read/" + id, ctx.tr("ai.agent.run.read_plan"), [&agent, bound, item] {
+        if (bound()) { agent.read_run_plan(item); }
+      }).disable(!enabled);
+      bool displayed = false;
+      if (const auto *plan = agent.run_plan(item); plan && ctx.ui) {
+        const auto key = id + "\n" + sha;
+        const std::string text = plan->dump(2);  // complete JSON, including resources, inputs and every task
+        // Reserve root/card padding, text margins and the vertical scrollbar; rewrap after resize or font changes.
+        const auto &style = ctx.ui->style();
+        const float width = layout.block().rect().w - 8 * style.unit - 2 * style.text_margin - style.scrollbar;
+        const auto signature = std::to_string(width) + "/" + std::to_string(style.mono.size_px) + "\n" + text;
+        if (run_plan_text_[key] != signature) {
+          run_plan_text_[key] = signature;
+          auto buffer = frozen_plan_text(text, width, ctx);
+          run_plan_readable_[key] = buffer.has_value();
+          if (buffer) { run_plan_logs_[key] = std::move(*buffer); }
+        }
+        if (run_plan_readable_[key]) {
+          card.paragraph(ctx.tr("ai.agent.run.full_plan"));
+          card.log_view("ai_agent_run_plan/" + id, run_plan_logs_.at(key), 14);
+          displayed = true;
+        }
+        else { hint(card, ctx, "ai.agent.run.read_first"); }
+      }
+      else { hint(card, ctx, "ai.agent.run.read_first"); }
+      const auto receipt = entry.value("receipt", Json());
+      const bool consumed = entry.value("decision", Json()).is_object() || receipt.is_object();
+      if (consumed) {
+        const auto outcome = io::get_string(receipt, "outcome", "pending");
+        card.paragraph(std::string(catalog.tr_or("ai.agent.run.outcome." + outcome, outcome)));
+        const auto status = io::get_string(receipt, "run_status");
+        if (!status.empty()) {
+          card.paragraph(catalog.format("ai.agent.run.status", {
+              {"status", std::string(catalog.tr_or("workflow.run.status." + status, status))}}));
+        }
+        hint(card, ctx, "ai.agent.run.observe_only");
+        card.button("ai_agent_run_observe/" + id, ctx.tr("ai.agent.run.observe"), [&agent, bound, item] {
+          if (bound()) { agent.observe_run(item); }
+        }).disable(!enabled);
+      }
+      else {
+        if (io::get_int(item, "expected_revision", -1) != state.project()->revision) { hint(card, ctx, "ai.agent.run.stale"); }
+        auto &actions = card.row();
+        actions.button("ai_agent_run_start/" + id, ctx.tr("ai.agent.run.approve"), [&agent, bound, item] {
+          if (bound()) { agent.decide_run(item, "start"); }
+        }).disable(!displayed || !agent.can_decide_run(item, "start"));
+        actions.button("ai_agent_run_decline/" + id, ctx.tr("ai.agent.run.decline"), [&agent, bound, item] {
+          if (bound()) { agent.decide_run(item, "decline"); }
+        }).disable(!agent.can_decide_run(item, "decline"));
+      }
+    }
   }
 
   /** What the session waits for: a draft to review and apply (through the session, project.agent.decide), then the
@@ -1353,6 +1509,7 @@ class AIEditor final : public Editor {
     const bool enabled = !state.busy() && !agent.busy() && !agent.running();
     for (const auto &item : view.value("awaiting", Json::array())) {
       const auto kind = io::get_string(item, "kind"), item_id = io::get_string(item, "item_id");
+      if (kind == "start_run") { continue; }
       auto &card = layout.box();
       if (kind == "apply_draft") {
         const auto draft_id = io::get_string(item, "draft_id");
@@ -1409,6 +1566,10 @@ class AIEditor final : public Editor {
   ui::LogBuffer transcript_, raw_reply_;
   std::string pending_session_, pending_project_, agent_opening_, shown_agent_, agent_navigation_error_;
   ui::LogBuffer agent_timeline_;
+  std::string run_plan_origin_;
+  std::map<std::string, std::string> run_plan_text_;
+  std::map<std::string, ui::LogBuffer> run_plan_logs_;
+  std::map<std::string, bool> run_plan_readable_;
 };
 }  // namespace
 

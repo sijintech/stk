@@ -6,17 +6,17 @@ Levels are STK's own, never taken from a model or another service:
 - ``record``: appends an immutable record (a context, a discussion message, a request) without changing the revision.
 - ``model``: sends one request through the model gateway (its checks apply).
 - ``draft``: saves a draft that a person reviews; never applies it.
-- ``prepare_run``: freezes a run plan (no submission). No agent tool in v1 (owner decision 3).
+- ``prepare_run``: freezes an explicitly selected MuPRO run plan; a person separately approves its first start.
 - ``submit_run``: starts, submits or cancels computation, locally or on a Runtime. Never for the agent.
 - ``project_edit``: changes the project's revision, labels, archive or settings, or files on this computer. Never.
 - ``external_network``: connects to other computers or services (Runtime, hub, transfers). Never in v1.
 
 The tests check that every operation in the bridge's script catalog is classified here, and that tools use only
-operations at the first four levels.
+operations at the declared agent levels; submission remains desktop-only.
 """
 
-AGENT_LEVELS = ("read", "record", "model", "draft")
-LEVELS = (*AGENT_LEVELS, "prepare_run", "submit_run", "project_edit", "external_network")
+AGENT_LEVELS = ("read", "record", "model", "draft", "prepare_run")
+LEVELS = (*AGENT_LEVELS, "submit_run", "project_edit", "external_network")
 
 # operation -> (level, why the agent does not use it, or "" when a tool uses it)
 OPERATIONS = {
@@ -114,7 +114,7 @@ OPERATIONS = {
     "project.workflows.list": ("read", "not needed: project_outline lists workflows"),
     "project.workflows.validate": ("read", "not needed in v1"),
     "project.workflows.choices": ("read", "not needed in v1"),
-    "project.workflow_runs.prepare": ("prepare_run", "the AI never prepares runs in v1 (owner decision 3)"),
+    "project.workflow_runs.prepare": ("prepare_run", ""),  # only the bounded MuPRO tool uses it
     "project.workflow_runs.get": ("read", ""),
     "project.workflow_runs.list": ("read", ""),
     "project.workflow_runs.start": ("submit_run", "a person starts runs"),
@@ -217,6 +217,10 @@ OPERATIONS = {
 
 # Desktop-only methods that are deliberately not in the script catalog.
 DESKTOP_ONLY = {"project.agent.decide": ("project_edit", "a person approves a draft from the session card"),
+                "project.agent.run_target": ("record", "a person selects Runtime and resources for this session"),
+                "project.agent.run_plan": ("read", "a person reads the complete frozen run before approving"),
+                "project.agent.run_decide": ("submit_run", "a person consumes a single first-start approval"),
+                "project.agent.run_observe": ("read", "observe the original approval without dispatch"),
                 "workspace.export": ("project_edit", "a person exports a portable workspace from the desktop"),
                 "workspace.preview": ("read", "the desktop previews a local workspace package"),
                 "workspace.import": ("project_edit", "the desktop imports to a new local directory"),
@@ -283,6 +287,7 @@ TOOL_USES = {
     "draft_status": ["project.drafts.get"],
     "find_runs": ["project.workflow_runs.list", "project.workflow_runs.get"],
     "capture_run_results": ["project.workflow_runs.get", "project.contexts.capture"],
+    "prepare_muferro_run": ["project.workflow_runs.prepare"],
 }
 
 

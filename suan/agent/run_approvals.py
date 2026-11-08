@@ -59,6 +59,34 @@ class RunApprovals:
     def __init__(self, store):
         self.store = store
 
+    def cards(self, session_id):
+        """Bounded pending cards and recent consumed cards, independently of event pagination."""
+        _, events = self.store.agent_sessions.events(session_id)
+        cards = []
+        for item in reversed(_offers(events)):
+            receipt = next((e for e in reversed(events) if e["kind"] == "approval_receipt"
+                            and e.get("item_id") == item["item_id"]), None)
+            cards.append({"item": item, "decision": _decision(events, item["item_id"]), "receipt": receipt})
+        pending = [c for c in cards if c["decision"] is None]
+        return (pending + [c for c in cards if c["decision"] is not None])[:MAX_PENDING]
+
+    def decision(self, session_id, item_id):
+        _, events = self.store.agent_sessions.events(session_id)
+        _item(events, item_id)
+        return _decision(events, item_id)
+
+    def review(self, session_id, item_id):
+        """Read the original complete frozen plan; this is never a start or a recovery."""
+        with self.store._connect() as db:
+            _, events = self.store.agent_sessions._read(db, session_id)
+            item = _item(events, item_id)
+            plan, run_events = self.store.workflow_runs._read(db, item["run_id"])
+            row = db.execute("SELECT request_sha256 FROM workflow_run_plans WHERE id=?", (item["run_id"],)).fetchone()
+            if _hash(plan) != item["plan_sha256"] or row[0] != item["request_sha256"]:
+                raise ProjectError("The original run approval evidence no longer matches")
+            run = {**plan, "plan_sha256": item["plan_sha256"], **self.store.workflow_runs._state(plan, run_events)}
+            return {"item": item, "run": run}
+
     def offer(self, session_id, *, turn, call_id, run_id):
         """Bind an existing run to its original frozen tool call, atomically and idempotently."""
         if run_id != run_identity(session_id, turn, call_id):
@@ -141,7 +169,8 @@ class RunApprovals:
                 if any(e["step"] == "" and e["status"] == "started" for e in run_events):
                     raise RevisionConflict("The run has already been started")
             payload = {"item_id": item_id, "item_kind": "start_run", "decision": decision,
-                       "approval": _envelope(item), "by": {"user": by, "authenticated": False}, "at": _now()}
+                       "run_id": item["run_id"], "approval": _envelope(item),
+                       "by": {"user": by, "authenticated": False}, "at": _now()}
             event_id = sessions._append(db, session_id, item["source_turn"], "approval_decided", payload)
             if decision == "decline":
                 sessions._append(db, session_id, item["source_turn"], "approval_receipt",
@@ -159,7 +188,8 @@ class RunApprovals:
             if decided is None:
                 return {"outcome": "pending", "item": item}
             if decided["decision"] == "decline":
-                return {"outcome": "declined", "item": item}
+                return {"outcome": "declined", "item_id": item_id, "run_id": item["run_id"],
+                        "approval": _envelope(item), "ok": True, "decision": "decline"}
             plan, run_events = self.store.workflow_runs._read(db, item["run_id"])
             stored = db.execute("SELECT request_sha256 FROM workflow_run_plans WHERE id=?", (item["run_id"],)).fetchone()
             if _hash(plan) != item["plan_sha256"] or stored[0] != item["request_sha256"]:
