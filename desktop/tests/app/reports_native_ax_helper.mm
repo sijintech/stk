@@ -3,6 +3,8 @@
 #include "reports_native_ax_protocol.hh"
 #include <ApplicationServices/ApplicationServices.h>
 #include <poll.h>
+#include <fcntl.h>
+#include <limits.h>
 #include <unistd.h>
 #include <algorithm>
 #include <cerrno>
@@ -30,7 +32,30 @@ struct Probe {
   const pid_t parent = getppid();
   const Clock::time_point began = Clock::now();
   ax::Response response;
-  bool failed = false;
+  bool failed = false, bound = false;
+  ax::Request binding;
+  uint64_t sequence = 0, dropped = 0;
+  size_t node_index = ax::kNodeLimit, node_depth = ax::kDepthLimit + 1;
+  ax::TreeRole node_role = ax::TreeRole::Other;
+  void node(size_t index, size_t depth, ax::TreeRole role) { node_index = index; node_depth = depth; node_role = role; }
+  void mark(ax::ProgressStage stage, ax::ProgressEdge edge, ax::Phase phase = ax::Phase::None,
+            ax::Operation operation = ax::Operation::None, ax::Attribute attribute = ax::Attribute::None,
+            int32_t error = 0) {
+    if (!bound) return;
+    ++sequence;
+    if (sequence > ax::kProgressRecordLimit || elapsed() >= 2000) { ++dropped; return; }
+    ax::Progress value;
+    value.request_generation = binding.request_generation; value.navigation_generation = binding.navigation_generation;
+    value.viewport_generation = binding.viewport_generation; value.sequence = sequence; value.stage = stage; value.edge = edge;
+    value.call_sequence = stage == ax::ProgressStage::Api ? response.calls : 0;
+    value.phase = phase; value.operation = operation; value.attribute = attribute;
+    value.node_index = node_index; value.node_depth = node_depth; value.role = node_role;
+    value.elapsed_ms = elapsed(); value.api_error = error; value.dropped = dropped;
+    const auto bytes = ax::encode(value);
+    static_assert(ax::kProgressBytes <= PIPE_BUF);
+    // One atomic nonblocking attempt: diagnostics must never wait for pipe capacity or restart the clock.
+    if (write(ax::kProgressFd, bytes.data(), bytes.size()) != ssize_t(bytes.size())) ++dropped;
+  }
   double elapsed() const { return std::chrono::duration<double, std::milli>(Clock::now() - began).count(); }
   bool reject(ax::Reason reason, ax::Status status = ax::Status::Rejected) {
     if (!failed) { failed = true; response.reason = reason; response.status = status; } return false;
@@ -44,7 +69,9 @@ struct Probe {
   template<class F> std::optional<AXError> invoke(ax::Phase phase, ax::Operation operation, ax::Attribute attribute, F fn) {
     if (!check()) return std::nullopt;
     response.phase = phase; response.operation = operation; response.attribute = attribute; ++response.calls;
+    mark(ax::ProgressStage::Api, ax::ProgressEdge::Enter, phase, operation, attribute);
     const AXError error = fn(); // The external parent watchdog can kill this process if the API blocks.
+    mark(ax::ProgressStage::Api, ax::ProgressEdge::Returned, phase, operation, attribute, int32_t(error));
     if (!check()) return std::nullopt;
     return error;
   }
@@ -71,7 +98,11 @@ bool read_request(Probe &p, ax::Request &q) {
   p.response.request_generation = q.request_generation; p.response.navigation_generation = q.navigation_generation;
   p.response.viewport_generation = q.viewport_generation;
   if (q.parent_pid != uint64_t(p.parent)) return p.reject(ax::Reason::NotParent, ax::Status::InvalidRequest);
-  return p.check();
+  if (!p.check()) return false;
+  p.binding = q; p.bound = true;
+  // Before this correlated marker, absence of progress means startup/request-read is still unknown.
+  p.mark(ax::ProgressStage::Request, ax::ProgressEdge::Returned);
+  return true;
 }
 bool attribute(Probe &p, AXUIElementRef e, CFStringRef name, ax::Attribute category, ax::Phase phase, Owned<CFTypeRef> &out) {
   CFTypeRef raw = nullptr;
@@ -155,9 +186,13 @@ bool descendant(const std::vector<Node> &nodes, size_t child, size_t ancestor) {
 bool run(Probe &p, const ax::Request &q) {
   if (!p.check()) return false;
   auto &r = p.response;
+  p.mark(ax::ProgressStage::Trust, ax::ProgressEdge::Enter);
   r.trusted = AXIsProcessTrusted(); // No prompt/options, entitlement change, or TCC request.
+  p.mark(ax::ProgressStage::Trust, ax::ProgressEdge::Returned);
   if (!p.check()) return false;
+  p.mark(ax::ProgressStage::Application, ax::ProgressEdge::Enter);
   Owned<AXUIElementRef> app(AXUIElementCreateApplication(getppid()));
+  p.mark(ax::ProgressStage::Application, ax::ProgressEdge::Returned);
   if (!app.p) return p.reject(ax::Reason::ApplicationUnavailable);
   Owned<CFArrayRef> windows;
   if (!array(p, app.p, kAXWindowsAttribute, ax::Attribute::Windows, ax::Phase::Window, ax::kWindowLimit, false, windows)) return false;
@@ -186,7 +221,9 @@ bool run(Probe &p, const ax::Request &q) {
     if (r.windows + nodes.size() >= ax::kNodeLimit || next.depth > ax::kDepthLimit) return p.reject(ax::Reason::TreeBudget);
     for (const auto &old : nodes) if (CFEqual(old.element.p, next.element.p)) return p.reject(ax::Reason::SharedTree);
     Node node{std::move(next.element), next.parent, next.depth, Role::Other, {}};
+    p.node(nodes.size(), next.depth, Role::Other);
     if (!role(p, node.element.p, ax::Phase::Tree, node.role)) return false;
+    p.node(nodes.size(), next.depth, node.role);
     if (node.role != Role::Other && !frame(p, node.element.p, ax::Phase::Tree, node.rect)) return false;
     const size_t index = nodes.size(); nodes.push_back(std::move(node));
     r.tree_nodes = nodes.size(); r.nodes = r.windows + r.tree_nodes; r.deepest = std::max(r.deepest, uint64_t(next.depth));
@@ -204,20 +241,29 @@ bool run(Probe &p, const ax::Request &q) {
   std::vector<ax::TreeNode> topology;
   topology.reserve(nodes.size());
   for (const auto &node : nodes) topology.push_back({node.parent, node.role, node.rect});
+  p.node(ax::kNodeLimit, ax::kDepthLimit + 1, Role::Other);
+  p.mark(ax::ProgressStage::Select, ax::ProgressEdge::Enter);
   const auto selected = ax::select_viewport(q, topology);
+  r.witness = selected.witness;
+  p.mark(ax::ProgressStage::Select, ax::ProgressEdge::Returned);
   r.viewport_matches = selected.matches; r.viewport_chains = selected.chains;
   r.viewport_chain_length = selected.chain_length; r.webareas = selected.webareas;
   if (!selected.complete) return p.reject(selected.reason);
   const size_t viewport = selected.viewport, webarea = selected.webarea;
   size_t slider = ax::kNodeLimit;
   // Every coextensive wrapper in the proven chain must refer to this exact own window.
-  for (const auto &node : nodes)
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    const auto &node = nodes[i];
+    p.node(i, node.depth, node.role);
     if (node.role == Role::Group && ax::same_rect(node.rect, q.viewport) &&
         !same_window(p, node.element.p, window.p)) return false;
+  }
+  p.node(webarea, nodes[webarea].depth, nodes[webarea].role);
   if (!same_window(p, nodes[webarea].element.p, window.p)) return false;
   for (size_t i = 0; i < nodes.size(); ++i) {
     const Node &node = nodes[i];
     if (node.role != Role::Slider || !descendant(nodes, i, webarea)) continue;
+    p.node(i, node.depth, node.role);
     ++r.sliders;
     if (!ax::contains(q.video, node.rect) || node.rect.width < q.video.width * .20 || node.rect.height < 2 ||
         node.rect.width < node.rect.height * 4) continue;
@@ -235,11 +281,15 @@ bool run(Probe &p, const ax::Request &q) {
   }
   if (r.candidates != 1) return p.reject(r.candidates ? ax::Reason::MultipleSliders : ax::Reason::NoSlider);
   ax::Rect last_window, last_viewport, last_slider;
-  if (!frame(p, window.p, ax::Phase::Recheck, last_window) ||
-      !frame(p, nodes[viewport].element.p, ax::Phase::Recheck, last_viewport) ||
-      !frame(p, nodes[slider].element.p, ax::Phase::Recheck, last_slider)) return false;
+  p.node(0, nodes[0].depth, nodes[0].role);
+  if (!frame(p, window.p, ax::Phase::Recheck, last_window)) return false;
+  p.node(viewport, nodes[viewport].depth, nodes[viewport].role);
+  if (!frame(p, nodes[viewport].element.p, ax::Phase::Recheck, last_viewport)) return false;
+  p.node(slider, nodes[slider].depth, nodes[slider].role);
+  if (!frame(p, nodes[slider].element.p, ax::Phase::Recheck, last_slider)) return false;
   if (!ax::same_rect(last_window, q.window) || !ax::same_rect(last_viewport, q.viewport) || !ax::same_rect(last_slider, r.slider))
     return p.reject(ax::Reason::GeometryChanged);
+  p.node(ax::kNodeLimit, ax::kDepthLimit + 1, Role::Other);
   Owned<CFArrayRef> last_windows;
   if (!array(p, app.p, kAXWindowsAttribute, ax::Attribute::Windows, ax::Phase::Recheck, ax::kWindowLimit, false, last_windows)) return false;
   if (!last_windows.p || !CFEqual(last_windows.p, windows.p)) return p.reject(ax::Reason::WindowsChanged);
@@ -248,11 +298,15 @@ bool run(Probe &p, const ax::Request &q) {
 }
 }
 int main(int argc, char *[]) {
+  const int progress_flags = fcntl(ax::kProgressFd, F_GETFL);
+  if (progress_flags < 0 || fcntl(ax::kProgressFd, F_SETFL, progress_flags | O_NONBLOCK) < 0) return 2;
   alarm(2); // Local backstop only; the parent still owns the absolute deadline, kill and reap.
   Probe probe; ax::Request request;
   if (argc != 1) probe.reject(ax::Reason::InvalidRequest, ax::Status::InvalidRequest);
   else if (read_request(probe, request)) run(probe, request);
   probe.check(); probe.response.elapsed_ms = probe.elapsed();
+  probe.node(ax::kNodeLimit, ax::kDepthLimit + 1, ax::TreeRole::Other);
+  probe.mark(ax::ProgressStage::Response, ax::ProgressEdge::Enter);
   auto bytes = ax::encode(probe.response);
   // Fixed numeric wire: no arbitrary text, label, URL, stderr diagnostics or private tokens.
   size_t sent = 0;
@@ -262,5 +316,6 @@ int main(int argc, char *[]) {
     if (n <= 0) return 2;
     sent += size_t(n);
   }
+  probe.mark(ax::ProgressStage::Response, ax::ProgressEdge::Returned);
   return probe.failed || probe.response.status != ax::Status::Success ? 1 : 0;
 }

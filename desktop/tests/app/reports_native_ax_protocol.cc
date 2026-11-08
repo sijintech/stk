@@ -8,7 +8,8 @@
 
 namespace stk::reports_native_test::ax {
 namespace {
-constexpr uint64_t kRequestMagic = 0x53544b4158520001ULL, kResponseMagic = 0x53544b4158530002ULL;
+constexpr uint64_t kRequestMagic = 0x53544b4158520001ULL, kResponseMagic = 0x53544b4158530003ULL;
+constexpr uint64_t kProgressMagic = 0x53544b4158500001ULL;
 template<size_t N> void word(std::array<uint8_t, N> &bytes, size_t &at, uint64_t value) {
   for (int shift = 56; shift >= 0; shift -= 8) bytes[at++] = uint8_t(value >> shift);
 }
@@ -110,6 +111,24 @@ ViewportSelection select_viewport(const Request &q, std::span<const TreeNode> no
   for (size_t i = 0; i < nodes.size(); ++i)
     if (nodes[i].role == TreeRole::WebArea && below(i, outermost)) { ++out.webareas; webarea = i; }
   if (out.webareas != 1) return reject(out.webareas ? Reason::MultipleWebareas : Reason::NoWebarea);
+  // Record only already-validated numeric ancestry. This does not publish successful selection indices.
+  auto &witness = out.witness;
+  witness.available = true; witness.outer = outermost; witness.inner = innermost; witness.webarea = webarea;
+  witness.relation = below(webarea, innermost) ? TopologyRelation::WebareaBelowInner :
+      below(innermost, webarea) ? TopologyRelation::WebareaAboveInner : TopologyRelation::Divergent;
+  std::array<bool, kNodeLimit> included{};
+  for (auto start : {innermost, webarea}) {
+    for (size_t step = 0; step <= kDepthLimit && start < nodes.size(); ++step) {
+      included[start] = true; start = nodes[start].parent;
+    }
+  }
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    if (!included[i]) continue;
+    if (witness.count >= kWitnessLimit) { witness = {}; return reject(Reason::TreeBudget); }
+    const auto &node = nodes[i];
+    witness.rows[witness.count++] = {i, node.parent, node.role, depths[i],
+        node.role == TreeRole::Group && same_rect(node.rect, q.viewport)};
+  }
   if (!below(webarea, innermost)) return reject(Reason::WebareaAssociation);
   if (!contains(nodes[webarea].rect, q.video)) return reject(Reason::WebareaGeometry);
   out.viewport = innermost; out.webarea = webarea; out.reason = Reason::Unique;
@@ -131,6 +150,19 @@ ResponseWire encode(const Response &r) {
        r.viewport_chains, r.viewport_chain_length, r.webareas, r.sliders, r.candidates,
        r.leaf_no_value, r.leaf_unsupported}) word(bytes, at, value);
   rect(bytes, at, r.slider); real(bytes, at, r.minimum); real(bytes, at, r.maximum); real(bytes, at, r.value);
+  const auto &w = r.witness;
+  for (auto value : {uint64_t(w.available), w.outer, w.inner, w.webarea, uint64_t(w.relation), w.count}) word(bytes, at, value);
+  for (const auto &row : w.rows)
+    for (auto value : {row.index, row.parent, uint64_t(row.role), row.depth, uint64_t(row.viewport_match)}) word(bytes, at, value);
+  return bytes;
+}
+ProgressWire encode(const Progress &r) {
+  ProgressWire bytes{}; size_t at = 0;
+  for (auto value : {kProgressMagic, r.request_generation, r.navigation_generation, r.viewport_generation,
+      r.sequence, uint64_t(r.stage), uint64_t(r.edge), r.call_sequence, uint64_t(r.phase),
+      uint64_t(r.operation), uint64_t(r.attribute), r.node_index, r.node_depth, uint64_t(r.role)}) word(bytes, at, value);
+  real(bytes, at, r.elapsed_ms);
+  word(bytes, at, uint64_t(int64_t(r.api_error))); word(bytes, at, r.dropped);
   return bytes;
 }
 bool decode(std::span<const uint8_t> bytes, Request &request) {
@@ -161,14 +193,133 @@ bool decode(std::span<const uint8_t> bytes, Response &response) {
       &r.sliders, &r.candidates, &r.leaf_no_value, &r.leaf_unsupported};
   for (auto *count : counts) *count = word(bytes, at);
   r.slider = rect(bytes, at); r.minimum = real(bytes, at); r.maximum = real(bytes, at); r.value = real(bytes, at);
+  const uint64_t available = word(bytes, at);
+  auto &w = r.witness;
+  w.outer = word(bytes, at); w.inner = word(bytes, at); w.webarea = word(bytes, at);
+  const uint64_t relation = word(bytes, at); w.count = word(bytes, at);
+  if (available > 1 || !enumeration<TopologyRelation>(relation) || w.count > kWitnessLimit) return false;
+  w.available = bool(available); w.relation = TopologyRelation(relation);
+  for (auto &row : w.rows) {
+    row.index = word(bytes, at); row.parent = word(bytes, at);
+    const auto role = word(bytes, at); row.depth = word(bytes, at); const auto match = word(bytes, at);
+    if (!enumeration<TreeRole>(role) || match > 1) return false;
+    row.role = TreeRole(role); row.viewport_match = bool(match);
+  }
   if (!std::isfinite(r.elapsed_ms) || r.elapsed_ms < 0 || r.calls > 100000 || r.nodes > kNodeLimit ||
       r.tree_nodes > kNodeLimit || r.deepest > kDepthLimit || r.windows > kWindowLimit ||
       r.window_matches > kWindowLimit || r.viewport_matches > kNodeLimit ||
       r.viewport_chains > r.viewport_matches || r.viewport_chain_length > r.viewport_matches || r.webareas > kNodeLimit ||
       r.sliders > kNodeLimit || r.candidates > kNodeLimit || r.leaf_no_value > kNodeLimit || r.leaf_unsupported > kNodeLimit ||
       !std::isfinite(r.slider.x) || !std::isfinite(r.slider.y) || !std::isfinite(r.slider.width) ||
-      !std::isfinite(r.slider.height) || !std::isfinite(r.minimum) || !std::isfinite(r.maximum) || !std::isfinite(r.value)) return false;
+      !std::isfinite(r.slider.height) || !std::isfinite(r.minimum) || !std::isfinite(r.maximum) || !std::isfinite(r.value) ||
+      !witness_valid(r)) return false;
   response = r; return true;
+}
+bool witness_valid(const Response &r) {
+  const auto &w = r.witness;
+  if (w.count > kWitnessLimit || !enumeration<TopologyRelation>(uint64_t(w.relation))) return false;
+  for (size_t i = size_t(w.count); i < kWitnessLimit; ++i) {
+    const auto &row = w.rows[i];
+    if (row.index || row.parent || row.role != TreeRole::Window || row.depth || row.viewport_match) return false;
+  }
+  if (!w.available) {
+    return w.count == 0 && w.outer == kNodeLimit && w.inner == kNodeLimit && w.webarea == kNodeLimit &&
+        w.relation == TopologyRelation::Unknown && r.status != Status::Success && r.reason != Reason::WebareaAssociation;
+  }
+  if (w.count < 3 || r.tree_nodes > kNodeLimit || r.viewport_chains != 1 ||
+      r.viewport_matches == 0 || r.viewport_chain_length != r.viewport_matches || r.webareas != 1 ||
+      w.relation == TopologyRelation::Unknown) return false;
+  const auto find = [&](uint64_t index) -> const WitnessRow * {
+    for (size_t i = 0; i < w.count; ++i) if (w.rows[i].index == index) return &w.rows[i];
+    return nullptr;
+  };
+  uint64_t matches = 0;
+  for (size_t i = 0; i < w.count; ++i) {
+    const auto &row = w.rows[i];
+    if (row.index >= r.tree_nodes || !enumeration<TreeRole>(uint64_t(row.role)) ||
+        row.depth > kDepthLimit || row.depth > r.deepest || (i && row.index <= w.rows[i - 1].index)) return false;
+    if (!i) {
+      if (row.index != 0 || row.parent != kNodeLimit || row.role != TreeRole::Window || row.depth || row.viewport_match) return false;
+    }
+    else {
+      const auto *parent = find(row.parent);
+      if (!parent || row.parent >= row.index || row.depth != parent->depth + 1) return false;
+    }
+    if (row.viewport_match) {
+      if (row.role != TreeRole::Group) return false;
+      ++matches;
+    }
+  }
+  const auto *outer = find(w.outer), *inner = find(w.inner), *webarea = find(w.webarea);
+  if (!outer || !inner || !webarea || !outer->viewport_match || !inner->viewport_match ||
+      outer->role != TreeRole::Group || inner->role != TreeRole::Group || webarea->role != TreeRole::WebArea ||
+      matches != r.viewport_matches) return false;
+  const auto below = [&](uint64_t child, uint64_t ancestor) {
+    for (size_t step = 0; step <= kDepthLimit; ++step) {
+      const auto *row = find(child);
+      if (!row) return false;
+      if (child == ancestor) return true;
+      child = row->parent;
+    }
+    return false;
+  };
+  if (!below(w.inner, w.outer) || !below(w.webarea, w.outer)) return false;
+  // All viewport matches belong to that exact chain, with outer/inner its first/last matches.
+  const WitnessRow *first_match = nullptr, *last_match = nullptr;
+  for (size_t i = 0; i < w.count; ++i) if (w.rows[i].viewport_match) {
+    if (!below(w.inner, w.rows[i].index)) return false;
+    if (!first_match) first_match = &w.rows[i];
+    last_match = &w.rows[i];
+  }
+  if (!first_match || first_match->index != w.outer || last_match->index != w.inner) return false;
+  uint64_t webareas = 0;
+  for (size_t i = 0; i < w.count; ++i) {
+    const auto &row = w.rows[i];
+    if (!below(w.inner, row.index) && !below(w.webarea, row.index)) return false;
+    if (row.role == TreeRole::WebArea && below(row.index, w.outer)) ++webareas;
+  }
+  if (webareas != 1) return false;
+  const auto relation = below(w.webarea, w.inner) ? TopologyRelation::WebareaBelowInner :
+      below(w.inner, w.webarea) ? TopologyRelation::WebareaAboveInner : TopologyRelation::Divergent;
+  if (relation != w.relation) return false;
+  if (r.status == Status::Success && relation != TopologyRelation::WebareaBelowInner) return false;
+  return r.reason != Reason::WebareaAssociation || relation == TopologyRelation::WebareaAboveInner ||
+      relation == TopologyRelation::Divergent;
+}
+bool decode(std::span<const uint8_t> bytes, Progress &progress) {
+  if (bytes.size() != kProgressBytes) return false;
+  size_t at = 0; if (word(bytes, at) != kProgressMagic) return false;
+  Progress r;
+  r.request_generation = word(bytes, at); r.navigation_generation = word(bytes, at); r.viewport_generation = word(bytes, at);
+  r.sequence = word(bytes, at);
+  const auto stage = word(bytes, at), edge = word(bytes, at); r.call_sequence = word(bytes, at);
+  const auto phase = word(bytes, at), operation = word(bytes, at), attribute = word(bytes, at);
+  r.node_index = word(bytes, at); r.node_depth = word(bytes, at); const auto role = word(bytes, at);
+  r.elapsed_ms = real(bytes, at); const auto error = std::bit_cast<int64_t>(word(bytes, at)); r.dropped = word(bytes, at);
+  if (!enumeration<ProgressStage>(stage) || !enumeration<ProgressEdge>(edge) || !enumeration<Phase>(phase) ||
+      !enumeration<Operation>(operation) || !enumeration<Attribute>(attribute) || !enumeration<TreeRole>(role) ||
+      !r.request_generation || !r.navigation_generation || !r.viewport_generation || !r.sequence ||
+      r.sequence > kProgressRecordLimit || r.dropped > kProgressRecordLimit ||
+      !std::isfinite(r.elapsed_ms) || r.elapsed_ms < 0 || r.elapsed_ms >= 2000 ||
+      error < std::numeric_limits<int32_t>::min() || error > std::numeric_limits<int32_t>::max()) return false;
+  r.stage = ProgressStage(stage); r.edge = ProgressEdge(edge); r.phase = Phase(phase);
+  r.operation = Operation(operation); r.attribute = Attribute(attribute); r.role = TreeRole(role); r.api_error = int32_t(error);
+  if (r.node_index == kNodeLimit) {
+    if (r.node_depth != kDepthLimit + 1 || r.role != TreeRole::Other) return false;
+  }
+  else if (r.node_index > kNodeLimit || r.node_depth > kDepthLimit) return false;
+  if (r.edge == ProgressEdge::Enter && r.api_error) return false;
+  if (r.stage == ProgressStage::Api) {
+    if (!r.call_sequence || r.call_sequence > kProgressCallLimit || r.phase == Phase::None ||
+        r.operation == Operation::None || r.attribute == Attribute::None) return false;
+  }
+  else if (r.call_sequence || r.phase != Phase::None || r.operation != Operation::None ||
+      r.attribute != Attribute::None || r.api_error) return false;
+  progress = r; return true;
+}
+bool correlated(const Request &q, const Progress &p) {
+  return p.request_generation == q.request_generation && p.navigation_generation == q.navigation_generation &&
+      p.viewport_generation == q.viewport_generation;
 }
 bool accepted(const Request &q, const Response &r) {
   return valid_request(q) && r.status == Status::Success && r.reason == Reason::Unique && r.api_error == 0 &&
@@ -196,4 +347,8 @@ std::string_view name(Reason v) {
 std::string_view name(Phase v) { static constexpr const char *n[] = {"none","window","tree","bind","slider","recheck"}; return enum_name(v,n); }
 std::string_view name(Operation v) { static constexpr const char *n[] = {"none","attribute","attribute_count","array"}; return enum_name(v,n); }
 std::string_view name(Attribute v) { static constexpr const char *n[] = {"none","role","position","size","windows","children","window","enabled","min","max","value"}; return enum_name(v,n); }
+std::string_view name(TreeRole v) { static constexpr const char *n[] = {"window","group","scroll_area","webarea","slider","other"}; return enum_name(v,n); }
+std::string_view name(TopologyRelation v) { static constexpr const char *n[] = {"unknown","webarea_below_inner","webarea_above_inner","divergent"}; return enum_name(v,n); }
+std::string_view name(ProgressStage v) { static constexpr const char *n[] = {"request","trust","application","api","select","response"}; return enum_name(v,n); }
+std::string_view name(ProgressEdge v) { static constexpr const char *n[] = {"enter","returned"}; return enum_name(v,n); }
 } // namespace stk::reports_native_test::ax

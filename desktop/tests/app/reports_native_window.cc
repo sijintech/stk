@@ -69,6 +69,37 @@ Json media_json(const Media &media)
       {"navigation_generation", media.navigation_generation}};
 }
 #  ifdef __APPLE__
+Json ax_progress_json(const std::optional<reports_native_test::ax::Progress> &value)
+{
+  if (!value) return nullptr;
+  namespace ax = reports_native_test::ax;
+  const auto &p = *value;
+  const bool node_known = p.node_index != ax::kNodeLimit;
+  const bool role_known = node_known && !(p.stage == ax::ProgressStage::Api && p.attribute == ax::Attribute::Role);
+  return {{"sequence", p.sequence}, {"stage", ax::name(p.stage)}, {"edge", ax::name(p.edge)},
+      {"call_sequence", p.call_sequence}, {"api_phase", ax::name(p.phase)},
+      {"api_operation", ax::name(p.operation)}, {"api_attribute", ax::name(p.attribute)},
+      {"node_index", node_known ? Json(p.node_index) : Json(nullptr)},
+      {"node_depth", node_known ? Json(p.node_depth) : Json(nullptr)},
+      {"node_role", role_known ? Json(ax::name(p.role)) : Json(nullptr)},
+      {"elapsed_ms", p.elapsed_ms}, {"dropped", p.dropped},
+      {"api_error", p.stage == ax::ProgressStage::Api && p.edge == ax::ProgressEdge::Returned ?
+          Json(p.api_error) : Json(nullptr)}};
+}
+Json ax_witness_json(const reports_native_test::ax::Response &response)
+{
+  namespace ax = reports_native_test::ax;
+  const auto &w = response.witness;
+  if (!w.available) return nullptr;
+  Json rows = Json::array();
+  for (size_t i = 0; i < w.count; ++i) {
+    const auto &row = w.rows[i];
+    rows.push_back({{"index", row.index}, {"parent", row.parent == ax::kNodeLimit ? Json(nullptr) : Json(row.parent)},
+        {"role", ax::name(row.role)}, {"depth", row.depth}, {"viewport_match", row.viewport_match}});
+  }
+  return {{"outer_group_index", w.outer}, {"inner_group_index", w.inner}, {"webarea_index", w.webarea},
+      {"relation", ax::name(w.relation)}, {"rows", std::move(rows)}};
+}
 Json activation_json(const reports_native_test::WindowActivationObservation &observed)
 {
   return {{"policy", observed.policy}, {"main_thread", observed.main_thread},
@@ -614,19 +645,29 @@ class Exercise {
           window_.height(), input, resources, error), error);
       const bool sent = finish(observed, delivery, error);
       const auto &child = observed.public_client; const auto &reply = child.response;
+      const auto api = [&](auto value) -> Json { return child.response_available ? Json(value) : Json(nullptr); };
       result_["native_media_inputs"].push_back({{"cycle", cycle}, {"phase", phase}, {"action", "public-client-timeline-click"},
           {"delivered", sent}, {"delivery", delivery}, {"error", error}, {"before", media_json(before)},
           {"client_status", reports_native_test::ax::name(child.status)}, {"client_pid", child.child_pid},
           {"client_reaped", child.reaped}, {"client_killed", child.killed}, {"client_ownership_lost", child.ownership_lost},
           {"client_exit_code", child.exit_code}, {"client_signal", child.signal}, {"client_system_error", child.system_error},
           {"client_stderr_bytes", child.stderr_bytes}, {"client_elapsed_ms", child.elapsed_ms},
-          {"api_status", reports_native_test::ax::name(reply.status)}, {"api_reason", reports_native_test::ax::name(reply.reason)},
-          {"api_phase", reports_native_test::ax::name(reply.phase)}, {"api_operation", reports_native_test::ax::name(reply.operation)},
-          {"api_attribute", reports_native_test::ax::name(reply.attribute)}, {"api_error", reply.api_error},
-          {"trusted", reply.trusted}, {"nodes", reply.nodes}, {"deepest", reply.deepest}, {"sliders", reply.sliders},
-          {"windows", reply.windows}, {"window_matches", reply.window_matches}, {"viewport_matches", reply.viewport_matches},
-          {"viewport_chains", reply.viewport_chains}, {"viewport_chain_length", reply.viewport_chain_length},
-          {"webareas", reply.webareas}, {"time_matched_candidates", reply.candidates},
+          {"api_response_available", child.response_available}, {"progress_available", child.progress_available},
+          {"progress_incomplete", child.progress_incomplete}, {"progress_invalid", child.progress_invalid},
+          {"progress_dropped", child.progress_dropped}, {"progress_bytes", child.progress_bytes},
+          {"progress_records", child.progress_records}, {"request_bytes_sent", child.request_bytes_sent},
+          {"response_bytes_received", child.response_bytes_received},
+          {"last_progress", ax_progress_json(child.last_progress)},
+          {"last_started_api", ax_progress_json(child.last_api_enter)},
+          {"last_returned_api", ax_progress_json(child.last_api_return)},
+          {"topology_witness", child.response_available ? ax_witness_json(reply) : Json(nullptr)},
+          {"api_status", api(reports_native_test::ax::name(reply.status))}, {"api_reason", api(reports_native_test::ax::name(reply.reason))},
+          {"api_phase", api(reports_native_test::ax::name(reply.phase))}, {"api_operation", api(reports_native_test::ax::name(reply.operation))},
+          {"api_attribute", api(reports_native_test::ax::name(reply.attribute))}, {"api_error", api(reply.api_error)},
+          {"trusted", api(reply.trusted)}, {"nodes", api(reply.nodes)}, {"deepest", api(reply.deepest)}, {"sliders", api(reply.sliders)},
+          {"windows", api(reply.windows)}, {"window_matches", api(reply.window_matches)}, {"viewport_matches", api(reply.viewport_matches)},
+          {"viewport_chains", api(reply.viewport_chains)}, {"viewport_chain_length", api(reply.viewport_chain_length)},
+          {"webareas", api(reply.webareas)}, {"time_matched_candidates", api(reply.candidates)},
           {"native_session_revalidated", observed.public_client_revalidated},
           {"slider_screen_points_bottom_left", {observed.screen_x, observed.screen_y, observed.screen_width, observed.screen_height}},
           {"slider_range_value", {observed.minimum, observed.maximum, observed.value}}, {"target_fraction", fraction},

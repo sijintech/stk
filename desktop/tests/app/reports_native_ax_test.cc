@@ -3,9 +3,11 @@
 #include "reports_native_ax_process.hh"
 #include "reports_native_wait.hh"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -14,6 +16,7 @@
 #include <vector>
 #ifndef _WIN32
 #  include <cerrno>
+#  include <fcntl.h>
 #  include <signal.h>
 #  include <sys/wait.h>
 #  include <unistd.h>
@@ -72,15 +75,33 @@ ax::Request request() {
   r.window = {-1200, 100, 1000, 800}; r.viewport = {-1180, 150, 900, 700};
   r.video = {-1100, 200, 640, 360}; r.current_time = 3; r.duration = 6; return r;
 }
+void apply_topology(ax::Response &r, const ax::Request &q, const std::vector<ax::TreeNode> &nodes) {
+  const auto selected = ax::select_viewport(q, nodes);
+  r.status = selected.complete ? ax::Status::Success : ax::Status::Rejected;
+  r.reason = selected.reason; r.witness = selected.witness;
+  r.viewport_matches = selected.matches; r.viewport_chains = selected.chains;
+  r.viewport_chain_length = selected.chain_length; r.webareas = selected.webareas;
+  r.tree_nodes = nodes.size(); r.windows = r.window_matches = 1; r.nodes = r.tree_nodes + 1;
+  r.deepest = r.sliders = 0;
+  std::array<size_t, ax::kNodeLimit> depths{};
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    if (i) { check(nodes[i].parent < i, "test topology parent order"); depths[i] = depths[nodes[i].parent] + 1; }
+    r.deepest = std::max(r.deepest, uint64_t(depths[i]));
+    if (nodes[i].role == ax::TreeRole::Slider) ++r.sliders;
+  }
+}
 ax::Response response(const ax::Request &q) {
   ax::Response r; r.status = ax::Status::Success; r.reason = ax::Reason::Unique;
   r.request_generation = q.request_generation; r.navigation_generation = q.navigation_generation;
-  r.viewport_generation = q.viewport_generation; r.elapsed_ms = 12; r.calls = 20;
-  r.windows = 1; r.window_matches = 1; r.viewport_matches = 1; r.webareas = 1;
-  r.viewport_chains = 1; r.viewport_chain_length = 1;
-  r.sliders = 1; r.candidates = 1; r.tree_nodes = 4; r.nodes = 5; r.deepest = 3;
+  r.viewport_generation = q.viewport_generation; r.elapsed_ms = 12; r.calls = 3;
+  r.phase = ax::Phase::Tree; r.operation = ax::Operation::AttributeCount; r.attribute = ax::Attribute::Children;
+  r.candidates = 1;
   r.slider = {q.video.x + 10, q.video.y + q.video.height - 12, q.video.width * .75, 4};
-  r.minimum = 0; r.maximum = 6; r.value = 3; return r;
+  r.minimum = 0; r.maximum = 6; r.value = 3;
+  apply_topology(r, q, {{ax::kNodeLimit, ax::TreeRole::Window, q.window},
+      {0, ax::TreeRole::Group, q.viewport}, {1, ax::TreeRole::WebArea, q.viewport},
+      {2, ax::TreeRole::Slider, r.slider}});
+  return r;
 }
 void topology_cases(const ax::Request &q, const ax::Response &good) {
   using Role = ax::TreeRole;
@@ -100,8 +121,7 @@ void topology_cases(const ax::Request &q, const ax::Response &good) {
       selected.matches == 4 && selected.chains == 1 && selected.chain_length == 4 && selected.webareas == 1,
       "four nested wrappers were not proven as one viewport");
   auto nested_response = good;
-  nested_response.viewport_matches = 4; nested_response.viewport_chain_length = 4;
-  nested_response.tree_nodes = 7; nested_response.nodes = 8; nested_response.deepest = 6;
+  apply_topology(nested_response, q, nested);
   ax::Response roundtrip;
   check(ax::decode(ax::encode(nested_response), roundtrip) && ax::accepted(q, roundtrip) &&
       roundtrip.viewport_matches == 4 && roundtrip.viewport_chains == 1 && roundtrip.viewport_chain_length == 4,
@@ -119,6 +139,24 @@ void topology_cases(const ax::Request &q, const ax::Response &good) {
   reject(bad, ax::Reason::MultipleWebareas, "extra outer WebArea ignored");
   bad = nested; bad[5].parent = 1;
   reject(bad, ax::Reason::WebareaAssociation, "WebArea outside inner wrapper accepted");
+  auto divergent = good; apply_topology(divergent, q, bad);
+  const std::vector<Node> ancestor = {{ax::kNodeLimit, Role::Window, q.window},
+      {0, Role::Group, q.viewport}, {1, Role::WebArea, q.viewport}, {2, Role::Group, q.viewport},
+      {3, Role::Group, q.viewport}, {4, Role::Group, q.viewport}, {5, Role::Slider, good.slider}};
+  reject(ancestor, ax::Reason::WebareaAssociation, "WebArea above inner wrapper accepted");
+  auto above = good; apply_topology(above, q, ancestor);
+  check(above.viewport_matches == 4 && above.viewport_chains == 1 && above.viewport_chain_length == 4 && above.webareas == 1 &&
+      above.viewport_matches == divergent.viewport_matches && above.viewport_chains == divergent.viewport_chains &&
+      above.viewport_chain_length == divergent.viewport_chain_length && above.webareas == divergent.webareas,
+      "ancestor/divergent counterexamples do not retain identical summary counts");
+  check(above.witness.relation == ax::TopologyRelation::WebareaAboveInner &&
+      divergent.witness.relation == ax::TopologyRelation::Divergent &&
+      ax::decode(ax::encode(above), roundtrip) && !ax::accepted(q, roundtrip) &&
+      roundtrip.witness.relation == ax::TopologyRelation::WebareaAboveInner,
+      "ancestor diagnostic disappeared or authorized delivery");
+  check(ax::decode(ax::encode(divergent), roundtrip) && !ax::accepted(q, roundtrip) &&
+      roundtrip.witness.relation == ax::TopologyRelation::Divergent && roundtrip.witness.webarea == 5 &&
+      roundtrip.witness.inner == 4, "divergent diagnostic disappeared or authorized delivery");
   bad = nested; bad[5].role = Role::Other;
   reject(bad, ax::Reason::NoWebarea, "missing WebArea accepted");
   bad = single; bad[1].rect.width -= 1;
@@ -153,9 +191,11 @@ void topology_cases(const ax::Request &q, const ax::Response &good) {
   check(selected.complete && selected.matches == 2 && selected.chain_length == 2 &&
       selected.viewport == 3 && selected.webarea == 4, "intermediate transparent role broke ancestry");
   auto depth_response = good;
-  depth_response.viewport_matches = 14; depth_response.viewport_chain_length = 14;
-  depth_response.tree_nodes = 17; depth_response.nodes = 18; depth_response.deepest = 16;
-  check(ax::accepted(q, depth_response), "maximum-depth wrapper proof rejected");
+  std::vector<Node> maximum = {{ax::kNodeLimit, Role::Window, q.window}};
+  for (size_t i = 1; i <= 14; ++i) maximum.push_back({i - 1, Role::Group, q.viewport});
+  maximum.push_back({14, Role::WebArea, q.viewport}); maximum.push_back({15, Role::Slider, good.slider});
+  apply_topology(depth_response, q, maximum);
+  check(ax::decode(ax::encode(depth_response), roundtrip) && ax::accepted(q, roundtrip), "maximum-depth wrapper proof rejected");
   depth_response.viewport_matches = 15; depth_response.viewport_chain_length = 15;
   depth_response.tree_nodes = 18; depth_response.nodes = 19;
   check(!ax::accepted(q, depth_response), "wrapper chain too deep for WebArea and slider accepted");
@@ -177,9 +217,86 @@ void topology_cases(const ax::Request &q, const ax::Response &good) {
   check(!ax::decode(std::span(bytes.data(), bytes.size() - 1), roundtrip), "truncated response accepted");
   auto impossible = good; impossible.viewport_chains = 2;
   check(!ax::decode(ax::encode(impossible), roundtrip), "impossible chain count decoded");
+  for (int mutation = 0; mutation < 10; ++mutation) {
+    auto malformed = nested_response;
+    auto &w = malformed.witness;
+    switch (mutation) {
+      case 0: w = {}; break; // A bare old success is not a diagnostic-capable response.
+      case 1: w.rows[w.count].index = 1; break;
+      case 2: w.rows[1].parent = 2; break;
+      case 3: ++w.rows[1].depth; break;
+      case 4: w.rows[1].role = Role::Count; break;
+      case 5: w.relation = ax::TopologyRelation::Divergent; break;
+      case 6: w.rows[0].viewport_match = true; break;
+      case 7: w.outer = ax::kNodeLimit; break;
+      case 8: w.rows[2].index = w.rows[1].index; break;
+      case 9: w.count = ax::kWitnessLimit + 1; break;
+    }
+    check(!ax::decode(ax::encode(malformed), roundtrip), "malformed numeric witness decoded");
+  }
   std::cout << "PASS: viewport ancestor-chain proof and hostile topology rejection\n";
 }
+ax::Progress progress(const ax::Request &q) {
+  ax::Progress p;
+  p.request_generation = q.request_generation; p.navigation_generation = q.navigation_generation;
+  p.viewport_generation = q.viewport_generation; p.sequence = 2; p.stage = ax::ProgressStage::Api;
+  p.edge = ax::ProgressEdge::Enter; p.call_sequence = 1; p.phase = ax::Phase::Tree;
+  p.operation = ax::Operation::AttributeCount; p.attribute = ax::Attribute::Children;
+  p.node_index = 1; p.node_depth = 1; p.role = ax::TreeRole::Group; p.elapsed_ms = 12;
+  return p;
+}
+void progress_cases(const ax::Request &q) {
+  const auto good = progress(q); ax::Progress parsed;
+  check(ax::decode(ax::encode(good), parsed) && ax::correlated(q, parsed), "numeric progress round trip");
+  auto stale = good; ++stale.viewport_generation;
+  check(ax::decode(ax::encode(stale), parsed) && !ax::correlated(q, parsed), "stale progress correlation accepted");
+  auto lost = good; lost.sequence = 3; lost.dropped = 1;
+  check(ax::decode(ax::encode(lost), parsed) && parsed.dropped == 1,
+      "a bounded reported progress loss was not retained");
+  for (int mutation = 0; mutation < 17; ++mutation) {
+    auto p = good;
+    switch (mutation) {
+      case 0: p.request_generation = 0; break; case 1: p.sequence = 0; break;
+      case 2: p.sequence = ax::kProgressRecordLimit + 1; break;
+      case 3: p.stage = ax::ProgressStage::Count; break; case 4: p.edge = ax::ProgressEdge::Count; break;
+      case 5: p.call_sequence = ax::kProgressCallLimit + 1; break; case 6: p.phase = ax::Phase::None; break;
+      case 7: p.operation = ax::Operation::Count; break; case 8: p.attribute = ax::Attribute::None; break;
+      case 9: p.node_index = ax::kNodeLimit + 1; break; case 10: p.node_depth = ax::kDepthLimit + 1; break;
+      case 11: p.role = ax::TreeRole::Count; break; case 12: p.elapsed_ms = 2000; break;
+      case 13: p.elapsed_ms = std::numeric_limits<double>::quiet_NaN(); break;
+      case 14: p.api_error = -1; break; case 15: p.dropped = ax::kProgressRecordLimit + 1; break;
+      case 16: p.stage = ax::ProgressStage::Select; break;
+    }
+    check(!ax::decode(ax::encode(p), parsed), "malformed numeric progress decoded");
+  }
+  auto returned = good; returned.edge = ax::ProgressEdge::Returned; returned.api_error = -42;
+  check(ax::decode(ax::encode(returned), parsed) && parsed.api_error == -42, "returned API error lost");
+  auto marker = good; marker.stage = ax::ProgressStage::Response; marker.edge = ax::ProgressEdge::Returned;
+  marker.call_sequence = 0; marker.phase = ax::Phase::None; marker.operation = ax::Operation::None;
+  marker.attribute = ax::Attribute::None; marker.node_index = ax::kNodeLimit;
+  marker.node_depth = ax::kDepthLimit + 1; marker.role = ax::TreeRole::Other;
+  check(ax::decode(ax::encode(marker), parsed), "valid terminal progress marker rejected");
+  const auto bytes = ax::encode(good);
+  check(!ax::decode(std::span(bytes.data(), bytes.size() - 1), parsed), "partial progress decoded");
+  auto oversized = std::vector<uint8_t>(bytes.begin(), bytes.end()); oversized.push_back(0);
+  check(!ax::decode(oversized, parsed), "oversized progress decoded");
+  auto invalid = bytes; invalid[0] ^= 1;
+  check(!ax::decode(invalid, parsed), "unknown progress magic decoded");
+  invalid = bytes; invalid[15 * 8] = 0x7f;
+  check(!ax::decode(invalid, parsed), "overflowing progress API error decoded");
+  std::cout << "PASS: bounded numeric progress, correlation and hostile wire rejection\n";
+}
 #ifndef _WIN32
+bool write_bytes(int fd, std::span<const uint8_t> bytes) {
+  size_t sent = 0;
+  while (sent < bytes.size()) {
+    const auto n = write(fd, bytes.data() + sent, bytes.size() - sent);
+    if (n < 0 && errno == EINTR) continue;
+    if (n <= 0) return false;
+    sent += size_t(n);
+  }
+  return true;
+}
 int fake(const std::string &mode, const char *path) {
   ax::RequestWire input{}; size_t got = 0;
   if (mode == "close") return 4;
@@ -192,7 +309,6 @@ int fake(const std::string &mode, const char *path) {
   if (read(STDIN_FILENO, &extra, 1) != 0) return 3;
   ax::Request q;
   if (!ax::decode(input, q) || q.parent_pid != uint64_t(getppid())) return 3;
-  if (mode == "hang") for (;;) pause();
   if (mode == "ignore" || mode == "nochildwait") {
     struct sigaction action{};
     action.sa_handler = mode == "ignore" ? SIG_IGN : SIG_DFL;
@@ -208,15 +324,96 @@ int fake(const std::string &mode, const char *path) {
     if (!finished || finished->status != ax::ProcessStatus::Unsupported || finished->child_pid || finished->killed) return 3;
   }
   auto r = response(q);
-  if (mode == "stale") ++r.request_generation;
+  if (mode == "stale" || mode == "zero-stale") ++r.request_generation;
   if (mode == "api") { r.status = ax::Status::ApiError; r.reason = ax::Reason::ApiError; r.api_error = -42; }
   if (mode == "multiple") r.candidates = 2;
+  const auto old_flags = fcntl(ax::kProgressFd, F_GETFL);
+  if (old_flags < 0 || fcntl(ax::kProgressFd, F_SETFL, old_flags | O_NONBLOCK) < 0) return 3;
+  uint64_t sequence = 0, dropped = 0;
+  const auto marker = [&](ax::ProgressStage stage, ax::ProgressEdge edge) {
+    ax::Progress p; p.request_generation = q.request_generation; p.navigation_generation = q.navigation_generation;
+    p.viewport_generation = q.viewport_generation; p.stage = stage; p.edge = edge; return p;
+  };
+  const auto send = [&](ax::Progress p) {
+    p.sequence = ++sequence; p.elapsed_ms = double(sequence) * .01; p.dropped = dropped;
+    return write_bytes(ax::kProgressFd, ax::encode(p));
+  };
+  if (mode.starts_with("progress-") && mode != "progress-flood") {
+    auto p = marker(ax::ProgressStage::Request, ax::ProgressEdge::Returned);
+    p.sequence = 1; p.elapsed_ms = .01;
+    if (mode == "progress-zero") p.request_generation = 0;
+    if (mode == "progress-stale") ++p.request_generation;
+    if (mode == "progress-invalid") p.stage = ax::ProgressStage::Count;
+    if (mode == "progress-gap") p.sequence = 2; // Unreported sequence loss is malformed.
+    if (mode == "progress-lossy-prefix") {
+      p = progress(q); p.sequence = 3; p.dropped = 2; p.edge = ax::ProgressEdge::Returned;
+      // Request/Returned and the first API/Enter were lost; all later diagnostics are absent.
+    }
+    auto bytes = ax::encode(p);
+    const size_t size = mode == "progress-partial" ? bytes.size() - 1 : bytes.size();
+    if (!write_bytes(ax::kProgressFd, std::span(bytes.data(), size))) return 3;
+    if (mode == "progress-oversize" && write(ax::kProgressFd, "x", 1) != 1) return 3;
+    return write_bytes(STDOUT_FILENO, ax::encode(r)) ? 0 : 3;
+  }
+  if (mode == "progress-flood") {
+    // The child deliberately never yields or exits: only the parent's bounded drain/absolute watchdog may stop it.
+    for (uint64_t i = 1;; ++i) {
+      auto p = i == 1 ? marker(ax::ProgressStage::Request, ax::ProgressEdge::Returned) : progress(q);
+      p.sequence = i; p.elapsed_ms = .01;
+      if (i > 1) { p.call_sequence = i / 2; p.edge = i % 2 ? ax::ProgressEdge::Returned : ax::ProgressEdge::Enter; }
+      const auto bytes = ax::encode(p);
+      for (;;) {
+        const auto n = write(ax::kProgressFd, bytes.data(), bytes.size());
+        if (n == ssize_t(bytes.size())) break;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) continue;
+        return 3;
+      }
+    }
+  }
+  const bool has_progress = !mode.starts_with("zero");
+  if (has_progress) {
+    if (!send(marker(ax::ProgressStage::Request, ax::ProgressEdge::Returned))) return 3;
+    if (mode == "hang" || mode == "cancel" || mode == "destroy" || mode == "returned-hang") {
+      auto p = progress(q);
+      if (!send(p)) return 3;
+      if (mode == "returned-hang") {
+        p.edge = ax::ProgressEdge::Returned;
+        if (!send(p) || !send(marker(ax::ProgressStage::Select, ax::ProgressEdge::Enter))) return 3;
+      }
+      if (mode == "cancel" || mode == "destroy") {
+        std::ofstream ready(std::filesystem::path(path).parent_path() / (mode + "-ready"));
+        ready << "ready"; ready.close();
+        if (!ready.good()) return 3;
+      }
+      for (;;) pause();
+    }
+    for (uint64_t i = 1; i <= r.calls; ++i) {
+      auto p = progress(q); p.call_sequence = i;
+      if ((mode == "lossy" || mode == "lossy-no-response") && i == 1) {
+        ++sequence; ++dropped; // The first enter event was attempted but its nonblocking write was dropped.
+      }
+      else if (!send(p)) return 3;
+      p.edge = ax::ProgressEdge::Returned;
+      if (i == r.calls) p.api_error = r.api_error;
+      if (!send(p)) return 3;
+    }
+    if (!send(marker(ax::ProgressStage::Response, ax::ProgressEdge::Enter))) return 3;
+  }
+  if (mode == "lossy-no-response") {
+    return send(marker(ax::ProgressStage::Response, ax::ProgressEdge::Returned)) ? 0 : 3;
+  }
+  if (mode == "zero-no-response") return 0;
   auto bytes = ax::encode(r);
   if (mode == "malformed") bytes[0] = 0;
+  if (mode == "v2" || mode == "zero-v2" || mode == "v2-magic") bytes[7] = 2;
   if (mode == "stderr" && write(STDERR_FILENO, "x", 1) != 1) return 3;
-  const size_t amount = mode == "truncated" ? bytes.size() - 1 : bytes.size();
-  if (write(STDOUT_FILENO, bytes.data(), amount) != ssize_t(amount)) return 3;
+  const size_t amount = mode == "v2" || mode == "zero-v2" ? 33 * 8 :
+                        mode == "truncated" ? bytes.size() - 1 : bytes.size();
+  if (!write_bytes(STDOUT_FILENO, std::span(bytes.data(), amount))) return 3;
   if (mode == "oversize" && write(STDOUT_FILENO, "x", 1) != 1) return 3;
+  // Match the real helper: stdout is complete before the optional terminal progress write.
+  if (has_progress && mode != "omit-returned" &&
+      !send(marker(ax::ProgressStage::Response, ax::ProgressEdge::Returned))) return 3;
   return mode == "exit" ? 7 : mode == "api" ? 1 : 0;
 }
 template<class Process> ax::ProcessResult wait(Process &process, int &pumps) {
@@ -233,6 +430,13 @@ void reaped(const ax::ProcessResult &r) {
   int status = 0; errno = 0;
   check(waitpid(pid_t(r.child_pid), &status, WNOHANG) == -1 && errno == ECHILD, "child remains unreaped");
 }
+void ready(const std::filesystem::path &marker) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!std::filesystem::exists(marker)) {
+    check(std::chrono::steady_clock::now() < deadline, "controlled child did not reach its progress boundary");
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+}
 #endif
 }
 int main(int argc, char **argv) {
@@ -244,6 +448,7 @@ int main(int argc, char **argv) {
     waiting_cases();
     const auto q = request(); const auto good = response(q);
     topology_cases(q, good);
+    progress_cases(q);
     ax::LayoutEpoch layout;
     check(!layout.freeze(), "unobserved layout was freezeable");
     layout.ready(); const auto token = layout.freeze(); check(token.has_value(), "ready layout not freezeable");
@@ -303,9 +508,55 @@ int main(int argc, char **argv) {
       int pumps = 0; ax::ProbeProcess process(path.string(), q);
       auto r = wait(process, pumps); reaped(r); return r;
     };
-    auto r = run("good"); check(r.status == ax::ProcessStatus::Response && ax::accepted(q, r.response), "owned success rejected");
-    for (const auto *mode : {"malformed", "truncated", "oversize", "exit", "stderr", "close"}) {
+    auto r = run("good");
+    check(r.status == ax::ProcessStatus::Response && r.response_available && r.progress_available &&
+        !r.progress_incomplete && !r.progress_invalid && !r.progress_dropped &&
+        r.last_progress && r.last_progress->stage == ax::ProgressStage::Response &&
+        r.last_progress->edge == ax::ProgressEdge::Returned && r.last_api_return &&
+        r.last_api_return->call_sequence == good.calls && ax::accepted(q, r.response), "owned diagnostic success rejected");
+    for (const auto *mode : {"malformed", "truncated", "oversize", "exit", "stderr", "close", "v2", "zero-v2", "v2-magic"}) {
       r = run(mode); check(r.status != ax::ProcessStatus::Response, "invalid child output authorized");
+    }
+    r = run("zero");
+    check(r.status == ax::ProcessStatus::Response && r.response_available && !r.progress_available &&
+        r.progress_incomplete && !r.progress_invalid && !r.progress_dropped && !r.progress_records &&
+        !r.last_progress && !r.last_api_enter && !r.last_api_return &&
+        ax::encode(r.response) == ax::encode(good) && ax::accepted(q, r.response),
+        "complete v3 response rejected or diagnostics invented when all progress was absent");
+    r = run("omit-returned");
+    check(r.status == ax::ProcessStatus::Response && r.response_available && r.progress_available &&
+        r.progress_incomplete && !r.progress_invalid && !r.progress_dropped && r.last_progress &&
+        r.last_progress->stage == ax::ProgressStage::Response && r.last_progress->edge == ax::ProgressEdge::Enter &&
+        r.last_api_return && r.last_api_return->call_sequence == good.calls &&
+        r.progress_records == 2 * good.calls + 2 && ax::encode(r.response) == ax::encode(good) &&
+        ax::accepted(q, r.response), "lost terminal progress invalidated an independently complete v3 response");
+    r = run("zero-stale");
+    check(r.status == ax::ProcessStatus::Response && r.response_available && !r.progress_available &&
+        r.progress_incomplete && !ax::accepted(q, r.response), "absent diagnostics authorized stale response generations");
+    r = run("zero-no-response");
+    check(r.status == ax::ProcessStatus::ProtocolError && !r.response_available && !r.progress_available &&
+        r.progress_incomplete && !ax::accepted(q, r.response), "absent diagnostics manufactured a valid response");
+    r = run("progress-lossy-prefix");
+    check(r.status == ax::ProcessStatus::Response && r.response_available && r.progress_available &&
+        r.progress_dropped && r.progress_incomplete && !r.progress_invalid && r.progress_records == 1 &&
+        !r.last_api_enter && r.last_api_return && r.last_api_return->call_sequence == 1 &&
+        ax::encode(r.response) == ax::encode(good) && ax::accepted(q, r.response),
+        "valid finite diagnostic prefix invalidated an independently complete v3 response");
+    r = run("lossy");
+    check(r.status == ax::ProcessStatus::Response && r.response_available && r.progress_available &&
+        r.progress_dropped && r.progress_incomplete && !r.progress_invalid && r.last_progress &&
+        r.last_progress->stage == ax::ProgressStage::Response && r.last_progress->edge == ax::ProgressEdge::Returned &&
+        r.last_progress->sequence == 2 * good.calls + 3 && r.last_progress->dropped == 1 &&
+        r.progress_records == 2 * good.calls + 2 && ax::accepted(q, r.response),
+        "reported progress loss invalidated a separately valid response or lost its incompleteness flags");
+    r = run("lossy-no-response");
+    check(r.status == ax::ProcessStatus::ProtocolError && !r.response_available && r.progress_dropped &&
+        r.progress_incomplete && !ax::accepted(q, r.response), "lossy progress manufactured a valid response");
+    for (const auto *mode : {"progress-zero", "progress-stale", "progress-invalid", "progress-partial",
+                             "progress-oversize", "progress-gap", "progress-flood"}) {
+      r = run(mode);
+      check(r.status != ax::ProcessStatus::Response && r.elapsed_ms < 4000 &&
+          (r.progress_invalid || r.progress_incomplete), "invalid/flooded progress authorized or starved watchdog");
     }
     r = run("stale"); check(r.status == ax::ProcessStatus::Response && !ax::accepted(q, r.response), "stale echo authorized");
     r = run("multiple"); check(r.status == ax::ProcessStatus::Response && !ax::accepted(q, r.response), "multiple slider child authorized");
@@ -318,16 +569,31 @@ int main(int argc, char **argv) {
     r = wait(hung, pumps); reaped(r);
     check(r.status == ax::ProcessStatus::Deadline && r.killed && pumps > 100 && r.elapsed_ms >= 1900 && r.elapsed_ms < 4000,
           "deadline did not kill/reap while caller kept polling");
-    ax::ProbeProcess cancelled(hang.string(), q);
-    std::this_thread::sleep_for(std::chrono::milliseconds(30)); cancelled.cancel();
+    check(!r.response_available && r.progress_available && r.progress_incomplete && r.last_api_enter &&
+        !r.last_api_return && r.last_api_enter->phase == ax::Phase::Tree &&
+        r.last_api_enter->operation == ax::Operation::AttributeCount &&
+        r.last_api_enter->attribute == ax::Attribute::Children,
+        "deadline lost the last observed in-flight API boundary");
+    r = run("returned-hang");
+    check(r.status == ax::ProcessStatus::Deadline && r.killed && !r.response_available &&
+        r.last_api_enter && r.last_api_return &&
+        r.last_api_enter->call_sequence == r.last_api_return->call_sequence && r.last_progress &&
+        r.last_progress->stage == ax::ProgressStage::Select,
+        "a returned API followed by local hang was reported as an unfinished API");
+    const auto cancel = dir / "ax-stub-cancel"; std::filesystem::create_symlink(self, cancel);
+    ax::ProbeProcess cancelled(cancel.string(), q);
+    ready(dir / "cancel-ready"); cancelled.cancel();
     r = wait(cancelled, pumps); reaped(r);
-    check(r.status == ax::ProcessStatus::Cancelled && r.killed, "cancel did not kill/reap owned child");
-    auto destroyed = std::make_unique<ax::ProbeProcess>(hang.string(), q);
+    check(r.status == ax::ProcessStatus::Cancelled && r.killed && !r.response_available && r.last_api_enter &&
+        !r.last_api_return && r.progress_incomplete, "cancel did not retain progress and kill/reap owned child");
+    const auto destroy = dir / "ax-stub-destroy"; std::filesystem::create_symlink(self, destroy);
+    auto destroyed = std::make_unique<ax::ProbeProcess>(destroy.string(), q);
     auto completion = destroyed->completion();
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    ready(dir / "destroy-ready");
     destroyed.reset(); // Simulates UI-owner destruction. The plain completion handle remains drainable.
     r = wait(completion, pumps); reaped(r);
-    check(r.status == ax::ProcessStatus::Cancelled && r.killed, "owner destruction lost child cleanup");
+    check(r.status == ax::ProcessStatus::Cancelled && r.killed && r.last_api_enter &&
+        !r.response_available, "owner destruction lost child cleanup/progress");
     invalid = q; ++invalid.parent_pid;
     ax::ProbeProcess foreign(hang.string(), invalid);
     r = wait(foreign, pumps); check(r.status == ax::ProcessStatus::ProtocolError && r.child_pid == 0, "foreign target was spawned");

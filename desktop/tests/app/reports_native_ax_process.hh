@@ -15,6 +15,10 @@ struct ProcessResult {
   int64_t child_pid = 0;
   int exit_code = -1, signal = 0, system_error = 0;
   bool killed = false, reaped = false, ownership_lost = false;
+  bool response_available = false, progress_available = false;
+  bool progress_incomplete = false, progress_invalid = false, progress_dropped = false;
+  size_t request_bytes_sent = 0, response_bytes_received = 0, progress_bytes = 0, progress_records = 0;
+  std::optional<Progress> last_progress, last_api_enter, last_api_return;
   size_t stderr_bytes = 0;
   double elapsed_ms = 0;
 };

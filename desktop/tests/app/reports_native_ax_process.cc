@@ -62,8 +62,8 @@ template<class Cancelled> ProcessResult execute(const std::string &path, const R
   if (child_policy.sa_handler != SIG_DFL || (child_policy.sa_flags & SA_NOCLDWAIT)) {
     out.status = ProcessStatus::Unsupported; elapsed(); return out;
   }
-  Fd input_read, input_write, output_read, output_write, error_read, error_write;
-  if (!pipe_pair(input_read, input_write) || !pipe_pair(output_read, output_write) || !pipe_pair(error_read, error_write)) {
+  Fd input_read, input_write, output_read, output_write, error_read, error_write, progress_read, progress_write;
+  if (!pipe_pair(input_read, input_write) || !pipe_pair(output_read, output_write) || !pipe_pair(error_read, error_write) || !pipe_pair(progress_read, progress_write)) {
     out.system_error = errno; elapsed(); return out;
   }
   posix_spawn_file_actions_t actions;
@@ -73,11 +73,15 @@ template<class Cancelled> ProcessResult execute(const std::string &path, const R
   action(posix_spawn_file_actions_adddup2(&actions, input_read.value, STDIN_FILENO));
   action(posix_spawn_file_actions_adddup2(&actions, output_write.value, STDOUT_FILENO));
   action(posix_spawn_file_actions_adddup2(&actions, error_write.value, STDERR_FILENO));
-  for (int fd : {input_read.value,input_write.value,output_read.value,output_write.value,error_read.value,error_write.value})
+  // Close the original input FD (which can be 3) before installing the dedicated progress FD.
+  for (int fd : {input_read.value,input_write.value,output_read.value,output_write.value,error_read.value,error_write.value,
+                 progress_read.value})
     action(posix_spawn_file_actions_addclose(&actions, fd));
+  action(posix_spawn_file_actions_adddup2(&actions, progress_write.value, kProgressFd));
+  if (progress_write.value != kProgressFd) action(posix_spawn_file_actions_addclose(&actions, progress_write.value));
 #if defined(__linux__) && defined(__GLIBC__)
 #  if __GLIBC_PREREQ(2, 34)
-  action(posix_spawn_file_actions_addclosefrom_np(&actions, 3));
+  action(posix_spawn_file_actions_addclosefrom_np(&actions, kProgressFd + 1));
 #  endif
 #endif
   posix_spawnattr_t attributes;
@@ -108,13 +112,16 @@ template<class Cancelled> ProcessResult execute(const std::string &path, const R
     out.status = stopped ? ProcessStatus::Cancelled : ProcessStatus::Deadline; elapsed(); return out;
   }
   out.child_pid = pid;
-  input_read.close(); output_write.close(); error_write.close();
+  input_read.close(); output_write.close(); error_write.close(); progress_write.close();
   out.status = ProcessStatus::IoError;
-  bool io_ok = nonblocking(input_write.value) && nonblocking(output_read.value) && nonblocking(error_read.value);
+  bool io_ok = nonblocking(input_write.value) && nonblocking(output_read.value) && nonblocking(error_read.value) && nonblocking(progress_read.value);
   const auto wire = encode(request);
   size_t sent = 0;
   ResponseWire bytes{};
   size_t received = 0;
+  ProgressWire progress_wire{};
+  size_t progress_received = 0;
+  uint64_t last_sequence = 0, dropped = 0;
   int wait_status = 0;
   bool exited = false, failed = !io_ok;
   // Suppress SIGPIPE only for this worker/pipe. Never change a process-wide disposition.
@@ -126,6 +133,93 @@ template<class Cancelled> ProcessResult execute(const std::string &path, const R
 #endif
   if (mask_error) { out.system_error = mask_error; failed = true; }
   bool pipe_signal = false;
+  auto progress_error = [&] {
+    out.progress_invalid = true; out.progress_incomplete = true;
+    if (!failed) { out.status = ProcessStatus::ProtocolError; failed = true; }
+  };
+  auto progress_frame = [&] {
+    Progress value;
+    if (!decode(progress_wire, value) || !correlated(request, value) || value.sequence <= last_sequence ||
+        value.dropped < dropped || value.sequence - last_sequence - 1 != value.dropped - dropped ||
+        (out.last_progress && value.elapsed_ms < out.last_progress->elapsed_ms)) {
+      progress_error(); return;
+    }
+    const bool lossy = value.dropped != 0;
+    if (!last_sequence && !lossy &&
+        (value.stage != ProgressStage::Request || value.edge != ProgressEdge::Returned)) {
+      progress_error(); return;
+    }
+    if (!lossy && value.stage == ProgressStage::Response && value.edge == ProgressEdge::Returned &&
+        (!out.last_progress || out.last_progress->stage != ProgressStage::Response ||
+         out.last_progress->edge != ProgressEdge::Enter)) {
+      progress_error(); return;
+    }
+    if (value.stage == ProgressStage::Api) {
+      const uint64_t latest = std::max(out.last_api_enter ? out.last_api_enter->call_sequence : 0,
+                                      out.last_api_return ? out.last_api_return->call_sequence : 0);
+      if (value.call_sequence < latest || (value.edge == ProgressEdge::Enter && value.call_sequence == latest) ||
+          (value.edge == ProgressEdge::Returned && out.last_api_return &&
+           value.call_sequence == out.last_api_return->call_sequence)) {
+        progress_error(); return;
+      }
+    }
+    if (value.stage == ProgressStage::Api && !lossy) {
+      if (value.edge == ProgressEdge::Enter) {
+        const uint64_t previous = out.last_api_enter ? out.last_api_enter->call_sequence : 0;
+        if (value.call_sequence != previous + 1 || (previous &&
+            (!out.last_api_return || out.last_api_return->call_sequence != previous))) {
+          progress_error(); return;
+        }
+      }
+      else {
+        if (!out.last_api_enter || value.call_sequence != out.last_api_enter->call_sequence ||
+            (out.last_api_return && out.last_api_return->call_sequence == value.call_sequence) ||
+            value.phase != out.last_api_enter->phase || value.operation != out.last_api_enter->operation ||
+            value.attribute != out.last_api_enter->attribute || value.node_index != out.last_api_enter->node_index ||
+            value.node_depth != out.last_api_enter->node_depth || value.role != out.last_api_enter->role) {
+          progress_error(); return;
+        }
+      }
+    }
+    out.progress_dropped |= value.dropped != 0;
+    out.progress_incomplete |= out.progress_dropped;
+    last_sequence = value.sequence; dropped = value.dropped;
+    ++out.progress_records; out.progress_available = true; out.last_progress = value;
+    if (value.stage == ProgressStage::Api) {
+      if (value.edge == ProgressEdge::Enter) out.last_api_enter = value;
+      else out.last_api_return = value;
+    }
+  };
+  // A hostile continuously-writing child cannot keep us in drain until the watchdog expires.
+  auto drain_progress = [&] {
+    if (progress_read.value < 0) return;
+    size_t turn = 0;
+    while (turn < 4096) {
+      uint8_t buffer[512];
+      const ssize_t count = read(progress_read.value, buffer, sizeof(buffer));
+      if (count == 0) {
+        progress_read.close(); if (progress_received) progress_error(); return;
+      }
+      if (count < 0) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) progress_error();
+        return;
+      }
+      turn += size_t(count); out.progress_bytes += size_t(count);
+      if (out.progress_bytes > kProgressRecordLimit * kProgressBytes) {
+        out.progress_incomplete = true;
+        if (!failed) { out.status = ProcessStatus::OutputLimit; failed = true; }
+        return;
+      }
+      for (ssize_t i = 0; i < count; ++i) {
+        progress_wire[progress_received++] = buffer[i];
+        if (progress_received == progress_wire.size()) {
+          progress_frame(); progress_received = 0;
+          if (out.progress_invalid) return;
+        }
+      }
+      if (!deadline.permits(Clock::now()) || cancelled()) return;
+    }
+  };
   while (!failed) {
     // Observe without consuming the child. The controlled host must not run a competing waitpid(-1) reaper.
     siginfo_t information{};
@@ -138,7 +232,7 @@ template<class Cancelled> ProcessResult execute(const std::string &path, const R
     if (!deadline.permits(Clock::now())) { out.status = ProcessStatus::Deadline; failed = true; break; }
     if (input_write.value >= 0) {
       const ssize_t count = write(input_write.value, wire.data() + sent, wire.size() - sent);
-      if (count > 0) sent += size_t(count);
+      if (count > 0) { sent += size_t(count); out.request_bytes_sent = sent; }
       else if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
         out.system_error = errno; pipe_signal = errno == EPIPE; failed = true; break;
       }
@@ -161,13 +255,15 @@ template<class Cancelled> ProcessResult execute(const std::string &path, const R
         else {
           if (received + size_t(count) > bytes.size()) { out.status = ProcessStatus::OutputLimit; failed = true; break; }
           std::copy_n(buffer, size_t(count), bytes.data() + received); received += size_t(count);
+          out.response_bytes_received = received;
         }
       }
     };
-    drain(output_read, false); drain(error_read, true);
-    if (failed || (exited && output_read.value < 0 && error_read.value < 0)) break;
-    pollfd fds[] = {{output_read.value, POLLIN, 0}, {error_read.value, POLLIN, 0}, {input_write.value, POLLOUT, 0}};
-    if (::poll(fds, 3, 5) < 0 && errno != EINTR) { out.system_error = errno; failed = true; }
+    drain(output_read, false); drain(error_read, true); drain_progress();
+    if (failed || (exited && output_read.value < 0 && error_read.value < 0 && progress_read.value < 0)) break;
+    pollfd fds[] = {{output_read.value, POLLIN, 0}, {error_read.value, POLLIN, 0}, {input_write.value, POLLOUT, 0},
+                    {progress_read.value, POLLIN, 0}};
+    if (::poll(fds, 4, 5) < 0 && errno != EINTR) { out.system_error = errno; failed = true; }
   }
   if (!out.ownership_lost) {
     // Check ownership again immediately before any signal. ECHILD means no signal and no PID-reuse assumption.
@@ -194,6 +290,9 @@ template<class Cancelled> ProcessResult execute(const std::string &path, const R
     (void)pipe_signal;
 #endif
   }
+  // Keep the last already-buffered numeric evidence after deadline/cancellation, never wait for more.
+  if (out.reaped) drain_progress();
+  if (progress_received) out.progress_incomplete = true;
   if (out.reaped) {
     if (WIFEXITED(wait_status)) out.exit_code = WEXITSTATUS(wait_status);
     if (WIFSIGNALED(wait_status)) out.signal = WTERMSIG(wait_status);
@@ -203,8 +302,20 @@ template<class Cancelled> ProcessResult execute(const std::string &path, const R
     if (out.signal || out.stderr_bytes || (out.exit_code != 0 && out.exit_code != 1)) out.status = ProcessStatus::ExitError;
     else if (!decode(std::span(bytes.data(), received), out.response) ||
         (out.exit_code == 0) != (out.response.status == Status::Success)) out.status = ProcessStatus::ProtocolError;
-    else out.status = ProcessStatus::Response;
+    else {
+      out.response_available = true;
+      // Nonblocking diagnostics may lose their final frame without a later drop report.
+      // Only the independently decoded current response supplies the numerical proof.
+      if (!out.last_progress || out.last_progress->stage != ProgressStage::Response ||
+          out.last_progress->edge != ProgressEdge::Returned || (!out.progress_dropped &&
+          (out.response.calls ? !out.last_api_return || out.last_api_return->call_sequence != out.response.calls :
+                                out.last_api_return.has_value()))) {
+        out.progress_incomplete = true;
+      }
+      out.status = ProcessStatus::Response;
+    }
   }
+  if (!out.response_available) out.progress_incomplete = true;
   elapsed(); return out;
 }
 #endif
