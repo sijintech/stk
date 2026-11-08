@@ -1,5 +1,19 @@
 # STK 开发计划
 
+## 2026-11-07：独立 worktree 与任务归属（当前）
+
+按所有者最新决定，Codex 为 root 总负责；Claude 从共用树设计协作改为独立 worktree 的文档与指定模块开发。
+root 保留 main，Claude 使用 `stk-claude` / `claude/support`；写入路径、基线、依赖与验收由任务卡划定，
+最终集成、四状态文档、AOCI、推送及 CI 归 root，详见 [协作约定](planning/agent-collaboration.md)。
+
+CL-D1-01 已定义为 ready：仅新增 D1 兼容门清单，不等于已接单、发布新协议或完成 D1。
+root 继续按当前 Desktop CI、既有记录/AOCI、原生文献 UI、当前 Synthrix 装配/桌面入口、D1 的依赖顺序推进。
+起始本地 5670f565 / 远端 6f4de650；该远端 Runtime/Docs/Secret 成功、Desktop 仍运行，具体见运行验收。
+本轮只调整协作设置，旧八项范围、三待决和 PET 后置不变；下方分工及 Git/CI 旧快照为历史。
+
+所有者另已设持续开发目标为 active：root 合理分配 Claude 工作，并审查、验证及合并当前计划相关 PR；
+所有者数日后回复问题，期间继续不依赖待决的工作，不把未回复视为授权选择。
+
 ## 2026-11-06 UTC：总体框架、启动会与滚动试点计划（当前）
 
 整体目标见[平台框架](design/platform-framework.md)，具体相对周数/依赖/角色/退出证据见

@@ -3,6 +3,9 @@
 - Default to developing, committing and pushing directly on `main`, as requested by the owner.
 - Do not create a feature branch or PR for routine changes unless the owner asks for one or a
   repository protection rule requires it.
+- The owner has explicitly requested separate worktrees for Codex and Claude. Root keeps `main`;
+  Claude uses a task branch in its own worktree, as specified below. This is the authorized
+  exception to the default branch workflow, and does not require a PR.
 - Existing unrelated open PRs are not implicitly approved for integration by this workflow choice.
 
 # Development direction
@@ -44,31 +47,36 @@
   `docs/runtime-validation.md`. Run a secret scan (gitleaks with `.gitleaks.toml`) on staged changes before committing.
 - Pending owner decisions are listed in `handoff.md`; do not build on an option the owner has not chosen.
 
-# Agent roles (owner decision 2026-11-07, option A)
+# Agent roles and worktrees (latest owner decision 2026-11-07)
 
-Codex and Claude share one working tree on `main`. Only one agent writes product code and integrates.
+Codex is Root and owns overall delivery. Codex and Claude work in separate worktrees; this replaces
+the earlier shared-worktree, design-only arrangement. The working agreement and ready task are in
+[docs/planning/agent-collaboration.md](docs/planning/agent-collaboration.md).
 
-- **Codex is Root, the integrator.** It owns product code and tests, native builds and full CTest
-  (`/home/mnemora/opt/stk-build/merge-check`), every push, CI follow-up, AOCI loading and maintenance, and the four
-  state docs: `handoff.md`, `docs/development-plan.md`, `docs/development-log.md` and `docs/runtime-validation.md`.
-  Its queue, in order:
-  1. CI of `6f4de650`;
-  2. committing the 11-03 record WIP together with AOCI maintenance;
-  3. the native literature editor and its click acceptance;
-  4. Synthrix normal-startup assembly and its desktop entry;
-  5. D1 implementation.
-- **Claude does design, decision memos and review.** It owns three things:
-  - the D1 pre-work: settling the new schema and compatibility gates that the plan requires before D1 is implemented;
-  - decision memos for the three pending owner decisions in `handoff.md` and for the PET ester-ipso charge;
-  - critical review of Root's deliveries, with findings reported to Root rather than applied by Claude.
-- **Claude's write scope.** Claude writes only files it creates under `docs/design/` or `docs/planning/`, plus this
-  section. It does not edit, stage or commit Root's WIP, product code, the four state docs, `aoci.txt` or `.aoci/`.
-  It does not run native builds or full CTest. Claude commits its own files locally; Root pushes them and records them
-  in the state docs.
-- **Commits.** Before committing, each agent checks that `git diff --cached` holds only its own changes and commits
-  with an explicit pathspec (`git commit --only -- <paths>`).
-- **Designs and changes.** A Claude design is a proposal: Root implements only the options the owner has chosen. Only
-  the owner changes this split.
+- **Root:** `/home/mnemora/xcheng/sijin/stk`, `main`. Owns task ordering, module boundaries,
+  shared contracts, review, integration, final regression/builds, pushes and CI follow-up. Root
+  maintains the four state docs, repository-wide instructions and the main worktree's AOCI assets.
+- **Persistent work:** the owner has asked Root to continue development, assign Claude work and
+  periodically merge relevant PRs. Review and validate each PR against the current plan and exact
+  head before merging; unrelated PRs remain outside this authorization. Keep undecided options
+  pending and continue independent work while the owner is away.
+- **Claude:** `/home/mnemora/xcheng/sijin/stk-claude`, `claude/support`. Owns assigned documentation
+  and specifically assigned modules, including their relevant tests. A task must name its base
+  commit, write scope, dependencies, acceptance and handoff evidence. Being the Web or backend
+  directory does not by itself assign ownership to either agent.
+- **Isolation:** do not edit or stage another agent's worktree. Use separate build/output directories;
+  `/home/mnemora/opt/stk-build/merge-check` remains Root's. Do not copy local credentials or private
+  assets to a worktree. AOCI reads/maintenance must bind to the actual worktree root, never silently
+  reuse a main-bound MCP service for Claude's tree.
+- **Delivery:** Claude commits only the assigned files on its branch and hands Root the exact commit,
+  checks, evidence and remaining limits. Root reviews and integrates selected commits into `main`,
+  resolves conflicts, performs final AOCI maintenance and validation, and alone pushes. Do not merge
+  whole historical branches or copy another worktree's AOCI baselines as integration.
+- **Protect WIP:** inspect the staged diff before every commit. Stage only owned changes, using hunks
+  when a file contains pre-existing WIP; avoid `git add .`, destructive cleanup and unintended commits.
+- **Decisions:** designs remain proposals until the owner chooses an option. The three pending owner
+  decisions and PET new-work deferral remain in force. Claude may investigate and propose; task
+  assignment does not authorize changing endpoints, credentials, network policy or execution powers.
 
 <!-- aoci:begin -->
 ## AOCI 仓库认知

@@ -1,5 +1,16 @@
 # 开发交接记录
 
+## 2026-11-07：所有者指定 root 总负责与独立 worktree
+
+Codex 负责拆任务、审查、集成和交付；Claude 在独立 `stk-claude` / `claude/support` 承担文档及指定模块，
+替换刚提交的 5670f565 共用树/设计专属分工。更新 AGENTS/CLAUDE 入口并增加协作约定和 CL-D1-01 ready 任务卡。
+原有未提交状态文档内容保留，四文档新增本节；未改产品代码或发布契约，未宣称 Claude 已开始任务。
+实时 CI：远端 6f4de650 的 Runtime/Docs/Secret 成功，Desktop 42442318655 仍运行；本轮验证/证据见运行验收。
+旧八项范围、三待决、PET 后置保持。证据目录为 `~/.local/state/stk-validation/worktree-coordination-20261107-01/`。
+
+所有者另已设持续开发目标为 active：root 合理分配 Claude 工作，并审查、验证及合并当前计划相关 PR；
+所有者数日后回复问题，期间继续不依赖待决的工作，不把未回复视为授权选择。
+
 ## 2026-11-06 UTC：准备启动会、整体框架和多仓库协作材料
 
 交付 [平台总体框架](design/platform-framework.md)、[滚动路线/周会模板](planning/platform-roadmap.md)、

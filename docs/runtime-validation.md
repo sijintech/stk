@@ -1,5 +1,26 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-07：root / Claude worktree 协作设置（当前）
+
+本轮范围是协作规则、隔离 worktree 和交接任务，不是产品 UI/科研功能交付。
+起始 `main` 为 `5670f565be32b6be85d187ba2fb2baa22d272341`；原六项未提交 WIP 与空暂存已核对，
+六份公开文档 preimage 保存在 `~/.local/state/stk-validation/worktree-coordination-20261107-01/before/`。
+仅对四状态文档追加当前记录，历史正文保留；规则详见 [协作约定](planning/agent-collaboration.md)。
+
+| 核验 | 本轮事实与边界 |
+|---|---|
+| 远端与前置 CI | 已核远端 main 为 6f4de650；该头 Runtime [42442318483](https://github.com/sijintech/stk/actions/runs/42442318483)、Docs [42442318504](https://github.com/sijintech/stk/actions/runs/42442318504)、Secret [42442318534](https://github.com/sijintech/stk/actions/runs/42442318534) completed/success；Desktop [42442318655](https://github.com/sijintech/stk/actions/runs/42442318655) in_progress。未以单 job 或旧 failure 代替整个新 run 终态 |
+| 角色与路径 | root 在 stk/main；Claude 在 stk-claude/claude/support，仅接受有基线/路径/验收的文档和模块任务；root 统一集成与推送 |
+| 功能与点击 | 未运行新产品、模型、许可软件、GPU、原生窗口或点击验收；CL-D1-01 仅 ready，不标实施完成 |
+| AOCI 认知 | 本轮沿用同 Run 的完整 1181 条/44 块、Challenge 10/10、覆盖率 100%、框架掌握度自评 88%；已加载且严格验证通过，治理仍待最终稳定态维护，不声称当前系统全貌可靠 |
+
+协作规则提交及隔离结果以本批外部 closure 和实际 Git 为准；不连带提交原四文档 WIP。
+本轮文档检查：13 个相对链接存在，diff 空白检查通过；gitleaks 8.30.1 按 `.gitleaks.toml` 扫描暂存增量零发现。
+未运行产品测试，不用旧产品测试计作本轮验证。
+
+所有者另已设持续开发目标为 active：root 合理分配 Claude 工作，并审查、验证及合并当前计划相关 PR；
+所有者数日后回复问题，期间继续不依赖待决的工作，不把未回复视为授权选择。
+
 ## 2026-11-06 UTC：启动会与多仓规划材料验收（当前，仅文档）
 
 材料提交 `325fe57dc955b4e9a69370e60d03f39ad0a6bb7b`；入口为[总体框架](design/platform-framework.md)、

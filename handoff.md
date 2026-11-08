@@ -1,5 +1,25 @@
 # STK 当前交接
 
+## 2026-11-07：root / Claude 独立 worktree 协作（当前）
+
+所有者最新决定覆盖此前共用工作树、Claude 只做设计的分工。Codex 为 root，继续在
+`/home/mnemora/xcheng/sijin/stk` 的 `main` 负责拆任务、契约、审查、集成、最终验证、AOCI、推送和 CI；
+Claude 使用 `/home/mnemora/xcheng/sijin/stk-claude` 的 `claude/support`，配合文档及明确分配的模块和相关测试。
+完整规则与首张任务卡见 [协作约定](docs/planning/agent-collaboration.md)。CL-D1-01 为 ready，尚未接单或验收；
+首项交付限新文件 `docs/planning/d1-compatibility-gates.md`，不发布 schema、不代选待决。
+
+本轮起始 main 为 `5670f565be32b6be85d187ba2fb2baa22d272341`；实际远端为 `6f4de650`，
+旧 11-06 快照中的“远端 350534d / 535b0d63 未推送”已过时。
+本轮实时核对同 `6f4de650`：Runtime 42442318483、Docs 42442318504、Secret 42442318534 均 completed/success；
+Desktop 42442318655 仍 in_progress，未满足下一代码 push 等待门。协作配置不等于新产品功能验收。
+既有六项 WIP 保留；四文档仅前置本次记录，旧正文保留，Claude 工作树只继承提交内容。
+
+root 先跟进当前 Desktop / 记录及认知收口，再做原生文献 UI 与实际点击验收、核实 Synthrix 当前正常启动接线及桌面入口、
+推进 D1；Claude 的 D1 前置文档可独立进行。三待决、八项范围与 PET 后置保持。
+
+所有者另已设持续开发目标为 active：root 合理分配 Claude 工作，并审查、验证及合并当前计划相关 PR；
+所有者数日后回复问题，期间继续不依赖待决的工作，不把未回复视为授权选择。
+
 ## 2026-11-06 UTC：启动会材料、总体框架与多仓协作（当前）
 
 本轮继续同一设计工作，所有者要求为与合作方的固定周会/启动会准备整体框架、开发计划与仓库规划。
