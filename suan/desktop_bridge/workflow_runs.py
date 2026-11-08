@@ -128,18 +128,27 @@ class WorkflowRunExecutor:
 
     # ---- service methods ----
 
-    def start(self, store, run_id):
-        """Claim a prepared or stopped run and execute its unfinished tasks in the background."""
+    def start(self, store, run_id, *, approval=None):
+        """Claim a prepared or stopped run and execute its unfinished tasks in the background.
+
+        ``approval`` (a person's first-start envelope, see ``WorkflowRuns.start``) is passed unchanged to
+        the store's atomic first claim. With it, a run already executing here is refused rather than
+        reported as started, and a run that was ever started (including one whose thread failed to start
+        and was stopped) cannot be approved again, by this executor or another. Without it nothing changes."""
         with self._lock:
             if self._closing.is_set():
                 raise BridgeError("shutting_down", "Workflow executor is closed")
             key = self._key(store, run_id)
             if key in self._jobs:
+                if approval is not None:
+                    raise BridgeError("conflict", "This workflow run is already executing; an approval allows only "
+                                                  "its first start")
                 return store.workflow_runs.get(run_id)
             if len(self._jobs) >= MAX_ACTIVE_RUNS:
                 raise BridgeError("busy", "The local executor has reached its 4-workflow-run limit")
+            claim = {"approval": approval} if approval is not None else {}
             record = store.workflow_runs.start(run_id, executor_id=self.executor_id,
-                                               owner={"host": socket.gethostname(), "pid": os.getpid()})
+                                               owner={"host": socket.gethostname(), "pid": os.getpid()}, **claim)
             job = _Job(store, run_id)
             job.thread = threading.Thread(target=self._run, args=(job,), daemon=True, name="stk-workflow-" + run_id)
             self._jobs[key] = job
