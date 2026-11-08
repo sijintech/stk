@@ -1,5 +1,14 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：节点断连已复验，原生 AX 候选已接主线
+
+本地源码 `688db5a0889f301f339150f836de8caa3cd1abea`，前一源码 `d2f6262262e713d4bf1e986fb15d03a5fea70b59`；本节成文时未push，远端b3c3b912，最终交付/新CI见 `native-ax-client-20261108-09/root-integration/closure.json`。root先提交原生12路径，再选择集成Claude `a215972d` 三条节点断连路径，产品Python后端和既有helper未改。
+原生候选保留四次完整空provider查询和真实250ms泵UI，仅全空才启一次公共AX子进程；父端持续泵UI、2s绝对child期限及owned kill/reap，关闭前取消/drain。实际WKWebView/session/导航/布局代次及新DOM核对后才原生点击，8s原seek期限不续期，唯一slider/DOM/OS像素/20轮门保留。root两目标构建和43项相关CPU测试全过、零skip、2.85s；12文件SHA稳定，暂存106792字节gitleaks零发现。未Apple编译/AX实测，仍是待Mac CI候选；同步AppKit查询不可抢占。
+Claude12两P2已修并独立关闭：杀前原Node有效存活且实际SIGKILL/reap，原program和worker全阶段身份冻结，显式取消后清扫前核退出。root最终联合90通过、零skip、43.90s；最小安装-I的10断言全过，场景23.544913289s、含清理24.654371985s，来源/模块SHA一致、一任务/run/marker、无残留。script8d75922f…/helperc1235e8c…；包源58到当前产品树零差异。旧假绿及修后反例保留，不借清理证明取消。证据 `d1-node-disconnect-20261108-10/root-integration/`、`review/candidate-2/`。
+远端b3整个Runtime42479012065于12:26:56Z success/13job，Docs42479012061于12:13:16Z success（完整构建发布），Secret42479012010于12:10:58Z success。b3文档路径未触发Desktop；最近适用整轮Desktop304/42472416447已于11:15:29Z失败终态，等待门满足。当前新原生/断连字节没有目标OS CI，不继承旧结果。PR53/54头仍未变、未集成无关旧差异。
+实际Claude已接CL-D1-HUB-RESTART-13，在独立树a215972d仅写hub_restart.py/HUB_RESTART.md/新测试，验证Runtime已接受而Hub尚未存结果时丢回复/同库重启/原action重派。保节点缓存，缓存恢复与再次Runtime提交分别报告；任务尚未交付。root独占main、共享构建、四状态文档、认知/推送；另一原生辅助不是Claude。
+D1仍缺其余合同/传输撤权/故障和云端项目语义；真实MuPRO主机/SDK/许可/小算例、扫描值及分析提案形式仍待输入。S2c仅明确直连/SSH目标、本地冻结及人工首次批准，HDF5仍需DAT完成验证。原八项、文献实际点击、Synthrix正常装配和D2-D5保留，PET新专项后置；旧WIP/AOCI预存资产保留，工作树对齐不等发布索引全量提交。
+
 ## 2026-11-08 UTC：文档 CI 下载准备已修，故障候选继续复核
 
 main 本地源码 `9053ea5c394060252e936a121229668d6e185594` 已提交；本节成文时未push，远端为 `599937f9`，最终推送/新CI见 `docs-libvips-20261108-11/root/closure.json`。root 为文档安装从同官方release有界下载固定libvips8.14.5，先核sharp0.32.6上游SHA-512，再交本地prebuild入口；sharp自身校验、冻结锁、Pagefind产物门均保留，产品模型/网络策略未改。

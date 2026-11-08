@@ -66,19 +66,28 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
 
 ### CL-D1-DISCONNECT-12：节点断线与原任务恢复观察
 
-- **状态：** 已派给同一实际 Claude 会话及独立 worktree，尚未集成。基线为其 `6cc2d39e`，先对 root `6ae96999` 两文件 patch 做 no-commit cherry-pick、暂存扫描和独立提交；不合并 main 或重置本树。
-- **当前复核：** root 独立反例证明候选 `22c038cd…` 可把提前退出的节点当主动 SIGKILL，或在替换 worker 元数据后漏掉仍活的原 worker；两项 P2 已退回同三路径修正，接收前须冻结原身份并重新绑定 source/installed 证据，不能借最终清扫证明取消成功。
+- **状态：** Claude在同步root两文件修正后交付 `a215972d68ecf2497c3161ac4a083a9323152773`，root选择集成 `688db5a0`；本地主线已提交，推送/新CI见本批closure。
+- **当前复核：** 两P2均已关闭：原节点须杀前有效存活、实际SIGKILL并reap；原program/worker冻结身份跨阶段比较，取消后清扫前核原身份退出。旧候选提前退出/worker替换两假绿在最终字节被拒绝；独立五个真实sleeper场景通过，八进程全回收。
 - **唯一新增写入：** `examples/backend_parity/disconnect.py`、`examples/backend_parity/DISCONNECT.md`、`tests/test_backend_parity_disconnect.py`。同步后已有 helper/README 只读，root 树、全局状态、AOCI、共享构建、产品契约及 CI 均不改，不推送或另委派 peer。
 - **目标：** 私有 loopback Hub/Node/Runtime 中只提交一次固定程序；只停本次 NodeAgent，证明 Runtime 原任务及真实程序身份继续；Hub 离线精确读保持 unavailable/unknown。用同 profile 重启节点后观察同 task，再明确取消并核 PID/worker 退出和一次启动，没有换 authority 或重新提交。
 - **退出证据：** 原请求身份、实际阶段观察、逐模块与两份 harness SHA、无新增观察 action、marker/PID 和清理。只读接口若不能证明某项须报告限制；预算、source/installed 和窄环境约束复用已验 helper，异常不导出私有路径或凭据。
-- **限制：** 仍为单主机制造故障，不代表站点故障转移、许可求解或科学通过。任务与证据在 `d1-node-disconnect-20261108-10/`，由 root 独立审查后选择集成。
+- **实际验收：** root最终联合90通过、零skip、43.90s；最小非system-site-packages环境 `-I installed` 的10项断言通过，场景23.544913289s、含清理24.654371985s，module来源/摘要及script/helper SHA一致，原进程退出、一任务/run/marker、清理无残留。Claude最终source/installed分别为trial-06/07，独立审阅核实绑定，旧trial不代新字节。
+- **限制：** 仍为单主机进程SIGKILL，不代表网络分区、Hub/Runtime重启、站点故障转移、许可求解或科学通过。证据 `d1-node-disconnect-20261108-10/root-integration/`、`review/candidate-2/`；产品后端未改。
+
+### CL-D1-HUB-RESTART-13：已接受任务的 Hub 丢结果与重启
+
+- **状态/基线：** 同一实际Claude会话已接单，在独立 `stk-claude / claude/support` 的 `a215972d` 上开发；尚无候选交付。root同时收口主线原生与节点断连，不共写路径。
+- **唯一新增写入：** `examples/backend_parity/hub_restart.py`、`examples/backend_parity/HUB_RESTART.md`、`tests/test_backend_parity_hub_restart.py`。既有offline/disconnect helper、产品、全局docs/AOCI/CI只读，不push或另委派peer。
+- **目标：** 原Runtime已接受且原program/worker运行，Hub原action仍queued无结果时，仅SIGKILL/reap自有Hub；原Node/Runtime存活、首次结果在断线时被丢弃后，以同库/端口重启Hub，真实重派原action并恢复同任务。保留节点原缓存，缓存恢复与再次Runtime幂等提交分别记录，不删缓存制造重放。
+- **验收：** 只一次客户端提交、冻结action/key/request摘要和原进程身份；实际故障、重派/缓存、一次启动及显式取消前退出证据。source/installed同字节、helper/driver摘要、绝对预算、清理失败拒绝及受控反例；不以只排队未运行的简单重启替代该边界。
+- **证据/限制：** `d1-hub-restart-20261108-12/`；单Linux主机公开程序，不含单实例锁、网络分区/跨站、云端项目、真实MuPRO或科学验收。越界依赖先报root，最终仍由root审查、集成和维护状态。
 
 ### root 原生 AX client 测试候选
 
 - **归属：** 另一 Codex 辅助代理，独立 detached `/home/mnemora/xcheng/sijin/stk-native-ax`、基线 `304ba0be`；不是 Claude。旧 `stk-native-runs` worktree 保留。
 - **范围：** 报告测试夹具、新公共 AX helper、numeric 协议/所属进程控制和 CPU 反例；root 已扩展 `test_media_probe.hh` 和 `native_view_cocoa.mm` 的 Apple TEST_PROBES 部分，只读核真实 WKWebView/session/导航代次。不改非测试行为、权限或网络。root 统一共享构建、原生验收、认知及发布。
-- **当前候选：** 独立提交 `c16170c8` 及绝对 seek/子进程时限后续 `0b4b53c0`，最终树干净；作者 CPU 1/1、严格编译和 Linux consumer object 已过，root 最终固定字节审阅仍在进行，尚未集成。
-- **待验：** 父端持续泵 UI、有限 kill/reap、实际窗口/视图/session/导航和布局代次再核。唯一 slider、原生输入、DOM/OS 像素和 20 轮门不放宽。未目标 Mac 编译/运行的候选不算修复。
+- **当前候选：** 独立提交 `c16170c8` 及绝对时限后续 `0b4b53c0` 已审阅并选择集成 `d2f62622`。12路径SHA与候选一致，root两个主线目标构建通过、43项相关CPU测试零skip通过/2.85s；暂存106792字节gitleaks零发现。独立源码审阅无新增实质问题，未执行Apple分支。
+- **待验：** 已实现父端泵UI、owned child的2s绝对时限/有限kill-reap和关闭前drain、真实窗口/WKWebView/session/导航/布局代次及新DOM再核；8s原seek期限不因重试续期。唯一slider、原生输入、DOM/OS像素和20轮门保留。仍须目标Mac编译/实际原生CI，Linux/审阅不算修复；同步AppKit查询不可抢占，只拒绝晚结果。
 
 ### CL-D1-01：D1 实施前的最小契约与兼容门清单
 

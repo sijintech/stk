@@ -1,18 +1,20 @@
 # D1 实施前的最小契约与兼容门清单
 
-任务卡：CL-D1-01、CL-D1-PARITY-11（见[协作约定](agent-collaboration.md#当前任务卡)）。状态：**首个任务切片已本地验收，D1 完整退出门尚未完成；下列新进度优先于历史基线。**
+任务卡：CL-D1-01、CL-D1-PARITY-11、CL-D1-DISCONNECT-12（见[协作约定](agent-collaboration.md#当前任务卡)）。状态：**正常任务与节点断连切片已本地验收，D1 完整退出门尚未完成；下列新进度优先于历史基线。**
 本文不发布新 schema，不改产品代码或数据库格式，也不替所有者选择 D3 领域、剩余未决事项或 PET 新专项。
 2026-11-07 所有者对原三项待决作了新回答，root 已把它们写入任务卡并要求纳入本清单，见 §6。
 
 **历史基线：** 初稿来自 `claude/support` 的 `37d26464591f9191986459f4d70b7320e68f5555`；三份设计当时以 `535b0d63d15521ea7d4294ddfce2ac68a3555667` 为证据，两头当时的产品代码相同。下文未更新的 `路径:行` 仅定位该历史版本，不能据此声称当前源码仍相同。
 
-**2026-11-08 进度核定：** 已推主线 `599937f9` 的整个 Runtime 工作流 13 job 通过，含三 Linux 的新 D1 测试；Windows 排除 server 组，不能算该组的 Windows 验收。HDF5 和有限 S2c 契约分别见 [MuPRO HDF5/1](../specs/mupro-hdf5-1.md) 和 [agent MuFerro run/1](../specs/agent-muferro-run-1.md)。S2c 仍只允许桌面明确选择的直连/SSH Runtime，不支持 Hub 准备。
+**2026-11-08 进度核定：** 已推主线 `b3c3b912` 的整个 Runtime 工作流 13 job、文档部署和 Secret 均通过；Windows 排除 server 组，不能算该组的 Windows 验收。本地下述新切片尚未push，不能借旧头CI覆盖新字节。HDF5 和有限 S2c 契约分别见 [MuPRO HDF5/1](../specs/mupro-hdf5-1.md) 和 [agent MuFerro run/1](../specs/agent-muferro-run-1.md)。S2c 仍只允许桌面明确选择的直连/SSH Runtime，不支持 Hub 准备。
 
 root 选择 R1(a)，已将 Claude `6cc2d39e` 的[双部署样例](../../examples/backend_parity/README.md)选择集成，并修正清理异常和未舍入预算判断；源码 `6ae96999` 已随文档 `599937f9` 推送。联合测试 61 通过、零跳过；root 在独立、非 system-site-packages 的最小 `server/control/test` 环境，以 `-I --mode installed` 验证真实 Runtime A 和 Hub/Node/Runtime B，9 项断言通过、总耗时 12.1s，两个部署的实际模块来源/摘要一致，任务程序和 worker 均退出，临时目录已删除。包来自 `58fbd03e`，到 `6ae96999` 的 `suan/`、`toolkits/`、`pyproject.toml` 无差异；样例自身另绑 SHA。证据为 `d1-parity-20261108-08/root/parity-integration/`，最终提交/推送以其 closure 和[运行验收](../runtime-validation.md)为准。
 
-这只完成已列明的正常任务切片，未覆盖全部合同矩阵或故障门；云端项目语义、跨主机/目标 OS、真实 MuPRO 和科学有效性均未验。下一模块 CL-D1-DISCONNECT-12 验节点离线/原 profile 重连观察，不自动重提任务。
+CL-D1-DISCONNECT-12 已由 Claude `a215972d` 交付，root 选择集成 `688db5a0`；[断连样例](../../examples/backend_parity/DISCONNECT.md)联合90项零skip通过、43.90s。root 最小安装环境 `-I --mode installed` 的10项断言通过，场景23.544913289s、含清理24.654371985s，实际site-packages来源和模块SHA一致。仅杀本次原NodeAgent且核实际SIGKILL/reap；Hub离线精确读不返回任务状态；同profile重连后观察原任务，显式取消后原program和worker均在清扫前退出，一任务/run/marker、无残留。
 
-断线模块初稿尚未集成：独立反例发现节点已退出仍可冒充主动 SIGKILL、worker 元数据替换后原 worker 仍活也能通过。必须固定杀停前原节点及原 program/worker 身份，取消后直接核原进程退出，不能由 finally 清扫代替；修正和新字节验证由 Claude 的同三路径完成。文档 CI 修正 `9053ea5c` 独立收口，不作为断线模块或目标 OS 原生通过证据。
+初稿两P2已关闭：提前退出不能冒充故障注入，worker元数据替换不能漏掉仍活的原进程。旧假绿及修后拒绝反例均保留，最终证据绑定script `8d75922f…`、helper `c1235e8c…`；见 `d1-node-disconnect-20261108-10/root-integration/` 和独立 `review/candidate-2/`。这只完成单主机进程断连切片，网络分区/长中断、期间自然完成、Hub未完成action重启等仍缺；CL-D1-HUB-RESTART-13 已派实际Claude，验证接受后丢结果、同Hub状态重启和原action重派。节点原缓存恢复与Runtime再次幂等提交须分别报告。
+
+全部合同矩阵、传输/撤权、云端项目语义、跨主机/目标OS、真实MuPRO和科学有效性均未完成。文档CI修正及原生AX候选不能作为这些验收证据。
 
 **输入：**
 - [共享架构](../design/shared-backend-architecture.md)
@@ -137,7 +139,7 @@ ID 前缀 X 是本文编号；括号里给出对应的[跨端验收](../design/d
 | X4（F05） | 排队中取消、运行中取消、取消回复丢失 | 取消意图幂等；只有核实退出后才是 `cancelled` | Runtime 侧已实现；B 侧只在带 key 时幂等 | `tests/test_runtime.py:115,511,556`；`tests/test_runtime_hub_cli.py:153` |
 | X5（F10） | 撤销设备后热缓存读取、冷重开、原 key 重放 | 当前授权先于返回数据 | 设备级撤权已实现（401）。**缺口：** ① 任何已配对客户端都能读所有非联邦 action；② 另一设备用相同 ID 和 body 重放时，`create_action` 直接返回原记录，不检查提交者（`suan/control/store.py:177-186`）；③ 没有按项目或用户的作用域 | `tests/test_control.py:30`；`tests/test_runtime_hub_cli.py:153`。②③没有测试，需要先有授权模型（依赖决定，见 R3） |
 | X6（F13） | 旧 Hub 或旧节点缺 `task.get`；任务超出心跳窗口 | 明确不支持；已知任务不因列表中没有就变成"不存在" | 已实现 | `tests/test_runtime_hub_cli.py:174,225` |
-| X7（F03） | 节点代理或 Hub 重启，期间 worker 完成 | 最后的任务事实和观察可用性分开展示；不把失联写成失败 | 部分实现：节点停止不停 Runtime 任务（`suan/control/cli.py:146-147`）；观察状态与执行状态分轴属拟议 | Runtime 侧：`tests/test_runtime.py:166`。节点断线重连：`tests/test_control.py:63`、`tests/test_runtime_hub_cli.py:195,243`、`tests/test_control_federation.py:603`。Hub 状态库重新打开后事件不变：`tests/test_control.py:30`。Hub 进程在有未完成 action 时重启：没有找到直接测试（缺口） |
+| X7（F03） | 节点代理或 Hub 重启，期间 worker 完成 | 最后的任务事实和观察可用性分开展示；不把失联写成失败 | 部分实现：节点停止不停Runtime任务；观察状态与执行状态分轴属拟议。新增单Linux主机真实NodeAgent SIGKILL/同profile重连，原任务继续并由显式取消结束；不含离线期间自然完成或网络分区 | `examples/backend_parity/disconnect.py`、`tests/test_backend_parity_disconnect.py`；root10断言及90项联合通过见首节。旧Runtime/控制与CLI测试仍保留。Hub未完成action进程重启由CL-D1-HUB-RESTART-13开发，尚未验收 |
 | X8 | 两个实例写同一项目：同修订上的两个不同操作 | 只有一个成功，另一个冲突 | 本地已实现：`expected_revision` CAS（`suan/project/store.py:229,289`）和 format-15 编辑回执（[project-edit-operations-1](../specs/project-edit-operations-1.md)）。**跨部署没有对应承载**（G1-5） | `tests/test_project_edit_operations.py:78,103,196` |
 | X9 | 同一地址换成另一个 Runtime 实例 | 拒绝把新实例当原服务 | **缺口：** 只有配置级 `server_key`，无法认证实例 | 无测试；依赖拟议的 authority 身份 |
 | X10 | 刷新、重开、订阅、等待超时 | 不重新提交，不取消，不调用模型 | 现行实现中提交和取消都是显式命令 | `tests/test_desktop_bridge_runtime.py:405`。D1 要在两部署上各记一次（`requests.jsonl` 中零新增提交） |
@@ -246,7 +248,7 @@ root 描述的链条是：软件发现 → 能力预检 → 冻结输入 → 显
 | R3 | 授权模型：Hub 现在是设备级授权，D1 是否引入按项目或用户的作用域 | D1 先声明现状差异，不扩大开放范围；按项目授权进 D2 前置 | 关闭 X5 的②③；与 Synthrix 的 `authz` 迁移相关 |
 | R4 | `@python` 与 `{python}` 不对称（G1-3）是只在 harness 中规避，还是把 `demo-field` 模板改用 `{python}` | 只在 harness 中规避；改模板会改变已发布模板，须单独审 | 影响 Hub 模板的精确匹配和既有测试 |
 | R5 | 冲突分类依赖英文消息子串（C-5）。是否在 D1 引入版本化的稳定冲突码 | 不在 D1 改；先补一条"文本 → `conflict`"的回归测试锁住现状 | 防止改错误文本时无声地破坏客户端 |
-| R6 | 两个测试缺口：(1) Hub 没有进程级单实例锁，也没有双实例测试；(2) Hub 进程在有未完成 action 时重启，没有直接测试 | 在 D1 harness 中补这两个反例；Hub 是否加锁由 root 决定 | 影响 C-11 和 X7 能否在部署 B 上闭合 |
+| R6 | 两个测试缺口：(1) Hub 没有进程级单实例锁，也没有双实例测试；(2) Hub 进程在有未完成 action 时重启 | (2) CL-D1-HUB-RESTART-13已派Claude，仅测试三新路径，须原程序实际运行、Hub尚queued时杀停/同库重启、丢首次结果后原action重派和一次启动；节点缓存不能冒充再次Runtime提交。(1)仍待补，Hub是否加锁由root决定 | 两项均未以新任务交付关闭；节点断连模块通过不替代 C-11/X7 的其余故障 |
 | R7 | MuFerro 的 `--license-dir`、`--sdk-prefix`、`--env-script` 路径都写进 argv（`suan/mupro/spec.py:35-40`），因而随 TaskSpec 存进 Runtime 库和项目运行计划；直连 `task.get` 能看到，Hub 投影会去掉 | 这些是节点本地路径，不是秘密（许可内容从不读取）。建议先列为已知现状；是否改为节点本地配置由 root 决定 | 影响 P-2，以及任何把 TaskSpec 原文导出或送入模型的路径 |
 | R8 | HDF5 陈旧输出及最终状态输入边界 | 本轮已用 CLI 和制造求解器复现 `run.h5` 遗留混入，补可选输出预检及反例；不把所有 `.h5` 都当输出，也不把可选文件变成 DAT 必需文件。最终状态的文件/字节上限继续保留 | 不证明 HDF5-only 完成或真实许可运行；最终测试与提交见运行验收 |
 | R9 | 同一批准不能重复启动；扩权不等于自动执行 | 已实现：消费一次后只观察原证据，任何历史 started 都使批准首次 claim 失败；消费前已有手工 started 会拒绝消费并保持待决；决定已消费后的手工竞争启动才观察为 other_start，不能冒充原批准。未授权本地轻量自动开始 | 决定先落盘、claim 同事务复核；两事务间崩溃保留 uncertain，不用新 ID 或换路径补发 |

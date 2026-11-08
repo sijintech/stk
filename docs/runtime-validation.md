@@ -1,5 +1,20 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：主线 AX 候选与节点断连最终字节复验
+
+本地源码 `d2f6262262e713d4bf1e986fb15d03a5fea70b59`（原生12路径）及 `688db5a0889f301f339150f836de8caa3cd1abea`（Claude12三路径）；本节成文时未push，远端b3c3b912。最终交付/新CI见 `native-ax-client-20261108-09/root-integration/closure.json`。无新产品UI或实际点击交付，既有Viewer/隐藏稿保护和原原生验收门保留。
+
+- `native-ax-client-20261108-09/root-integration/build-main.log`、build-main-result.json：root独占merge-check构建stk-reports-native-ax-tests和stk-reports-native-window退出0，12文件前后SHA匹配最终候选0b4b53c0；未Apple编译/链接。ctest-main.log/xml/result为DocumentResources、NativeMediaProbe、ReportDocumentHost和reports_native_ax_cpu，43/43通过、零skip、2.85s；Linux Unsupported用例不是原生呈现通过。
+- 同批 `independent-review/review-final.json`：固定c16170c8/0b4b53c0的12blob独立源码审阅无新增实质问题，没有执行Mac。仅四次完整空provider读允许一次公共AX helper；只读本应用公开AX、唯一slider，新DOM与真实WKWebView/资源/session/导航/布局epoch再核后点击。2s原child期限/8s原seek期限不续期，cancel/关闭UI持续泵并drain owned child，丢失回收证明不能通过；同步AppKit查询不可抢占，只能拒绝迟到结果。唯一slider、原生输入、DOM/OS像素和20轮均未放宽，仍待新Mac CI。
+- `d1-node-disconnect-20261108-10/review/candidate-2/`：三blob精确匹配Claude最终a215972d，script8d75922fec09e1ea5af91debb1bbcd732ac178172174f624fedb58e0abeaffc3。旧提前退出/worker替换反例从全绿变D2及D5/D7/D8拒绝；五个独立真实sleeper场景通过、八自有进程全reap。Claude最终实际trial-06-source-review14/07-installed-review14各10断言通过、23.6669/23.8132s，仅作为作者证据；未误用旧trial01。
+- `d1-node-disconnect-20261108-10/root-integration/pytest-main.log/xml`：root在主线最终三路径运行normal/disconnect联合90项、零skip通过，43.90s；source实际服务场景包含在内。inputs.json/validation-summary.json绑定五输入SHA且前后稳定，产品后端未改。
+- 同批 `installed-main/`：非system-site-packages最小server/control/test Python3.12，以-I installed实际启动Runtime/Hub/Node、杀原Node并同profile重连。10/10断言通过、scenario23.544913289s、含清理24.654371985s，预算按原始单调耗时判定。来源均site-packages且12模块SHA相同；helperc1235e8c…/最终script SHA匹配。原program/worker全阶段冻结，显式取消后清扫前按PID/create_time核退出，一任务/run/marker、无遗留；清理不用于补取消证明。包来自58fbd03e，58到当前suan/toolkits/pyproject零diff，不借版本号替字节证据。
+- gitleaks-staged-native.json及断连gitleaks-staged.json：各自暂存扫描退出0、零发现，原生patch106792字节；每次commit前执行，diff空白通过。四状态文档只暂存root新增前缀，原WIP/AOCI预存修改保留；工作树认知对齐不等发布索引全量提交。
+
+前远端b3c3b912整个Runtime42479012065于2026-11-08T12:26:56Z completed/success，13job全成功；Docs42479012061于12:13:16Z completed/success，正式站点构建和发布均完成；Secret42479012010于12:10:58Z success且扫描步骤执行。b3六文档路径不命中Desktop触发，未生成其Desktop；最近适用304ba0be的整个Desktop42472416447已于11:15:29Z failure，1job成功/3下载失败/2skip。推送等待门已满足，没有本轮新目标OS原生证明。独立核验 `root-integration/ci-prepush.json`；PR53/54头未变，未集成无关旧差异。
+
+本轮断连只是单Linux主机NodeAgent进程SIGKILL；不含网络分区/长中断/离线自然完成、Hub未完成action重启或全D1。实际Claude已接CL-D1-HUB-RESTART-13，仅三新路径、同a215基线；须Runtime实际接受且原进程运行/Hub尚queued时丢首结果、同库重启和原action重派。保Node原缓存，缓存恢复不称再次Runtime.submit；尚未交付。D1其余合同/传输撤权/云端项目、真实MuPRO/HDF5-only完成、跨站/目标OS和科学有效性仍未完成；S2c/DAT限制与原八项/待决保留。
+
 ## 2026-11-08 UTC：文档 CI 下载修正、599 全矩阵及候选反例
 
 本地源码 `9053ea5c394060252e936a121229668d6e185594`，成文时尚未push、远端599937f9；最终提交/推送/CI见 `docs-libvips-20261108-11/root/closure.json`。本批无新产品UI或点击验收，既有Viewer/草稿保护门未改。

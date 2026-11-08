@@ -1,5 +1,16 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：交付断连切片，启动 Hub 丢结果恢复验证
+
+本地源码688db5a0集成Claude12最终三路径，root联合90项零skip通过/43.90s，最小安装-I真实10断言通过；原进程取消后、清扫前退出，一任务/run/marker。原生源码d2f62622补公共AX进程测试链，主线两目标构建及43项CPU通过/2.85s，仍待目标Mac CI。本节成文时未push，新CI见本批closure。
+
+1. 交付上述固定字节、更新状态和认知并扫描推送；前适用整个Desktop304已失败终态，b3的Runtime13job/Docs实际部署/Secret均成功。新原生候选必须看新Mac编译与20轮，不能借Linux或旧OS结果。
+2. 实际Claude独立树已接CL-D1-HUB-RESTART-13，仅三条新测试样例路径：原Runtime已接受、Hub尚queued时丢首次结果，保Node/Runtime并同库重启Hub，核原action重派和一次启动。保现有节点缓存，缓存恢复不称再次Runtime.submit；root继续审阅和D1合同字段缺口核定。
+3. D1尚缺全部合同/传输撤权/其余故障、Hub单实例及云端项目语义；D2-D5、原生文献实际点击、Synthrix正常装配和原八项继续按依赖推进。真实MuPRO/HDF5-only完成需资产，当前仍DAT完成验证；有限S2c不是自动开始。
+4. 研究扫描数值与分析修改提案形式不代选，PET新专项继续后置。root独占main、共享构建、状态/认知/推送，Claude只改分配路径；原WIP保留。
+
+证据 `native-ax-client-20261108-09/root-integration/`、`d1-node-disconnect-20261108-10/root-integration/`；旧候选两假绿已有独立红绿证据，初稿绿灯不代最终字节。
+
 ## 2026-11-08 UTC：收口文档 CI，继续 D1 故障和原生候选
 
 root 本地 `9053ea5c` 修正文档依赖下载：同源固定libvips8.14.5、有界curl重试和上游摘要校验后交sharp本地入口。精确Node22.23.3/pnpm8.15.9的站点38页、搜索37页/两语言通过，锁未变；未push/部署，最终见本批closure。

@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：固定原进程断连验收与公共 AX client 集成
+
+root提交原生 `d2f6262262e713d4bf1e986fb15d03a5fea70b59`，来自独立候选c16170c8/0b4b53c0的12文件，随后选择集成Claude12最终a215972d为 `688db5a0889f301f339150f836de8caa3cd1abea` 三文件。当前未push，远端b3，后续交付见本批closure；旧WIP及AOCI资产未连带提交。
+原生测试仅四次完整空provider后一次公共AX只读helper，严格numeric协议、真实父窗/WKWebView/资源/导航/布局代次及新DOM绑定。子进程2s和seek8s均为原绝对截止，失效/关闭取消并在UI泵中drain/reap；唯一slider、原生输入和原DOM/OS像素20轮门不改。两次固定源码审阅无新增实质问题，root主线两目标构建成功、43项CPU零skip通过/2.85s，12输入SHA稳定；106792字节暂存扫描零发现。没有Apple SDK或真实AX运行，不能称Mac问题修复；旧同步AppKit调用仅能拒晚结果。
+断连初稿两P2经Claude修复、独立五个真实sleeper场景和旧反例验证关闭，八owned进程全回收。root最终source联合90项通过/43.90s、最小installed-I 10断言通过（23.544913289s，含清理24.654371985s），原program/worker跨阶段一致且显式取消后清扫前退出，一任务/run/marker，清理无残留。最终harness8d75922f…与helperc1235e8c…，已装包58到当前产品目录零diff；暂存三路径扫描零发现。单Linux节点SIGKILL不代网络分区、长故障或Hub重启。
+b3整个Runtime13job于12:26:56Z success、Docs完整部署12:13:16Z success、Secret12:10:58Z success；无Desktop触发。最近适用整轮Desktop304于11:15:29Z失败终态，推送等待门满足。PR53/54无新头，不合无关旧差异。
+Claude已接13，仅新增Hub丢首次结果/同状态重启样例、说明和测试，尚未交付；保真实Node缓存，恢复原action与再次Runtime提交须分别陈述。root统一共享构建/状态/认知及发布，原八项/D1-D5/文献点击/Synthrix入口及待决不缩减；真实MuPRO和科学有效性仍缺资产。证据见运行验收。
+
 ## 2026-11-08 UTC：固定文档依赖的有界下载与独立故障复核
 
 root源码 `9053ea5c394060252e936a121229668d6e185594` 本地提交，尚未push。文档CI新增同官方release的固定libvips8.14.5准备：每次120秒、至多两次重试、先核上游SHA-512再移动正式包，半文件退出清理；sharp继续自身完整性核验，冻结锁/搜索产物门保留。真实步骤下载6,763,082字节通过，两失败反例均不发布或残留；暂存2772字节扫描零发现。
