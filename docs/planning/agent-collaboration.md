@@ -67,6 +67,7 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
 ### CL-D1-DISCONNECT-12：节点断线与原任务恢复观察
 
 - **状态：** 已派给同一实际 Claude 会话及独立 worktree，尚未集成。基线为其 `6cc2d39e`，先对 root `6ae96999` 两文件 patch 做 no-commit cherry-pick、暂存扫描和独立提交；不合并 main 或重置本树。
+- **当前复核：** root 独立反例证明候选 `22c038cd…` 可把提前退出的节点当主动 SIGKILL，或在替换 worker 元数据后漏掉仍活的原 worker；两项 P2 已退回同三路径修正，接收前须冻结原身份并重新绑定 source/installed 证据，不能借最终清扫证明取消成功。
 - **唯一新增写入：** `examples/backend_parity/disconnect.py`、`examples/backend_parity/DISCONNECT.md`、`tests/test_backend_parity_disconnect.py`。同步后已有 helper/README 只读，root 树、全局状态、AOCI、共享构建、产品契约及 CI 均不改，不推送或另委派 peer。
 - **目标：** 私有 loopback Hub/Node/Runtime 中只提交一次固定程序；只停本次 NodeAgent，证明 Runtime 原任务及真实程序身份继续；Hub 离线精确读保持 unavailable/unknown。用同 profile 重启节点后观察同 task，再明确取消并核 PID/worker 退出和一次启动，没有换 authority 或重新提交。
 - **退出证据：** 原请求身份、实际阶段观察、逐模块与两份 harness SHA、无新增观察 action、marker/PID 和清理。只读接口若不能证明某项须报告限制；预算、source/installed 和窄环境约束复用已验 helper，异常不导出私有路径或凭据。
@@ -75,7 +76,8 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
 ### root 原生 AX client 测试候选
 
 - **归属：** 另一 Codex 辅助代理，独立 detached `/home/mnemora/xcheng/sijin/stk-native-ax`、基线 `304ba0be`；不是 Claude。旧 `stk-native-runs` worktree 保留。
-- **范围：** 仅报告测试夹具、新公共 AX helper、numeric 协议/所属进程控制和 CPU 反例；不改生产文档适配、权限或网络。root 统一共享构建、原生验收、认知及发布。
+- **范围：** 报告测试夹具、新公共 AX helper、numeric 协议/所属进程控制和 CPU 反例；root 已扩展 `test_media_probe.hh` 和 `native_view_cocoa.mm` 的 Apple TEST_PROBES 部分，只读核真实 WKWebView/session/导航代次。不改非测试行为、权限或网络。root 统一共享构建、原生验收、认知及发布。
+- **当前候选：** 独立提交 `c16170c8` 及绝对 seek/子进程时限后续 `0b4b53c0`，最终树干净；作者 CPU 1/1、严格编译和 Linux consumer object 已过，root 最终固定字节审阅仍在进行，尚未集成。
 - **待验：** 父端持续泵 UI、有限 kill/reap、实际窗口/视图/session/导航和布局代次再核。唯一 slider、原生输入、DOM/OS 像素和 20 轮门不放宽。未目标 Mac 编译/运行的候选不算修复。
 
 ### CL-D1-01：D1 实施前的最小契约与兼容门清单

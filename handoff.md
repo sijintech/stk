@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：文档 CI 下载准备已修，故障候选继续复核
+
+main 本地源码 `9053ea5c394060252e936a121229668d6e185594` 已提交；本节成文时未push，远端为 `599937f9`，最终推送/新CI见 `docs-libvips-20261108-11/root/closure.json`。root 为文档安装从同官方release有界下载固定libvips8.14.5，先核sharp0.32.6上游SHA-512，再交本地prebuild入口；sharp自身校验、冻结锁、Pagefind产物门均保留，产品模型/网络策略未改。
+实际执行工作流下载步骤成功；下载失败与坏摘要两反例均失败且无正式包或半文件残留。独立Node22.23.3/pnpm8.15.9安装18.603s，完整站点/搜索构建14.494s，38页、Pagefind37页/两语言，锁SHA未变，200个跟踪文档文件绑定9053实际树。首次隔离PATH缺npx，页面生成但搜索门失败；已补本地工具环境后复验，旧失败保留，不是产品修正。暂存2772字节gitleaks零发现，证据 `docs-libvips-20261108-11/root/`。
+已推599的Runtime42477006366于12:00:18Z整轮success，13job全过：Linux3.11/3.14各5737通过153skip，3.12为5754/136；Windows两版本各5098/254并395未选，新41项server测试未在Windows运行。Secret42477006328通过，Docs42477006418两attempt均libvips请求超时、构建未启动；未第三次重试。599仅样例/测试/文档，未命中Desktop路径过滤，无新目标OS原生证明；最近整轮Desktop304已于11:15:29Z终态failure。
+实际Claude仍独立stk-claude/claude/support：CL-D1-DISCONNECT-12初稿曾真实试跑，但root独立反例抓到提前退出冒充SIGKILL、原worker身份未冻结两P2，已暂停接收并要求同三路径修复/新source与installed验证，未集成。另一Codex原生辅助已交公共AX测试候选及绝对时限后续头，root另一审阅线程核最终字节；未Mac编译/运行，不称修好。root独占main、集成/共享构建/四状态文档/AOCI与push。
+真实MuPRO主机/SDK/许可/小算例、科学扫描值与分析提案形式仍待输入；原八项、D1-D5、文献实际点击和Synthrix入口保留，PET新专项后置。PR53/54头未变且无关旧差异未合入。四文档原WIP及AOCI预存资产保留，工作树治理不代表发布索引全量提交。
+
 ## 2026-11-08 UTC：D1 首个双部署任务切片已本地验收
 
 main 源码 `6ae9699940633de8fd4de004486bd440107e7bc9` 已本地提交；本节成文时未push，远端 `304ba0be`，最终交付/推送见本批closure。Claude原提交 `6cc2d39e` 已选择集成 `4b33e131`；root补清理配置检查异常隔离、未舍入时限和两红例，原MuPRO/共同后端产品代码未变。

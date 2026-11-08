@@ -1,5 +1,16 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：收口文档 CI，继续 D1 故障和原生候选
+
+root 本地 `9053ea5c` 修正文档依赖下载：同源固定libvips8.14.5、有界curl重试和上游摘要校验后交sharp本地入口。精确Node22.23.3/pnpm8.15.9的站点38页、搜索37页/两语言通过，锁未变；未push/部署，最终见本批closure。
+
+1. CL-D1-DISCONNECT-12由实际Claude独立树继续修复：主动杀停前原NodeAgent必须存活且最终为SIGKILL；固定原worker身份，不能由新worker或最终清扫冒充取消成功。两P2均有独立纯桩反例，候选暂不集成；修后重新绑定source/installed证据。D1其余合同、传输撤权、Hub重启和云端项目语义仍在队列。
+2. 原生辅助独立树候选补公共AX进程、真实WKWebView/session/导航及布局代次绑定、原绝对seek/子进程时限与清理。root审最终固定头，仍须实际Mac编译和原生20轮；不降低唯一slider/DOM/OS像素门。
+3. 已推599整个Runtime13job成功、Secret通过；Docs两attempt仍下载超时。599不触发Desktop，最后适用整轮Desktop304已终态失败；无新的Mac/Windows原生验收。文档CI修正推送后核真实新工作流，不以本地构建当部署成功。
+4. MuPRO真实执行与HDF5-only完成仍需资产；S2c仅本地准备、直连/SSH目标与人工首次批准。保原八项、原生文献点击、Synthrix正常装配和D2-D5；PET新专项后置，不代选研究扫描数值或提案形式。
+
+root/main负责集成/共享构建/状态/认知及发布；Claude只改三分配路径，原生辅助不是Claude。旧WIP保留，最终提交/推送/CI见 `docs-libvips-20261108-11/root/closure.json`。
+
 ## 2026-11-08 UTC：D1 正常任务切片通过，继续故障与原生候选
 
 本地源码 `6ae96999`（本节成文时未push）已集成Claude双部署样例并修最终两边界；61项联合零skip通过，root最小安装-I真实双部署9断言通过、12.1s。原MuPRO与后端产品目录到58无差异，验收以实际安装/脚本SHA绑定，不借旧源码头。

@@ -1,5 +1,20 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：文档 CI 下载修正、599 全矩阵及候选反例
+
+本地源码 `9053ea5c394060252e936a121229668d6e185594`，成文时尚未push、远端599937f9；最终提交/推送/CI见 `docs-libvips-20261108-11/root/closure.json`。本批无新产品UI或点击验收，既有Viewer/草稿保护门未改。
+
+- `docs-libvips-20261108-11/root/preflight.json` 与 fetch-step.sh：直接解析当前YAML并执行其下载脚本，bash语法通过；同官方release的libvips8.14.5包6,763,082字节，SHA-512与sharp0.32.6固定上游一致。
+- failure-probes.json：curl最终失败退出22、坏摘要退出1；两个实际工作流脚本反例均无正式包和半文件残留。未强制安装、跳过TLS/摘要或改下载来源。
+- install.log/build-results.json：独立精确Node22.23.3、pnpm8.15.9，冻结锁安装18.603s；sharp确认Using local及Integrity check passed。首次隔离PATH缺npx，pnpm build虽退出0但Pagefind检查失败，build.log保留。补本地npm/npx后build-with-npx.log构建14.494s，38页、Pagefind37页/两语言，index/en/index/search JS均非空；锁SHA前后37c1ba34…一致，跟踪文档文件逐Git blob核对9053树。修正并非声称远端部署已成。
+- staged-scan-summary.json：两路径diff2772字节，gitleaks退出0/零发现；独立CI小审阅见 `d1-node-disconnect-20261108-10/review/candidate-1/docs-ci-review.json`。root仅提交自己新增状态前缀，原WIP和AOCI预存修改保留。
+
+599937f9的整个Runtime42477006366于2026-11-08T12:00:18Z completed/success，13job全成功：Linux3.11为5737通过153skip4未选/843.19s，3.14同计数/905.10s，3.12为5754通过136skip4未选/847.58s。五矩阵日志零失败；三Linux含新41项D1。Windows3.11/3.12各5098通过254skip395未选、820.90/899.00s，server标记组被排除，不作为Windows D1或原生验收。其余八job成功含三文献/协议/peer-macos/Flower/web和该workflow desktop组，详见ci-599-runtime-terminal.json。
+Secret42477006328 success。Docs42477006418 attempt1及2均sharp/libvips8.14.5 Request timed out，正式构建未启动；未第三次重试。599改动不命中Desktop路径过滤，未触发其整轮；最近适用304的Desktop42472416447已于11:15:29Z失败终态，前推送门已核。当前没有新的目标Mac/Windows原生证据。
+
+Claude12候选script22c038cd…由独立审阅两个P2纯AST/文件反例证明可假绿：Node已退出0/1仍当主动SIGKILL；worker.json换A为B后B和program已死、原A仍活，十断言仍可全过。root已要求固定杀前有效存活身份、真实SIGKILL和原program/worker的全阶段绑定及取消前退出，不由finally sweep兜底。候选未集成；旧trial-01绑定其他字节，不作当前验收。证据review/candidate-1/review.json、pure-probes.py、probes.json；修后需重新source/installed实测。
+Mac公共AX候选独立提交c16170c8及绝对时限后续0b4b53c0，原生辅助有CPU1/1、严格编译与Linux consumer object证据；root最终审阅仍在进行，未Mac编译运行，不称修复或20轮通过。真实MuPRO/跨站/科学有效性均未验，D1其余故障/合同和云端项目仍未完成。
+
 ## 2026-11-08 UTC：D1 真实双部署与最终安装验收
 
 本地源码 `6ae9699940633de8fd4de004486bd440107e7bc9`，Claude原提交6cc2d39e选择集成4b33e131；本节成文时尚未push，远端304ba0be。证据根 `d1-parity-20261108-08/root/parity-integration/`，最终提交/推送见closure。无新产品UI或点击验收。

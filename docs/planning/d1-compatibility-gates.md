@@ -6,11 +6,13 @@
 
 **历史基线：** 初稿来自 `claude/support` 的 `37d26464591f9191986459f4d70b7320e68f5555`；三份设计当时以 `535b0d63d15521ea7d4294ddfce2ac68a3555667` 为证据，两头当时的产品代码相同。下文未更新的 `路径:行` 仅定位该历史版本，不能据此声称当前源码仍相同。
 
-**2026-11-08 进度核定：** 已推主线 `304ba0be` 的整个 Runtime 工作流通过；HDF5 和有限 S2c 契约分别见 [MuPRO HDF5/1](../specs/mupro-hdf5-1.md) 和 [agent MuFerro run/1](../specs/agent-muferro-run-1.md)。S2c 仍只允许桌面明确选择的直连/SSH Runtime，不支持 Hub 准备。
+**2026-11-08 进度核定：** 已推主线 `599937f9` 的整个 Runtime 工作流 13 job 通过，含三 Linux 的新 D1 测试；Windows 排除 server 组，不能算该组的 Windows 验收。HDF5 和有限 S2c 契约分别见 [MuPRO HDF5/1](../specs/mupro-hdf5-1.md) 和 [agent MuFerro run/1](../specs/agent-muferro-run-1.md)。S2c 仍只允许桌面明确选择的直连/SSH Runtime，不支持 Hub 准备。
 
-root 选择 R1(a)，已将 Claude `6cc2d39e` 的[双部署样例](../../examples/backend_parity/README.md)选择集成，并修正清理异常和未舍入预算判断；源码本地头 `6ae96999`，本节成文时尚未推送。联合测试 61 通过、零跳过；root 在独立、非 system-site-packages 的最小 `server/control/test` 环境，以 `-I --mode installed` 验证真实 Runtime A 和 Hub/Node/Runtime B，9 项断言通过、总耗时 12.1s，两个部署的实际模块来源/摘要一致，任务程序和 worker 均退出，临时目录已删除。包来自 `58fbd03e`，到 `6ae96999` 的 `suan/`、`toolkits/`、`pyproject.toml` 无差异；样例自身另绑 SHA。证据为 `d1-parity-20261108-08/root/parity-integration/`，最终提交/推送以其 closure 和[运行验收](../runtime-validation.md)为准。
+root 选择 R1(a)，已将 Claude `6cc2d39e` 的[双部署样例](../../examples/backend_parity/README.md)选择集成，并修正清理异常和未舍入预算判断；源码 `6ae96999` 已随文档 `599937f9` 推送。联合测试 61 通过、零跳过；root 在独立、非 system-site-packages 的最小 `server/control/test` 环境，以 `-I --mode installed` 验证真实 Runtime A 和 Hub/Node/Runtime B，9 项断言通过、总耗时 12.1s，两个部署的实际模块来源/摘要一致，任务程序和 worker 均退出，临时目录已删除。包来自 `58fbd03e`，到 `6ae96999` 的 `suan/`、`toolkits/`、`pyproject.toml` 无差异；样例自身另绑 SHA。证据为 `d1-parity-20261108-08/root/parity-integration/`，最终提交/推送以其 closure 和[运行验收](../runtime-validation.md)为准。
 
 这只完成已列明的正常任务切片，未覆盖全部合同矩阵或故障门；云端项目语义、跨主机/目标 OS、真实 MuPRO 和科学有效性均未验。下一模块 CL-D1-DISCONNECT-12 验节点离线/原 profile 重连观察，不自动重提任务。
+
+断线模块初稿尚未集成：独立反例发现节点已退出仍可冒充主动 SIGKILL、worker 元数据替换后原 worker 仍活也能通过。必须固定杀停前原节点及原 program/worker 身份，取消后直接核原进程退出，不能由 finally 清扫代替；修正和新字节验证由 Claude 的同三路径完成。文档 CI 修正 `9053ea5c` 独立收口，不作为断线模块或目标 OS 原生通过证据。
 
 **输入：**
 - [共享架构](../design/shared-backend-architecture.md)
