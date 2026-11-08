@@ -1,6 +1,6 @@
 # MuPRO / MuFerro 执行器试点
 
-2026-11-07。所有者已选择首期优先执行器与专业软件，首个软件为 MuPRO / MuFerro；
+2026-11-08 更新。所有者已选择首期优先执行器与专业软件，首个软件为 MuPRO / MuFerro；
 数据格式由插件定义，MuPRO 使用 HDF5；同意扩展 S2c 智能体 prepare/run 权限。
 这些是当前开发方向的决定，下面区分实施切片、既有合同和仍未验证的部分。
 
@@ -12,9 +12,9 @@
 - S2c 从此前禁止 Agent prepare/run 的边界进入明确的权限扩展开发。仅方向获准，当前注册表和发布协议仍须逐项扩展并验证，
   不能只把两个字符串加入允许列表就当完成。模型建议不能自行构造用户/节点授权。
 - 分工由 root 总负责；Claude 在独立 worktree 实现分配的文档及模块。D1 兼容门清单已经 root 审阅修正后合入 main；
-  双部署验收仍待实施。HDF5 读取模块已修正审查问题，由 root 在 main `56f51af7` 接为显式 FileSource/图数据源，
+  单主机任务/故障子集已验证，D1 完整退出仍未完成。HDF5 读取模块已修正审查问题，由 root 在 main `56f51af7` 接为显式 FileSource/图数据源，
   [读取契约](../specs/mupro-hdf5-1.md)已发布。main `89e40c89` 增加有界元数据发现、限定字段句柄和同一已成功任务的 HDF5 附加产物收集；
-  HDF5-only 完成验证、真实执行验收与 S2c 仍待后续增量。
+  HDF5-only 完成验证与真实执行验收仍待后续增量。有限 S2c 已按[首次批准契约](../specs/agent-muferro-run-1.md)接入：仅桌面明确直连/SSH目标、本地冻结与人工首次批准；不是模型自动执行。
 
 ## 当前可复用的实现与缺口
 
@@ -24,7 +24,7 @@
 | [`suan/workflows/muferro.py`](../../suan/workflows/muferro.py) | 既有执行链已补同任务 `case/run.h5` 的摘要、冻结网格及跨步类型核验和登记 | 收集仍要求旧 DAT 完成验证；继续真实软件与 HDF5-only 输出验收，不另建调度器 |
 | [`suan/connectors/mupro/`](../../suan/connectors/mupro/) | 0.2.0 已发现 `run.h5` 并以 `hdf5:<field>` 打开；DAT/表格保持，HDF5 错误有单独诊断 | 合成/CLI 软件验证不代真实 HDF5 输出、完成证据或目标 OS，不能称整个执行器已完成 |
 | [数据格式 v1 §10](../specs/stk-data-format-v1.md) | 已写明 MuPRO `run.h5:/tNNNNNNNN/<name>` 数组为 `(nx,ny,nz,nc)`，读入需转成 `(nz,ny,nx,nc)` | 按现有轴序做独立适配；组/字段/步号、类型、几何、单位和限制在插件合同中明示，不猜物理量或六分量张量顺序 |
-| [`suan/agent/levels.py`](../../suan/agent/levels.py)、[`tools.py`](../../suan/agent/tools.py) | 当前 Agent 工具只允许 read/record/model/draft，prepare_run/submit_run 仍被排除 | 增加受信任执行授权与冻结计划工具、明确运行和原回执读取；扩展工具/事件/取消/恢复测试及版本合同 |
+| [`suan/agent/levels.py`](../../suan/agent/levels.py)、[`tools.py`](../../suan/agent/tools.py) | 已有有限prepare_muferro_run工具与桌面完整计划/单次首次批准；旧会话工具集合不增权，submit_run不进Agent | 真实MuPRO和目标平台验证仍缺；不支持Hub准备，不以本机身份标签充当认证，丢回执仅观察原身份 |
 
 现有 VTKHDF 与 MuPRO HDF5 是不同布局；HDF5 是容器，不自动证明 group、轴序、单位和来源正确。
 插件必须能说明实际读出的是什么。真实求解器是否按当前样例生成目标 HDF5，还需实际版本和产物证据。

@@ -1,5 +1,19 @@
 # Codex / Claude worktree 协作约定
 
+## 2026-11-08 当前补充：15已集成，16接Hub工作区CLI
+
+实际Claude15交4d02ea3a，仅三新harness路径，由root选择集成为2cc40a0d。root67项/最小installed10断言及独立审阅通过，既有WIP保留；证据见运行验收。root仍独占main/共享build/状态文档/AOCI/推送，前整个Desktop42495020086终态前不push。
+
+### CL-D1-HUB-WORKSPACES-16：现有Hub工作区的CLI薄适配
+
+- 基线Claude4d02ea3a，独立stk-claude/claude/support，不同步main；已派发，未交付。
+- 唯一写入suan/runtime/cli.py、tests/test_runtime_hub_cli.py、docs/hub.md。create/list/files及仅workspace.create原action观察复用现有ConnectionStore/HubBackend；direct/SSH/jobs兼容。
+- create先打印原key/action，丢回复保unknown，只观察原身份，不自动批准或重建。list明确有界heartbeat快照；files按既有read及兼容fallback，不冒称旧Hub也零action。Hub upload在遍历/读文件/网络前明确unsupported，直连上传保持；不自授desktop或改R2/R3/协议。
+- 真实公开loopback及适配反例验证同键、冲突、review、丢回复、跨node/kind、断线/能力和早拒绝；先交固定diff/SHA/测试，经root审阅才stage/scan/commit，不push或另派peer。任务卡d1-hub-workspaces-20261108-20/root/claude-task16.txt。
+
+下方“15未交付”为历史快照，以上新进度优先。
+
+
 ## 2026-11-08 当前补充：Claude14已集成，15开发中
 
 root单路径集成实际Claude14 b510da04为a1904447，真实peer点击18/18通过；旧7ef WindowsCPU本轮也1446/1446过，具体空JSON根因仍未知。root AX五源码79ae0adf7bfe7734a49f33fd571ecdd4e7b650bd另验，Apple待新CI。前整个Desktop42487388780于15:04:55Z failure终态，等待门满足；WindowsPDF像素和Mac两视频仍未通过。root独占main、共享构建、四状态文档/AOCI和push，旧WIP保留。

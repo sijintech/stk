@@ -1,5 +1,14 @@
 # D1 实施前的最小契约与兼容门清单
 
+## 2026-11-08 后续进度：真实Bridge收块丢ACK恢复
+
+[上传恢复样例](../../examples/backend_parity/UPLOAD_RESTART.md)由实际Claude4d02ea3a三路径选择集成为main2cc40a0d，本地未push。真实Hub先收首1MiB、Bridge原journal仍bytes_done=0时SIGKILL/reap，仅重开同profile/state/journal，保持其他四服务原PID/创建时间；原transfer/key/request/upload_session恢复，首新块1048576、下一块2097152，总2621464字节。完成后原workspace.import仍待人工批准，批准前零文件/任务，之后精确大小/SHA一致；无Task提交，不声称程序消费了输入。驱动写后及启动前SHA核验，缺证明和清理失败独立禁通过。
+
+最终script38e42c02…/testc56f8803…；README仅两处说明修正。Claude联合282项零skip通过/74.18s，最终source04/installed05各10断言通过；root主线新模块67项零skip通过/9.814s。root独立最小安装态以同一script运行10/10，场景5.722266164s、含清理6.579574818s，17模块来源探针SHA与root一致、无GUI/科学可选依赖且无残留；探针不等逐服务完整sys.modules采集。独立18纯反例无实质发现，提前SIGTERM和服务session丢失后从0重传真实红例正确失败。暂存75410字节、SHA0a266fba…，gitleaks零发现。证据 `d1-upload-restart-20261108-19/root/`、`claude/`。单Linux主机、一个故障点，不代网络分区/R3/许可求解或科学验证。
+
+此片补原输入样例未覆盖的Bridge journal重开/原偏移恢复，仍不补网络分区、R3或云端项目。Claude16转既有Hub工作区CLI入口，root继续公共后端/桌面/集成；不据此裁决R2/R3。最新691 Runtime13job成功；整个Desktop仍待Windows原生终态，Mac CPU1502/1503、Metal跳过、原生4/6，详情见[运行验收](../runtime-validation.md)。
+
+
 ## 2026-11-08 后续进度：输入与现有设备撤权首片
 
 源码 main `4399f2fa6dfaba941922d2808ca023eba3766105` 已本地提交，尚未push；远端仍 `7ef5d21e`。前整个Desktop42487388780仍运行，终态前不推送。原四文档WIP和AOCI预存改动保留，最终交付状态见 `d1-input-transfer-20261108-18/root/closure.json` 与实际Git。

@@ -1,5 +1,18 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：完成上传恢复有限切片，推进工作区入口
+
+Claude15 `4d02ea3a03b8583d13bd8ab1a0a4a7fb8f771a53` 已仅三路径选择集成为 main `2cc40a0ddbe789770a43cb06c1f0f758ae48e524`，尚未push；root原生等待候选c0ff亦未push。远端691整个Desktop42495020086在16:22Z附近仍运行，须整轮终态后推送。Runtime42495020053已13job全绿，Docs/Secret成功；WindowsCPU成功，Windows原生128786216358仍live。Mac CPU1502/1503通过、531.86s，唯一失败为联邦ChineseNarrow1x的federation_register未解锁；Metal跳过。原生4/6，两视频仍失败，不能沿用旧7ef CPU/Metal结果。
+
+1. 已集成Claude15三路径为2cc40a0d；root新模块67项及最小安装态10断言通过，保原transfer/session/偏移和人工import，不等整个D1完成。
+2. Claude16仅开发Hub工作区CLI薄适配与相关文档测试，root复核后集成；不新增授权/调度状态机，不涉及R2/R3选型。
+3. root跟踪新Mac联邦控件解锁失败、AX中WebArea链位置拒绝及HTML视频2秒deadline；c0ff等待候选仍待目标OS。保持原像素、连续帧、20轮和Viewer/草稿门。
+
+root继续负责main、公共后端/契约、桌面问题、共享构建、审查集成、四状态文档/AOCI和推送。实际Claude在独立stk-claude/claude/support接CL-D1-HUB-WORKSPACES-16，基线4d02，仅cli.py、test_runtime_hub_cli.py、docs/hub.md：为Hub补工作区create/list/files及原action观察，复用既有后端，先交固定候选供审阅；本片不接Hub上传、不自授desktop、不改协议或R2/R3。当前尚未交付。任务卡 `d1-hub-workspaces-20261108-20/root/claude-task16.txt`。
+
+继续D1剩余合同/故障和云端项目、原生文献实际点击、Synthrix正常装配及D2-D5与原八项；MuPRO/MuFerro、插件自定格式/MuPRO HDF5、有限S2c方向已确认。真实执行主机/SDK/许可/小算例、扫描数值及分析修改提案持久形式仍待输入，HDF5仍需DAT完成验证；PET新专项后置。PR53/54实际头仍c9f13994/2dd3e4ee，不合无关旧差异。原四文档和AOCI WIP保留，正式新交付/CI/治理见本批closure。
+
+
 ## 2026-11-08 UTC：691新头Runtime整轮已通过
 
 691f3f12的Runtime42495020053于15:45:20Z completed/success，13个job全过；Windows3.11/3.12各5098通过、254skip、580未选，分别701.01/900.42s，旧SIGKILL收集错误已获得新头Windows验证。Linux完整矩阵和文献/peer-macos/独立联邦等亦成功；不把Windows排除server组当该组验收。Docs/Secret已成功；整个Desktop42495020086仍live，Mac已目标编译完成并进入CPU测试，WindowsCPU仍构建，原生待出。root c0ff1ac7/7f7a40d3本地未push，仍须等前整个Desktop终态；最新交付见windows-pdf-ci-42487388780/review/closure.json。下方较早“Runtime仍live”为当时快照，保原WIP。
