@@ -36,6 +36,7 @@ raised with per-node ``errors`` and the ``partial`` result. Every such
 exception carries ``partial`` (an :class:`EvaluationResult`) and ``node``.
 """
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 import time
 from types import MappingProxyType
@@ -86,6 +87,7 @@ class _Keys:
     params: dict        # normalized params
     data_params: dict
     client_params: dict
+    source: object = None  # plain-JSON fingerprint used to plan this key
 
 
 def evaluate(graph, *, registry, resolver, outputs=None, parameters=None, cache=None, budget=None, cancel=None,
@@ -126,6 +128,14 @@ class _Context:
         if self._keys is None:
             raise GraphError("unsupported", "data_key is not available inside fingerprint()", node=self.node_id)
         return self._keys.data
+
+    @property
+    def source_fingerprint(self):
+        """A private copy of the fingerprint that planned this execution, never a fresh observation."""
+        if self._keys is None:
+            raise GraphError("unsupported", "source_fingerprint is not available inside fingerprint()",
+                             node=self.node_id)
+        return deepcopy(self._keys.source)
 
     @property
     def ancestors(self):
@@ -393,7 +403,7 @@ class _Evaluation:
         final = None
         if node_type.stage == "representation" and node_type.finalize is not None:
             final = sub_key(full, "finalize")
-        self.keys[node_id] = _Keys(data, full, impl, final, params, data_params, client_params)
+        self.keys[node_id] = _Keys(data, full, impl, final, params, data_params, client_params, source)
         self.result.keys[node_id] = {"data": data, "full": full}
         if node_type.cache != "none" and node_type.impl is not None:
             # Choices and warnings belong to the key: replay them even if the value is never loaded

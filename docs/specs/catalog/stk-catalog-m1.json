@@ -5225,6 +5225,100 @@
    "cache": "memory"
   },
   {
+   "id": "stk.source.mupro_hdf5@1",
+   "type": "stk.source.mupro_hdf5",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "source",
+   "category": "source",
+   "title": {
+    "en": "MuPRO HDF5 field",
+    "zh": "MuPRO HDF5 场"
+   },
+   "description": {
+    "en": "Read one explicit /tNNNNNNNN/field from MuPRO HDF5, preserving numeric dtype and unknown physical units. Source file limit 1 GiB; selected array budget 256 MiB."
+   },
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind": "image"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "binding": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "x-stk-widget": "binding",
+      "x-stk-stage": "data"
+     },
+     "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(^|/)\\.\\.(/|$))[^\\\\\\u0000]+$",
+      "x-stk-widget": "path",
+      "default": "run.h5",
+      "x-stk-stage": "data"
+     },
+     "selector": {
+      "type": "string",
+      "pattern": "^/t[0-9]{8}/[A-Za-z][A-Za-z0-9_]{0,63}$",
+      "x-stk-stage": "data"
+     },
+     "extent": {
+      "type": "array",
+      "items": {
+       "type": [
+        "integer",
+        "null"
+       ],
+       "minimum": 0
+      },
+      "minItems": 6,
+      "maxItems": 6,
+      "title": "Inclusive [i0, i1, j0, j1, k0, k1]",
+      "default": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "x-stk-stage": "data"
+     },
+     "stride": {
+      "type": "array",
+      "items": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "minItems": 3,
+      "maxItems": 3,
+      "x-stk-widget": "int3",
+      "default": [
+       1,
+       1,
+       1
+      ],
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [
+     "binding",
+     "selector"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "disk"
+  },
+  {
    "id": "stk.source.table@1",
    "type": "stk.source.table",
    "version": 1,

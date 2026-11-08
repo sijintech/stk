@@ -46,6 +46,8 @@ Implementation contract (evaluated by ``suan.graph.evaluator`` in Phase B2):
   it resolved: its keys leave out the upstream keys and its ``selectors``
   params (e.g. ``step``/``policy``), so the fingerprint must describe everything
   it reads, including what it takes from its inputs.
+  During execution ``ctx.source_fingerprint`` returns a private copy of the
+  exact planned fingerprint, allowing readers to reject changed content.
 * ``meta(ctx, input_metas, params) -> {port: meta}`` is optional (``graph.meta``).
 """
 from dataclasses import dataclass, field, fields as dataclass_fields
@@ -948,6 +950,10 @@ class NodeContext(Protocol):
 
     @property
     def data_key(self) -> str: ...     # this node's data cache key (hex)
+
+    @property
+    def source_fingerprint(self) -> Any: ...
+        # private copy of the plain-JSON fingerprint used to plan this key; unavailable in fingerprint()
 
     def resolve(self, binding: str) -> Any: ...
         # -> suan.connectors.api.FileSource for a binding name; GraphError("unknown_binding") otherwise

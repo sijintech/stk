@@ -15,8 +15,8 @@ resolved content (docs/specs/stk-graph-v1.md §5): ``muferro_frame`` declares
 ``step=3`` resolving to frame 2, ``step=2`` and ``latest`` share one entry, and
 energy rows appended by a live run do not invalidate frame-derived nodes.
 """
-from suan.graph.registry import (NodeExecutionError, Port, binding, enum, integer, json_param, node, rel_path, step,
-                                 string, string_list, vector3)
+from suan.graph.registry import (NodeExecutionError, Port, array, binding, enum, int3, integer, json_param, node,
+                                 rel_path, step, string, string_list, vector3)
 
 RUN_FILES = ("energy_out.dat", "mupro_progress.jsonl", "mupro_completion.json")
 MAX_TOML_FILES = 64  # case files hashed into the muferro_run fingerprint
@@ -347,6 +347,48 @@ def file_source(ctx, inputs, params):
                                     agent={"reader": READERS[kind], "node": ctx.node_id},
                                     used=[{"path": path, "sha256": sha, "role": "input"}])
     return dataset
+
+
+# ---------------------------------------------------------------------------
+# stk.source.mupro_hdf5
+
+
+def _mupro_hdf5_fingerprint(ctx, inputs, params):
+    from suan.connectors.api import ConnectorError
+    from suan.connectors.mupro.source import fingerprint
+    try:
+        return fingerprint(_source(ctx, params["binding"]), params["path"], params["selector"], check=ctx.check)
+    except ConnectorError as exc:
+        raise _failure(exc) from None
+
+
+@node("stk.source.mupro_hdf5", title={"en": "MuPRO HDF5 field", "zh": "MuPRO HDF5 场"},
+      description={"en": "Read one explicit /tNNNNNNNN/field from MuPRO HDF5, preserving numeric dtype and "
+                         "unknown physical units. Source file limit 1 GiB; selected array budget 256 MiB."},
+      outputs=[Port("out", "dataset", kind="image")],
+      params={
+          "binding": binding(),
+          "path": rel_path("run.h5"),
+          "selector": string(pattern=r"^/t[0-9]{8}/[A-Za-z][A-Za-z0-9_]{0,63}$"),
+          "extent": array({"type": ["integer", "null"], "minimum": 0}, [None] * 6, min_items=6, max_items=6,
+                          title="Inclusive [i0, i1, j0, j1, k0, k1]"),
+          "stride": int3([1, 1, 1], minimum=1),
+      },
+      cache="disk", fingerprint=_mupro_hdf5_fingerprint)
+def mupro_hdf5_source(ctx, inputs, params):
+    from suan.connectors.api import ConnectorError
+    from suan.connectors.mupro.source import read
+    planned = ctx.source_fingerprint
+    max_bytes = 256 * 1024 * 1024
+    if ctx.budget.max_memory_mb is not None:
+        max_bytes = min(max_bytes, ctx.budget.max_memory_mb * 1024 * 1024)
+    extent = params["extent"]
+    try:
+        return read(_source(ctx, params["binding"]), params["path"], params["selector"],
+                    expected_sha256=planned["sha256"], region=[extent[i:i + 2] for i in (0, 2, 4)],
+                    stride=params["stride"], max_bytes=max_bytes, check=ctx.check)
+    except ConnectorError as exc:
+        raise _failure(exc) from None
 
 
 # ---------------------------------------------------------------------------

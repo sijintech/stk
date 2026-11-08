@@ -249,6 +249,7 @@ regardless of VTK support.
 
 **MuPRO HDF5** (`run.h5:/tNNNNNNNN/<name>`) is `(nx, ny, nz, nc)` with x slowest: readers
 transpose to `(nz, ny, nx, nc)` (one copy).
+The explicit field reader and graph source are specified in [MuPRO HDF5/1](mupro-hdf5-1.md).
 
 **Internal cache format** (not interchange): `.npy` per array plus a JSON descriptor for images;
 `.npz` for polydata and tables.

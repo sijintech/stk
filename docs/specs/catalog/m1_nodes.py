@@ -152,6 +152,23 @@ def file_source(ctx, inputs, params):
     _todo()
 
 
+@node("stk.source.mupro_hdf5", title={"en": "MuPRO HDF5 field", "zh": "MuPRO HDF5 场"},
+      description={"en": "Read one explicit /tNNNNNNNN/field from MuPRO HDF5, preserving numeric dtype and "
+                         "unknown physical units. Source file limit 1 GiB; selected array budget 256 MiB."},
+      outputs=[Port("out", "dataset", kind="image")],
+      params={
+          "binding": binding(),
+          "path": rel_path("run.h5"),
+          "selector": string(pattern=r"^/t[0-9]{8}/[A-Za-z][A-Za-z0-9_]{0,63}$"),
+          "extent": array({"type": ["integer", "null"], "minimum": 0}, [None] * 6, min_items=6, max_items=6,
+                          title="Inclusive [i0, i1, j0, j1, k0, k1]"),
+          "stride": int3([1, 1, 1], minimum=1),
+      },
+      cache="disk", fingerprint=_todo)
+def mupro_hdf5_source(ctx, inputs, params):
+    _todo()
+
+
 @node("stk.source.table", impl_version=2, title={"en": "Table file", "zh": "表格文件"},
       description={"en": "Read a table file inside a binding: muFerro energy_out.dat, whitespace columns "
                          "(optional header), CSV or a progress JSONL log."},

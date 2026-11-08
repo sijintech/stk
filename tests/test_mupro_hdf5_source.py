@@ -1,0 +1,199 @@
+"""Actual FileSource bytes, native selectors and content-bound graph execution."""
+import hashlib
+import io
+import os
+from pathlib import Path
+
+import pytest
+
+h5py = pytest.importorskip("h5py")
+np = pytest.importorskip("numpy")
+
+from suan.connectors.api import ConnectorError  # noqa: E402
+from suan.connectors.files import LocalFiles  # noqa: E402
+from suan.connectors.mupro import source as adapter  # noqa: E402
+from suan.data.manifest import check  # noqa: E402
+from suan.graph.cache import GraphCache  # noqa: E402
+from suan.graph.catalog import default_registry  # noqa: E402
+from suan.graph.evaluator import EvaluationFailed, evaluate  # noqa: E402
+from suan.graph.registry import Budget, Cancelled  # noqa: E402
+from suan.graph.resolve import LocalDirResolver  # noqa: E402
+
+
+def write_file(path):
+    values = np.arange(5 * 4 * 3 * 3, dtype=np.float64).reshape(5, 4, 3, 3)
+    with h5py.File(path, "w") as f:
+        f.create_dataset("t00000002/Polar", data=values)
+        f.create_dataset("t00000004/Polar", data=(values + 1000).astype(np.float32))
+    return values
+
+
+def graph(selector="/t00000002/Polar", **params):
+    return {"schema": "stk.graph/1", "catalog": {"stk": 1},
+            "nodes": [{"id": "field", "type": "stk.source.mupro_hdf5@1",
+                       "params": {"binding": "data", "selector": selector, **params}}],
+            "outputs": {"field": "field.out"}}
+
+
+def run(root, document=None, **kw):
+    return evaluate(document or graph(), registry=default_registry(),
+                    resolver=LocalDirResolver({"data": root}), **kw)
+
+
+def test_local_source_preserves_values_metadata_and_crop(tmp_path):
+    values = write_file(tmp_path / "run.h5")
+    result = run(tmp_path, graph(extent=[1, 4, 0, 3, 1, 2], stride=[2, 3, 1]))
+    image = result.outputs["field"]
+    np.testing.assert_array_equal(image.array("Polar"), values[1:5:2, 0:4:3, 1:3].transpose(2, 1, 0, 3))
+    assert image.origin == (1., 0., 1.) and image.spacing == (2., 3., 1.)
+    assert image.time.step == 2 and image.time.time is None
+    assert image.time.to_json()["physical"] == {"unit": "unspecified", "known": False}
+    assert image.length_unit == "grid_index" and image.fields["Polar"].unit == "unspecified"
+    assert image.frames[0].sources["Polar"].selector == "/t00000002/Polar"
+    assert image.provenance.used == [{"path": "run.h5", "role": "input",
+                                      "sha256": hashlib.sha256((tmp_path / "run.h5").read_bytes()).hexdigest()}]
+    check(image.descriptor())
+
+
+def test_selectors_separate_cached_frames_and_reopen_disk_cache(tmp_path):
+    write_file(tmp_path / "run.h5")
+    cache_dir = tmp_path / "cache"
+    first = run(tmp_path, cache=GraphCache(cache_dir))
+    second = run(tmp_path, graph("/t00000004/Polar"), cache=GraphCache(cache_dir))
+    assert first.keys != second.keys and second.outputs["field"].time.step == 4
+    assert second.outputs["field"].array("Polar").dtype == np.dtype("float32")
+    again = run(tmp_path, cache=GraphCache(cache_dir))
+    assert again.evaluated == [] and again.keys == first.keys
+    np.testing.assert_array_equal(again.outputs["field"].array("Polar"), first.outputs["field"].array("Polar"))
+
+
+def test_rewrite_after_planning_cannot_poison_cache(tmp_path):
+    path = tmp_path / "run.h5"
+    write_file(path)
+    cache = GraphCache()
+    before = path.stat()
+
+    def mutate(event):
+        if event["type"] == "node.started":
+            with h5py.File(path, "r+") as f:
+                f["t00000002/Polar"][0, 0, 0, 0] = 999
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+    with pytest.raises(EvaluationFailed) as raised:
+        run(tmp_path, cache=cache, on_event=mutate)
+    assert raised.value.errors[0]["code"] == "invalid_data"
+    assert "changed after" in raised.value.errors[0]["message"]
+    assert path.stat().st_size == before.st_size
+    after = run(tmp_path, cache=cache)
+    assert after.outputs["field"].array("Polar")[0, 0, 0, 0] == 999
+    assert after.evaluated == ["field"]
+
+
+def test_file_source_without_local_path_or_trusted_hash(tmp_path, monkeypatch):
+    write_file(tmp_path / "run.h5")
+    data = (tmp_path / "run.h5").read_bytes()
+
+    class Remote:
+        def open(self, path):
+            assert path == "run.h5"
+            return io.BytesIO(data)
+
+        def sha256(self, path):
+            raise AssertionError("metadata hash memo must not be trusted")
+
+        def local_path(self, path):
+            raise AssertionError("must work with remote streams")
+
+    planned = adapter.fingerprint(Remote(), "run.h5", "/t00000004/Polar")
+    seen = []
+    from suan.connectors.mupro import hdf5
+    original = hdf5.read_hdf5_image
+
+    def observed(path, *args, **kwargs):
+        seen.append(Path(path))
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(hdf5, "read_hdf5_image", observed)
+    image = adapter.read(Remote(), "run.h5", planned["selector"], expected_sha256=planned["sha256"])
+    assert image.time.step == 4 and seen and not seen[0].exists()
+
+
+def test_source_limit_and_cancellation_precede_hdf5_parse(tmp_path, monkeypatch):
+    write_file(tmp_path / "run.h5")
+    source = LocalFiles(tmp_path)
+    monkeypatch.setattr(adapter, "FILE_LIMIT", 8)
+    with pytest.raises(ConnectorError) as raised:
+        adapter.fingerprint(source, "run.h5", "/t00000002/Polar")
+    assert raised.value.code == "budget_exceeded"
+
+    def cancel():
+        raise Cancelled("test cancellation")
+
+    with pytest.raises(Cancelled):
+        adapter.read(source, "run.h5", "/t00000002/Polar", expected_sha256="0" * 64, check=cancel)
+
+
+@pytest.mark.parametrize("failure", ["hash", "parse", "cancel", "limit"])
+def test_private_copy_removed_on_failed_read(tmp_path, monkeypatch, failure):
+    path = tmp_path / "run.h5"
+    write_file(path)
+    if failure == "parse":
+        path.write_bytes(b"invalid HDF5 bytes")
+    expected = hashlib.sha256(path.read_bytes()).hexdigest()
+    if failure == "hash":
+        expected = "0" * 64
+    created, temporary = [], adapter.TemporaryDirectory
+
+    def private_directory(*args, **kwargs):
+        directory = temporary(*args, dir=tmp_path, **kwargs)
+        created.append(Path(directory.name))
+        return directory
+
+    def cancel():
+        if failure == "cancel":
+            raise Cancelled("test cancellation")
+
+    monkeypatch.setattr(adapter, "TemporaryDirectory", private_directory)
+    if failure == "limit":
+        monkeypatch.setattr(adapter, "FILE_LIMIT", 8)
+    with pytest.raises((Cancelled, ConnectorError)):
+        adapter.read(LocalFiles(tmp_path), "run.h5", "/t00000002/Polar", expected_sha256=expected, check=cancel)
+    assert created and all(not path.exists() for path in created)
+
+
+def test_selected_array_allocation_respects_evaluation_budget(tmp_path):
+    # The selected 256*256*3*8 bytes require twice that during transpose (>1 MiB).
+    with h5py.File(tmp_path / "run.h5", "w") as f:
+        f.create_dataset("t00000002/Polar", data=np.zeros((256, 256, 1, 3)))
+    with pytest.raises(EvaluationFailed) as raised:
+        run(tmp_path, budget=Budget(max_memory_mb=1))
+    assert raised.value.errors[0]["code"] == "budget_exceeded"
+
+
+@pytest.mark.parametrize("selector", ["/t00000002/Polar\n", "/t00000002/Polar\r", "/t٢0000002/Polar"])
+def test_node_rejects_nonliteral_selector(tmp_path, selector):
+    from suan.graph.schema import GraphValidationError
+    with pytest.raises(GraphValidationError):
+        run(tmp_path, graph(selector))
+
+
+def test_planned_fingerprint_is_copied_and_unavailable_during_fingerprinting():
+    from suan.graph.registry import GraphError, Port, Registry
+    registry = Registry(namespaces={"stk": 1})
+
+    def fingerprint(ctx, inputs, params):
+        with pytest.raises(GraphError, match="not available"):
+            _ = ctx.source_fingerprint
+        return {"nested": ["planned"]}
+
+    @registry.node("stk.source.context", outputs=[Port("out", "value", value_type="json")],
+                   fingerprint=fingerprint)
+    def impl(ctx, inputs, params):
+        observed = ctx.source_fingerprint
+        observed["nested"][0] = "mutated"
+        return ctx.source_fingerprint
+
+    document = {"schema": "stk.graph/1", "catalog": {"stk": 1},
+                "nodes": [{"id": "a", "type": "stk.source.context@1"}], "outputs": {"out": "a.out"}}
+    result = evaluate(document, registry=registry, resolver={})
+    assert result.outputs["out"] == {"nested": ["planned"]}

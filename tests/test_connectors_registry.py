@@ -105,7 +105,7 @@ def test_numpy_free_parts(tmp_path):
     from mupro_fake import write_case
     write_case(tmp_path / "case", grid=(4, 3, 2))
     code = (
-        "import sys; sys.modules['numpy'] = None\n"
+        "import sys; sys.modules['numpy'] = None; sys.modules['h5py'] = None\n"
         "from suan.connectors.registry import ConnectorRegistry\n"
         "from suan.connectors.files import LocalFiles\n"
         "from suan.graph.registry import Registry\n"
@@ -117,7 +117,7 @@ def test_numpy_free_parts(tmp_path):
         "inputs = registry.inputs('mupro.muferro')\n"
         "case = inputs.read_case(LocalFiles(sys.argv[1]))\n"
         "spec = inputs.task_spec(case, {'ranks': 2}, workspace_id='w' * 32)\n"
-        "assert len(Registry([sources])) == 5 and len(cubic26('stk-legacy')) == 26\n"
+        "assert len(Registry([sources])) == 6 and len(cubic26('stk-legacy')) == 26\n"
         "assert palettes.to_hex(palettes.cubic26_color((1, 0, 0))) == '#ff0000'\n"
         "print(case['app'], spec['resources']['ranks'], registry.get('mupro.muferro').sniff(LocalFiles(sys.argv[1])))\n"
     )

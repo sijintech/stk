@@ -299,6 +299,7 @@ class NodeContext(Protocol):
     parameters: Mapping[str, Any]          # effective graph parameters
     cache_dir: Path | None                 # scratch space for large intermediates
     data_key: str                          # this node's data key (hex)
+    source_fingerprint: Any                 # private copy of the planned fingerprint (or None)
     def resolve(self, binding: str) -> FileSource: ...
     def check(self) -> None: ...           # raises Cancelled / BudgetExceeded; call between chunks
     def progress(self, fraction: float | None = None, message: str = "") -> None: ...
@@ -306,6 +307,11 @@ class NodeContext(Protocol):
     def report_choices(self, param: str, choices: Sequence, *, value=None) -> None: ...
     def cached(self, name: str, compute: Callable[[], T], *, disk: bool = False) -> T: ...
 ```
+
+`source_fingerprint` is unavailable while `fingerprint()` runs. During execution it is the
+plain-JSON observation used to plan this node's key, rather than a fresh read. Modifying the
+returned copy does not change the key or subsequent observations of this property. Readers may
+use its SHA to reject content that changed between planning and execution.
 
 `Budget(max_seconds=300.0, max_memory_mb=None, max_output_bytes=None, profile="web")`;
 `CancelToken().cancel(reason)`, `.cancelled`, `.raise_if_cancelled()`; exceptions `GraphError(code,
@@ -1245,6 +1251,22 @@ Index of a muFerro run directory: published field frames, the energy trace, the 
 |---|---|---|---|
 | `binding` | string (pattern) | **required** | data |
 | `case_dir` | string (pattern) | `"auto"` | data |
+
+#### `stk.source.mupro_hdf5@1` — MuPRO HDF5 field / MuPRO HDF5 场
+
+Read one explicit /tNNNNNNNN/field from MuPRO HDF5, preserving numeric dtype and unknown physical units. Source file limit 1 GiB; selected array budget 256 MiB.
+
+- stage `source`, cache `disk`, time_dependent `false`
+- inputs: none
+- outputs: `out`: dataset<image>
+
+| param | type | default | stage |
+|---|---|---|---|
+| `binding` | string (pattern) | **required** | data |
+| `path` | string (pattern) | `"run.h5"` | data |
+| `selector` | string (pattern) | **required** | data |
+| `extent` | integer \| null (>=0)[6] | `[null, null, null, null, null, null]` | data |
+| `stride` | integer (>=1)[3] | `[1, 1, 1]` | data |
 
 #### `stk.source.table@1` — Table file / 表格文件
 
