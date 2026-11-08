@@ -28,6 +28,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -38,6 +39,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <string_view>
 #include <thread>
 
 using namespace stk;
@@ -67,6 +69,50 @@ Json media_json(const Media &media)
       {"video_rect_css", {media.rect_x, media.rect_y, media.rect_width, media.rect_height}},
       {"viewport_size_css", {media.viewport_width, media.viewport_height}},
       {"navigation_generation", media.navigation_generation}};
+}
+struct MediaProbeObservation {
+  Clock::time_point started = Clock::now();
+  std::optional<Clock::time_point> dispatched, callback, finished;
+  std::optional<bool> accepted;
+  std::optional<document_preview::test::MediaProbeResult> reply;
+};
+struct HiddenMediaObservation {
+  int cycle = 0;
+  Clock::time_point started = Clock::now();
+  const char *stage = "play-return";
+  std::string session, session_sha256;
+  Media playing, before;
+  std::optional<Media> current, failed, last_valid;
+  bool current_valid = false;
+  std::optional<bool> requested_session_matches;
+  size_t samples = 0;
+  std::optional<Clock::time_point> tab_begin, tab_returned, paused_begin, paused_returned, hold_begin;
+  std::optional<Clock::time_point> failure_detected;
+  const char *failure_kind = nullptr;
+  std::optional<std::array<bool, 3>> hidden_checks;
+  std::optional<std::array<bool, 5>> hold_checks;
+};
+double media_seconds(Clock::time_point start, Clock::time_point end)
+{
+  return std::chrono::duration<double>(end - start).count();
+}
+Json media_time(Clock::time_point start, const std::optional<Clock::time_point> &end)
+{
+  return end ? Json(media_seconds(start, *end)) : Json(nullptr);
+}
+void log_last_media_observation(const Json &result) noexcept
+{
+  try {
+    for (const auto *key : {"last_hidden_media_observation", "last_explicit_pause_observation"}) {
+      const auto item = result.find(key);
+      if (item == result.end() || !item->is_object()) continue;
+      // These objects contain only fixed phase names, hashes and numerical probe facts.
+      const auto text = item->dump();
+      if (text.size() <= 8192) std::fprintf(stderr, "STK_NATIVE_LAST_MEDIA_OBSERVATION %s\n", text.c_str());
+      else std::fputs("STK_NATIVE_LAST_MEDIA_OBSERVATION unavailable\n", stderr);
+    }
+  }
+  catch (...) { std::fputs("STK_NATIVE_LAST_MEDIA_OBSERVATION unavailable\n", stderr); }
 }
 #  ifdef __APPLE__
 Json ax_progress_json(const std::optional<reports_native_test::ax::Progress> &value)
@@ -498,15 +544,134 @@ class Exercise {
 #  endif
   Media media(const std::string &session)
   {
-    auto reply = std::make_shared<std::optional<document_preview::test::MediaProbeResult>>();
-    std::string error;
-    require(document_preview::test::probe_media(window_.native_window_handle(), session,
-        [reply](auto result) { *reply = std::move(result); }, error), error);
-    wait([&] { return reply->has_value(); }, "Fixed native media observation", 10);
-    require(reply->value().ok, reply->value().error);
-    const auto observed = reply->value().media;
-    require(observed.error_code == 0, "System media decoder reported an error");
-    return observed;
+    auto reply = std::make_shared<MediaProbeObservation>();
+    last_media_probe_ = reply;
+    if (hidden_media_) {
+      auto &phase = *hidden_media_;
+      if (phase.current_valid) phase.last_valid = phase.current;
+      phase.current.reset(); phase.failed.reset(); phase.current_valid = false;
+      phase.hold_checks.reset();
+      phase.requested_session_matches = session == phase.session;
+      ++phase.samples;
+    }
+    try {
+      std::string error;
+      const bool accepted = document_preview::test::probe_media(window_.native_window_handle(), session,
+          [reply](auto result) {
+            reply->callback = Clock::now(); reply->reply = std::move(result);
+          }, error);
+      reply->accepted = accepted; reply->dispatched = Clock::now();
+      require(accepted, error);
+      wait([&] { return reply->reply.has_value(); }, "Fixed native media observation", 10);
+      require(reply->reply->ok, reply->reply->error);
+      const auto observed = reply->reply->media;
+      if (hidden_media_) hidden_media_->current = observed;
+      require(observed.error_code == 0, "System media decoder reported an error");
+      if (hidden_media_) hidden_media_->current_valid = true;
+      reply->finished = Clock::now(); return observed;
+    }
+    catch (...) {
+      reply->finished = Clock::now();
+      // A valid callback can arrive during a pump that crosses the unchanged deadline.
+      // Retain that observation without accepting its late result or inventing a snapshot.
+      if (hidden_media_) {
+        auto &phase = *hidden_media_;
+        phase.failure_kind = "probe-or-wait"; phase.failure_detected = reply->finished;
+        if (reply->reply && reply->reply->ok) {
+          phase.current = reply->reply->media;
+          if (phase.current->error_code != 0) phase.failed = phase.current;
+        }
+      }
+      throw;
+    }
+  }
+  void begin_hidden_media(int cycle, const std::string &session, const Media &playing,
+                          Clock::time_point playing_returned) noexcept
+  {
+    try {
+      hidden_media_.emplace();
+      auto &phase = *hidden_media_;
+      phase.started = playing_returned;
+      phase.cycle = cycle; phase.session = session; phase.session_sha256 = core::Sha256::hex(session);
+      phase.playing = playing; phase.before = playing; phase.last_valid = playing;
+      last_media_probe_.reset();
+    }
+    catch (...) { hidden_media_.reset(); }
+  }
+  void hidden_media_checkpoint(const char *stage) noexcept
+  {
+    if (!hidden_media_) return;
+    auto &phase = *hidden_media_; phase.stage = stage;
+    const auto now = Clock::now();
+    if (std::string_view(stage) == "tab-begin") phase.tab_begin = now;
+    else if (std::string_view(stage) == "tab-returned") phase.tab_returned = now;
+    else if (std::string_view(stage) == "paused-begin") phase.paused_begin = now;
+    else if (std::string_view(stage) == "paused-returned") phase.paused_returned = now;
+  }
+  void hidden_media_snapshot(const Media &hidden, const Media &playing) noexcept
+  {
+    if (!hidden_media_) return;
+    auto &phase = *hidden_media_;
+    phase.hidden_checks = std::array<bool, 3>{
+        hidden.current_time < 2.9, hidden.current_time >= playing.current_time - 0.05, !hidden.ended};
+    if (!std::all_of(phase.hidden_checks->begin(), phase.hidden_checks->end(), [](bool value) { return value; })) {
+      phase.failed = hidden; phase.failure_kind = "hidden-predicate"; phase.failure_detected = Clock::now();
+    }
+  }
+  void finish_hidden_media(bool success) noexcept
+  {
+    if (!hidden_media_) return;
+    try {
+      const auto &p = *hidden_media_;
+      const auto now = Clock::now();
+      const auto sample = [](const std::optional<Media> &value) {
+        return value ? media_json(*value) : Json(nullptr);
+      };
+      Json probe = nullptr;
+      if (last_media_probe_) {
+        const auto &r = *last_media_probe_;
+        const bool available = r.reply && r.reply->ok;
+        probe = {{"dispatch_accepted", r.accepted ? Json(*r.accepted) : Json(nullptr)},
+            {"callback_received", bool(r.reply)}, {"reply_ok", r.reply ? Json(r.reply->ok) : Json(nullptr)},
+            {"snapshot_available", available},
+            {"decoder_ok", available ? Json(r.reply->media.error_code == 0) : Json(nullptr)},
+            {"started_seconds", media_seconds(p.started, r.started)},
+            {"dispatched_seconds", media_time(p.started, r.dispatched)},
+            {"callback_seconds", media_time(p.started, r.callback)},
+            {"finished_seconds", media_time(p.started, r.finished)}};
+      }
+      Json observation = {{"cycle", p.cycle}, {"phase", "hidden-tab-pause"}, {"stage", p.stage},
+          {"success", success}, {"session_sha256", p.session_sha256},
+          {"requested_session_matches", p.requested_session_matches ? Json(*p.requested_session_matches) : Json(nullptr)},
+          {"expected_navigation_generation", p.playing.navigation_generation},
+          {"playing_before_hide", media_json(p.playing)}, {"before", media_json(p.before)},
+          {"current", sample(p.current)}, {"failed", sample(p.failed)},
+          {"last_valid", sample(p.last_valid)},
+          {"last_valid_meaning", "previous successful probe; initialized from play-before-hide"},
+          {"failure_kind", p.failure_kind ? Json(p.failure_kind) : Json(nullptr)},
+          {"failure_detected_seconds", media_time(p.started, p.failure_detected)},
+          {"sample_count", p.samples}, {"probe", std::move(probe)},
+          {"elapsed_seconds", media_seconds(p.started, now)},
+          {"hold_elapsed_seconds", p.hold_begin ? Json(media_seconds(*p.hold_begin, now)) : Json(nullptr)},
+          {"checkpoints_seconds", {{"play_return", 0}, {"tab_begin", media_time(p.started, p.tab_begin)},
+              {"tab_returned", media_time(p.started, p.tab_returned)},
+              {"paused_begin", media_time(p.started, p.paused_begin)},
+              {"paused_returned", media_time(p.started, p.paused_returned)},
+              {"hold_begin", media_time(p.started, p.hold_begin)}}},
+          {"hidden_checks", p.hidden_checks ? Json{{"upper_time_lt_2_9", (*p.hidden_checks)[0]},
+              {"lower_time_ge_playing_minus_0_05", (*p.hidden_checks)[1]},
+              {"not_ended", (*p.hidden_checks)[2]}} : Json(nullptr)},
+          {"hold_checks", p.hold_checks ? Json{{"navigation_equal", (*p.hold_checks)[0]},
+              {"paused", (*p.hold_checks)[1]}, {"not_ended", (*p.hold_checks)[2]},
+              {"not_seeking", (*p.hold_checks)[3]}, {"abs_time_delta_le_0_10", (*p.hold_checks)[4]}} : Json(nullptr)}};
+      // Copy now: a pending callback owns only its separate shared probe and cannot revise this evidence.
+      result_["last_hidden_media_observation"] = observation;
+      auto &cycles = result_["hidden_media_observations"];
+      if (cycles.is_null()) cycles = Json::array();
+      if (cycles.is_array() && cycles.size() < 20) cycles.push_back(std::move(observation));
+    }
+    catch (...) {} // Diagnostics must never replace the original test exception.
+    hidden_media_.reset(); last_media_probe_.reset();
   }
   Media media_until(const std::string &session, const std::function<bool(const Media &)> &predicate,
                     const std::string &reason, double seconds = 10)
@@ -530,9 +695,22 @@ class Exercise {
                    const Media &before, double seconds)
   {
     const auto start = Clock::now();
+    if (hidden_media_) {
+      hidden_media_->stage = "hold"; hidden_media_->hold_begin = start; hidden_media_->before = before;
+    }
     Media after;
     wait([&] {
       after = media(session);
+      if (hidden_media_) {
+        auto &observation = *hidden_media_;
+        observation.hold_checks = std::array<bool, 5>{
+            after.navigation_generation == before.navigation_generation, after.paused, !after.ended,
+            !after.seeking, std::abs(after.current_time - before.current_time) <= 0.10};
+        if (!std::all_of(observation.hold_checks->begin(), observation.hold_checks->end(), [](bool value) { return value; })) {
+          observation.failed = after; observation.failure_kind = "hold-predicate";
+          observation.failure_detected = Clock::now();
+        }
+      }
       require(after.navigation_generation == before.navigation_generation && after.paused && !after.ended &&
           !after.seeking && std::abs(after.current_time - before.current_time) <= 0.10,
           "Paused media advanced, resumed, ended or changed navigation during " + phase);
@@ -939,6 +1117,10 @@ class Exercise {
   }
   wm::WindowManager &manager_; wm::Window &window_; wm::Screen &screen_;
   Json &result_; fs::path directory_;
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+  std::shared_ptr<MediaProbeObservation> last_media_probe_;
+  std::optional<HiddenMediaObservation> hidden_media_;
+#endif
   reports_native_test::ScrollGuard scroll_guard_;
 #if defined(__APPLE__) && defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES)
   reports_native_test::ax::LayoutEpoch layout_epoch_;
@@ -1255,9 +1437,27 @@ raise SystemExit(main())
           "Initial or explicitly reprepared video must never autoplay");
       ui.held_media(cycle, "initial-no-autoplay", session, initial, 0.50);
       auto bounds = ui.widget("reports_document_viewport")->rect;
-      play(cycle, "explicit-play", session, bounds);
+      try {
+        result["last_explicit_pause_observation"] = {{"cycle", cycle}, {"phase", "explicit-pause"},
+            {"playing", nullptr}, {"paused", nullptr}};
+      }
+      catch (...) {}
+      const auto explicitly_playing = play(cycle, "explicit-play", session, bounds);
+      const auto explicit_play_returned = Clock::now();
       ui.click("reports_document_pause", *area);
+      const auto explicit_click_returned = Clock::now();
       auto red = paused(session, "Explicit Pause button");
+      const auto explicit_paused_returned = Clock::now();
+      try {
+        result["last_explicit_pause_observation"] = {{"cycle", cycle}, {"phase", "explicit-pause"},
+            {"session_sha256", core::Sha256::hex(session)}, {"playing", media_json(explicitly_playing)},
+            {"paused", media_json(red)},
+            {"click_return_seconds", media_seconds(explicit_play_returned, explicit_click_returned)},
+            {"paused_return_seconds", media_seconds(explicit_play_returned, explicit_paused_returned)},
+            {"checks", {{"lower_time_gt_0_05", red.current_time > 0.05},
+                {"upper_time_lt_2_6", red.current_time < 2.6}, {"not_ended", !red.ended}}}};
+      }
+      catch (...) {} // Preserve the original assertion even if optional evidence cannot be copied.
       require(red.current_time > 0.05 && red.current_time < 2.6 && !red.ended,
           "Explicit pause must stop actual playback before the blue/ended segment");
       ui.held_media(cycle, "explicit-pause", session, red, 0.25);
@@ -1285,12 +1485,25 @@ raise SystemExit(main())
       auto early = seek(cycle, false, session, bounds);
       ui.held_media(cycle, "seek-early-paused", session, early, 0.25);
       const auto playing = play(cycle, "play-before-hide", session, bounds);
+      const auto playing_returned = Clock::now();
       require(!playing.paused && playing.current_time < 2.5, "Hide must interrupt a playing early clip");
-      ui.tab(*area, 1);
-      auto hidden = paused(session, "Hide must pause the actual native media");
-      require(hidden.current_time < 2.9 && hidden.current_time >= playing.current_time - 0.05 && !hidden.ended,
-          "Hidden pause must precede the color transition and natural ending");
-      hidden = ui.held_media(cycle, "hidden-tab-pause", session, hidden, 0.75);
+      ui.begin_hidden_media(cycle, session, playing, playing_returned);
+      auto hidden = [&] {
+        try {
+          ui.hidden_media_checkpoint("tab-begin");
+          ui.tab(*area, 1);
+          ui.hidden_media_checkpoint("tab-returned");
+          ui.hidden_media_checkpoint("paused-begin");
+          auto hidden = paused(session, "Hide must pause the actual native media");
+          ui.hidden_media_checkpoint("paused-returned");
+          ui.hidden_media_snapshot(hidden, playing);
+          require(hidden.current_time < 2.9 && hidden.current_time >= playing.current_time - 0.05 && !hidden.ended,
+              "Hidden pause must precede the color transition and natural ending");
+          hidden = ui.held_media(cycle, "hidden-tab-pause", session, hidden, 0.75);
+          ui.finish_hidden_media(true); return hidden;
+        }
+        catch (...) { ui.finish_hidden_media(false); throw; }
+      }();
       ui.media_capture(cycle, "hidden-video-tab", 0, rectangle, hidden, session);
       require(area->tab(1).save_workspace_state() == draft_state, "Video hide preserves the Python draft");
       ui.tab(*area, 0); ui.wait(ready, "Paused video report shown again");
@@ -1525,6 +1738,9 @@ int main(int argc, char **argv)
   }
   catch (const std::exception &error) {
     std::fprintf(stderr, "FAIL: %s\n", error.what());
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+    log_last_media_observation(result);
+#endif
     log_last_observation(result);
     try {
       result["status"] = "failed"; result["error"] = error.what();
