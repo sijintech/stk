@@ -26,7 +26,25 @@ jobs:
       - name: Install the pinned package manager
         run: npm install --global pnpm@8.15.9
 
+      - name: Fetch pinned libvips for sharp
+        timeout-minutes: 8
+        run: |
+          # Keep the version and upstream SHA-512 in sync with sharp in docs/pnpm-lock.yaml.
+          archive="${RUNNER_TEMP}/stk-docs-libvips/v8.14.5/libvips-8.14.5-linux-x64.tar.br"
+          mkdir -p "$(dirname "$archive")"
+          trap 'rm -f "$archive.part"' EXIT
+          curl --fail --location --retry 2 --retry-all-errors \
+            --connect-timeout 20 --max-time 120 \
+            --output "$archive.part" \
+            https://github.com/lovell/sharp-libvips/releases/download/v8.14.5/libvips-8.14.5-linux-x64.tar.br
+          printf '%s  %s\n' \
+            4a5156ac84d25b95d55246853d03b24806921979e19062428fc5f6c06618b5af61939a62665750c8ca78cf0cb4cfa51e46ed6a2932ad66f9aadbc5b71a787dc4 \
+            "$archive.part" | sha512sum --check --status
+          mv -- "$archive.part" "$archive"
+
       - name: Build
+        env:
+          npm_config_sharp_libvips_local_prebuilds: ${{ runner.temp }}/stk-docs-libvips
         run: |
           cd docs
           pnpm install --frozen-lockfile

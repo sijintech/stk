@@ -37,6 +37,11 @@ pnpm run build
 `main` 上的文档变更由 `.github/workflows/publish_docs.yml` 构建并发布到既有 Cloudflare Pages 项目。
 发布凭据保留在 GitHub Secrets，不写入文档或本地配置。修复构建不等于已经验证部署；以该提交的工作流结果为准。
 
+CI 在安装依赖前，从官方 release 下载锁定 sharp 0.32.6 所需的 Linux x64 libvips 8.14.5，
+每次最多 120 秒并重试至多两次；下载先核对[上游固定版本的 SHA-512](https://github.com/lovell/sharp/blob/v0.32.6/package.json#L168)，
+通过后才把临时目录交给 sharp 的本地预构建包入口，sharp 自身的完整性校验仍会执行。
+升级锁文件中的 sharp 时须一并核对 CI 下载版本和摘要。该准备步骤仅用于 CI；本地构建命令不变。
+
 2026-09-28 已在隔离目录用锁定依赖和 Node 22 构建 36 个页面，Pagefind 索引 35 个页面、两种语言。
 这修复了此前 Node 18、未使用锁文件时 Astro 依赖加载的 `ERR_REQUIRE_ESM`。
 Node 的同步 ESM 加载行为见[官方模块文档](https://nodejs.org/download/release/v22.13.1/docs/api/modules.html#loading-ecmascript-modules-using-require)。
