@@ -71,7 +71,11 @@ CLI 可以作为普通客户端，经 hub 选择已有的 Linux 执行节点。�
 # 所有者先在 hub 签发 --role client 配对码；下条命令以隐藏输入读取配对码
 suan connect hub-pair lab --url https://hub.example.org --device-name laptop
 suan connect hub-nodes lab
-# NODE_ID 来自上一条结果；WORKSPACE_ID 是节点上已经存在的工作区
+# NODE_ID 来自上一条结果
+suan workspaces --hub lab --node NODE_ID create "实验 1" --key workspace-1
+suan workspaces --hub lab --node NODE_ID action ACTION_ID    # 结果中的 workspace.id 即 WORKSPACE_ID
+suan workspaces --hub lab --node NODE_ID list
+suan workspaces --hub lab --node NODE_ID files WORKSPACE_ID
 suan jobs --hub lab --node NODE_ID submit --workspace WORKSPACE_ID --template echo --key experiment-1
 suan jobs --hub lab --node NODE_ID action ACTION_ID
 suan jobs --hub lab --node NODE_ID show TASK_ID
@@ -86,7 +90,8 @@ suan jobs --hub lab --node NODE_ID cancel TASK_ID --key cancel-experiment-1
 默认凭据保存在私有文件 `~/.stk/client/hubs.json`，使用既有 ConnectionStore 格式。所有相关命令都可用
 `--hub-state-dir DIR` 指定另一目录；例如只读使用桌面桥目录中的既有配对。不要同时让 CLI 配对命令和
 桌面桥修改同一个文件。CLI 不生成所有者令牌、不自行授予 desktop 配置，也不替用户批准操作。
-`jobs --hub` 与 `--profile` / `--state-dir` 互斥，`--node` 必须是明确的节点设备 ID。
+`jobs --hub` 和 `workspaces --hub` 都与 `--profile` / `--state-dir` 互斥，`--node` 必须是明确的节点设备 ID；
+命令结束时关闭自己打开的连接。
 
 提交和取消在请求前向 stderr 打印原始幂等键和确定的 action ID。JSON 的 `outcome` 为 `queued`（已入队）、
 `pending_review`（待复核）或 `accepted`（节点已处理操作）；这些都不代表计算已成功。传输失败可能发生在 hub
@@ -94,7 +99,28 @@ suan jobs --hub lab --node NODE_ID cancel TASK_ID --key cancel-experiment-1
 不会创建第二个任务。不要换键猜测重提。操作失败或被拒绝时，输出真实的 `failed` / `rejected` 并以 1 退出。
 新命令、资源超额与模板变更仍按现有策略复核；CLI 无审批子命令。
 `--template` 使用 hub 已注册模板；也可像直连一样使用 `--spec` 或 `--workspace ID -- PROGRAM ARG...`。
-此增量不增加 CLI 经 hub 的工作区创建或输入上传；这些仍使用已有桌面功能或 Runtime 工作区命令。
+
+`workspaces --hub` 复用同一套 hub 操作与读取，不新增服务、协议、授权或数据库：
+
+- `create NAME --key KEY` 与提交一样，先向 stderr 打印原始幂等键和确定的 action ID
+  （`workspace.create` 的 ID 由节点和键决定），再发送请求。`outcome` 和退出码的含义同上：
+  `queued`、`pending_review`、`accepted`，以及丢失回复时的 `unknown`。同一个键和同一个名称重试会得到原工作区；
+  同一个键配另一个名称会被拒绝为冲突。CLI 不会换键重发，也不会批准操作。现行策略不复核 `workspace.create`；
+  如果某个操作处于复核中，`pending_review` 期间节点上不会出现工作区。
+- `action ACTION_ID` 只查询所选节点上 `workspace.create` 的原 action，成功时返回 `workspace`。它不接受任务 action，
+  `jobs action` 也不接受工作区 action；两者都不会重新派发。
+- `list` 是节点最近一次心跳中的工作区快照，标记为 `heartbeat_snapshot` 并带 `online`；stderr 说明它可能过时
+  或不完整。快照中没有某个工作区，不能说明它不存在。
+- `files WORKSPACE_ID` 使用既有读路径，从节点实时读取，不写 action 记录。节点离线时报告 `unavailable`。
+  对没有读路径的旧节点或旧 hub，沿用既有兼容方式：发起一次读取 action，并在既有的有界时间内等待它的结果，
+  失败或超时则以 1 退出，不会当作结果输出。因此这种情况不保证零 action 记录。只有写操作（创建、提交、取消）
+  才只确认收下、不等待执行或复核。
+- 读取命令不创建工作区，也不运行任务。
+- `upload` 暂不支持 hub：带 `--hub` 时在检查或读取任何本地文件、连接 hub 之前，以用法错误退出。请用直连 / SSH
+  的 `suan workspaces upload`，或桌面应用的上传。CLI 不会给自己授予 desktop 配置，也不会重新配对。
+
+不带 `--hub` 时，直连 / SSH 的 `workspaces` 命令和输出保持不变；`create` 可选的 `--key` 会作为 Runtime 的
+幂等键原样传入。
 
 `jobs list` 明确标记为最多 200 条的 `heartbeat_snapshot`，不能用于断定老任务不存在。
 `show` / `watch` 使用新增只读 `task.get`：负载严格为 `{"task_id":"32位十六进制ID"}`，返回任务公开字段，

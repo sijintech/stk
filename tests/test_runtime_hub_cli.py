@@ -6,10 +6,11 @@ import threading
 import time
 from urllib.error import URLError
 
+import click
 import pytest
 from click.testing import CliRunner
 
-from suan.runtime.cli import connect, jobs
+from suan.runtime.cli import connect, jobs, workspaces
 from suan.desktop_bridge.backends import HubBackend, action_id
 from suan.desktop_bridge.hub import HubClient, HubResponseError
 from suan.desktop_bridge.protocol import BridgeError
@@ -358,3 +359,367 @@ def test_hub_cli_import_remains_lightweight():
 def test_invalid_target_never_loads_credentials(arguments):
     result = CliRunner().invoke(jobs, arguments)
     assert result.exit_code == 2
+
+
+# --- workspaces through a paired hub ------------------------------------------------------------------------
+
+
+def resolve_workspace(target, identity, timeout=15):
+    deadline = time.monotonic() + timeout
+    while True:
+        result = value(invoke(workspaces, target + ["action", identity]))
+        if result["action"]["state"] in {"succeeded", "failed", "rejected", "review"}:
+            return result
+        assert time.monotonic() < deadline, result
+        time.sleep(0.05)
+
+
+def runtime_workspaces(live):  # noqa: F811
+    return {item["id"]: item["name"] for item in live.client.workspaces()}
+
+
+def test_cli_hub_workspace_create_observe_list_files_and_key_semantics(live, paired, tmp_path):  # noqa: F811
+    target, _ = paired
+    key, name = "workspace-one", "CLI 工作区"
+    identity = action_id("workspace.create", live.node_id, key)
+    before = runtime_workspaces(live)
+    created = invoke(workspaces, target + ["create", name, "--key", key])
+    # The original key, then the deterministic action ID, are printed before the hub's reply is used.
+    assert created.stderr.index(f"Idempotency key: {key}") < created.stderr.index(f"Hub action: {identity}")
+    receipt = value(created)
+    assert receipt["key"] == key and receipt["action"]["id"] == identity
+    assert receipt["outcome"] in {"queued", "accepted"}
+    workspace = resolve_workspace(target, identity)["workspace"]
+    assert workspace["name"] == name and runtime_workspaces(live) == {**before, workspace["id"]: name}
+    # The same key and request return the original workspace; the same key with another name is a conflict.
+    replay = value(invoke(workspaces, target + ["create", name, "--key", key]))
+    assert replay["outcome"] == "accepted" and replay["workspace"]["id"] == workspace["id"]
+    conflict = CliRunner().invoke(workspaces, target + ["create", "another name", "--key", key])
+    assert conflict.exit_code == 1 and "different request" in conflict.output
+    assert runtime_workspaces(live) == {**before, workspace["id"]: name}
+    # list is the node's bounded heartbeat snapshot, labelled as such.
+    deadline = time.monotonic() + 15
+    while True:
+        listed = invoke(workspaces, target + ["list"])
+        listing = value(listed)
+        if workspace["id"] in {item["id"] for item in listing["workspaces"]}:
+            break
+        assert time.monotonic() < deadline, listing
+        time.sleep(0.2)
+    assert listing["observation"] == "heartbeat_snapshot" and listing["online"] is True
+    assert "heartbeat snapshot" in listed.stderr and "may still exist" in listed.stderr
+    # files reads the node live through the read path: no action row, no workspace, no task.
+    source = tmp_path / "input.txt"
+    source.write_text("公开输入\n", encoding="utf-8")
+    live.client.upload(workspace["id"], source, "input.txt")
+    actions, tasks = len(live.actions()), len(live.client.tasks())
+    files = value(invoke(workspaces, target + ["files", workspace["id"]]))
+    assert [item["path"] for item in files["files"]] == ["input.txt"]
+    assert len(live.actions()) == actions and len(live.client.tasks()) == tasks
+    assert runtime_workspaces(live) == {**before, workspace["id"]: name}
+
+
+def test_cli_hub_workspace_review_waits_for_an_explicit_owner_decision(live, paired):  # noqa: F811
+    """The current Hub policy never reviews workspace.create, so the reviewed state is seeded through the real
+    store with exactly the request the CLI sends; the CLI must report it and never approve it itself."""
+    target, _ = paired
+    key, name = "reviewed-workspace", "复核工作区"
+    identity = action_id("workspace.create", live.node_id, key)
+    request = {"id": identity, "node_id": live.node_id, "kind": "workspace.create", "payload": {"name": name}}
+    live.store.create_action(request, "seeded review for this test")
+    before = runtime_workspaces(live)
+    pending = value(invoke(workspaces, target + ["create", name, "--key", key]))
+    assert pending["outcome"] == "pending_review" and "workspace" not in pending
+    assert resolve_workspace(target, identity)["action"]["state"] == "review"
+    assert runtime_workspaces(live) == before  # Nothing exists before the decision.
+    approved = live.http.post(f"/api/v1/actions/{identity}/review", json={"approved": True}, headers=AUTH)
+    assert approved.status_code == 200
+    workspace = resolve_workspace(target, identity)["workspace"]
+    assert runtime_workspaces(live) == {**before, workspace["id"]: name}
+    assert value(invoke(workspaces, target + ["create", name, "--key", key]))["workspace"]["id"] == workspace["id"]
+
+
+def test_cli_hub_workspace_lost_reply_is_observed_by_its_original_action(live, paired, monkeypatch):  # noqa: F811
+    target, _ = paired
+    key, name = "lost-workspace-reply", "丢失回复"
+    original = HubClient.post_action
+    sent = []
+
+    def lost(self, body):
+        sent.append(body["id"])
+        original(self, body)
+        raise URLError("reply lost")
+
+    before = runtime_workspaces(live)
+    monkeypatch.setattr(HubClient, "post_action", lost)
+    unknown = CliRunner().invoke(workspaces, target + ["create", name, "--key", key])
+    monkeypatch.setattr(HubClient, "post_action", original)
+    assert unknown.exit_code == 1
+    receipt = value(unknown)
+    assert receipt["outcome"] == "unknown" and receipt["key"] == key
+    assert receipt["action"] == {"id": action_id("workspace.create", live.node_id, key), "node_id": live.node_id,
+                                 "kind": "workspace.create"}
+    assert sent == [receipt["action"]["id"]]  # One request; no automatic retry under another key.
+    workspace = resolve_workspace(target, receipt["action"]["id"])["workspace"]
+    assert runtime_workspaces(live) == {**before, workspace["id"]: name}
+    assert value(invoke(workspaces, target + ["create", name, "--key", key]))["workspace"]["id"] == workspace["id"]
+    assert runtime_workspaces(live) == {**before, workspace["id"]: name}  # Not recreated.
+
+
+def test_cli_hub_action_lookup_is_limited_to_its_node_and_kind(live, paired):  # noqa: F811
+    target, state = paired
+    created = value(invoke(workspaces, target + ["create", "kinds", "--key", "kinds"]))
+    workspace_action = created["action"]["id"]
+    workspace = resolve_workspace(target, workspace_action)["workspace"]["id"]
+    submitted = value(invoke(jobs, target + ["submit", "--workspace", workspace, "--template", "echo", "--key", "kinds"]))
+    task_action = submitted["action"]["id"]
+    wrong_kind = CliRunner().invoke(workspaces, target + ["action", task_action])
+    assert wrong_kind.exit_code == 1 and "not a workspace creation action" in wrong_kind.output
+    other_kind = CliRunner().invoke(jobs, target + ["action", workspace_action])
+    assert other_kind.exit_code == 1 and "not a task action" in other_kind.output
+    other_node = ["--hub", "lab", "--node", "f" * 32, "--hub-state-dir", str(state)]
+    wrong_node = CliRunner().invoke(workspaces, other_node + ["action", workspace_action])
+    assert wrong_node.exit_code == 1 and "not a workspace creation action for the selected node" in wrong_node.output
+
+
+def test_cli_hub_workspace_reads_during_a_real_node_disconnect(live, paired):  # noqa: F811
+    target, _ = paired
+    created = value(invoke(workspaces, target + ["create", "offline reads", "--key", "offline-reads"]))
+    workspace = resolve_workspace(target, created["action"]["id"])["workspace"]["id"]
+    live.agent_loop.call_soon_threadsafe(live.agent_task.cancel)
+    live.agent_thread.join(timeout=10)
+    assert not live.agent_thread.is_alive()
+    try:
+        actions, before = len(live.actions()), runtime_workspaces(live)
+        offline = CliRunner().invoke(workspaces, target + ["files", workspace])
+        assert offline.exit_code == 1 and "unavailable" in offline.output.lower()
+        listed = value(invoke(workspaces, target + ["list"]))  # The last snapshot, never a live claim.
+        assert listed["observation"] == "heartbeat_snapshot"
+        assert len(live.actions()) == actions and runtime_workspaces(live) == before
+    finally:
+        live.agent_thread = threading.Thread(target=live._run_agent, daemon=True)
+        live.agent_thread.start()
+        deadline = time.monotonic() + 15
+        while True:
+            result = CliRunner().invoke(workspaces, target + ["files", workspace])
+            if result.exit_code == 0:
+                break
+            assert time.monotonic() < deadline, result.output
+            time.sleep(0.1)
+    assert value(result)["files"] == []
+
+
+class OldHub:
+    """A stand-in hub whose node has no read path (501): reads fall back to a read action that is queued when
+    posted and changes only when polled, in the given order of states (the last one repeats)."""
+    url = "http://127.0.0.1:4"
+
+    def __init__(self, states, result=None):
+        self.states, self.result, self.posts, self.polls = list(states), result, [], []
+
+    def read(self, *args):
+        raise HubResponseError(501, "This node agent has no read path; upgrade suan-node")
+
+    def _record(self, body, state):
+        return {"id": body["id"], "node_id": body["node_id"], "request": body, "state": state,
+                "result": self.result if state == "succeeded" else None,
+                "error": "the node failed the read" if state == "failed" else ""}
+
+    def post_action(self, body):
+        self.posts.append(body)
+        return self._record(body, "review" if body["kind"] == "task.submit" and "spec" in body["payload"] else "queued")
+
+    def action(self, identity):
+        self.polls.append(identity)
+        state = self.states.pop(0) if len(self.states) > 1 else self.states[0]
+        return self._record(self.posts[-1], state)
+
+
+def old_hub_cli(monkeypatch, hub, wait=5.0):
+    """The CLI's own Hub client over a real HubBackend (with its own bounded wait) on the stand-in hub."""
+    from suan.desktop_bridge.backends import _NO_READ_PATH
+
+    class Store:
+        def __init__(self, *args):
+            pass
+
+        def backend(self, connection, node):
+            return HubBackend(connection, hub, node, wait=wait)
+
+        def close(self):
+            pass
+
+    monkeypatch.delitem(_NO_READ_PATH, (hub.url, "a" * 32), raising=False)
+    monkeypatch.setattr("suan.desktop_bridge.connections.ConnectionStore", Store)
+    return ["--hub", "lab", "--node", "a" * 32]  # Real (short) polling sleeps inside HubBackend.run_action.
+
+
+def test_old_node_read_fallback_polls_its_one_read_action_to_success(monkeypatch):
+    """An old node answers the read path with 501; the existing fallback posts one read action, which the CLI
+    must poll within the backend's bounded wait (not acknowledge and abandon, which a rerun would duplicate)."""
+    from suan.runtime.cli import HubCLIClient
+    hub = OldHub(["queued", "queued", "succeeded"], result=[{"path": "a.txt", "size": 1}])
+    target = old_hub_cli(monkeypatch, hub)
+    result = value(invoke(workspaces, target + ["files", "b" * 32]))
+    assert result == {"files": [{"path": "a.txt", "size": 1}]}
+    assert [body["kind"] for body in hub.posts] == ["workspace.files"] and len(hub.polls) == 3
+    assert set(hub.polls) == {hub.posts[0]["id"]}  # The same read action, never a second one.
+    client = HubCLIClient("lab", "a" * 32, "/unused")
+    assert client.backend.wait == 5.0  # Reads keep the backend's own wait.
+    hub.states = ["succeeded"]
+    client.files("b" * 32)
+    assert client.backend.wait == 5.0
+
+
+@pytest.mark.parametrize("states,wait,message", [(["queued", "failed"], 5.0, "failed"),
+                                                  (["queued"], 0.2, "has not finished")])
+def test_old_node_read_fallback_failure_or_timeout_is_not_a_result(monkeypatch, states, wait, message):
+    hub = OldHub(states, result=[{"path": "never.txt", "size": 1}])
+    target = old_hub_cli(monkeypatch, hub, wait=wait)  # wait 0.2: the action stays queued past it
+    result = CliRunner().invoke(workspaces, target + ["files", "b" * 32])
+    assert result.exit_code == 1 and message in result.output and "never.txt" not in result.output
+    assert len(hub.posts) == 1 and hub.polls  # It was polled, and still not reported as files.
+
+
+def test_hub_writes_are_acknowledged_without_polling_and_restore_the_read_wait(monkeypatch):
+    from suan.runtime.cli import HubCLIClient
+    hub = OldHub(["succeeded"])
+    target = old_hub_cli(monkeypatch, hub)
+    created = value(invoke(workspaces, target + ["create", "acknowledged", "--key", "ack"]))
+    assert created["outcome"] == "queued" and "workspace" not in created and hub.polls == []
+    submitted = value(invoke(jobs, target + ["submit", "--workspace", "b" * 32, "--key", "ack", "--",
+                                             "@python", "-c", "print(1)"]))
+    assert submitted["outcome"] == "pending_review" and "task" not in submitted and hub.polls == []
+    client = HubCLIClient("lab", "a" * 32, "/unused")
+    client.create_workspace("again", "again")
+    assert client.backend.wait == 5.0 and hub.polls == []
+
+    def lost(body):
+        raise URLError("reply lost")
+
+    hub.post_action = lost
+    with pytest.raises(click.exceptions.Exit):
+        client.create_workspace("lost", "lost")
+    assert client.backend.wait == 5.0  # Restored even when the write fails.
+
+
+@pytest.mark.parametrize("source_exists", [True, False])
+def test_hub_upload_is_refused_before_any_file_or_hub_access(tmp_path, monkeypatch, source_exists):
+    import pathlib
+
+    source = tmp_path / "inputs"
+    if source_exists:
+        source.mkdir()
+        (source / "a.txt").write_text("a", encoding="utf-8")
+    else:
+        source = tmp_path / "missing"
+
+    import os
+    touched = []
+
+    def store(*args, **kwargs):
+        touched.append("hub connection store")
+        raise AssertionError("the hub connection store was opened")
+
+    def spy(name, original):
+        def call(self, *args, **kwargs):
+            if str(self).startswith(str(source)):
+                touched.append(f"Path.{name}")
+            return original(self, *args, **kwargs)
+        return call
+
+    def spy_os(name, original):
+        def call(path, *args, **kwargs):
+            if str(path).startswith(str(source)):
+                touched.append(f"os.{name}")
+            return original(path, *args, **kwargs)
+        return call
+
+    # Record-only spies, active just for this CLI call: the refusal must come before any of them sees the source.
+    with monkeypatch.context() as patch:
+        patch.setattr("suan.desktop_bridge.connections.ConnectionStore", store)
+        for name in ("rglob", "is_dir", "is_file", "open", "read_bytes", "stat", "exists", "iterdir"):
+            patch.setattr(pathlib.Path, name, spy(name, getattr(pathlib.Path, name)))
+        for name in ("stat", "scandir", "open", "listdir"):
+            patch.setattr(os, name, spy_os(name, getattr(os, name)))
+        result = CliRunner().invoke(workspaces, ["--hub", "lab", "--node", "a" * 32, "upload", "b" * 32, str(source)])
+    assert result.exit_code == 2 and "not supported with --hub" in result.output
+    assert "does not exist" not in result.output  # click's existence check of the source never ran
+    assert touched == []
+
+
+def test_direct_workspace_commands_keep_their_calls_and_output(tmp_path, monkeypatch):
+    calls = []
+
+    class Client:
+        def create_workspace(self, *args):
+            calls.append(("create",) + args)
+            return {"id": "w" * 32, "name": args[0]}
+
+        def workspaces(self):
+            calls.append(("list",))
+            return [{"id": "w" * 32, "name": "direct"}]
+
+        def files(self, workspace_id):
+            calls.append(("files", workspace_id))
+            return []
+
+        def upload(self, workspace_id, path, remote):
+            calls.append(("upload", workspace_id, remote))
+            return {"path": remote}
+
+    monkeypatch.setattr("suan.runtime.cli.get_client", lambda *args: Client())
+    plain = invoke(workspaces, ["create", "direct"])
+    assert json.loads(plain.stdout) == {"id": "w" * 32, "name": "direct"} and plain.stderr == ""
+    invoke(workspaces, ["create", "keyed", "--key", "direct-key"])
+    assert json.loads(invoke(workspaces, ["list"]).stdout) == [{"id": "w" * 32, "name": "direct"}]
+    invoke(workspaces, ["files", "w" * 32])
+    folder = tmp_path / "inputs"
+    (folder / "sub").mkdir(parents=True)
+    (folder / "a.txt").write_text("a", encoding="utf-8")
+    (folder / "sub" / "b.txt").write_text("b", encoding="utf-8")
+    invoke(workspaces, ["upload", "w" * 32, str(folder)])
+    assert calls == [("create", "direct"), ("create", "keyed", "direct-key"), ("list",), ("files", "w" * 32),
+                     ("upload", "w" * 32, "a.txt"), ("upload", "w" * 32, "sub/b.txt")]
+
+
+@pytest.mark.parametrize("arguments", [["--hub", "lab", "list"], ["--node", "a" * 32, "list"],
+    ["--hub", "lab", "--node", "a" * 32, "--profile", "direct", "list"],
+    ["--hub", "lab", "--node", "a" * 32, "--state-dir", "/unused", "list"], ["action", "a" * 32]])
+def test_invalid_workspace_target_never_loads_credentials(arguments, monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("credentials were loaded")
+
+    monkeypatch.setattr("suan.desktop_bridge.connections.ConnectionStore", forbidden)
+    monkeypatch.setattr("suan.runtime.cli.get_client", forbidden)
+    result = CliRunner().invoke(workspaces, arguments)
+    assert result.exit_code == 2
+
+
+def test_hub_workspace_cli_closes_its_own_connection(monkeypatch):
+    closed = []
+
+    class Backend:
+        node_id = "a" * 32
+        wait = 30
+
+        def workspaces(self):
+            return {"workspaces": []}
+
+        def device(self):
+            return {"online": False}
+
+    class Store:
+        def __init__(self, *args):
+            pass
+
+        def backend(self, *args):
+            return Backend()
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr("suan.desktop_bridge.connections.ConnectionStore", Store)
+    result = invoke(workspaces, ["--hub", "lab", "--node", "a" * 32, "list"])
+    assert value(result) == {"workspaces": [], "observation": "heartbeat_snapshot", "online": False}
+    assert closed == [True]

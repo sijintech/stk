@@ -45,7 +45,16 @@ class HubCLIClient:
         except Exception:
             self.store.close()
             raise
-        self.backend.wait = 0  # Submission acknowledges the action, never waits for execution/review.
+        # Reads keep the backend's own bounded wait (an old hub or node answers them through a read action that
+        # must be polled); only write actions are acknowledged without waiting, in _acknowledged.
+
+    def _acknowledged(self, operation):
+        """Run a write action without waiting for its execution or review, then restore the read wait."""
+        saved, self.backend.wait = self.backend.wait, 0
+        try:
+            return operation()
+        finally:
+            self.backend.wait = saved
 
     @staticmethod
     def _public_task(task):
@@ -59,7 +68,7 @@ class HubCLIClient:
         identity = action_id(kind, self.backend.node_id, key)
         click.echo(f"Hub action: {identity}", err=True)
         try:
-            result = operation()
+            result = self._acknowledged(operation)
         except BridgeError as exc:
             if exc.data and exc.data.get("action") and (
                     exc.code == "timeout" or exc.data["action"]["state"] in {"failed", "rejected"}):
@@ -101,16 +110,36 @@ class HubCLIClient:
     def task(self, task_id):
         return self.backend.task(task_id, require_live=True)["task"]
 
-    def action(self, identity):
+    def create_workspace(self, name, key):
+        return self._operation("workspace.create", key, lambda: self.backend.create_workspace(name, key))
+
+    def workspaces(self):
+        """The node's last heartbeat listing: bounded and possibly stale, never proof that a workspace is absent."""
+        listing = self.backend.workspaces()["workspaces"]
+        return {"workspaces": listing, "observation": "heartbeat_snapshot",
+                "online": bool(self.backend.device().get("online"))}
+
+    def files(self, workspace_id):
+        if not re.fullmatch(r"[a-f0-9]{32}", workspace_id):
+            raise click.UsageError("A workspace ID is 32 lowercase hexadecimal characters")
+        return self.backend.files(workspace_id)
+
+    # The kinds each CLI group may resolve, and the result each kind carries.
+    TASK_ACTIONS = {"task.submit": "task", "task.cancel": "task"}
+    WORKSPACE_ACTIONS = {"workspace.create": "workspace"}
+
+    def action(self, identity, kinds=TASK_ACTIONS):
         from suan.desktop_bridge.backends import summary
         if not re.fullmatch(r"[a-f0-9]{32}", identity):
             raise click.UsageError("An action ID is 32 lowercase hexadecimal characters")
         record = self.backend.call(self.backend.hub.action, identity)
-        if record["node_id"] != self.backend.node_id or record["request"]["kind"] not in {"task.submit", "task.cancel"}:
-            raise click.ClickException("This is not a task action for the selected node")
+        if record["node_id"] != self.backend.node_id or record["request"]["kind"] not in kinds:
+            what = "task" if kinds is self.TASK_ACTIONS else "workspace creation"
+            raise click.ClickException(f"This is not a {what} action for the selected node")
         out = {"action": summary(record)}
         if record["state"] == "succeeded":
-            out["task"] = self._public_task(record["result"])
+            result = kinds[record["request"]["kind"]]
+            out[result] = self._public_task(record["result"]) if result == "task" else record["result"]
         return out
 
     def logs(self, task_id, stream, offset):
@@ -468,24 +497,54 @@ def hub_job_options(function):
                         type=click.Path(path_type=Path), show_default=True)(function)
 
 
+def select_target(ctx, profile, state_dir, hub, node, hub_state_dir):
+    """A paired hub's exact node (closed with the command) or a direct/SSH Runtime client."""
+    if hub:
+        if profile or state_dir:
+            raise click.UsageError("--hub cannot be combined with --profile or --state-dir")
+        if not node:
+            raise click.UsageError("--hub requires --node; use connect hub-nodes NAME to select one")
+        ctx.obj = HubCLIClient(hub, node, hub_state_dir)
+        ctx.call_on_close(ctx.obj.store.close)
+    else:
+        if node:
+            raise click.UsageError("--node requires --hub")
+        ctx.obj = LazyClient(profile, state_dir)
+
+
 @click.group(cls=FriendlyGroup)
-@client_options
+@hub_job_options
 @click.pass_context
-def workspaces(ctx, profile, state_dir):
+def workspaces(ctx, profile, state_dir, hub, node, hub_state_dir):
     """Create workspaces and transfer immutable task inputs."""
-    ctx.obj = LazyClient(profile, state_dir)
+    if hub and ctx.invoked_subcommand == "upload":
+        # Refused before any local file is examined or read, and before the hub is contacted.
+        raise click.UsageError("workspaces upload is not supported with --hub; upload through a direct or SSH "
+                               "Runtime connection, or with the desktop app")
+    select_target(ctx, profile, state_dir, hub, node, hub_state_dir)
 
 
 @workspaces.command("create")
 @click.argument("name")
+@click.option("--key", help="Idempotency key; reuse it with the same name after a lost response")
 @click.pass_obj
-def create_workspace(client, name):
-    dump(client.create_workspace(name))
+def create_workspace(client, name, key):
+    if isinstance(client, HubCLIClient):
+        key = key or uuid.uuid4().hex
+        click.echo(f"Idempotency key: {key}", err=True)
+        dump(client.create_workspace(name, key))
+    elif key:
+        dump(client.create_workspace(name, key))
+    else:
+        dump(client.create_workspace(name))
 
 
 @workspaces.command("list")
 @click.pass_obj
 def list_workspaces(client):
+    if isinstance(client, HubCLIClient):
+        click.echo("Hub workspace listing: the node's last heartbeat snapshot; it may be stale or incomplete, and a "
+                   "workspace missing from it may still exist", err=True)
     dump(client.workspaces())
 
 
@@ -496,6 +555,19 @@ def list_files(client, workspace_id):
     dump(client.files(workspace_id))
 
 
+@workspaces.command("action")
+@click.argument("action_id")
+@click.pass_obj
+def show_workspace_action(client, action_id):
+    """Resolve a pending/unknown Hub workspace creation by its original action ID."""
+    if not isinstance(client, HubCLIClient):
+        raise click.UsageError("workspaces action requires --hub and --node")
+    result = client.action(action_id, kinds=HubCLIClient.WORKSPACE_ACTIONS)
+    dump(result)
+    if result["action"]["state"] in {"failed", "rejected"}:
+        raise click.exceptions.Exit(1)
+
+
 @workspaces.command("upload")
 @click.argument("workspace_id")
 @click.argument("source", type=click.Path(exists=True, path_type=Path))
@@ -504,6 +576,8 @@ def list_files(client, workspace_id):
 )
 @click.pass_obj
 def upload(client, workspace_id, source, remote_path):
+    if isinstance(client, HubCLIClient):  # The group refuses this first; kept as a second guard.
+        raise click.UsageError("workspaces upload is not supported with --hub")
     if source.is_dir():
         if remote_path:
             raise click.UsageError("--path is only supported for a single file")
@@ -523,17 +597,7 @@ def upload(client, workspace_id, source, remote_path):
 @click.pass_context
 def jobs(ctx, profile, state_dir, hub, node, hub_state_dir):
     """Submit, reconnect to, inspect and cancel persistent tasks."""
-    if hub:
-        if profile or state_dir:
-            raise click.UsageError("--hub cannot be combined with --profile or --state-dir")
-        if not node:
-            raise click.UsageError("--hub requires --node; use connect hub-nodes NAME to select one")
-        ctx.obj = HubCLIClient(hub, node, hub_state_dir)
-        ctx.call_on_close(ctx.obj.store.close)
-    else:
-        if node:
-            raise click.UsageError("--node requires --hub")
-        ctx.obj = LazyClient(profile, state_dir)
+    select_target(ctx, profile, state_dir, hub, node, hub_state_dir)
 
 
 @jobs.command("submit", context_settings={"ignore_unknown_options": True})
