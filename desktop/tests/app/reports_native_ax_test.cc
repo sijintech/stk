@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "reports_native_ax_protocol.hh"
 #include "reports_native_ax_process.hh"
+#include "reports_native_wait.hh"
 
 #include <chrono>
 #include <cmath>
@@ -21,6 +22,45 @@
 namespace ax = stk::reports_native_test::ax;
 namespace {
 void check(bool value, const char *what) { if (!value) throw std::runtime_error(what); }
+struct TestClock {
+  using time_point = std::chrono::steady_clock::time_point;
+  static inline time_point current;
+  static time_point now() { return current; }
+};
+void waiting_cases() {
+  using namespace std::chrono;
+  const auto start = TestClock::time_point(seconds(100));
+  const auto deadline = start + seconds(45);
+  for (int ready_second : {44, 45, 46}) {
+    TestClock::current = start;
+    int predicates = 0, pumps = 0, yields = 0;
+    bool externally_ready = false;
+    const bool done = stk::reports_native_test::poll_before<TestClock>(deadline,
+        [&] { ++predicates; return externally_ready; },
+        [&](bool wait) { check(!wait, "external completion waits for an unrelated OS event"); ++pumps; },
+        [&] { ++yields; TestClock::current = start + seconds(ready_second); externally_ready = true; });
+    check(done == (ready_second == 44) && pumps == 1 && yields == 1 &&
+        predicates == (ready_second == 44 ? 2 : 1), "external ready event renewed its original deadline");
+  }
+  TestClock::current = start;
+  check(!stk::reports_native_test::poll_before<TestClock>(deadline,
+      [&] { TestClock::current = deadline; return true; },
+      [](bool) { throw std::runtime_error("pump after terminal predicate"); }, [] {}),
+      "synchronous predicate crossing the deadline accepted");
+  TestClock::current = start;
+  int predicates = 0;
+  check(!stk::reports_native_test::poll_before<TestClock>(deadline,
+      [&] { ++predicates; return false; }, [&](bool wait) {
+        check(!wait, "late pump may block"); TestClock::current = deadline + seconds(1);
+      }, [] { throw std::runtime_error("yield after late pump"); }) && predicates == 1,
+      "late UI pump caused another predicate dispatch");
+  TestClock::current = deadline;
+  check(!stk::reports_native_test::poll_before<TestClock>(deadline,
+      []() -> bool { throw std::runtime_error("predicate after expired start"); },
+      [](bool) { throw std::runtime_error("pump after expired start"); },
+      [] { throw std::runtime_error("yield after expired start"); }), "expired wait accepted");
+  std::cout << "PASS: external completion polls without an OS event and rejects late results\n";
+}
 ax::Request request() {
   ax::Request r;
 #ifndef _WIN32
@@ -201,6 +241,7 @@ int main(int argc, char **argv) {
   if (filename.starts_with("ax-stub-")) return fake(filename.substr(8), argv[0]);
 #endif
   try {
+    waiting_cases();
     const auto q = request(); const auto good = response(q);
     topology_cases(q, good);
     ax::LayoutEpoch layout;

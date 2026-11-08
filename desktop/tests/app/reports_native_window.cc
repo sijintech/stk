@@ -21,6 +21,7 @@
 #include "../../spike/document_preview/evidence_pixels.hh"
 #include "../../spike/document_preview/fixture.hh"
 #include "reports_native_scroll.hh"
+#include "reports_native_wait.hh"
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
 #  include "stk/document/test_media_probe.hh"
 #  include "reports_native_input.hh"
@@ -163,19 +164,21 @@ class Exercise {
     return true;
 #endif
   }
-  void process()
+  void process(bool wait_for_event = false)
   {
-    const bool alive = manager_.process(true);
+    const bool alive = manager_.process(wait_for_event);
     check_native_scroll();
     require(alive && manager_.main_window() == &window_, "STK window closed unexpectedly");
+    // WGC/AX completion may arrive without an OS event. Also yield for the standalone AX loop.
+    if (!wait_for_event) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
   }
   void wait(const std::function<bool()> &predicate, const std::string &reason, double seconds = 45)
   {
-    const auto start = Clock::now();
-    while (!predicate()) {
-      require(std::chrono::duration<double>(Clock::now() - start).count() < seconds, reason + " timed out");
-      process();
-    }
+    const auto deadline = Clock::now() + std::chrono::duration_cast<Clock::duration>(
+        std::chrono::duration<double>(seconds));
+    const bool completed = reports_native_test::poll_before<Clock>(deadline, predicate,
+        [this](bool wait_for_event) { process(wait_for_event); }, [] {});
+    require(completed, reason + " timed out");
   }
   void frame()
   {
