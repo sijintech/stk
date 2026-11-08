@@ -13,15 +13,16 @@
   不能只把两个字符串加入允许列表就当完成。模型建议不能自行构造用户/节点授权。
 - 分工由 root 总负责；Claude 在独立 worktree 实现分配的文档及模块。D1 兼容门清单已经 root 审阅修正后合入 main；
   双部署验收仍待实施。HDF5 读取模块已修正审查问题，由 root 在 main `56f51af7` 接为显式 FileSource/图数据源，
-  [读取契约](../specs/mupro-hdf5-1.md)已发布；自动结果发现/收集与真实执行验收仍待后续增量。
+  [读取契约](../specs/mupro-hdf5-1.md)已发布。main `89e40c89` 增加有界元数据发现、限定字段句柄和同一已成功任务的 HDF5 附加产物收集；
+  HDF5-only 完成验证、真实执行验收与 S2c 仍待后续增量。
 
 ## 当前可复用的实现与缺口
 
 | 入口 | 当前事实 | 试点需要的增量 |
 |---|---|---|
 | [`suan/mupro/spec.py`](../../suan/mupro/spec.py)、[`run.py`](../../suan/mupro/run.py) | 已有结构化 TaskSpec、Linux/MPI 启动、程序解析与完整输出核验；许可只配置目录 | 定向预检实际引擎/依赖/许可配置及可运行算例，记录真实启动/退出与失败，不读取许可正文 |
-| [`suan/workflows/muferro.py`](../../suan/workflows/muferro.py) | 已有项目导入、冻结、准备、提交、结果收集和查看链 | 复用原项目/run/task/幂等身份，明确 HDF5 数据入口与原产物的绑定，不另建调度器 |
-| [`suan/connectors/mupro/`](../../suan/connectors/mupro/) | DAT 自动运行描述保持；新增只读 HDF5 与 FileSource、显式 `stk.source.mupro_hdf5@1` 已通过合成读取及 CLI 导出 | 后续接自动 describe/open 与原任务收集；真实 HDF5 输出/完成证据另验，不能据显式读取称执行器已完成 |
+| [`suan/workflows/muferro.py`](../../suan/workflows/muferro.py) | 既有执行链已补同任务 `case/run.h5` 的摘要、冻结网格及跨步类型核验和登记 | 收集仍要求旧 DAT 完成验证；继续真实软件与 HDF5-only 输出验收，不另建调度器 |
+| [`suan/connectors/mupro/`](../../suan/connectors/mupro/) | 0.2.0 已发现 `run.h5` 并以 `hdf5:<field>` 打开；DAT/表格保持，HDF5 错误有单独诊断 | 合成/CLI 软件验证不代真实 HDF5 输出、完成证据或目标 OS，不能称整个执行器已完成 |
 | [数据格式 v1 §10](../specs/stk-data-format-v1.md) | 已写明 MuPRO `run.h5:/tNNNNNNNN/<name>` 数组为 `(nx,ny,nz,nc)`，读入需转成 `(nz,ny,nx,nc)` | 按现有轴序做独立适配；组/字段/步号、类型、几何、单位和限制在插件合同中明示，不猜物理量或六分量张量顺序 |
 | [`suan/agent/levels.py`](../../suan/agent/levels.py)、[`tools.py`](../../suan/agent/tools.py) | 当前 Agent 工具只允许 read/record/model/draft，prepare_run/submit_run 仍被排除 | 增加受信任执行授权与冻结计划工具、明确运行和原回执读取；扩展工具/事件/取消/恢复测试及版本合同 |
 

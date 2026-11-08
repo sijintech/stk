@@ -89,9 +89,31 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
 
 ### CL-H5-REVIEW-02：HDF5 接入只读交叉审查
 
-- **状态：Claude 已交付主审查结果：命名副本在强杀后遗留已由 root 修正为 `3579aea1` 并通过实际子进程测试；附加兼容性复核尚待回报。** 基线 root `56f51af7`，Claude 保持独立工作树；只读 root 的本批 adapter/node/context/测试和 HDF5 契约。
+- **状态：Claude 主审查和附加兼容性复核均已回报。** 命名副本在强杀后遗留已由 root 修正为 `3579aea1`；容器上限和全量哈希成本保留，Runtime 终态可见性及本地读取器/FileSource 路径规则已补入读取契约。基线 root `56f51af7`，全程只读 root 的本批 adapter/node/context/测试和 HDF5 契约。
 - **目标：** 核对实际字节与规划键、FileSource 边界、取消和私有副本清理、dtype/轴序及兼容性。先交具体反例与证据，root 负责修正。
 - **写入范围：** 不改产品源码、文档、认知资产，不提交或推送；可在独立外部临时目录做合成探测。
+
+### CL-MUPRO-H5-DISCOVERY-03：MuPRO HDF5 元数据发现
+
+- **状态：Claude 已交付 `c975f58da1290317ecbe9eff510ca53b82ab52b3`，root 审查并选择集成 main `89e40c89`。** root 接 FileSource、结果描述及原任务收集；最终联合419通过/5跳过，真实许可与目标 OS 未验。
+- **基线：** Claude 现有干净 `73abd757fcbaa29fbeb72993e6df930ea581aaa3` / `claude/support`。拟从 main `f152e67a` 新建任务分支被 Claude 后台会话的权限设置拒绝，未改设置或重试绕过；继续使用已授权的既有独立分支，root 只选择集成两个新文件。
+- **唯一写入范围：** `suan/connectors/mupro/discovery.py`、`tests/test_mupro_hdf5_discovery.py`。
+- **接口：** `_discover_hdf5_stream(stream, *, max_entries=4096, check=None)`；调用方拥有已验内容的普通匿名流，返回 selector/step/name/shape/dtype 元数据，保持流打开。
+- **验收：** 复用读取器的链接/存储/dtype 检查，不读值或分配数值数组；两层遍历计入忽略名称并限总条目；顺序确定、取消及同 API 文件变化检查。真实合成 h5py 反例、暂存 gitleaks 后提交完整 SHA。
+- **边界：** 不改 root 工作树、父连接器、契约、全局状态或 AOCI；不执行许可软件/模型，不推送，不代选科学参数。root 审查后集成，元数据发现不证明求解成功。
+
+### CL-H5-INTEGRATION-REVIEW-04：发现与收集接入复核
+
+- **范围：** 只读 root 的 FileSource/结果句柄、父连接器、图索引、收集和相关测试/契约；外部小型合成探测，不改源码/文档/认知，不提交推送。
+- **已回报：** HDF5 诊断曾阻断 DAT/能量入口，root 已复现并修复；保留严格原生字段规则及硬链接 selector，不把别名当独立科学观察。root 另复现并修正跨步布局收集漏检和替换插件调用兼容。
+- **收口：** Claude 已针对 main `89e40c89` 完成只读复核，合成探测确认 DAT/能量兼容问题关闭；`integration-review.md` 与 `integration-probe-recheck.json` 保留在本轮外部证据的 `claude/`。未传 `result=` 的 open 仍重做完整容器复制，运行中改写仍可使索引失败，无 live HDF5 支持。419/5为root实际回归；Claude未重跑该套件、目标 OS 或真实 MuPRO。独立树保持 `c975f58d`，root继续负责全局交付。
+
+### CL-S2C-PLAN-05：MuPRO 智能体执行授权的实施清单
+
+- **状态：已派发只读规划任务。** root 产品基线 `89e40c89`；Claude 保持干净 `claude/support` / `c975f58d`，不切分支或修改权限设置。
+- **目标：** 核对 agent 工具/事件、项目运行和桌面桥，提出最小契约及反例矩阵：冻结计划、受信任桌面人工单次批准、prepare/submit 分离、原请求/幂等键恢复、撤权/CAS和取消/观察区分。
+- **范围：** 有界只读当前源码、相关发布契约及测试；只在外部证据目录 `claude/s2c-plan-05.md` 交付源码依据、建议路径和测试清单，不改两棵树的产品、文档或认知资产，不提交推送。
+- **边界：** S2c方向获准不代表无限自动执行；不代选扫描数值或分析提案持久形式，不调用真实求解器或收费模型，不改凭据/端点/网络策略。root 审查后再安排具体实现模块。
 
 root 已核对 `6f4de650` 整个 Desktop 失败终态；继续按最新决定优先 MuPRO/MuFerro 执行器与 HDF5 试点，
 原生文献 UI、Synthrix 正常装配/桌面入口及 D1-D5 保留在队列，按真实依赖推进。

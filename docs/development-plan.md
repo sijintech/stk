@@ -1,5 +1,16 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：MuPRO HDF5 发现与附加产物收集已提交
+
+main本地源码 `89e40c89f946556e35ee954eb9a3fbf9c1a0dbfe`，未推送。连接器0.2.0和图索引实现2已接有界元数据发现、`hdf5:<field>` 内容绑定句柄及原任务HDF5附加文件收集。
+DAT/能量入口保留；坏HDF5有独立诊断。收集仍须既有DAT完成验证；真实HDF5-only执行器与S2c并未随此完成。
+最终回归419通过/5跳过、34记录输入稳定；CLI180个float32原值一致，目标OS/真实MuPRO/科学验收仍缺。
+Claude模块 `c975f58d` 已由root选择集成；具体分工见[协作约定](planning/agent-collaboration.md)。
+接下来：S2c冻结计划与人工单次授权、实际MuPRO资产/完成协议、D1同源双部署和跨端验证；原生文献UI及旧CI问题继续。
+远端f152的Runtime失败已定位并修正其清单/测试前提；Desktop已于06:17:18Z失败终态，4个job成功、macOS及Windows原生文档失败。等待门已满足，本节记录时新源码CI未触发。
+不缩减原八项，不代选科学扫描数值或分析提案持久形式，PET新专项继续后置；证据与限制见运行验收。
+Claude已完成89e40c89只读复核，DAT兼容问题关闭；下一任务CL-S2C-PLAN-05已派发，仅外部实施/反例清单，不改产品树。
+
 ## 2026-11-08 UTC：HDF5 软件切片已实现，执行器链继续
 
 读取器由 Claude 独立树 `73abd757` 交付，root 审查并接入 FileSource 和 `stk.source.mupro_hdf5@1`；源码已提交 main `56f51af70d576837426f63c12694941b0ea7cfcd`。

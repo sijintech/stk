@@ -1,5 +1,38 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：HDF5 自动发现/收集交付（本地待推送）
+
+源码：main `89e40c89f946556e35ee954eb9a3fbf9c1a0dbfe`，19文件；Claude读取/发现模块后续交付 `c975f58da1290317ecbe9eff510ca53b82ab52b3` 只选择两新文件集成。
+证据根：`/home/mnemora/.local/state/stk-validation/mupro-hdf5-discovery-20261108-03/root/`；Claude原始证据在同级 `claude/`。
+
+| 实际检查 | 结果与边界 |
+|---|---|
+| `joint-final-02.xml` / `.json` | 21文件419通过/5跳过，268.34s；34记录输入SHA前后相同，退出0 |
+| `joint-final-01.xml` | 修正前414通过/5跳过，241.95s；不覆盖后续兼容修正 |
+| `collection-consistency-red.xml` | 2个先失败反例，确认跨步dtype/分量变化曾被错误收集 |
+| `collection-consistency-final.xml` | 修正后18通过，84.85s，记录输入稳定 |
+| `dat-compatibility-red.xml` | 3个先失败反例：坏HDF5阻断DAT、容器预算阻断图索引、替换插件误收公共新参数/格式政策 |
+| `dat-compatibility-final-01.xml` | 修正后52通过，2.24s；最终21文件联合02再次覆盖 |
+| `ci-regressions-01.xml` | 108通过/1 Windows专属跳过，1.75s；目标Windows必须再由CI验证 |
+| `cli-02/verification.json` | 真实CLI新进程自动索引及NPY输出，180个float32原值完全相等，selector与源SHA一致；无求解完成声明 |
+| `gitleaks-code-01.json` | 暂存按 `.gitleaks.toml` 扫描56.97KB，零发现 |
+
+五个最终skip分别为Windows HANDLE原生查询、未启用性能基准、已有离屏子进程SIG11，以及真实MuPRO项目/批次各一项缺资产。
+所有测试清空 `STK_TOKEN_PLAN_API_KEY` 并移除 `STK_TOKEN_PLAN_MODEL`；没有运行真实MuPRO或收费模型、没有新UI交付或点击计数。
+当前收集仍要求旧DAT完整核验，并严格检查附加HDF5的容器字节、网格与跨步布局；元数据可读不证明值完成或科学正确。
+文件上限仍1GiB、数组/chunk估算另256MiB，临时盘可能tmpfs，命中仍全量哈希；运行中本地容器变化可拒绝，未新增SWMR/活跃Runtime产物读取。
+
+远端代码头 `f152e67a31c6fc742408644e9d9668971cabb060`：
+Runtime [42451045163](https://github.com/sijintech/stk/actions/runs/42451045163) completed/failure，13 job中5失败、8成功。
+Linux3.11/3.14各1 fail/5542 pass/153 skip/4 deselected，3.12为1 fail/5559 pass/136 skip/4 deselected；失败均旧节点清单。
+Windows3.11为2 fail/4951 pass/254 skip/346 deselected；3.12的三失败为节点清单、ctime创建时间前提和msvcrt被动导入前提。精确摘要与原失败在 `f152-ci-failures.json`。
+Docs42451045187及Secret42451045182 success；Desktop [42451045164](https://github.com/sijintech/stk/actions/runs/42451045164) 已于06:17:18Z completed/failure。
+6个job中Linux包、全新24.04包冒烟、Linux GL/Vulkan和Windows CPU成功；macOS CPU/文献及原生文档、Windows原生文档失败。精确终态保留在 `f152-desktop-terminal.json`。
+前整个Desktop等待门已满足，失败仍待修复。本节记录时新源码尚未push/触发CI，随后推送及新CI见本批closure；本地通过不代表远端或目标OS已过。
+
+本轮旧PR53/54头未变，未盲合历史分支；53与主线已有传输重试实现重叠，54为旧大写交接，均未作为当前功能集成。
+原四文档正文WIP保留；认知Verify/Check/Guide、记录提交和最终Git/CI实况另记本批 `closure.json`。
+
 ## 2026-11-08 UTC：MuPRO HDF5 显式源的回归和真实CLI
 
 - 源码：main `56f51af70d576837426f63c12694941b0ea7cfcd`，16文件；Claude读取器来源`73abd757fcbaa29fbeb72993e6df930ea581aaa3`，仅选择其两项分配文件，root新增来源/图接入。

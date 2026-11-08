@@ -1,5 +1,20 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：HDF5 自动发现与原任务附加产物收集
+
+源码已本地提交 main `89e40c89f946556e35ee954eb9a3fbf9c1a0dbfe`（19文件），尚未推送；远端仍为 `f152e67a`。
+Claude 独立树 `c975f58d` 的元数据模块/测试已选择集成；root负责结果句柄、图索引、收集、兼容修正及交付。
+连接器0.2.0发现 `run.h5`，字段以 `hdf5:<field>` 保留 selector/原 dtype/容器 SHA；HDF5问题单独诊断，DAT和能量可读。
+原任务收集检查产物摘要、冻结网格及跨步布局，重复收集不重提；仍要求既有 DAT 完成验证，HDF5-only 求解完成尚未实现。
+最终21文件回归419通过/5跳过，34记录输入稳定；实际CLI自动发现和NPY导出的180个float32值一致。修正前失败反例均保留。
+跳过为Windows HANDLE、性能、旧离屏SIG11及两真实MuPRO资产例；不称目标OS、真实许可或科学有效性已验。
+上一头Runtime 42451045163 completed/failure（旧节点清单及Windows测试前提，本批已修）；Docs/Secret success。
+Desktop 42451045164 已于06:17:18Z completed/failure：4个job成功，macOS及Windows原生文档失败。前整轮等待门已满足；本节记录时新源码还没有CI。
+下一步继续 S2c 冻结授权/人工单次批准、真实软件与HDF5完成链、D1双部署及原生文献/旧CI问题；八项范围与PET后置不变。
+计算主机/SDK/小算例和扫描数值仍待输入，分析提案持久形式待决；不替所有者选值。
+本轮证据、认知收口、最终Git/CI见 `mupro-hdf5-discovery-20261108-03/root/closure.json`；原状态文档WIP保留。
+Claude已完成89e40c89只读复核，DAT兼容问题关闭；下一任务CL-S2C-PLAN-05已派发，仅外部实施/反例清单，不改产品树。
+
 ## 2026-11-08 UTC：HDF5 显式数据源已集成
 
 读取器由 Claude 独立树 `73abd757` 交付，root 审查并接入 FileSource 和 `stk.source.mupro_hdf5@1`；源码已提交 main `56f51af70d576837426f63c12694941b0ea7cfcd`。

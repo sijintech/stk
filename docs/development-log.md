@@ -1,5 +1,20 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：MuPRO HDF5 发现、收集与兼容修正
+
+源码提交 `89e40c89f946556e35ee954eb9a3fbf9c1a0dbfe`，19文件；Claude两新文件来自 `c975f58d`，root完成跨模块接入。本地已提交；前Desktop现已终态，推送及新CI以本批closure为准。
+
+- 元数据仅遍历两层、总4096项，复用原读取器的链接/存储/类型检查；不读值。字段按原名/步号、dtype和selector描述。
+- `hdf5:<field>` 与DAT独立；句柄读入须匹配发现时容器SHA。图索引规划SHA与执行绑定，替换插件保持原describe契约。
+- 同任务 `case/run.h5` 经产物摘要、冻结网格及跨步shape/dtype核验后登记；不新增调度器或提交路径，坏HDF5不登记为成功结果。
+- 审查复现并修正跨步布局漏检（2个先失败反例）及DAT浏览、容器预算、替换插件兼容（3个先失败反例）。HDF5问题进入独立诊断，规划内容变化仍拒绝。
+- 修复f152 CI遗漏的节点目录断言；Windows创建时间测试改独立GetFileTime，不假设fstat ctime语义，被动导入不再误禁标准库msvcrt。产品HANDLE ChangeTime检查保留。
+
+最终21文件419通过/5跳过，268.34s，34记录输入前后稳定；修正前414/5、各红例及18/52项定向复验保留，不能用旧结果覆盖新字节。
+CLI02在实际新进程自动发现HDF5并导出NPY，180个float32值/selector/源SHA独立相等。合成SDK只证明软件和原任务身份，不是许可求解或科学验证。
+暂存56.97KB gitleaks零发现。远端f152 Runtime终态失败、Docs/Secret成功，Desktop于06:17:18Z失败终态（4个job成功，macOS及Windows原生文档失败）；本节记录时未推新源码或重跑CI。
+root保持四文档原WIP，认知最终收口和记录提交身份见本批closure。后续S2c、D1、原生文献、真实MuPRO与旧CI范围继续。
+
 ## 2026-11-08 UTC：MuPRO HDF5 读取、来源与图接入
 
 读取器由 Claude 独立树 `73abd757` 交付，root 审查并接入 FileSource 和 `stk.source.mupro_hdf5@1`；源码已提交 main `56f51af70d576837426f63c12694941b0ea7cfcd`。
