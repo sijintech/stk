@@ -1,5 +1,14 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：原生捕获等待候选已本地提交
+
+root/main源码 `c0ff1ac76617769c9d266304f59d856a7485ca56` 已本地提交，未push；远端691f3f12的整个Desktop42495020086仍运行，终态前不推。四文档及AOCI原WIP保留，最终提交/CI见windows-pdf-ci-42487388780/review/closure.json。
+
+旧7ef Windows PDF artifact仅完成12轮/103图；第13轮最后是closed，无reprepared完成帧，不能判页序错。真正GHOST即使每次Sleep(1)，waitForEvent循环仍等OS事件，而WGC后台队列仅poll不唤UI。报告测试改非阻塞pump并统一1ms让出，固定原deadline前后核predicate及pump后查期；慢同步调用不可抢占，仅拒晚结果。原45s、8s seek、OS像素/连续帧/20轮及Viewer/稿门保持。两目标构建与55/55零skip2.73s通过，独立六C++20/-Werror探针及固定三路径终审0发现，暂存6098字节gitleaks0；目标Windows/Mac仍待新CI。
+
+691新Docs/Secret已成功，Runtime的Windows3.11及文献/peer-macos/独立联邦等已过，其余矩阵与Desktop仍live。实际Claude15在独立树source trial-03的真实Bridge SIGKILL/原session偏移恢复10断言通过、场景5.592835773s、清理干净；SIGTERM提前退出红例被U2拒绝，安装态及最终三文件候选尚未交付，不能当最终验收。root继续审阅集成；原八项/D1-D5、文献实际点击、Synthrix入口及MuPRO真实资产/扫描/提案待决保留，PET新专项后置。
+
+
 ## 2026-11-08 UTC：peer夹具已集成，AX拓扑候选与Claude15继续
 
 root已将实际Claude14 `b510da043a5ef8bef1c1bb8bd4f2aa45d9634954` 单文件选择集成为 `a1904447e7f8285adc17fd844c866499eb44f9e0`；AX五路径源码提交 79ae0adf7bfe7734a49f33fd571ecdd4e7b650bd。推送/新CI以 `mac-ax-ci-42487388780/review/closure.json` 和实际Git为准，旧四文档WIP及AOCI预存资产保留。

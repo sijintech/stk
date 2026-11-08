@@ -1,5 +1,14 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：报告原生等待不依赖额外OS事件
+
+root提交c0ff1ac76617769c9d266304f59d856a7485ca56，仅reports_native_window.cc、新wait helper及原AX CPU测试。旧7ef Windows PDF result/3PNG经精确Range与CRC核验：12完整轮/103图，第13轮closed后无完成捕获，不能当页一像素不匹配。WGC后台frame pool无UI wake，真正GHOST等待循环支持改为非阻塞pump候选；未声称已在Windows复现。
+
+原绝对deadline前后核predicate、pump后核时，统一1ms yield含独立AX轮询；原45s/8s、OS像素与20轮门保留，慢同步调用不抢占。两个target构建成功，55/55零skip2.73s；独立C++20/-Wall/-Wextra/-Werror六探针、固定三路径终审0发现，SHA稳定，暂存6098字节gitleaks0。前691整轮Desktop仍live，未push，不借旧CI证明新候选。
+
+实际Claude15 source trial-03的10断言通过/5.592835773s、清理无残留，提前非SIGKILL退出红例被拒；固定最终字节、installed与交付尚未完成。root保main/构建/认知独占；旧WIP与原路线保持。
+
+
 ## 2026-11-08 UTC：peer发布读取诊断与AX拓扑证明候选
 
 - 实际Claude14 b510da04由root精确选择集成a1904447，仅peer_test.cc；JSON关闭临时文件后原子发布，读取区分missing/unreadable/empty/invalid/complete，永久坏JSON立即失败，原30s预算泵UI。root18/18绿、零skip、9045ms，暂存13370字节gitleaks0；不推定Windows根因。

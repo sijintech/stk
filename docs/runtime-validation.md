@@ -1,5 +1,18 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：原生WGC等待候选与固定截止反例
+
+源码c0ff1ac76617769c9d266304f59d856a7485ca56已本地提交、未push；远端691的整个Desktop42495020086仍运行，终态前不再推。当前新Docs42495020085完整部署及Secret42495020054成功；Runtime42495020053 Windows3.11、文献三版本、peer-macos、web/协议/独立联邦等成功，其余仍live（15:43Z附近观察，不是整轮终态）。
+
+旧7ef Windows job128763142651 PDF第13轮reprepared-page1 timeout。artifact13621583516只取result.json及3PNG共400958字节并逐项CRC，另目录/tail262509字节，未下载214MB整包。completed_cycles=12/images=103，最后13/closed，无13/reprepared或waiting完成图；12/reprepared与13/visible PNG完全同SHA、页一正确。缺新帧不能推断像素不匹配。实际vendored GHOST waitForEvent虽Sleep(1)仍循环待消息/计时器；WGC CreateFreeThreaded仅TryGetNextFrame、无UI wake，Ready后Host移除加载timer，支持候选但不证明Windows动态根因。
+
+报告测试采用poll_before原deadline、调用predicate前后及pump后查期，pump(false)；统一process 1ms yield覆盖独立AX循环，无双sleep。原45s、8s seek、唯一slider/新DOM/OS像素/连续帧/20轮及Viewer/隐藏稿要求保留，无新产品UI或点击路径。同步SDK/事件回调不可抢占，只能拒绝其晚结果，不能称硬墙钟截止。
+
+root两target构建成功，相关55/55零skip2.73s。新fake-clock正反例核44s成功、45/46s拒绝、无OS事件仍轮询、慢predicate/pump跨期、expired零派发；独立六contract探针C++20/-Wall/-Wextra/-Werror全过，三源码SHA前后稳定、终审0发现。暂存6098字节gitleaks0。证据windows-pdf-ci-42487388780/review/root-candidate-1/，closure记录最终发布；目标Windows/Mac编译和原生门仍未验新字节。
+
+Claude15的source trial-03为10断言通过/场景5.592835773s、清理干净，提前SIGTERM红例U2拒绝；只属过程结果，尚无最终候选/安装态交付。旧root输入28/installed11及peer18的固定字节结果保留，不替本新模块验收。
+
+
 ## 2026-11-08 UTC：peer实际点击与AX拓扑候选，前整轮终态
 
 源码：peer root a1904447（实际Claude b510da04单路径）；AX root 79ae0adf7bfe7734a49f33fd571ecdd4e7b650bd。前7ef整个Desktop42487388780于15:04:55Z completed/failure，满足等待后push条件，不能称全平台通过。Mac编译成功、CPU1502/1502与Metal254/254，原生4/6；WindowsCPU1446/1446、873.20s，原生5/6，PDF cycle13 reprepared-page1像素timeout/231.05s，两视频384.28/395.15s通过。WindowsCPU本轮尚无14补修，故空JSON具体根因仍未知。旧Runtime42487388719两Windows收集失败，4399本地修复待新CI；Docs42487388755完整部署与Secret42487388666成功。
