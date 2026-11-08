@@ -1,5 +1,16 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：上传第四版完整源码/最小安装验收与前4d整轮终态
+
+源码集成397a464d来自实际Claude分支claude/hub-upload-cli-18、基线a0f77fa3的冻结六路径第四版；patch SHA d83af30da18b22c37116a446ba1674e4b7c4350f33e0b1ae14f1248566f9dfdf。CLI a2010de0…、worker b8891128…与两项测试保持作者冻结字节；root只补设计文档实际验收状态。共同transfers.py为54d47290…、含6c481e59；不把作者531旧依赖当修后版本。
+
+- 作者九模块225/225零skip；root2b已提交归档加六SHA覆盖九模块234/234零skip、95.56s，XML SHA8dcc7ba6ef2a32d4a8d090921a672b37a51f32aa17f991add473fbf51aa81065。差九是root共同后端回归，非重复计数。新侧记发布反例在第三版4失败/2控制通过，第四版通过；独立终审12场景及原读取11组通过、清临时且不调用replace，报告SHA61015342fb0d4c6ffc00ce279c21ea32553f827dfc46033130a58ca8fe394331。
+- 离线wheel 48,312,551字节、SHA03c2bb32a931d2a5567d26a85511659f0f84510c345312ee8f63b91a589a70dd；新venv禁系统包，仅server/control/test依赖，无科学/GUI/模型包。无产品目录的独立测试床，从无关cwd以python-I运行，234收集/232通过/2明确排除/零skip，91.63s，XML SHA7ee9c16cb5caa71d6a9aa58641afffac334091fc28948e47d2cb16cbe4eb986f。排除test_deployment.py的test_shipped_parameter_sweep和test_doctor_and_saved_connection_check_running_stopped_and_bad_token，因明确依赖NumPy/Matplotlib，两项已在完整源码矩阵通过。三产品SHA、父进程实际模块均来自venv/site-packages且前后相等，未见自有活后代；不代所有子进程全module图。KEY空、MODEL unset，无收费请求。此CLI交付无新增UI点击流程。
+- 前4d6426fb整个Desktop42531177137已23:27:29Z completed/failure，六job全部终态。WinCPU128885487420、LinuxGPU128885487865、Linuxpackage128885487587、smoke128887194734、Win原生128893437017均success；Mac128885487773 failure。MacCPU1516/1516/614.61s、Metal254/254/381.00s、原生4/6/530.16s；Win原生6/6、零失败/skip、1038.93s。Runtime42531177232十三job全success，Docs42531177195实际部署、Secret42531177130成功。终态已满足下一批push等待门，旧CI不包含6c/397。
+- Mac两个新快照均完整且probe回调/解析成功、导航一致、paused=true。video隐藏hold的before0.36973825→failed0.234，abs差0.13573825超过原0.10；html-video的playing_before_hide0.2174544167→paused0.102，低于原playing-0.05。两项显式暂停checks全真。这里只确定失败谓词和一次回退观察，不证明持续播放、迟到seek或生产暂停根因；保原容差、期限、原生输入、像素和20轮门。
+
+证据：本机验证根d1-hub-upload-cli-20261108-21/root/author-candidate4-20261108-38/、candidate4-installed-20261108-38/及root-delivery-20261108-39/ci-proposal-agent/。目标OS worker、真实不支持硬链接文件系统、外部站点和科学有效性仍待验；原八项/D1–D5及MuPRO待决不缩减。实际最终提交、push和新CI以本批closure与真实Git核对；旧WIP保留。
+
 ## 2026-11-08 UTC：4d Runtime 终态与上传 candidate3 独立源码验收边界
 
 [Runtime42531177232](https://github.com/sijintech/stk/actions/runs/42531177232)已22:57:35Z completed/success；实际查询13job均completed/success，含Linux3.11/3.12/3.14、Windows3.11/3.12、文献三版本、peer-macos、独立联邦、网页及协议组。Docs42531177195实际部署与Secret42531177130成功。整个[Desktop42531177137](https://github.com/sijintech/stk/actions/runs/42531177137)仍运行，Mac/Windows CPU测试、Linux构建，两个Linux包job成功；Windows原生尚未创建。结果绑定4d，不能验证本地6c修复或未集成CLI；等待门仍关闭。

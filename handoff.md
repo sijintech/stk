@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：Hub 上传 CLI 第四版已集成，4d 整轮 Desktop 已终态
+
+root 在 main 选择集成实际 Claude 独立 worktree 的六路径第四版为 `397a464d`：Hub 输入上传、只读传输查看、原导入意图查询与显式恢复/取消，复用共同 TransferManager；不自授 desktop、不批准导入。第三版的硬链接错误后覆盖回退已删除；不支持硬链接明确拒绝，保原侧记。root 完整源码九模块234通过/零skip，独立最小安装232通过/零skip、明确排除两个科学用例（完整源码已覆盖），发布12场景和读取11组独立复核通过。共同依赖含本地 `6c481e59`，作者225与root234差九项新回归，不混基线。Windows/macOS worker、真实不支持硬链接文件系统及外部站点仍未验。
+
+前4d的整个Desktop42531177137已于23:27:29Z completed/failure，六job全部终态；WinCPU/Linux/两包job及Win原生成功，MacCPU1516/1516、Metal254/254、原生4/6。两视频显式暂停通过，隐藏后媒体时间回退使原有检查失败；新快照已捕获，非缺回调/解析，根因尚未确定，不放宽容差或期限。Runtime十三job、Docs部署、Secret成功。这些CI不包含6c或397；终态已记，满足下一次push等待门。本批最终提交、实际push与新头CI核对 `root-delivery-20261108-39/closure.json` 和真实Git。
+
+root继续独占main、共享构建、公共后端与交付；Claude原会话保留六文件冻结结果，后续任务另限定路径。原八项/D1–D5、云端项目和Synthrix接线继续；MuPRO真实资产/扫描数值/提案持久形式仍不代选，HDF5完成仍需DAT，PET新专项后置，PR53/54无关旧头不合。提案2aea已合入，P1/P2未生效，既有四文档及正式资产WIP保留。
+
 ## 2026-11-08 UTC：4d Runtime 十三项全绿，Claude 第四版发布修正继续
 
 远端仍4d6426fb；Runtime42531177232已22:57:35Z success，13job逐项全部completed/success，Docs42531177195部署和Secret42531177130成功。整个Desktop42531177137仍运行，Mac/Windows处CPU测试、Linux构建中，两个Linux包job成功；Windows原生尚未创建，不能提前解push门。root本地6c481e59坏日志启动修复及13337fde状态提交未push，67项零skip通过及独立终审证据见 `transfer-startup-20261108-36/closure.json`。

@@ -29,8 +29,7 @@
   - 实现放在新的私有模块 `suan/runtime/hub_transfers.py`，`cli.py` 只加惰性的薄入口；
   - `--wait` 默认 600 s，worker 停止宽限为 45 s；
   - 不提供 `--wait-review`。
-- 现状：`workspaces --hub ... upload` 在检查文件之前即被拒绝（`suan/runtime/cli.py:520`）；直连 / SSH 的上传和
-  `jobs` 保持不变。
+- 方案形成时的历史状态：`workspaces --hub ... upload` 在检查文件之前即被拒绝（旧 `suan/runtime/cli.py:520`）。第四版实现已接入下述上传入口；直连 / SSH 的上传和 `jobs` 保持不变。
 
 ## 已核实的现有行为
 
@@ -64,7 +63,8 @@
 ```text
 suan workspaces --hub H --node N upload WORKSPACE_ID SOURCE [--path REMOTE] --key KEY [--wait SECONDS]
 suan workspaces --hub-state-dir DIR transfers list
-suan workspaces --hub-state-dir DIR transfers show TRANSFER_ID [--check --hub H --node N]
+suan workspaces --hub-state-dir DIR transfers show TRANSFER_ID
+suan workspaces --hub H --node N transfers show TRANSFER_ID --check
 suan workspaces --hub H --node N transfers resume TRANSFER_ID [--wait SECONDS]
 suan workspaces --hub H --node N transfers cancel TRANSFER_ID
 ```

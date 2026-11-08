@@ -1,5 +1,11 @@
 # Codex / Claude worktree 协作约定
 
+## 2026-11-08 当前补充：Claude18第四版已由root集成，19准备项目服务设计
+
+root选择集成冻结六路径第四版为397a464d；作者225、root完整源码234和最小安装232（另2科学用例明确排除、完整源码覆盖）均零skip，独立发布12场景及读取11组通过。root共同依赖54d含6c，作者531仍旧；目标OS worker和外部站点待验。已授权实际Claude仅把原六文件在claude/hub-upload-cli-18扫描后提交留档，不push或改候选，原会话/worktree保留；root仍独占main、共享构建、公共契约和最终验收推送。
+
+下一张CL-D1-CLOUD-PROJECTS-DESIGN-19为仅设计的准备任务：唯一新文件docs/design/cloud-project-service.md，比较同SQLite语义加应用服务与仓储适配的落点，列身份、修订、永久回执、授权边界和故障验收。R2/R3仍不代选，不开放Bridge到网络、不实施新API/数据库/账号权限。须先确认18提交及peer干净，再从397建立独立claude/cloud-projects-design-19分支并明确派发；尚未把设计记为实现。root后续继续Mac隐藏暂停证据和原八项/D1–D5，P1/P2未生效，旧任务按时间保留。
+
 ## 2026-11-08 当前补充：root原生候选交付，Claude18继续独立实现
 
 root在main提交247cca3b及70a301f4，分别修正窄区域验收菜单和AX同祖先链的真实Slider证明；本机构建/CPU通过，新Apple及原生OS验收待新头CI。前612e整个Desktop已19:32:03Z failure终态（WindowsCPU1447/1447、原生6/6成功，Mac原生4/6），已记录等待门；root仍独占共享构建、四状态文档、正式认知、集成及push。
