@@ -29,6 +29,7 @@ import os
 from pathlib import Path
 import threading
 from contextvars import copy_context
+from functools import wraps
 import time
 import uuid
 
@@ -65,6 +66,21 @@ class _Stopped(Exception):
     """Internal: the transfer was paused (bridge shutdown) or cancelled."""
 
 
+def _writer(method):
+    """Keep admitted journal mutations inside the namespace owner's lifetime."""
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        with self._activity:
+            if self.stopping.is_set():
+                raise BridgeError("shutting_down", "Transfers are shutting down")
+            self._writers += 1
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._writer_finished()
+    return call
+
+
 class TransferManager:
     def __init__(self, state_dir, emit, backend_for):
         self.root = Path(state_dir) / "transfers"
@@ -76,6 +92,11 @@ class TransferManager:
         self.cancelled = set()
         self.notified = {}
         self.stopping = threading.Event()
+        # Separate from self.lock: source preparation may hold that lock for a long time.
+        self._activity = threading.Condition()
+        self._writers = 0
+        self._release_callback = None
+        self._release_pending = False
         self.slots = threading.BoundedSemaphore(MAX_CONCURRENT)
         self.releasers = {}
         self._recover()
@@ -170,6 +191,7 @@ class TransferManager:
         self.save(record)
         return record
 
+    @_writer
     def start_upload(self, connection, workspace_id, source, remote=None, node=None, idempotency_key=None):
         """A new upload, or with ``idempotency_key`` the transfer an earlier request with that key
         started (whatever its state now; a different request under the key is ``conflict``)."""
@@ -243,6 +265,7 @@ class TransferManager:
         return {"local": str(path), "remote": remote, "size": info.st_size, "mtime_ns": info.st_mtime_ns,
                 "sha256": None, "done": False}
 
+    @_writer
     def start_download(self, connection, owner, owner_id, path, dest, node=None, idempotency_key=None):
         """A new download, or with ``idempotency_key`` the transfer an earlier request with that key
         started (a different request under the key is ``conflict``)."""
@@ -270,6 +293,7 @@ class TransferManager:
         self._launch(record["id"])
         return self.public(record)
 
+    @_writer
     def resume(self, transfer_id):
         deadline = time.monotonic() + 5.0
         while True:
@@ -305,6 +329,7 @@ class TransferManager:
                 resumed.append(record["id"])
         return resumed
 
+    @_writer
     def cancel(self, transfer_id):
         record = self.load(transfer_id)
         with self.lock:
@@ -346,20 +371,80 @@ class TransferManager:
 
     def stop(self, timeout=5.0):
         """Pause every running transfer at its next chunk (bridge shutdown); journals stay resumable."""
-        self.stopping.set()
+        with self._activity:
+            self.stopping.set()
+            threads = tuple(self.threads.values())
         deadline = time.monotonic() + timeout
-        for thread in list(self.threads.values()):
-            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        for thread in threads:
+            if thread is not threading.current_thread() and thread.ident is not None:
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+
+    def _writer_finished(self):
+        with self._activity:
+            self._writers -= 1
+            self._activity.notify_all()
+
+    def release_after_stop(self, release):
+        """Release namespace ownership only after admitted calls and worker threads exit.
+
+        stop() keeps its bounded foreground wait. A slow transfer retains ownership in a
+        reaper, including the tiny interval between its last mutation and actual thread exit.
+        """
+        with self._activity:
+            if not self.stopping.is_set():
+                raise RuntimeError("Stop transfers before releasing their namespace")
+            if self._release_pending:
+                return
+            self._release_pending = True
+            self._release_callback = release
+            idle = self._writers == 0 and all(not t.is_alive() for t in self.threads.values())
+        if idle:
+            release()
+            self._release_callback = None
+            return
+
+        def finish():
+            with self._activity:
+                self._activity.wait_for(lambda: self._writers == 0)
+                threads = tuple(self.threads.values())
+            for thread in threads:
+                thread.join()
+            release()
+            self._release_callback = None
+
+        # Retain the callback above even if starting the reaper fails: active writers must
+        # never lose their lease merely because a cleanup thread could not be created.
+        threading.Thread(target=finish, daemon=True, name="stk-transfers-close").start()
 
     # -- running --------------------------------------------------------------------------------
 
     def _launch(self, transfer_id):
         context = copy_context()  # retain this workflow's frozen-target guard in the transfer worker
-        thread = threading.Thread(target=context.run, args=(self._run, transfer_id), daemon=True,
+
+        def run():
+            try:
+                context.run(self._run, transfer_id)
+            finally:
+                self._writer_finished()
+
+        thread = threading.Thread(target=run, daemon=True,
                                   name=f"stk-transfer-{transfer_id[:8]}")
         with self.lock:
-            self.threads[transfer_id] = thread
-        thread.start()
+            with self._activity:
+                if self.stopping.is_set():
+                    raise BridgeError("shutting_down", "Transfers are shutting down")
+                self._writers += 1
+                self.threads[transfer_id] = thread
+                try:
+                    thread.start()
+                except BaseException as exc:
+                    # A signal may interrupt start() after native thread creation. Only a
+                    # normal, unstarted failure proves no worker needs its ownership kept.
+                    if isinstance(exc, Exception) and thread.ident is None:
+                        self.threads.pop(transfer_id, None)
+                        self._writers -= 1
+                        self._activity.notify_all()
+                    raise
 
     def _notify(self, record, force=False):
         stamp = time.monotonic()

@@ -820,7 +820,7 @@ class Bridge:
         self.closed.set()
         self.projects.shutdown()
         self.connections.close()
-        self.state_lock.release()
+        self.transfers.release_after_stop(self.state_lock.release)
 
     # -- helpers ------------------------------------------------------------------------------
 
