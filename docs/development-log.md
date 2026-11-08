@@ -1,5 +1,12 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：试点文档集成与读取器审查
+
+main `f6a75f84` 集成9份试点/分工/D1文档；检查73个链接/锚点、暂存gitleaks56.67KB零发现，仅提交四状态文档新增前缀，保留原WIP。
+Claude在独立树提交HDF5初稿 `760b7ae1`；root独立实测确认尾换行selector及同大小改写后恢复mtime均被错误接受，交回修正，未采用初稿。
+原远端Desktop整轮completed/failure，Mac文献9例/媒体2例、Windows HTML视频布局拖动1例未过；Linux三job/Windows CPU成功，未改门槛或借局部绿灯覆盖。
+main九项AOCI增量维护并顺序Verify/Check/Guide通过；本节终态记录是后续新增字节，按最终稳定状态收口。
+
 ## 2026-11-07：MuPRO/HDF5 试点与 S2c 方向获准
 
 所有者选择 MuPRO/MuFerro 为首个执行器/专业软件试点，原生格式由各插件定义、MuPRO 使用 HDF5，并同意开发 S2c prepare/run 权限扩展。

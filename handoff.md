@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：试点计划已提交，前置 Desktop CI 已结束
+
+试点与审阅后的 D1 清单已提交 main `f6a75f846d2643e993af192cfb867ca19a9d3fb2`（9文件）；73个文档链接/锚点和暂存56.67KB gitleaks零发现，原四文档WIP保留。
+Claude 独立树的 HDF5 初稿为 `760b7ae1`；root 已复现尾换行 selector、改写后恢复 mtime 两个漏检并要求修正，未合入 main。
+原远端6f4de650的 Desktop 42442318655 于04:24:48Z completed/failure：四job成功，Mac文献9例/原生媒体2例失败，Windows原生6例中HTML视频布局拖动1例失败。
+前整轮等待门已满足，失败仍须修复；不称CI全绿。root继续HDF5审查、插件接入、S2c及旧计划，真实MuPRO未就绪。
+本轮AOCI九项已应用且Verify/Check/Guide对当时工作树全部退出0；本节终态记录纳入最终增量收口，证据见运行验收。
+
 ## 2026-11-07：MuPRO 执行器试点与权限方向更新（当前）
 
 所有者已选择先试点执行器和专业软件，第一项为 MuPRO/MuFerro；数据格式由插件自行定义，MuPRO 使用 HDF5；

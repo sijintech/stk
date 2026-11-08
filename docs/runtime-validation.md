@@ -1,5 +1,23 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：试点计划交付与前置 CI 终态
+
+文档提交 `f6a75f846d2643e993af192cfb867ca19a9d3fb2`（9文件），73个相对链接/锚点、围栏和暂存空白检查通过；gitleaks8.30.1扫描56.67KB零发现。
+四状态文档只暂存本轮前缀，原WIP正文精确保留；AOCI配置未由本轮修改，认知资产仍留工作树，不把工作树对齐称为提交索引已发布。
+产品源码仍为37d26464；旧MuPRO/工作流/传输回归74pass/1真实MuFerro资产skip，预检退出1，细项和限制见下节。
+
+Claude HDF5候选 `760b7ae1` 尚未集成。root对其源码SHA `7609f159d31598b1fdc5f8a6e0382dd3d7613faa9208381d5fe11f0a22958b18` 独立构造真实h5py文件，
+复现尾换行selector被接受、读取期间原位改写同大小数据并恢复mtime后仍交付两项问题；要求fullmatch与同stat API前后ctime检查及反例。
+`hdf5-root-review-before.json` 保存结果，不借Claude初稿81项通过覆盖这些未测边界；修正后需重新验收。
+
+前置 [Desktop 42442318655](https://github.com/sijintech/stk/actions/runs/42442318655) 在04:24:48Z completed/failure，绑定远端6f4de650：
+Linux三job/Windows CPU成功；Mac CPU1488中9个文献控制器失败、原生6中视频2例失败；Windows原生6中HTML视频1例失败，诊断为真实分隔条拖动未同时改变报告/Viewer并释放捕获。
+前整轮等待门现已满足，失败保留；Runtime/Docs/Secret成功。Mac帧artifact两次下载分别TLS/EOF失败，未采用不完整zip作证据；API日志已取得。
+
+本批九项AOCI应用后1197条/remaining0，Verify/Check/Guide均退出0、治理aligned、Check ok、Guide complete/none（`aoci-pilot/`）。
+本节终态增量的最终治理与提交/推送状态以 `pilot-doc-delivery.json` 及后续closure为准，不重新传全索引或把旧receipt冒充当前认知。
+上述证据均在 `~/.local/state/stk-validation/worktree-coordination-20261107-01/`。未执行收费模型、真实MuPRO、目标OS本地复验或UI点击验收。
+
 ## 2026-11-07：独立 worktree 已建立与试点决定（当前）
 
 协作规则提交 `37d26464`（main 本地，7 文件），仅新增本次协作记录，四份状态文档的原有 WIP 未连带提交。
