@@ -763,14 +763,18 @@ def clean_up(owned, env, keep, clients):
     for label, client in clients:
         if client is not None:
             try:
-                cancel_open(client)  # best effort: stopping the Runtime below ends its tasks anyway
+                cancel_open(client)  # best effort; the owned-process sweeps below handle leftovers
             except Exception:  # noqa: BLE001
                 pass
     step("spawned processes", owned.stop_spawned)
-    for label in ("A", "B"):
+
+    def stop_one_runtime(label):
         state = owned.work / label / "runtime"
         if (state / "config.json").exists():
-            step(f"{label} runtime", lambda: stop_runtime(owned, state, env, label))
+            stop_runtime(owned, state, env, label)
+
+    for label in ("A", "B"):
+        step(f"{label} runtime", lambda label=label: stop_one_runtime(label))
     resources["leftover_pids_after_stop"] = step("leftover scan", lambda: owned.leftovers(terminate=True))
     resources["leftover_pids_after_cleanup"] = step("leftover scan", lambda: owned.leftovers(terminate=False))
     resources["removed_work_dir"] = False if keep else bool(step("remove private directory",
@@ -819,7 +823,7 @@ def run(evidence, work_root=None, keep=False, mode="installed", deadline_seconds
         a, b = exercise(side_a), exercise(side_b)
         rows = compare(a, b)
         result = {"rows": rows, "assertions": assertions(a, b, rows)}
-        scenario_seconds = round(time.monotonic() - started, 1)
+        scenario_seconds = time.monotonic() - started
     except Exception as exc:  # noqa: BLE001 - evidence must still be written and owned processes stopped
         error = exported_error(exc)
     finally:

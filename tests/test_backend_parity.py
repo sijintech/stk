@@ -16,6 +16,7 @@ import platform
 import subprocess
 import sys
 import time
+import types
 
 import pytest
 
@@ -458,3 +459,82 @@ def test_unwritable_evidence_dir_is_a_controlled_failure(tmp_path, monkeypatch, 
     assert code == 1 and "Traceback" not in printed.err and "manufactured-file" not in printed.out + printed.err
     assert json.loads(printed.out)["error"]["kind"] == "error"
     assert not any(tmp_path.glob("stk-parity-*"))  # its private directory was still removed
+
+
+def test_subsecond_budget_overrun_cannot_round_into_success(tmp_path, monkeypatch):
+    module = harness()
+    clock, calls = [0.0], [0]
+    monkeypatch.setattr(module, "time", types.SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(module, "module_origins", lambda *args: {"consistent": True})
+    monkeypatch.setattr(module, "manifest", lambda *args: {})
+
+    class Client:
+        def tasks(self):
+            return []
+
+    class Backend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    backends = types.ModuleType("suan.desktop_bridge.backends")
+    backends.RuntimeBackend = backends.HubBackend = Backend
+    monkeypatch.setitem(sys.modules, "suan.desktop_bridge.backends", backends)
+    monkeypatch.setattr(module, "start_runtime", lambda owned, *args: (Client(), 1, owned.work))
+    monkeypatch.setattr(module, "start_hub", lambda *args: (None, "node", 2))
+    monkeypatch.setattr(module, "wait_node_live", lambda *args: None)
+    monkeypatch.setattr(module.Owned, "leftovers", lambda *args, **kwargs: [])
+
+    def completed_scenario(*args):
+        calls[0] += 1
+        if calls[0] == 2:
+            clock[0] = 1.04
+        return passing_facts(module)
+
+    monkeypatch.setattr(module, "exercise", completed_scenario)
+    evidence = tmp_path / "evidence"
+    ok, error, _ = module.run(evidence, work_root=tmp_path, mode="source", deadline_seconds=1)
+    checks = json.loads((evidence / "assertions.json").read_text())
+    assert error is None and checks["cleanup_ok"]
+    assert {item["status"] for item in checks["assertions"]} == {"pass"}
+    assert not ok and not checks["within_deadline"]
+
+
+def test_config_probe_failure_does_not_skip_cleanup_or_evidence(tmp_path, monkeypatch):
+    module = harness()
+    stopped, scans, blocked = [], [], [None]
+    original_exists = Path.exists
+    monkeypatch.setattr(module, "module_origins", lambda *args: {"consistent": True})
+    monkeypatch.setattr(module, "manifest", lambda *args: {})
+
+    def setup_then_stop(owned, *args):
+        for label in ("A", "B"):
+            state = owned.work / label / "runtime"
+            state.mkdir(parents=True)
+            (state / "config.json").write_text("{}")
+        blocked[0] = owned.work / "A" / "runtime" / "config.json"
+        raise module.Unknown("no service started in this test")
+
+    def inaccessible(path):
+        if path == blocked[0]:
+            raise PermissionError("manufactured-private-path")
+        return original_exists(path)
+
+    def scan(owned, *, terminate):
+        scans.append(terminate)
+        return []
+
+    monkeypatch.setattr(module, "start_runtime", setup_then_stop)
+    monkeypatch.setattr(Path, "exists", inaccessible)
+    monkeypatch.setattr(module, "stop_runtime", lambda owned, state, env, label: stopped.append(label))
+    monkeypatch.setattr(module.Owned, "leftovers", scan)
+    evidence = tmp_path / "evidence"
+    ok, error, _ = module.run(evidence, work_root=tmp_path, mode="source")
+    assert not ok and error["kind"] == "unknown"
+    assert stopped == ["B"] and scans == [True, False]
+    assert set(path.name for path in evidence.iterdir()) == set(EVIDENCE_FILES)
+    resources = json.loads((evidence / "resources.json").read_text())
+    assert resources["removed_work_dir"] and resources["leftover_pids_after_cleanup"] == []
+    assert {"label": "A runtime", "error": "PermissionError"} in resources["cleanup"]
+    assert not json.loads((evidence / "assertions.json").read_text())["cleanup_ok"]
+    assert "manufactured-private-path" not in evidence_text(evidence)
+    assert not any(tmp_path.glob("stk-parity-*"))
