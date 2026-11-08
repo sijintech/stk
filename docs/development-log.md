@@ -1,5 +1,14 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：窄区域tab与AX同链证明候选
+
+247cca3b只改原生报告验收的tab导航。612e HTML-video实际将a3从401缩到286，而生产header在300 UI像素以下不建独立tabs、把tab放在区域菜单尾部；旧前置检查因此误拒。现在独立tabs存在时仍要求可见/启用，仅不存在时经既有菜单和End/Up/Enter正常事件选择。外部真实CPU AppFixture固定1024×656、en/scale1复现宽度切换，往返2点击/5按键/0滚轮，Viewer/payload/相机及精确未保存Python稿保留；native-window重建成功。CPU未还原全部原生媒体高度/OS呈现。
+
+70a301f4只改四个AX测试/协议/helper文件。实际Mac数值链为Window0→Group6→Group7→ScrollArea8→WebArea9→Group10→Group11，旧规则在Slider查询前拒绝WA位于inner祖先。新候选只接受可比较祖先关系；完整WA中所有时间/几何/启用/同窗匹配Slider仍须恰一，再证明真实选中Slider位于WA与inner之下，父链进入原1632B/v3数值回执。Above成功缺Slider证明、侧支或多个候选仍拒，Below旧合法形状兼容；accepted原函数、2s/8s/Provider4、真实WK/会话代次、DOM、OS像素和20轮门均保持。原关系谓词恢复后受控红例失败，三份故意破坏的新候选分别拒绝；不是三项历史缺陷声明。root构建和一个CPU CTest内五组通过/4.25s，实际暂存17066B扫描0；新helper尚未Apple编译，真实Slider是否在inner下仍未知。
+
+612e整个Desktop42509570653已19:32:03Z failure终态，WindowsCPU1447/1447、原生6/6成功，Mac原生4/6失败；旧Windows同名智能体测试本轮过不归功于尚未包含的13035ccc。Runtime12job成功/3.14失败，Docs部署和Secret成功。已记终态后推进本批push，最终见root-delivery-20261108-28/closure.json。Claude18独立六路径仍在实现，未计交付；原路线与MuPRO缺口不变，P1/P2未启用，旧WIP保留。
+
+
 ## 2026-11-08 UTC：测试观察修正与上传实施分工
 
 299e756b让local-model测试等同一次观察的failed、exited详情和autostart=false，原15s预算不变；公开假服务使用确定性测试凭据。0.3s监督发布延迟下旧KeyError、新通过，模块17项零skip/10.23s；无产品模型配置变化。

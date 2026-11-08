@@ -1,5 +1,16 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：原生报告两项候选已提交，612e Desktop已终态
+
+root在main提交247cca3b（窄区域用既有区域菜单切tab）及70a301f4（同祖先链WebArea与真实选中Slider的交集证明）。前者真实CPU布局1024×656、en/scale1、a3宽401→286，经正常分隔条和菜单事件往返2点击/5按键/0滚轮，Viewer、相机和精确未保存Python稿保留；后者root重建成功，CPU一个CTest内五组通过/4.25s。两项均仅测试代码，新Apple helper尚未编译或原生验收；不能宣布Mac两视频已修复。
+
+612e整个Desktop42509570653已于19:32:03Z completed/failure，六job均终态；WindowsCPU1447/1447、914.14s，原生6/6、1324.32s，三Linuxjob成功；MacCPU1503/1503、Metal254/254、原生4/6，两视频仍失败。Runtime42509570684整轮failure，3.14旧running观察由本地fdbefeac修正候选覆盖；Docs部署/Secret成功。前整个Desktop终态和结果已记运行验收，推送等待门满足；本批最终提交、push和新头CI核对外部root-delivery-20261108-28/closure.json及真实Git。
+
+实际Claude继续独立stk-claude/claude/hub-upload-cli-18的六路径上传CLI实现，未交付已审定候选或安装态验证，不同步或覆盖其WIP。root独占main、共享构建、公共后端/契约、审阅集成及状态文档；已要求补准确测试选择和真实活worker持锁证据。原八项、D1剩余门/云端项目、文献实际点击、Synthrix接线与D2-D5继续。MuPRO真实主机/SDK/许可/小算例、扫描数值、分析修改提案形式仍待输入；HDF5完成仍需DAT，PET新专项后置。提案2aea已远端，P1/P2未生效；PR53/54仍为无关旧头。
+
+索引按现行合同收尾；原四文档和正式认知WIP保留，必要续接证据见本批closure。
+
+
 ## 2026-11-08 UTC：三项测试修正已提交，Claude18开始实现上传CLI
 
 远端main为612e3551，已含提案审阅2aea4a95；P1/P2未生效、AGENTS未改。root本地新增299e756b（完整模型失败报告等待）、13035ccc（智能体夹具JSONL写入串行化/完整行读取）、a0f77fa3（上传CLI实施方案）及fdbefeac（分析结束后重读状态）。本批最终状态提交、推送与CI见外部root-delivery-20261108-25/closure.json，先核真实Git；既有四文档及索引WIP保留。

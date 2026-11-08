@@ -1,5 +1,19 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：原生报告候选与612e整轮终态
+
+- 247cca3b：真实CPU AppFixture固定1024×656、en/scale1，原默认a3宽401，经实际divider拖到286，独立tabs缺失而区域菜单可见启用。普通菜单事件到Python再返回Reports：2鼠标点击、5按键、0滚轮；Viewer/payload/相机及精确未保存Python文字保持。原native-window目标构建0，暂存2977B/SHA8a276058…扫描0。没有新产品UI变更；此CPU探针未覆盖CI完整高度/真实媒体/OS呈现，不能充作原生20轮通过。
+- 70a301f4：完整WA唯一候选后再核实际Slider同时处于WA及inner祖先链；独立v3解码拒Above无Slider证明、伪父链/深度、额外Slider/无关行/侧支，保Below旧合法回执。外部-Werror五组4.257s；恢复旧selector谓词红例失败，另三份故意破坏候选为红，不能当三项历史根因。root构建stk-reports-native-ax-tests为0，CTest reports_native_ax_cpu 1/1（内含五组）、零skip、4.25s/总4.32s。冻结差分17066B/SHAa45a6afb…与四源SHA一致，实际暂存gitleaks0。accepted原文一致、1632B/v3/33行和原2s/8s/Provider4、真实WK/会话/导航/布局、DOM/OS像素及20轮门未改；新Apple helper未编译或运行。
+
+612e实际video主回执1632B、463.815ms、helper已回收/exit1：Window0→Group6→Group7→ScrollArea8→WA9→Group10→Group11，4个匹配Group为单链、唯一WA；拒绝发生在查询Slider前，故实际Slider是否属于inner仍未知。HTML-video已成功三次AX seek（557.351/589.065/499.196ms），随后宽286时缺独立tab控件。公开artifact只按range提取并核各条ZIP CRC/SHA，未核整个343MB archive摘要或下载PNG；不作整包完整性或新增截图声明。两失败均0/20，cleanup成功。
+
+前整个[Desktop42509570653](https://github.com/sijintech/stk/actions/runs/42509570653)已于2026-11-08T19:32:03Z completed/failure；run与jobs API核同612e/attempt1、total_count=6且六job均终态。WindowsCPU/job128819473697：1447个唯一测试全Passed、零skip/未跑、914.14s；原同名NativeAgentRuns本轮0.66s过，但612e无13035ccc，不能归功于新夹具。Windows原生/job128831493773：6/6、零skip、1324.32s（spike105.17、MD130.03、HTML126.74、PDF173.81、video381.35、html-video407.18s）。三Linuxjob成功。Mac/job128819473919 CPU1503/1503/559.67s、Metal254/254/337.61s、原生4/6/492.30s，仅原生step18失败：两视频仍未通过。由整轮终态满足push等待门，不用Windows局部绿代新头平台验收。
+
+同612e的[Runtime42509570684](https://github.com/sijintech/stk/actions/runs/42509570684)已18:39:50Z整轮failure，12job成功；3.14旧running观察失败6019通过/153skip/4未选/814.57s，本地fdbefeac未包含于该头。Docs42509570687完整部署及Secret42509570637成功。299e756b/13035ccc/fdbefeac与本批两候选均待新头CI。
+
+证据：desktop-ci-42509570653下review/、root-tab-menu/、ax-selector-proposal/candidate-1/及final-status/review.json（SHA c34409d4…）；root独立复核及扫描在root-delivery-20261108-28/。Claude18六路径仍为独立树WIP，未计安装态/功能验收。提案2aea已在远端但P1/P2未启用；最终提交/push/新头CI和索引收尾见本批closure，原WIP保留。
+
+
 ## 2026-11-08 UTC：三项测试修正的受控验证与612e CI
 
 | 本地提交 | 实际检查 | 覆盖限制 |

@@ -1,5 +1,15 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：推进Mac原生验收修正及上传CLI
+
+1. root提交247cca3b和70a301f4：验收使用现有窄区域tab菜单，并在完整WebArea候选唯一后证明真实选中Slider属于WebArea与最内层Group。正常事件CPU菜单往返2点击/5按键/0滚轮，状态保留；目标构建和AX CPU回归通过，下一头仍须Apple编译及真实OS/20轮，未放宽预算或像素门。
+2. 前612e整个Desktop已19:32:03Z failure终态：WindowsCPU1447/1447、原生6/6与三Linuxjob成功；MacCPU/Metal成功、原生两视频失败。Runtime3.14观察失败已有fdbefeac本地候选，连同299e756b/13035ccc待新头CI；Docs/Secret成功。运行验收已记整轮终态，满足push等待门。
+3. 实际Claude18在独立stk-claude/claude/hub-upload-cli-18实施六路径Hub上传CLI，root继续审阅、公共后端/契约、原生和共享构建。实现仍未集成；准确选择测试、活worker租约及安装来源是交付门，不自授desktop、不扩R2/R3。
+4. 原八项、D1其余合同/故障及云端项目、文献实际点击、Synthrix正常装配和D2-D5保持。MuPRO/MuFerro、插件原生格式/HDF5及有限S2c按已定方向；真实执行资产、扫描值和提案持久形式不代选，HDF5仍需DAT，PET新专项后置。PR53/54无新相关差异，提案P1/P2未激活。
+
+本批最终Git/CI和必要恢复事实见root-delivery-20261108-28/closure.json；保留既有WIP。
+
+
 ## 2026-11-08 UTC：修复测试竞态，启动Hub上传CLI实施
 
 1. root已提交299e756b、13035ccc、fdbefeac，分别处理模型失败详情、智能体夹具日志及分析完成状态的观察竞态；17/13/36项本机回归全过，生产逻辑及预算保持。新头平台验证尚待CI。

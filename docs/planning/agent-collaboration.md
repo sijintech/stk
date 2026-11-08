@@ -1,5 +1,12 @@
 # Codex / Claude worktree 协作约定
 
+## 2026-11-08 当前补充：root原生候选交付，Claude18继续独立实现
+
+root在main提交247cca3b及70a301f4，分别修正窄区域验收菜单和AX同祖先链的真实Slider证明；本机构建/CPU通过，新Apple及原生OS验收待新头CI。前612e整个Desktop已19:32:03Z failure终态（WindowsCPU1447/1447、原生6/6成功，Mac原生4/6），已记录等待门；root仍独占共享构建、四状态文档、正式认知、集成及push。
+
+实际Claude在同一独立stk-claude/claude/hub-upload-cli-18从a0实现CL-D1-HUB-UPLOAD-CLI-18六路径；仍未交付root审定的固定候选/安装来源，未授权stage/commit/push。root已指出-k window_one选择零测试不构成红例，要求精确测试和真实blocked worker存活至kill/reap的租约证据；后续交付据实审查。两树无源码写入重叠，不重启CLI会话或覆盖其WIP；旧support引用保留。提案2aea已远端，P1/P2未生效；原路线/待决不代选，最终状态见root-delivery-20261108-28/closure.json。
+
+
 ## 2026-11-08 当前补充：17设计已审定，18在新分支实施
 
 实际Claude17仅设计提交443c9fa76dd64de064e7f3def77f70f9b5d063e4，保留在claude/support。root校正sidecar禁止顶层id/state、精确backend签名、两段源变更窗口及先GC后新意图/不清孤立意图，以a0f77fa34e2505fb0de4090fd714b6b6aa20aa2c纳入实施方案；非已实现功能。提案2aea4a95已随612e进入远端main，P1/P2未生效。
