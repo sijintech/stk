@@ -1,5 +1,11 @@
 # Codex / Claude worktree 协作约定
 
+## 2026-11-08 当前补充：root交付生命周期与诊断，Claude修订17设计
+
+root已在main本地提交2aea4a95（修订并合入1a5的AOCI使用提案）、7bfae902（Bridge传输关闭锁）和0e0a1246（AX数值拓扑/独立进度诊断）；当前未push；bcec整个Desktop已18:16:12Z failure终态，Windows原生6/6成功，等待门满足。提案P1/P2未启用，现行AGENTS与工具合同保持；后续治理记录仅留必要状态与外部证据。
+
+实际Claude仍在独立stk-claude/claude/support、8ae2088d基线修订17唯一文档docs/design/hub-cli-transfers.md。候选1因生命周期、完整源SHA/变更门、取消依赖源、基线漂移和unknown/审阅观察问题要求修改。root已选择命令私有worker、保既有review策略、允许传输专属原import观察、不加wait-review；候选2尚未审定，不stage/commit、不实施、不改root树。Bridge修复由root负责，不替其设计实现。root独占main/共享构建/全局状态/认知/集成推送；本批证据见外部root-delivery-20261108-24/closure.json。下方旧状态按时间保留。
+
 ## 2026-11-08 当前补充：16已集成，17先做上传恢复设计
 
 Claude16实际8ae2088d（父1a5dc3ad）仅三路径选择集成为main2fcc7251；作者100项、root集成42及最小安装42均零skip通过。独立旧节点等待P2已修，原key/action及有限快照语义保持；Hub上传本片仍不支持。父提交是另一会话按所有者请求写的独立AOCI使用提案，保留在Claude分支，未集成或改变现行规则。

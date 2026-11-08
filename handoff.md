@@ -1,5 +1,15 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：提案审阅、桥关闭修正与原生诊断已本地提交
+
+main已含提案2aea4a95、Bridge修正7bfae902及AX诊断0e0a1246，当前尚未push，远端仍bcec982b。AOCI提案经root修订合入，P1/P2未生效、AGENTS未改；后续治理记录精简，保留恢复事实。旧WIP仍保留，认知收尾与本批证据见外部root-delivery-20261108-24/closure.json。
+
+Bridge目录锁现在覆盖已接收的传输写调用和真实worker退出，后台等待不延长前台stop预算；旧源码新回归8失败/1通过，新源码七模块137通过、零skip、46.43s。新测试使用真实StateDirLock和Bridge.shutdown，其余服务/传输后台受控；不证明所有RPC均已静止。AX新增数值父链和独立非阻塞进度，缺主回复时API值为未知；root审阅抓到诊断终帧丢失耦合并修复，完整v3仍须自身证明。两目标构建、CPU五组4.24s通过，尚无Apple编译或新头OS验收。
+
+bcec的Runtime42504540440已failure：12个job成功，Python3.14单个local-model测试在派生failed先于error时KeyError，6010通过/153skip；待修。Desktop42504540481已于18:16:12Z整轮failure终态：MacCPU1503/1503及Metal254/254通过，原生4/6，两视频分别AX证明失败和Tab不可全见；WindowsCPU1446/1447，唯一NativeAgentRuns测试解析done前缀为JSON失败，待核。Windows原生6/6成功、1341.53s，推送等待门已满足；Docs部署与Secret成功。
+
+root继续main/公共后端/原生/集成/共享构建/交付；实际Claude独立stk-claude/claude/support只修订17上传设计候选2，未授权实施或提交。原八项、D1-D5、原生文献实际点击、Synthrix正常接线继续；MuPRO真实主机/许可/小算例、扫描值和提案持久形式仍待输入，HDF5仍需DAT，PET新专项后置。
+
 ## 2026-11-08 UTC：工作区 CLI 已集成，691 Desktop 已终态
 
 当前代码 main `2fcc7251c9a5b70a5918e87792e16b8bfe0046b1`，集成实际 Claude16 `8ae2088d56a7ac1ab5ca25e3e99e42ad3317209e` 的三个文件；其父1a5dc3ad是独立AOCI使用提案，未合入main或改变现行规则。Hub工作区create/list/files/action已接既有后端，原key/action先打印，未知只查原身份；快照明确有界，上传仍早拒绝。独立审阅发现的旧节点读取零等待P2已修复：只有写操作临时wait=0，finally恢复；读取沿用有界轮询。

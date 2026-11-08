@@ -1,5 +1,15 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：关闭传输竞态，继续CI修复和上传设计
+
+1. main本地2aea4a95合入root修订后的AOCI评估提案；P1/P2未启用，现行规则保持。
+2. 7bfae902将Bridge状态目录锁保留至传输写调用及worker退出；旧红8/1，新七模块137项零skip通过。0e0a1246补AX父链与独立进度诊断，关闭合法丢帧误拒P2；两目标构建和CPU通过，Apple/OS待验，不放宽期限、唯一slider、像素或20轮。
+3. bcec的Runtime整轮failure（3.14一个local-model错误详情时序测试）；Desktop已18:16:12Z整轮failure，MacCPU/Metal成功而原生两视频失败；WindowsCPU一个NativeAgentRuns夹具解析失败，Windows原生6/6成功。root先定位这两项CI问题及视频证据，Desktop等待门已满足，记录终态后push；不继承旧头绿灯。
+4. 实际Claude在独立worktree继续17设计候选2，root已指定私有worker生命周期、完整源内容身份、取消不依赖源存在及unknown/审阅观察边界。仍仅文档，不实施Hub上传。root继续D1合同/故障、云端项目和D2-D5、原八项；原生文献与Synthrix正常入口保持待交付。
+5. MuPRO/MuFerro、插件自主格式/HDF5和有限S2c按已定方向；真实执行资产、扫描值、分析修改提案形式不代选。HDF5完成仍需DAT，PET新专项后置。
+
+具体证据与认知收尾见外部root-delivery-20261108-24/closure.json；原四文档及索引WIP保留。
+
 ## 2026-11-08 UTC：交付工作区入口，继续可恢复上传设计
 
 1. 已集成Claude16为main2fcc7251：Hub工作区create/list/files与仅创建action观察；旧节点读回退保持有界轮询，写操作只确认收下。作者100项、root集成42项及独立最小安装42项均零skip通过；未接Hub上传、未扩授权或R2/R3。

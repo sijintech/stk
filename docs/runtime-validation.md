@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：桥关闭生命周期和AX诊断的有限验证
+
+本地源码7bfae902（Bridge）和0e0a1246（AX诊断），另有提案2aea4a95；均尚未push。Bridge新9例在HEAD旧源码8失败/1通过、0.78s，在新源码连同六既有模块共137通过、零skip、46.43s。真实OS目录锁、真实TransferManager日志及Bridge.shutdown受控重现运行中/准备中重叠；其他服务stub，上传后台用事件控制，不代全Bridge RPC静止或真实远端传输。线程创建失败与已创建后异常均覆盖，释放后原worker已退出。暂存15351B、SHAa868ceb2…，gitleaks0。
+
+AX候选2完整75575B、SHA0aed5213…，暂存扫描0。独立五例证明完整1632B v3仅丢终帧/零进度原误拒、新保留response并标incomplete；两种v2仍拒。accepted逐字不变；坏帧/错代次、2s挂起、取消、stderr/flood、回收门保留。外部-Werror五组4.267s通过；root两目标构建成功，CTest reports_native_ax_cpu 4.24s/总4.32s通过。尚无Apple helper编译、OS像素或20轮证明。无新产品UI交付，固定起点点击未重测，既有Viewer/草稿验收不由CPU诊断代替。
+
+bcec的[Runtime42504540440](https://github.com/sijintech/stk/actions/runs/42504540440)已failure，其余12job成功；3.14为test_servers_that_fail_or_exit_are_reported_and_not_relaunched在派生failed和监督错误详情之间KeyError，6010通过/153skip/4未选、842.13s，仍待修。[Desktop42504540481](https://github.com/sijintech/stk/actions/runs/42504540481)已于18:16:12Z整轮failure终态：Linux三job成功；MacCPU1503/1503、569.88s，Metal254/254、332.04s；原生4/6、434.93s，video为AX证明失败、html-video为Tab不可全见，未证与旧头同根因。WindowsCPU1446/1447、657.33s，唯一NativeAgentRuns.AnUnconfirmedSetReplyCannotRestoreContinueWhenItsSessionIsReselected解析错误，首字符d；Windows原生6/6、1341.53s成功，整个Desktop已终态，推送等待门满足；Docs42504540389部署及Secret42504540501成功。
+
+提案统计/判断检查在aoci-proposal-review-20261108-22/root/；Bridge在bridge-transfer-shutdown-20261108-24/root/，AX在mac-ci-42495020086/root-ax-diagnostics-implementation/candidate-2/。实际Claude17仍设计修订，原八项/D1-D5及真实MuPRO缺口未关闭。认知收尾和本批最终提交/推送见root-delivery-20261108-24/closure.json，旧WIP保留。
+
 ## 2026-11-08 UTC：工作区CLI最终验证、联邦等待与691整轮终态
 
 main源码2fcc7251c9a5b70a5918e87792e16b8bfe0046b1，仅三路径集成Claude8ae2088d；其父1a5dc3ad独立提案未合入。作者六模块100通过、0skip、54.752s；root主线test_runtime_hub_cli 42通过、0skip、15.716s。独立新最小Python3.12.14安装态42通过、0skip、17.224s，-I且无源码注入；wheel SHA11bacdc79c0398b2e231517d9888d08b3c01787ad5d3d52195e343bb336eb907，f052归档仅覆盖最终cli.py，已核2fcc产品差异仅该文件。9实际父进程模块来自site-packages且SHA匹配，无NumPy/VTK/PySide6/Torch/h5py；不是逐子进程完整sys.modules采集。

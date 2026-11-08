@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：审阅提案并修复Bridge传输关闭生命周期
+
+root以2aea4a95将实际Claude1a5提案修订合入本地main，纠正字符比例/成本、主线提交计法和worktree边界，保留交付与恢复约束；P1/P2未启用、AGENTS未改。7bfae902修复已复现的关桥早释目录锁：关闭传输准入，计数已接收调用与worker，stop仍有界，真实线程退出后才释放。旧源码新9例8失败/1通过，新七模块137通过、零skip、46.43s；完整暂存15351B扫描0。
+
+0e0a1246加入AX数值拓扑及FD3非阻塞进度；root审阅发现合法末帧丢失误拒，外部旧红新绿后修正，accepted函数逐字未变。root两目标构建及CPU4.24s通过，完整暂存75575B扫描0；尚未Apple编译/真实AX和20轮，不宣布视频修好。未交付产品UI变更或新增点击改善。
+
+bcec Runtime42504540440整轮failure：其余12job成功，3.14为local-model测试KeyError/error（6010通过/153skip/842.13s）。Desktop42504540481已于18:16:12Z整轮failure终态：MacCPU1503/1503、Metal254/254，原生4/6；WindowsCPU1446/1447，NativeAgentRuns解析done前缀失败，原生6/6成功、1341.53s。Docs/Secret成功，推送等待门已满足。实际Claude17继续独立设计修订，不实施或提交。原路线及真实MuPRO缺口保留；外部root-delivery-20261108-24/closure.json保存本批状态和收尾，原WIP不覆盖。
+
 ## 2026-11-08 UTC：集成Claude16并补联邦测试等待
 
 实际Claude16交8ae2088d（父1a5dc3ad），root只集成cli.py、test_runtime_hub_cli.py、hub.md为2fcc7251。父提交的独立AOCI使用提案保留在Claude分支，未入main或生效。新增Hub工作区入口沿用原动作身份和权限；审阅抓到全局wait=0使旧节点读取无法完成的P2，改为仅写操作临时零等待并finally恢复。真实HubBackend排队读取反例一POST、同ID三次poll取得结果，失败/超时不返回文件；独立23项纯检查通过，作者恢复旧行为的四例全部失败。
