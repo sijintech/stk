@@ -1,5 +1,26 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：peer实际点击与AX拓扑候选，前整轮终态
+
+源码：peer root a1904447（实际Claude b510da04单路径）；AX root 79ae0adf7bfe7734a49f33fd571ecdd4e7b650bd。前7ef整个Desktop42487388780于15:04:55Z completed/failure，满足等待后push条件，不能称全平台通过。Mac编译成功、CPU1502/1502与Metal254/254，原生4/6；WindowsCPU1446/1446、873.20s，原生5/6，PDF cycle13 reprepared-page1像素timeout/231.05s，两视频384.28/395.15s通过。WindowsCPU本轮尚无14补修，故空JSON具体根因仍未知。旧Runtime42487388719两Windows收集失败，4399本地修复待新CI；Docs42487388755完整部署与Secret42487388666成功。
+
+root重建stk-peer-app-tests并实际18/18、零skip、9045ms。固定起点1440×1200、scale1、en、maximized-a4，真实Bridge、syntheticHostDTO；Viewer及隐藏Python稿保留：
+
+| 起点/动作 | 实际点击/滚轮 | 结果 |
+|---|---:|---|
+| send-tab，选择两份冻结文件 | 11 / 0 | 两文件Host回执解锁Offer，其他稿与Viewer保留 |
+| sender，历史操作 | 20 / 0 | manualSession和grant手改值保留 |
+| Files，选中已登记记录 | 1 / 0 | Peers section2及record草稿，无RPC send |
+
+peer暂存13370字节gitleaks0，证据native-peer-fixture-20261108-16/root/candidate-1/。
+
+Mac真实artifact经两result.json独立CRC核验：视频公共AX响应1603.426ms、trusted=true、raw Group4、31nodes/深10，因旧multiple_viewports提前返回；不能据此证明四者为祖先链。HTML-video在2004.280ms deadline后SIGKILL/reap，无解码响应，默认trusted=false不证明TCC拒绝。两项cleanup完整，原4次provider空查询仍保留。
+
+AX新候选纯选择器保raw数，全部同几何Group须一条严格祖先链，外层子树恰一WebArea且在最内层下；helper逐wrapper核原窗，accepted核chain/node/depth证明，私有响应wire同步升级。原2s child、8s seek、4次provider+250ms真实UI泵、真实WK/session/navigation/layout、新DOM、唯一time-matched slider、OS像素和20轮门保持。没有新产品UI点击或Apple编译/原生通过证明，HTML-video deadline仍待定位；WindowsPDF另追。固定差异与实测见mac-ax-ci-42487388780/review/root-candidate-2/及closure.json。
+
+最终两目标构建成功，相关55/55、零skip、2.76s；depth独立编译旧红新绿（14层边界通过、15层伪证明拒绝），暂存24314字节gitleaks0。候选1独立审阅发现depth缺口，候选2由root修复复核，未称独立终审通过。
+
+
 ## 2026-11-08 UTC：D1输入/设备撤权最终字节与新CI边界
 
 源码 main `4399f2fa6dfaba941922d2808ca023eba3766105` 已本地提交，尚未push；远端仍 `7ef5d21e`。前整个Desktop42487388780仍运行，终态前不推送。原四文档WIP和AOCI预存改动保留，最终交付状态见 `d1-input-transfer-20261108-18/root/closure.json` 与实际Git。

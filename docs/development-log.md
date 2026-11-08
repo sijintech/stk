@@ -1,5 +1,15 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：peer发布读取诊断与AX拓扑证明候选
+
+- 实际Claude14 b510da04由root精确选择集成a1904447，仅peer_test.cc；JSON关闭临时文件后原子发布，读取区分missing/unreadable/empty/invalid/complete，永久坏JSON立即失败，原30s预算泵UI。root18/18绿、零skip、9045ms，暂存13370字节gitleaks0；不推定Windows根因。
+- AX源码79ae0adf7bfe7734a49f33fd571ecdd4e7b650bd保raw匹配数，纯数值完整树选择器证明单祖先链、外层范围唯一WebArea/内层支配；helper逐wrapper核同窗，父端核链、节点数和depth，旧wire拒绝。独立审阅补不可能深度反例，未改产品权限/截止或媒体门；Apple仍待新CI。
+- 前Desktop42487388780于15:04:55Z整轮failure，等待门满足：Mac编译/CPU/Metal过、原生4/6；WindowsCPU1446/1446过、原生5/6，PDF cycle13 reprepared-page1像素timeout，两视频过。Docs/Secret成功，Runtime旧两Windows收集错误已本地补修，待新头验。
+- Claude独立树三基线同步至59f082db后接CL-D1-UPLOAD-RESTART-15，限定三个新样例/测试路径，尚未交付；root维护全局状态、AOCI和推送。固定字节/测试与最终发布见mac-ax-ci-42487388780/review/closure.json。
+
+最终两目标构建成功，相关55/55、零skip、2.76s；depth独立编译旧红新绿（14层边界通过、15层伪证明拒绝），暂存24314字节gitleaks0。候选1独立审阅发现depth缺口，候选2由root修复复核，未称独立终审通过。
+
+
 ## 2026-11-08 UTC：D1输入/撤权样例及singleton跨平台收集修正
 
 源码 main `4399f2fa6dfaba941922d2808ca023eba3766105` 已本地提交，尚未push；远端仍 `7ef5d21e`。前整个Desktop42487388780仍运行，终态前不推送。原四文档WIP和AOCI预存改动保留，最终交付状态见 `d1-input-transfer-20261108-18/root/closure.json` 与实际Git。

@@ -1,5 +1,18 @@
 # Codex / Claude worktree 协作约定
 
+## 2026-11-08 当前补充：Claude14已集成，15开发中
+
+root单路径集成实际Claude14 b510da04为a1904447，真实peer点击18/18通过；旧7ef WindowsCPU本轮也1446/1446过，具体空JSON根因仍未知。root AX五源码79ae0adf7bfe7734a49f33fd571ecdd4e7b650bd另验，Apple待新CI。前整个Desktop42487388780于15:04:55Z failure终态，等待门满足；WindowsPDF像素和Mac两视频仍未通过。root独占main、共享构建、四状态文档/AOCI和push，旧WIP保留。
+
+### CL-D1-UPLOAD-RESTART-15：真实Bridge上传ACK丢失恢复
+
+- 基线：实际Claude独立stk-claude/claude/support先从b510da04按授权同步b517554a、c5d8e503、4399f2fa三提交，实际59f082db；新任务尚未交付。
+- 仅新增examples/backend_parity/upload_restart.py、UPLOAD_RESTART.md及tests/test_backend_parity_upload_restart.py。既有helper、产品、CI、发布契约、全局状态和rootAOCI只读，不push或另派peer。
+- Hub真实upload_chunk已收至少1MiB且小于总量、Bridge ACK未入原journal时，仅SIGKILL/reap自有Bridge；Hub/Node/Runtime不重启。重开同profile/state/journal，无重新配对，显式resume原transfer/key/request/upload_session/offset，证明首新块从已收偏移而非0开始。
+- 原workspace.import仍人工复核，完成前无workspace字节/任务；驱动写后/启动前SHA绑定，错/缺驱动零spawn反例及独立成功门。复用helper来源、绝对预算和cleanup，source/installed同字节，KEY空/MODEL unset；无真实solver/helper/模型/许可。
+- 外部任务卡d1-upload-restart-20261108-19/root/claude-task15.txt；先固定diff和测试、root审阅后才准stage/commit。根四状态文档与认知由root维护，不合并Claude baseline。
+
+
 ## 2026-11-08 当前补充：root输入切片与Claude14
 
 源码 main `4399f2fa6dfaba941922d2808ca023eba3766105` 已本地提交，尚未push；远端仍 `7ef5d21e`。前整个Desktop42487388780仍运行，终态前不推送。原四文档WIP和AOCI预存改动保留，最终交付状态见 `d1-input-transfer-20261108-18/root/closure.json` 与实际Git。

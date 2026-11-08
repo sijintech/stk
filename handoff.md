@@ -1,5 +1,18 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：peer夹具已集成，AX拓扑候选与Claude15继续
+
+root已将实际Claude14 `b510da043a5ef8bef1c1bb8bd4f2aa45d9634954` 单文件选择集成为 `a1904447e7f8285adc17fd844c866499eb44f9e0`；AX五路径源码提交 79ae0adf7bfe7734a49f33fd571ecdd4e7b650bd。推送/新CI以 `mac-ax-ci-42487388780/review/closure.json` 和实际Git为准，旧四文档WIP及AOCI预存资产保留。
+
+peer真实Bridge与点击测试18/18、零skip、9045ms；原点击与Viewer/隐藏Python稿门保留。前7ef的WindowsCPU无需本补修也1446/1446通过/873.20s，不能宣称已证实Windows空JSON根因。AX保raw Group数，须全部同几何Group单祖先链、外层范围唯一WebArea且在最内层之下，wrapper逐个同窗；wire与accepted核链/深度证明。目标Apple仍待CI，另一个HTML-video两秒超时未定位，未放宽期限或像素/20轮门。
+
+前整个Desktop42487388780已于15:04:55Z completed/failure，push等待门满足：Linux三job成功；Mac编译、CPU1502/1502、Metal254/254通过，原生4/6；WindowsCPU通过，原生5/6，PDF第13轮reprepared-page1像素超时，两视频通过。Runtime42487388719仍为旧Windows收集failure，4399本地补修待新CI；Docs/Secret成功。原D1输入28绿/installed11绿保持，非全D1。
+
+实际Claude已在独立stk-claude/claude/support接CL-D1-UPLOAD-RESTART-15，三基线同步至59f082db，仅新增upload_restart.py、UPLOAD_RESTART.md和测试，验证Hub收块后ACK未入Bridge日志时终止/同profile原身份恢复。尚未交付；root独占main/共享构建/四状态文档/AOCI/推送。后续原八项、D1剩余合同/云端项目、文献实际点击、Synthrix正常装配及D2-D5继续；PET新专项后置。MuPRO/HDF5和有限S2c方向已定，真实执行资产、扫描数值和提案持久形式不代选。
+
+最终两目标构建成功，相关55/55、零skip、2.76s；depth独立编译旧红新绿（14层边界通过、15层伪证明拒绝），暂存24314字节gitleaks0。候选1独立审阅发现depth缺口，候选2由root修复复核，未称独立终审通过。
+
+
 ## 2026-11-08 UTC：输入传输与设备撤权有限切片已本地提交
 
 源码 main `4399f2fa6dfaba941922d2808ca023eba3766105` 已本地提交，尚未push；远端仍 `7ef5d21e`。前整个Desktop42487388780仍运行，终态前不推送。原四文档WIP和AOCI预存改动保留，最终交付状态见 `d1-input-transfer-20261108-18/root/closure.json` 与实际Git。

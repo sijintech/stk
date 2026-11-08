@@ -1,5 +1,14 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：集成peer夹具，严格AX候选与上传恢复并行
+
+1. 已选择集成实际Claude14为a1904447，root真实18项通过；Windows旧7ef本轮也全过，具体空JSON根因仍未知。
+2. root AX源码79ae0adf7bfe7734a49f33fd571ecdd4e7b650bd以单祖先链和唯一WebArea消歧，保raw数/同窗/真实WK与会话绑定和原输入、DOM、像素、20轮门；Apple待新CI，HTML-video两秒deadline仍未定位。
+3. 前整个Desktop42487388780于15:04:55Z failure终态，推送等待门满足；Mac原生4/6、Windows原生5/6，Windows PDF第13轮重准备像素超时另追，不当作已修复。Runtime旧Windows收集补修4399待新CI。
+4. 实际Claude独立worktree执行CL-D1-UPLOAD-RESTART-15，root做公共后端、契约、审阅集成与发布；首个真实Bridge上传中断/原日志恢复候选尚未交付。
+5. 继续其余D1合同/故障、云端项目语义、原生文献实际点击、Synthrix正常装配、D2-D5及原八项。MuPRO/MuFerro、插件原生格式/MuPRO HDF5、有限S2c已确认；真实许可资产、科学扫描值与提案持久形式未定，HDF5仍需DAT完成验证；PET新专项后置。
+
+
 ## 2026-11-08 UTC：输入传输、现有设备撤权与Windows收集补修
 
 源码 main `4399f2fa6dfaba941922d2808ca023eba3766105` 已本地提交，尚未push；远端仍 `7ef5d21e`。前整个Desktop42487388780仍运行，终态前不推送。原四文档WIP和AOCI预存改动保留，最终交付状态见 `d1-input-transfer-20261108-18/root/closure.json` 与实际Git。
