@@ -10,6 +10,8 @@
 #include "../bridge/support.hh"
 #include "../wm/support.hh"
 
+#include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -181,13 +183,51 @@ class MaterialsEditorPython : public ::testing::Test {
   }
   Json call(const std::string &method, Json params)
   {
-    std::optional<bridge::Result<Json>> result;
-    client->call(method, std::move(params)).then([&](auto value) { result = std::move(value); });
-    if (!loop.pump_until([&] { return result.has_value(); }, 30) || !result->ok()) {
-      ADD_FAILURE() << method << ": " << (result ? result->error().describe() : "timed out");
+    auto result = std::make_shared<std::optional<bridge::Result<Json>>>();
+    client->call(method, std::move(params)).then([result](auto value) { *result = std::move(value); });
+    if (!loop.pump_until([&] { return result->has_value(); }, 30) || !result->value().ok()) {
+      ADD_FAILURE() << method << ": " << (*result ? result->value().error().describe() : "timed out");
       return nullptr;
     }
-    return result->value();
+    return result->value().value();
+  }
+  void wait_models_active(const std::string &active, size_t versions,
+                          std::chrono::steady_clock::time_point deadline)
+  {
+    // A durable job's done row can precede release of its publication lease. Only this
+    // read may observe busy again; never repeat Prepare/Start/Activate or hide other errors.
+    std::shared_ptr<std::optional<bridge::Result<Json>>> pending;
+    Json models;
+    std::string error;
+    bool expired = false;
+    const double remaining = std::max(0.0,
+        std::chrono::duration<double>(deadline - std::chrono::steady_clock::now()).count());
+    const bool completed = loop.pump_until([&] {
+      if (std::chrono::steady_clock::now() >= deadline) { expired = true; return true; }
+      if (!pending) {
+        pending = std::make_shared<std::optional<bridge::Result<Json>>>();
+        bridge::CallOptions options; options.retry = bridge::CallOptions::Retry::Never;
+        client->call("materials.models.list", Json::object(), options).then(
+            [reply = pending](auto value) { *reply = std::move(value); });
+        return false;
+      }
+      if (!pending->has_value()) return false;
+      const auto &reply = pending->value();
+      if (!reply.ok()) {
+        if (reply.error().code == bridge::ErrorCode::Busy) { pending.reset(); return false; }
+        error = reply.error().describe(); return true;
+      }
+      models = reply.value();
+      expired = std::chrono::steady_clock::now() >= deadline;
+      return true;
+    }, remaining);
+    ASSERT_TRUE(completed && !expired) << "materials.models.list did not settle within 30 seconds";
+    ASSERT_TRUE(error.empty()) << "materials.models.list: " << error;
+    ASSERT_TRUE(models.is_object() && models.contains("kinds") && models.at("kinds").is_object() &&
+        models.at("kinds").contains("capacity_fade") && models.at("kinds").at("capacity_fade").is_object());
+    const auto &entry = models.at("kinds").at("capacity_fade");
+    ASSERT_TRUE(entry.contains("active") && entry.contains("versions") && entry.at("versions").is_array());
+    ASSERT_EQ(entry.at("active"), active); ASSERT_EQ(entry.at("versions").size(), versions);
   }
   void wait_widget(const std::string &key)
   {
@@ -279,13 +319,17 @@ class MaterialsEditorPython : public ::testing::Test {
   void admit_two_versions()
   {
     release("prepare_release"); release("train_release");
+    size_t versions = 0;
     for (const auto *id : {"version-one", "version-two"}) {
       ASSERT_EQ(call("materials.prepare", {{"directory", dataset()}, {"job_id", id}}).at("job").at("state"), "prepared");
       ASSERT_TRUE(call("materials.start", {{"job_id", id}}).is_object());
       Json result;
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
       ASSERT_TRUE(loop.pump_until([&] { result = call("materials.jobs.get", {{"job_id", id}}).at("job");
         return result.at("state") != "running"; }, 30));
       ASSERT_EQ(result.at("state"), "done") << result.dump();
+      ++versions;
+      ASSERT_NO_FATAL_FAILURE(wait_models_active("v" + std::to_string(versions), versions, deadline));
     }
   }
   void SetUp() override
@@ -392,7 +436,11 @@ TEST_F(MaterialsEditorPython, EnabledActivationRejectsOldSelectionBridgeHiddenAn
   // Produce real durable/admitted versions with the controlled UI trainer. The second capsule
   // freezes the first active model as its baseline; its descriptor and held-out set stay bound.
   ASSERT_NO_FATAL_FAILURE(admit_two_versions());
-  const auto models = call("materials.models.list", Json::object()).at("kinds").at("capacity_fade");
+  const auto listing = call("materials.models.list", Json::object());
+  ASSERT_TRUE(listing.is_object() && listing.contains("kinds") && listing.at("kinds").is_object() &&
+      listing.at("kinds").contains("capacity_fade") && listing.at("kinds").at("capacity_fade").is_object());
+  const auto models = listing.at("kinds").at("capacity_fade");
+  ASSERT_TRUE(models.contains("active") && models.contains("versions") && models.at("versions").is_array());
   ASSERT_EQ(models.at("active"), "v2"); ASSERT_EQ(models.at("versions").size(), 2u);
   ASSERT_NO_FATAL_FAILURE(show_materials());
   ASSERT_NO_FATAL_FAILURE(click_tab("materials_sections", 2));
@@ -443,8 +491,16 @@ TEST_F(MaterialsEditorPython, EnabledActivationRejectsOldSelectionBridgeHiddenAn
   EXPECT_EQ(count("activate"), 0); ASSERT_NO_FATAL_FAILURE(wait_widget("materials_activate"));
   const int before = clicks;
   ASSERT_NO_FATAL_FAILURE(click("materials_activate"));
-  ASSERT_TRUE(loop.pump_until([&] { frame(); return count("activate") == 1; }, 30));
-  EXPECT_EQ(call("materials.models.list", Json::object()).at("kinds").at("capacity_fade").at("active"), "v1");
+  ASSERT_TRUE(loop.pump_until([&] {
+    frame();
+    const auto *versions = widget("materials_versions"), *activate = widget("materials_activate");
+    return count("activate") == 1 && versions && versions->enabled && activate && !activate->enabled;
+  }, 30)); // The real write ACK has been adopted, not merely counted before dispatch.
+  const auto activated = call("materials.models.list", Json::object());
+  ASSERT_TRUE(activated.is_object() && activated.contains("kinds") && activated.at("kinds").is_object() &&
+      activated.at("kinds").contains("capacity_fade") && activated.at("kinds").at("capacity_fade").is_object() &&
+      activated.at("kinds").at("capacity_fade").contains("active"));
+  EXPECT_EQ(activated.at("kinds").at("capacity_fade").at("active"), "v1");
   EXPECT_EQ(clicks - before, 1); EXPECT_EQ(count("activate"), 1);
   EXPECT_EQ(count("prepare"), 2); EXPECT_EQ(count("start"), 2); EXPECT_EQ(count("train_worker"), 2);
   EXPECT_EQ(count("recover"), 0); ASSERT_NO_FATAL_FAILURE(expect_preserved());
