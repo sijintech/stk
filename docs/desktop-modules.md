@@ -29,6 +29,7 @@ cmake --build build --target stk_editor_analysis
 | `reports` | 冻结报告清单、创建、显式资产读取和导出，`src/editors/reports_editor.cc`；独立文档视口经 `ReportDocumentHost` 承载，原生候选默认关闭 |
 | `materials` | 本机曲线训练、真实损失与留出比较，`src/editors/materials_editor.cc`；执行归共享材料服务 |
 | `federation` | 节点 owner 数据登记、同意/审计及独立线性模型评估/版本，`src/editors/federation_editor.cc`；每 tab 草稿由 `FederationState::View` 隔离 |
+| `literature` | 本地文献库、复核导入、检索模型和精确引用页；`src/editors/literature_editor.cc`，每 tab 使用独立 `LiteratureState::View`，共享控制器和已发布桌面私有桥 |
 | `project` | 项目管理、复核、讨论与仿真 |
 | `jobs` | Runtime、任务、日志和传输 |
 | `workspace` / `skills` / `ai` | 工作台、技能目录、AI 对话 |
@@ -43,6 +44,11 @@ cmake --build build --target stk_editor_analysis
 格式和边界见[表格交换](project-table-io.md)与[工作空间](design/portable-workspaces.md)。
 Python 服务仍在 `suan/`，目录列举和程序文件读写经同一桌面桥完成。UI 每帧不遍历目录，
 各编辑器不另建数据库、调度器或模型客户端。通用单元格点击能力位于 `stk_ui`，区域交换位于 `stk_wm`。
+
+文献入口不要求打开项目；打开/恢复不派发文献 RPC，刷新、复核、导入、构建、检索和页图分别明确操作。
+批准按钮冻结显示时的复核身份，执行再核真实桥进程与活动区域；本地文字稿不因后台元数据失效丢失。
+隐藏/移动清授权和页图、保活标签文字稿，工作空间仅导出有限查询/范围与导航，不携导入路径或授权。
+页图高亮跟随同一图像变换，不改原 PNG。真实模型全链与目标 OS 验收仍分别留证，见[文献协议](specs/stk-desktop-literature-1.md)。
 
 `FederationState` 通过共享桥访问固定 Runtime owner 服务；原始数值冻结在桥私有目录，
 不进入界面 DTO 或普通工作空间。恢复布局仅恢复有界表单稿和选择，不重发未知操作、读取候选或开始训练。

@@ -42,6 +42,7 @@ add_executable(stk_ui_tests
   test_text_edit.cc
   test_events.cc
   test_native_viewport.cc
+  test_image_highlights.cc
   test_table_cell_selection.cc
   test_table_grid.cc
   test_layout_golden.cc

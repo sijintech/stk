@@ -89,3 +89,7 @@ stk_editor_module(federation
 stk_editor_module(peers
   src/editors/peers_editor.cc
 )
+
+stk_editor_module(literature
+  src/editors/literature_editor.cc
+)

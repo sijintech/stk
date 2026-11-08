@@ -402,7 +402,8 @@ TEST(App, EditorKeysExistInEveryCatalog)
   {
     keys.emplace_back(app::bridge_state_key(st));
   }
-  EXPECT_EQ(f.shell->registry().types().size(), 20u);
+  EXPECT_EQ(f.shell->registry().types().size(), 21u);
+  EXPECT_NE(f.shell->registry().find(app::kEditorLiterature), nullptr);
   EXPECT_NE(f.shell->registry().find(app::kEditorPeers), nullptr);
   EXPECT_NE(f.shell->registry().find(app::kEditorFederation), nullptr);
   ASSERT_NE(f.shell->registry().find(app::kEditorReports), nullptr);

@@ -725,7 +725,8 @@ class AppShell::TopBar final : public wm::Region {
     // Primary editors are visible actions, rather than destinations inside nested menus.
     for (const auto &item : std::vector<std::pair<const char *, const char *>>{
              {kEditorFiles, "app.tool.files"}, {kEditorAnalysisGraph, "app.tool.nodes"},
-             {kEditorTable, "app.tool.table"}, {kEditorPython, "app.tool.python"}}) {
+             {kEditorTable, "app.tool.table"}, {kEditorPython, "app.tool.python"},
+             {kEditorLiterature, "app.tool.literature"}}) {
       const std::string key = std::string("tool_") + item.first;
       const std::string id = item.first;
       const auto label = shell_.store_.tr(item.second);

@@ -123,6 +123,8 @@ class WorkspaceEditor final : public Editor {
         .disable(!available);
     // The skill library is shared across projects: reachable with or without one.
     tools.button("workspace_skills", ctx.tr("workspace.skills"), editor_navigation_action(ctx, kEditorSkills));
+    more.row().button("workspace_literature", ctx.tr("editor.literature.title"),
+                      editor_navigation_action(ctx, kEditorLiterature));
     modules(layout, ctx);
   }
 

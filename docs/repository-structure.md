@@ -56,7 +56,8 @@ Synthrix 作为 React 网页仓，旧后端按领域迁入共同实现；集成�
 ## 原生编辑器的独立模块
 
 `desktop/engine/lib/stk_app/editor_modules.cmake` 将 Viewer、分析图、项目流程、表格、文件树、Python、
-项目管理、任务、工作台、技能及 AI 分成 11 个可单独构建的对象库。新编辑器在同一 `EditorType` 注册表接入；
+项目管理、任务、工作台、技能、AI、报告、材料、联邦、设备共享与文献分成 16 个可单独构建的对象库。
+新编辑器在同一 `EditorType` 注册表接入；
 每页独立 UI 状态，项目/修订/撤销、Viewer 与执行服务仍共用。`stk_ui` 提供通用控件，`stk_wm` 提供真实区域交换，
 Python 文件与目录服务位于 `suan/desktop_bridge/`、`suan/project/`。具体职责、构建命令及少点击验收规则见
 [桌面模块](desktop-modules.md)。运行时加载插件、富对象单元格类型扩展不属于这组 CMake 模块的既有能力。

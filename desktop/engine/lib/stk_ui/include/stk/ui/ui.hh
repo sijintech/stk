@@ -25,6 +25,7 @@
  */
 #pragma once
 
+#include <array>
 #include <deque>
 #include <functional>
 #include <limits>
@@ -241,6 +242,11 @@ struct ImageSpec {
   int width = 0;
   int height = 0;
   float height_units = 8.0f;
+  /** Read-only convex quads in source-image pixels, perimeter order, origin top-left, y down.
+   * Display only: neither authorizes content access nor owns any GPU resource. Null/empty is off;
+   * non-finite or unrepresentable quads are skipped. Source pixels and texture remain unchanged. */
+  std::shared_ptr<const std::vector<std::array<Vec2, 4>>> highlights = nullptr;
+  Color highlight_color{255, 210, 64, 76};
 };
 
 struct TextFieldOptions {

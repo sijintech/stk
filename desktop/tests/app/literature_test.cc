@@ -8,6 +8,12 @@
 #include "stk/bridge/process.hh"
 #include "stk/core/sha256.hh"
 #include "../bridge/support.hh"
+#include "../wm/support.hh"
+#include "stk/app/viewer_state.hh"
+#include "stk/io/payload.hh"
+#include <cmath>
+#include <iostream>
+#include <thread>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -52,8 +58,15 @@ TEST(LiteratureState, ReceiptAndRequestKeepExactActionHashAndNumericTokens)
 // synthetic negative replies are never counted as model/parser acceptance.
 constexpr const char *script = R"PY(
 from pathlib import Path
-import json,sys,time,threading
+import json,sys,time,threading,os
 control=Path(sys.argv.pop(1))
+def crash_when_explicitly_requested():
+    while True:
+        marker=control.with_suffix('.crash')
+        if marker.exists():
+            marker.unlink();os._exit(7)
+        time.sleep(.01)
+threading.Thread(target=crash_when_explicitly_requested,daemon=True).start()
 from suan.desktop_bridge.server import Bridge
 from suan.desktop_bridge.literature import LiteratureService
 from suan.desktop_bridge.__main__ import main
@@ -80,7 +93,8 @@ main()
 )PY";
 class LiteratureBridge : public ::testing::Test {
  protected:
-  bridge::test::TempDir dir{"literature-controller"}; bridge::test::ManualLoop loop; AppStore store;
+  bridge::test::TempDir dir{"literature-controller"}; bridge::test::ManualLoop loop;
+  wmtest::AppFixture fixture{"en", 1, 1600, 1100}; AppStore &store = fixture.shell->store();
   std::unique_ptr<bridge::Client> client;
   LiteratureState &state() { return store.literature(); }
   void marker(const std::string &name) { std::ofstream(dir.path() / ("control." + name)) << "marker"; }
@@ -246,5 +260,198 @@ TEST_F(LiteratureBridge, DetachedHistoricalReviewCannotRestoreCurrentCommitAutho
   EXPECT_FALSE(v->historical_result.is_null());EXPECT_FALSE(v->values.contains("import.review"));
   EXPECT_FALSE(state().act(v,"import.commit",{{"review_id",original},{"review_sha256",review_sha}}));EXPECT_EQ(calls("import.commit"),0);
 }
+TEST(LiteratureEditor, PortableWorkspaceRestoresOnlyQueryAndScopesAndRejectsAuthorityAtomically)
+{
+  EditorRegistry registry; register_builtin_editors(registry);
+  auto first = registry.create(kEditorLiterature), second = registry.create(kEditorLiterature);
+  ASSERT_TRUE(first); ASSERT_TRUE(second);
+  auto saved = first->save_workspace_state(); saved["query"] = "polarization 极化";
+  saved["corpus"] = corpus; saved["scopes"] = Json::array({corpus}); saved["section"] = 1;
+  ASSERT_TRUE(first->load_workspace_state(saved)); EXPECT_TRUE(first->has_unsaved_changes());
+  ASSERT_TRUE(second->load_workspace_state(first->save_workspace_state()));
+  EXPECT_EQ(second->save_workspace_state(), saved);
+  for (const auto &change : std::vector<Json>{{{"authorization", true}}, {{"source", "/private.pdf"}},
+      {{"assets", "/private-model"}}, {{"operation_id", id}}, {{"version", 1.0}}, {{"section", true}},
+      {{"query", std::string(4097, 'x')}}, {{"corpus", "wrong"}}, {{"scopes", Json::array({corpus, corpus})}}}) {
+    auto bad = saved; bad.update(change);
+    EXPECT_FALSE(second->load_workspace_state(bad)); EXPECT_EQ(second->save_workspace_state(), saved);
+  }
+  EXPECT_FALSE(second->load_state({{"version", 1.0}, {"section", 0}}));
+}
+
+class LiteratureMouse : public LiteratureBridge, public ::testing::WithParamInterface<bool> {
+ protected:
+  int clicks = 0, wheels = 0;
+  void SetUp() override
+  {
+    LiteratureBridge::SetUp();
+    if (GetParam()) {
+      fixture.shell->set_language("zh_CN"); fixture.drv->ctx.rect = {0, 0, 1000, 1200};
+    }
+    frame();
+  }
+  void frame() { fixture.screen.run_deferred(); fixture.drv->frame(); }
+  const ui::Widget *widget(const std::string &key) const { return fixture.screen.ui()->find(key); }
+  void wait_widget(const std::string &key)
+  {
+    ASSERT_TRUE(loop.pump_until([&] { frame(); const auto *w = widget(key); return w && w->enabled; }, 45)) << key;
+  }
+  void click(const std::string &key)
+  {
+    ASSERT_NO_FATAL_FAILURE(wait_widget(key));
+    bool visible = false;
+    for (int i = 0; i < 30; ++i) {
+      const auto *w = widget(key); const auto clipped = w->rect.intersect(w->clip);
+      if (std::abs(clipped.h - w->rect.h) <= 1 && std::abs(clipped.w - w->rect.w) <= 1) { visible = true; break; }
+      wm::Event e; e.type = wm::EventType::Wheel; e.x = int(w->clip.cx());
+      e.y = fixture.screen.rect().ymax - 1 - int(w->clip.cy()); e.wheel_y = w->rect.cy() > w->clip.cy() ? -3 : 3;
+      ASSERT_TRUE(fixture.drv->send(e)); ++wheels; frame();
+    }
+    ASSERT_TRUE(visible) << key;
+    const auto [x, y] = fixture.widget_center(key); ASSERT_TRUE(fixture.drv->click(x, y)); ++clicks; frame();
+  }
+  void section(int index)
+  {
+    ASSERT_NO_FATAL_FAILURE(wait_widget("literature_sections")); const auto *w = widget("literature_sections");
+    const int x = int(w->rect.x + w->rect.w * (index + .5f) / 4);
+    const int y = fixture.screen.rect().ymax - 1 - int(w->rect.cy());
+    ASSERT_TRUE(fixture.drv->click(x, y)); ++clicks; frame();
+  }
+  void text(const std::string &key, const std::string &value)
+  {
+    ASSERT_NO_FATAL_FAILURE(click(key));
+#ifdef __APPLE__
+    fixture.drv->key(wm::Key::A, wm::ModOS);
+#else
+    fixture.drv->key(wm::Key::A, wm::ModCtrl);
+#endif
+    auto e = ui::Event::text_input(value); e.time = double(++fixture.drv->time_ms) / 1000.;
+    fixture.screen.ui()->handle_event(e); frame(); fixture.drv->key(wm::Key::Enter); frame();
+    ASSERT_NE(widget(key), nullptr); EXPECT_EQ(widget(key)->string.value(), value);
+  }
+  EditorArea *literature_area()
+  {
+    for (auto *a : fixture.screen.areas()) {
+      auto *area = dynamic_cast<EditorArea *>(a);
+      if (area && area->editor().type().id == kEditorLiterature) { return area; }
+    }
+    return nullptr;
+  }
+};
+
+TEST_P(LiteratureMouse, OneClickEntryIsPassiveAndPreservesViewerAndHiddenPythonDraft)
+{
+  auto &bottom = fixture.area("a4"); ASSERT_TRUE(bottom.set_tabs({kEditorLogs, kEditorPython}, 0));
+  auto hidden = bottom.tab(1).save_workspace_state(); hidden["source"] = "print('keep exact hidden literature draft')";
+  ASSERT_TRUE(bottom.tab(1).load_workspace_state(hidden));
+  store.viewer().set_auto_evaluate(false); store.viewer().prefetch_neighbours = false;
+  auto payload = std::make_shared<io::Payload>(io::read_stkp(std::string(STK_REPO_ROOT) + "/desktop/tests/viewer/fixtures/muferro_domains.stkp"));
+  store.viewer().open_payload(payload, "Public literature navigation fixture");
+  ASSERT_TRUE(loop.pump_until([&] { store.viewer().pump(); return !store.viewer().presets().empty() &&
+      store.viewer().catalog().is_object() && store.viewer().colormaps(); }));
+  const auto viewer = store.viewer().save_workspace_state();
+  const auto camera = store.viewer().camera_serial(), serial = store.viewer().payload_serial(); frame();
+  ASSERT_NO_FATAL_FAILURE(click("tool_literature")); ASSERT_NE(literature_area(), nullptr);
+  EXPECT_EQ(clicks, 1); EXPECT_EQ(wheels, 0); EXPECT_EQ(calls("info"), 0); EXPECT_EQ(calls("encoder.info"), 0);
+  EXPECT_FALSE(std::filesystem::exists(dir.path() / "bridge/literature"));
+  EXPECT_EQ(bottom.tab(1).save_workspace_state(), hidden); EXPECT_TRUE(bottom.tab(1).has_unsaved_changes());
+  EXPECT_EQ(store.viewer().save_workspace_state(), viewer); EXPECT_EQ(store.viewer().base_payload(), payload);
+  EXPECT_EQ(store.viewer().camera_serial(), camera); EXPECT_EQ(store.viewer().payload_serial(), serial);
+  std::cout << "LITERATURE_ENTRY layout=" << (GetParam() ? "zh_CN/1000x1200" : "en/1600x1100")
+            << " scale=1 clicks=" << clicks << " wheels=" << wheels << " rpc=0 preserved=true\n";
+  ASSERT_NO_FATAL_FAILURE(click("literature_refresh"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return calls("info") == 1 && calls("encoder.info") == 1; }));
+  EXPECT_FALSE(std::filesystem::exists(dir.path() / "bridge/literature"));
+}
+
+TEST_P(LiteratureMouse, OldReviewButtonCannotApproveANewerReviewAndHideKeepsLocalDrafts)
+{
+  ASSERT_NO_FATAL_FAILURE(click("tool_literature"));
+  ASSERT_NO_FATAL_FAILURE(section(1));
+  ASSERT_NO_FATAL_FAILURE(text("literature_name", "Owned UI library"));
+  ASSERT_NO_FATAL_FAILURE(click("literature_create"));
+  ASSERT_NO_FATAL_FAILURE(click("literature_created"));
+  const auto source = dir.path() / "ui-owned.pdf";
+  std::ofstream(source) << "%PDF-1.7\nSelf-authored UI byte-inspection fixture\n%%EOF\n";
+  ASSERT_NO_FATAL_FAILURE(text("literature_source", source.string()));
+  ASSERT_NO_FATAL_FAILURE(text("literature_title", "Owned UI document"));
+  ASSERT_NO_FATAL_FAILURE(text("literature_evidence", "Self-authored public software fixture"));
+  ASSERT_NO_FATAL_FAILURE(text("literature_approved_by", "Fixture owner"));
+  ASSERT_NO_FATAL_FAILURE(click("literature_authorized"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("literature_import_review"));
+  ASSERT_NO_FATAL_FAILURE(click("literature_import_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("literature_import_commit"));
+  const auto old_commit = widget("literature_import_commit")->on_click;
+  std::ofstream(source, std::ios::app) << "% A different set of reviewed bytes\n";
+  ASSERT_NO_FATAL_FAILURE(click("literature_import_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("literature_import_commit"));
+  EXPECT_EQ(calls("import.review"), 2); old_commit(); frame();
+  EXPECT_EQ(calls("import.commit"), 0);
+  ASSERT_NE(widget("literature_import_commit"), nullptr);
+  EXPECT_TRUE(widget("literature_import_commit")->enabled); // Accepted writes are synchronously busy before any queued reply.
+  ASSERT_NO_FATAL_FAILURE(click("literature_import_commit"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("literature_index")); EXPECT_EQ(calls("import.commit"), 1);
+  auto *area = literature_area(); ASSERT_NE(area, nullptr);
+  const int selected = area->active_tab(); const auto before = area->editor().save_workspace_state();
+  ASSERT_TRUE(area->add_tab(kEditorLogs)); area->set_active_tab(area->tab_count() - 1); frame();
+  area->set_active_tab(selected); frame();
+  EXPECT_EQ(area->editor().save_workspace_state(), before);
+  ASSERT_NE(widget("literature_source"), nullptr);
+  EXPECT_EQ(widget("literature_source")->string.value(), source.string());
+  EXPECT_EQ(widget("literature_title")->string.value(), "Owned UI document");
+  EXPECT_FALSE(widget("literature_authorized")->boolean.value());
+  EXPECT_EQ(calls("import.review"), 2); EXPECT_EQ(calls("import.commit"), 1);
+  std::cout << "LITERATURE_IMPORT layout=" << (GetParam() ? "zh_CN/1000x1200" : "en/1600x1100")
+            << " scale=1 clicks=" << clicks << " wheels=" << wheels << " review=2 commit=1 stale_approval_rejected=true\n";
+}
+
+TEST_P(LiteratureMouse, ActiveTextSurvivesCorpusInvalidationAndBridgeReattachmentWithoutDispatch)
+{
+  auto v = state().new_view(); const auto scope = create(v); ASSERT_FALSE(scope.empty());
+  ASSERT_NO_FATAL_FAILURE(click("tool_literature")); auto *area = literature_area(); ASSERT_NE(area, nullptr);
+  auto draft = area->editor().save_workspace_state(); draft["corpus"] = scope; draft["scopes"] = Json::array({scope});
+  ASSERT_TRUE(area->editor().load_workspace_state(draft)); frame();
+  ASSERT_NO_FATAL_FAILURE(click("literature_query"));
+  const auto type = [&](const std::string &text) {
+    auto e = ui::Event::text_input(text); e.time = double(++fixture.drv->time_ms) / 1000.;
+    fixture.screen.ui()->handle_event(e); frame();
+  };
+  type("keep corpus draft 极化");
+  ASSERT_NO_FATAL_FAILURE(commit(v, scope)); // Another view changes this library's generation.
+  frame(); fixture.drv->key(wm::Key::Enter); frame();
+  ASSERT_NE(widget("literature_query"), nullptr);
+  EXPECT_EQ(widget("literature_query")->string.value(), "keep corpus draft 极化");
+  ASSERT_NO_FATAL_FAILURE(click("literature_query"));
+  fixture.drv->key(wm::Key::End); type(" and reconnect");
+  const auto before = calls("info"); store.set_bridge(nullptr); store.set_bridge(client.get());
+  frame(); fixture.drv->key(wm::Key::Enter); frame();
+  EXPECT_EQ(widget("literature_query")->string.value(), "keep corpus draft 极化 and reconnect");
+  EXPECT_EQ(calls("info"), before); EXPECT_EQ(calls("search"), 0); EXPECT_EQ(calls("pages.render"), 0);
+}
+
+TEST_P(LiteratureMouse, CachedActionRefusesSameClientRestartBeforeItsStateListenerRuns)
+{
+  ASSERT_NO_FATAL_FAILURE(click("tool_literature"));
+  ASSERT_NO_FATAL_FAILURE(section(1));
+  ASSERT_NO_FATAL_FAILURE(text("literature_name", "Original local draft"));
+  const auto original = widget("literature_create")->on_click;
+  const auto before_hide = store.version();
+  fixture.screen.set_maximized(&fixture.area("a2")); original(); // No ready/layout callback has run yet.
+  EXPECT_EQ(store.version(), before_hide); EXPECT_EQ(calls("corpora.create"), 0);
+  fixture.screen.set_maximized(nullptr); frame();
+  const auto spawned = client->stats().spawned, epoch = store.bridge_epoch();
+  marker("crash"); const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(45);
+  // Deliberately do not pump ManualLoop: queued state notifications have not invalidated the UI.
+  while ((client->stats().spawned == spawned || client->state() != bridge::BridgeState::Ready) &&
+         std::chrono::steady_clock::now() < deadline) { std::this_thread::sleep_for(std::chrono::milliseconds(5)); }
+  ASSERT_GT(client->stats().spawned, spawned); ASSERT_EQ(client->state(), bridge::BridgeState::Ready);
+  ASSERT_EQ(store.bridge_epoch(), epoch); const auto version = store.version(); original();
+  EXPECT_EQ(store.version(), version); // Reject before the controller can rebind to the new process.
+  EXPECT_EQ(calls("corpora.create"), 0);
+  loop.run_ready(); frame(); ASSERT_NO_FATAL_FAILURE(click("literature_create"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("literature_created")); EXPECT_EQ(calls("corpora.create"), 1);
+}
+
+INSTANTIATE_TEST_SUITE_P(FixedLayouts, LiteratureMouse, ::testing::Bool());
 }  // namespace
 }  // namespace stk::app

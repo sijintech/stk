@@ -3,8 +3,10 @@
 The Bridge registers the exact 20 methods below with the `literature.` prefix in
 `desktop-bridge-1.schema.json`. All are desktop-only, including passive metadata;
 they are absent from the Python script catalog and agent operations/tools.
-Native UI, citation reader, privacy RAG, paid literature and shared sessions remain
-separate pending work. These methods do not extend project/report identity.
+The native Literature editor uses these methods through explicit controls for
+libraries, model review, search, citations, pages and original-action history.
+Privacy RAG, paid literature and shared sessions remain separate pending work.
+These methods do not extend project/report identity.
 
 `LiteratureService(state_dir, python=…, parser_python=…, encoder_python=…)` uses
 explicit absolute trusted interpreter configuration. Requests select local asset
@@ -181,7 +183,25 @@ reports old running admissions as uncertain without spawning or rewriting them.
 Workspace restoration may later restore bounded query/scope drafts only, never
 capabilities, authorization, pending jobs, model authority or automatic actions.
 
-## Validation and remaining UI integration
+## Native UI and validation
+
+The `literature` editor has its own tab-local View and local text drafts. Its
+top-bar and Workspace entries do not require an opened project. Opening, drawing
+or restoring it sends no literature RPC; Refresh reads metadata explicitly.
+Review approval buttons freeze the displayed operation UUID, result SHA and
+generation. Execution callbacks also check the actual Bridge process and active
+area; local text commits survive metadata invalidation and Bridge reattachment.
+Hiding or moving the tab stops observation and releases page resources without
+cancelling background work. Authorization and reviews do not survive detachment.
+
+Workspace restoration saves only bounded query/scope and navigation state.
+Import paths, permission evidence, model folders and operation authority remain
+local to the live tab and are not exported. The dirty-draft gate protects them
+from replacement; explicit Discard clears the form. History reads are separate
+from current approval. Its paged result summary omits PNG bytes and character
+geometry; the reader separately adopts only a verified resolve/render pair.
+Highlights use the same image fit, pan and zoom transform without modifying PNG
+bytes. A new render releases its previous texture before dispatch.
 
 Service tests and Bridge contract tests cover different boundaries; a service-only
 pass does not establish published dispatch/Schema or desktop UI behavior.
@@ -189,6 +209,12 @@ pass does not establish published dispatch/Schema or desktop UI behavior.
 lifecycle, trusted host configuration, script/headless isolation, closed Schema
 counterexamples and a provisioned real-parser/E5 Bridge chain. Real asset cases
 must execute with zero skips before claiming that chain passed.
+`desktop/tests/app/literature_test.cc` exercises real Bridge import review/commit
+with a self-authored byte fixture, passive one-click entry in two fixed layouts,
+stale approval/process callbacks, draft preservation and workspace limits.
+Image overlay tests check CPU draw commands. These tests do not establish a full
+real-encoder search/citation/page UI chain or target-OS rendering; both remain
+separate acceptance work recorded in `docs/runtime-validation.md`.
 The native editor must preserve
 Viewer and hidden drafts, reject stale Bridge/tab/scope responses, release page
 textures on revoke/rebind/detach, and record fixed-start click count and resulting

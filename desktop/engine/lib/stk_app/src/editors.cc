@@ -25,6 +25,7 @@ std::unique_ptr<Editor> make_reports_editor(const EditorType &type);
 std::unique_ptr<Editor> make_materials_editor(const EditorType &type);
 std::unique_ptr<Editor> make_federation_editor(const EditorType &type);
 std::unique_ptr<Editor> make_peers_editor(const EditorType &type);
+std::unique_ptr<Editor> make_literature_editor(const EditorType &type);
 
 void register_builtin_editors(EditorRegistry &registry)
 {
@@ -48,6 +49,7 @@ void register_builtin_editors(EditorRegistry &registry)
   registry.add({kEditorMaterials, "editor.materials.title", make_materials_editor});
   registry.add({kEditorFederation, "editor.federation.title", make_federation_editor});
   registry.add({kEditorPeers, "editor.peers.title", make_peers_editor});
+  registry.add({kEditorLiterature, "editor.literature.title", make_literature_editor});
 }
 
 }  // namespace stk::app

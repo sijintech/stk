@@ -825,8 +825,41 @@ void Context::draw_widget(const Widget &w)
       draw_.round_box(r, clamp_radius(th.text.roundness * st.unit, r), CORNER_ALL, th.text.inner, th.text.outline);
       if (w.image.texture) {
         const Rect area = r.inset(px, px);
+        const Rect image_rect = image_display_rect(w);
         draw_.clip_push(area);
-        draw_.image(image_display_rect(w), w.image.texture, {0, 0, 1, 1});
+        draw_.image(image_rect, w.image.texture, {0, 0, 1, 1});
+        if (w.image.highlights && !w.image.highlights->empty() && w.image.highlight_color.a && w.image.width > 0 &&
+            w.image.height > 0 && !image_rect.empty() && std::isfinite(image_rect.x) && std::isfinite(image_rect.y) &&
+            std::isfinite(image_rect.w) && std::isfinite(image_rect.h) && std::isfinite(image_rect.x1()) &&
+            std::isfinite(image_rect.y1())) {
+          /* Use the very same rounded image rectangle, including its zoom and pan. Clip to the
+           * image as well as the viewport so out-of-image annotations cannot fill letterboxing. */
+          draw_.clip_push(image_rect);
+          for (const auto &quad : *w.image.highlights) {
+            std::array<Vec2, 4> points;
+            bool valid = true;
+            for (size_t i = 0; i < quad.size(); ++i) {
+              if (!std::isfinite(quad[i].x) || !std::isfinite(quad[i].y)) {
+                valid = false;
+                break;
+              }
+              /* Double intermediates avoid overflowing before the float upload range check. */
+              const double x = double(image_rect.x) + double(quad[i].x) * image_rect.w / w.image.width;
+              const double y = double(image_rect.y) + double(quad[i].y) * image_rect.h / w.image.height;
+              constexpr double limit = std::numeric_limits<float>::max();
+              if (!std::isfinite(x) || !std::isfinite(y) || x < -limit || x > limit || y < -limit || y > limit) {
+                valid = false;
+                break;
+              }
+              points[i] = {float(x), float(y)};
+            }
+            if (valid) {
+              draw_.triangle(points[0], points[1], points[2], w.image.highlight_color);
+              draw_.triangle(points[0], points[2], points[3], w.image.highlight_color);
+            }
+          }
+          draw_.clip_pop();
+        }
         draw_.clip_pop();
       }
       break;
