@@ -1,5 +1,39 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：真实文献 CPU UI 全链、当前桌面 CI 与修复
+
+本地源码HEAD9b338172（99a25c36、9779efea、fe2cdb4b、9b338172），远端仍ae6e3d7c。前整个Desktop42523800365尚在运行，Windows原生128875254641仍live，push门未满足；不以任一job终态代整体。最终提交和推送结果见 `root-delivery-20261108-34/closure.json` 与实际Git。
+
+### 固定资产与真实 UI
+
+本机使用预供PDFium5.14.0与固定E5资产，manifest SHA256 `301ef8fcc5b1cf59cb7f55cd7bbc07e5f852f3deca2f89f4f1c548d20b1c2d71`；无下载、许可求解或收费模型。真实服务预检1/1零skip/34.45s；默认文献33/33、零skip；独立真实资产目标2/2、零skip，case耗时合计62.362s。21项相关源码实际运行前后SHA相等，独立源码审阅无阻断发现，未重跑模型作为第二份独立执行证据。
+
+| 固定起点 | 鼠标点击 | 滚轮 | 结果 |
+|---|---:|---:|---|
+| 默认工作台，en/1600×1100/scale1；Viewer与隐藏未保存Python稿预置 | 37 | 0 | 导入→PDFium索引→E5复核/选择/dense→检索→引用→渲染两次→撤权→历史观察通过 |
+| 默认工作台，zh_CN/1000×1200/scale1；同样状态 | 37 | 0 | 同一真实全链通过，Viewer/相机/隐藏稿保持 |
+
+文字输入及End/Enter属于正常键盘事件，不计入鼠标点击。夹具设置2项、隐藏重显/桥换代注入2项单列。打开文献首1点击、0文献RPC且不建库；业务动作均用正常UI事件，结果逐项绑定实际原请求/UUID/SHA。Jobs纹理hooks接实际核验PNG解码RGBA及逐字quads，两次render顺序create/free/create/free；重render先释放旧纹理，revoke输入同步清页，历史import.review结果不能复活批准。hooks按值捕获共享Capture，早失败或晚析构不依赖派生fixture寿命。CPU UI证据不证明OS/GPU呈现、文献段落科研正确性或检索质量。
+
+复现入口：用 `-DSTK_LITERATURE_REAL_ASSETS_APP_ACCEPTANCE=ON` 配置同一桌面构建，构建 `stk-literature-real-assets-app-tests`；显式设置可信 `STK_LITERATURE_TEST_PYTHON`、`STK_LITERATURE_E5_PYTHON`、`STK_LITERATURE_E5_ASSETS`、上述 `STK_LITERATURE_E5_MANIFEST_SHA256`，以KEY空/MODEL未设运行 `ctest --test-dir <build> -R '^RealAssets/LiteratureRealAssets'`。该目标默认OFF，真实CTest仅发现2项；资产缺失的受控单项反例exit1/失败1/零skip。默认可移植33项不增加skip。最初构建因四行同line的GTest宏label重名失败，拆行后目标构建成功；不把该初稿编译当通过。
+
+### 本机桌面修复与受控反例
+
+八份布局金样逐对象核对，仅新增顶栏文献按钮并位移其后Swap/余量标签，其余区域/控件/值逐字一致；正常测试8/8零skip。生成模式的8项skip是更新金样步骤，未计作测试通过。材料整组22/22零skip/10.868s，保1点击及原30s：count(activate)发生在派发前，durable done亦可早于publication lease释放；现在等UI采用真实ACK，准入后仅只读Busy可在原剩余截止内重观测，其他错误或形状不符即失败。
+
+独立外部完整C++目标同参数注入0.65s：activate保存持锁、version-two done提交后仍持锁两个窗口，旧目标都Busy+null304红，新目标各1/1零skip/2.085s和2.053s。31项共享链接输入SHA前后相等，四次自有进程全部退出；6组提取helper受控clock/ASan负例通过。初次注入Store.update遗漏epoch的无效试跑排除，不独断原CI具体初始/最终读取落点。真实目标数据训练器受控，不证明PyTorch训练准确性。
+
+原生媒体最终源64dbbe36…主目标构建、宏关语法通过，CPU AX五组所在1个CTest通过4.24s，最终源码提取95断言通过。新诊断有界记录显式pause真实快照、隐藏pause的上下界/hold细分条件与实际单调时刻；缺回调/无快照为null，晚回调不改已复制失败记录，诊断不盖原错。不增加probe/input/截图，原期限、DOM/唯一slider、像素和20轮门保持；这些不是生产暂停修复或目标OS验收。
+
+### 已推 ae6 的 CI（不覆盖本批新字节）
+
+[Desktop42523800365](https://github.com/sijintech/stk/actions/runs/42523800365)尚未整体结束。Linux2118中2109通过、9失败/498.06s（六默认金样、两Jobs金样、一个Materials激活测试）；MacCPU1516中1510通过、六默认金样失败/519.24s，Mac原生4/6/480.51s，两视频分别在显式暂停与隐藏暂停条件失败；WindowsCPU1460中1454通过、六默认金样失败/939.69s，Windows原生继续。三平台失败日志均绑定ae6；仍缺Mac失败瞬间的细分观测，本批补诊断待后续新头，不能沿用旧AX/Tab根因。
+
+[Runtime42523800339](https://github.com/sijintech/stk/actions/runs/42523800339)13job全部success；Docs42523800384实际部署与Secret42523800368成功。两个Linux包job成功，不代原生OS验收。PR53/54仍为c9f13994/2dd3e4ee旧头、无关未合。实际Claude第三版仍未最终冻结/安装态验收或集成；其开发62绿与旧candidate2的14红/WIP恢复属另一工作树观察，不作本批产品验收。
+
+本批证据 `root-delivery-20261108-34/root-verification.json`、`desktop-ci-42523800365/materials-activation-review/target-red-green-2/review-final.json` 和各XML/冻结源码审阅。暂存扫描用原.gitleaks.toml的 `gitleaks git --pre-commit --staged`，每个源码提交零发现；四状态文档/索引收尾和最终SHA另记closure，既有WIP保留。
+
+
 ## 2026-11-08 UTC：文献原生UI本机回归（源码已本地提交）
 
 当前源码已本地提交5c0b85d3、远端仍c281620d，构建root-build-06/application-build-01成功；17文件完整暂存80031字节，SHA a5be09859f932deaf1c2c98af6287b2ddf193c10965dc4924ee415d01de4ffef，gitleaks退出0且报告[]；源码已commit，四状态文档/认知收尾和push尚未完成。证据根`native-literature-ui-20261108-29/`，本次收尾记录`root-delivery-20261108-31/`。
