@@ -1,5 +1,14 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：AX 异步调度候选与 S2c 方案审阅
+
+源码 `598a069b` 仅改报告原生夹具：每次完整空AX查找后泵UI至少250ms，再进入原四次上限的下一次；成功输入、唯一时间匹配slider、DOM/OS像素和20轮门均保留。
+独立重读旧artifact确认两视频的第4次累计时间为34.067041/45.657208ms；WebKit311616及WebViewImpl的按需AX初始化为时序假说的直接来源，未声称本候选已修好Mac。
+Linux stk-reports-native-window目标重建退出0；本机不编译或运行新增APPLE分支。暂存836字节gitleaks8.30.1零发现，未新增产品UI或点击测试。
+前761a Desktop42455805095于07:27:11Z completed/failure，4job成功；Mac9文献/2视频，Windows原生1/6旧divider失败。前整轮门满足，下一push将含dc5890b1和598a069b，新CI另核。
+Claude交付145行s2c-plan-05.md，root核对CHECK约束、原prepare副作用和start可重启，选择无格式升级的会话payload方案；新增跨路径竞态要求：仅会话锁无法约束编辑器start，须在同一工作流写事务内防重复。
+已派发CL-S2C-FIRST-CLAIM-06，仅独立树workflow_runs.py与新测试；root负责其余接线和发布。方案测试未执行，完整S2c、真实MuPRO、D1/文献UI等继续，原WIP与待决保留。
+
 ## 2026-11-08 UTC：文献锁、原生夹具及插件测试顺序修正
 
 源码已本地提交 `dc5890b17eeb4c1b7a76aa42e0e8770abeccc924`，5文件；未push，前远端为761a9e37。

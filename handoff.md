@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：前 Desktop 已终态，补 AX 时序候选并拆出 S2c 原子启动模块
+
+main新增源码 `598a069b`：macOS原生视频夹具的完整空AX查询后实际泵UI至少250ms，仍4次查询、唯一时间匹配slider、DOM/OS像素与20轮；不是关闭验收。旧artifact四次仅34.067/45.657ms，WebKit公开初始化竞态支持此候选，目标Mac尚未验证。Linux报告目标重建退出0，但新增APPLE分支未在本机编译/运行。
+前远端761a9e37的整个Desktop42455805095已于07:27:11Z completed/failure，4job成功；Mac仍9文献/2视频失败，Windows原生1/6失败为旧divider问题。等待门已满足，dc5890b1及本候选将一并推送，新CI不得借旧结果认定通过。
+Claude已交145行S2c方案，root审阅后派发CL-S2C-FIRST-CLAIM-06：仅workflow_runs.py和新测试，在同一DB事务内绑定计划/请求/修订/归档并拒绝历史started。会话锁不能排除编辑器并发，不能只在UI外层检查。
+root选择不升项目格式、桌面显式连接/资源、本机未认证身份标记及既有1–100行上限；S2c工具、单次批准消费、恢复、桥/桌面接线和发布契约尚未完成。研究扫描与分析提案持久形式仍待决。
+四文档旧WIP保留，原八项/D1及原生文献/Synthrix入口继续；真实MuPRO与科学有效性仍未验。当前交付、推送与同头CI身份以 `native-ax-20261108-05/root/closure.json` 为准。
+
 ## 2026-11-08 UTC：原生 CI 定向修正与真实 PDF 回归
 
 root 源码已本地提交 main `dc5890b17eeb4c1b7a76aa42e0e8770abeccc924`（5文件），尚未推送；实际远端为 `761a9e37`，纠正下方旧快照的“未推 HDF5”状态。

@@ -1,5 +1,16 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：AX 真实调度间隔与前整轮 Desktop 终态
+
+新源 `598a069b`，前修正源dc5890b1；证据根 `native-ax-20261108-05/root/`。本节不新增产品UI或点击验收，没有真实MuPRO/模型调用；测试构建KEY为空且MODEL移除。
+旧已下载Mac两个result.json重新按字段核验：4次完整查询分别只累计34.067041和45.657208ms，均2节点/0slider/0候选/未送输入。
+[WebKit311616](https://bugs.webkit.org/show_bug.cgi?id=311616)描述远程对象先于AX初始化的空属性竞态，[当前WebViewImpl源码](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/mac/WebViewImpl.mm)在属性查询时按需启用AX；据此作时序候选，不推断runner已含该修复。
+夹具仅在已完整/零候选且尚有重试机会时，泵本窗真实UI直到steady_clock至少250ms后再查；仍4次、原节点/深度/时间匹配及DOM/OS像素/20轮。没有AX setter、DOM seek、全局输入或生产权限修改。
+Linux报告目标重建退出0，native-build-01.log；**新增APPLE分支不在本机编译/执行范围**，目标Mac结果待下一CI。暂存836字节gitleaks零发现，原代码前189/5及CPU24结果不覆盖此新分支。
+前远端761a9e37的[Desktop42455805095](https://github.com/sijintech/stk/actions/runs/42455805095)已completed/failure、updated07:27:11Z，全部6job终态：4成功，Mac失败（9/1488文献、原生2/6视频），Windows原生失败（1/6 HTML视频divider）。前整轮等待门满足，不代表通过；新源码须新头验证。
+Claude145行只读S2c方案已由root审阅，未跑其矩阵。root选择会话payload/无项目格式升级、桌面明确资源和现有批次上限；再将事务内首次启动模块CL-S2C-FIRST-CLAIM-06派发独立树。原计划/请求SHA、修订和归档须与首次started同事务核验，防会话锁之外的编辑器竞争。尚无该模块提交或完整S2c功能验收。
+四状态文档仅前置新节，旧WIP保留；认知工作树和发布状态分开，实际push/新CI结果见本证据closure。扫描数值与分析提案形式仍未代选。
+
 ## 2026-11-08 UTC：CI 定向修正的本机证据（目标 OS 待验）
 
 源提交 `dc5890b17eeb4c1b7a76aa42e0e8770abeccc924`（5文件），本地main；远端仍761a9e37。本批证据根 `native-ci-20261108-04/root/`，最终Git/认知/CI见该目录closure。

@@ -110,10 +110,19 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
 
 ### CL-S2C-PLAN-05：MuPRO 智能体执行授权的实施清单
 
-- **状态：已派发只读规划任务。** root 产品基线 `89e40c89`；Claude 保持干净 `claude/support` / `c975f58d`，不切分支或修改权限设置。
+- **状态：Claude已交外部 `s2c-plan-05.md`（145行），root已按实际源码审阅。** 基线 `89e40c89`，尚未运行方案中的测试或扩展发布权限。root选择会话payload可重算run身份、不升项目格式；由桌面明确选择连接/资源，保留本机未认证身份标记和现有1–100行限制。分析提案持久形式与科学参数仍待所有者。最终准备入口也须支持既有MuPRO工作流/案例行，不把目标缩成仅支持AI新建扫描行；开始仍须完整计划复核。
 - **目标：** 核对 agent 工具/事件、项目运行和桌面桥，提出最小契约及反例矩阵：冻结计划、受信任桌面人工单次批准、prepare/submit 分离、原请求/幂等键恢复、撤权/CAS和取消/观察区分。
 - **范围：** 有界只读当前源码、相关发布契约及测试；只在外部证据目录 `claude/s2c-plan-05.md` 交付源码依据、建议路径和测试清单，不改两棵树的产品、文档或认知资产，不提交推送。
 - **边界：** S2c方向获准不代表无限自动执行；不代选扫描数值或分析提案持久形式，不调用真实求解器或收费模型，不改凭据/端点/网络策略。root 审查后再安排具体实现模块。
+
+### CL-S2C-FIRST-CLAIM-06：工作流首次批准启动的原子门
+
+- **状态：已派发实现任务，尚未交付。** Claude继续独立 `stk-claude / claude/support`，基线c975f58d；root核对其workflow_runs.py与当前main相同，不切分支、不改变权限设置。
+- **唯一写入：** `suan/project/workflow_runs.py`、新增 `tests/test_workflow_run_approval.py`。不改两树其他源码、全局文档、契约或认知资产；不推送、不运行共享CMake/真实Runtime/许可软件/模型。
+- **接口：** `WorkflowRuns.start(..., approval=None)`；省略时保留原人工启动/重启行为。非空为封闭四键 `{approval_id, plan_sha256, request_sha256, expected_revision}`，严格核UUID、小写SHA和非bool整数。
+- **原子约束：** 与追加started同一BEGIN IMMEDIATE内核原计划/请求摘要、当前项目修订、当前workflow_run归档状态，并拒绝任何历史started；started保存验证后独立复制的approval。此对象是前置条件和审计绑定，不是身份认证或可复用授权。
+- **验收：** 错形/漂移无新事件，批准后停止不可再批，普通启动后停止不可转首次批准，原人工重启兼容；不同store并发及真实跨进程SQLite竞争不能双认领，归档/输入变更不绕过。测试KEY空/MODEL缺席、暂存gitleaks后仅提交两文件并交精确SHA。
+- **root职责：** 会话批准记录的单次消费、原身份恢复、工具/桥/桌面接线及版本契约仍由root负责。单独会话锁不能排除编辑器并发启动，所以本门必须落在工作流事务内；本模块交付也不等于完整S2c可用。
 
 root 已核对 `6f4de650` 整个 Desktop 失败终态；继续按最新决定优先 MuPRO/MuFerro 执行器与 HDF5 试点，
 原生文献 UI、Synthrix 正常装配/桌面入口及 D1-D5 保留在队列，按真实依赖推进。
