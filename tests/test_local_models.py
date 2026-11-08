@@ -11,6 +11,7 @@ import sys
 import tarfile
 import threading
 import time
+from types import SimpleNamespace
 from uuid import uuid4
 import zipfile
 
@@ -261,6 +262,9 @@ def server_env(monkeypatch, catalog):
     monkeypatch.setenv("STK_MODEL_CATALOG", str(catalog))
     monkeypatch.setenv("STK_LLAMA_SERVER", json.dumps([sys.executable, str(FAKE_SERVER)]))
     monkeypatch.setattr(local_module, "HEALTH_TIMEOUT_SECONDS", 30)
+    # The stand-in server records its environment; use a public test credential there.
+    monkeypatch.setattr(local_module, "secrets", SimpleNamespace(
+        token_urlsafe=lambda size: "abcdefghijklmnopqrstu" * 2))
 
 
 def make(state, managers, events=None):
@@ -457,7 +461,15 @@ def test_servers_that_fail_or_exit_are_reported_and_not_relaunched(tmp_path, fil
     local.install("tiny-q4", wait=True)
     local.start("tiny-q4", wait=True)
     assert local.is_running("local-tiny-q4")
-    eventually(lambda: local.list()["installed"][0]["server"]["state"] == "failed", timeout=15)
+
+    def failure_reported():
+        installed = local.list()["installed"][0]
+        server = installed["server"]
+        # list() can derive failed from process.poll() before the supervisor publishes its
+        # error and disables autostart. Wait for the complete observable failure report.
+        return server["state"] == "failed" and "exited" in server.get("error", "") and not installed["autostart"]
+
+    eventually(failure_reported, timeout=15)
     assert not local.is_running("local-tiny-q4") and "exited" in local.list()["installed"][0]["server"]["error"]
     assert local.list()["installed"][0]["autostart"] is False
 
