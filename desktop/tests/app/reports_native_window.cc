@@ -651,7 +651,11 @@ class Exercise {
       e.type = wm::EventType::MouseDown; e.button = wm::MouseButton::Left; event(e);
       record("after_down"); frame(); record("after_down_frame");
       require(screen_.capture() == wm::Screen::Capture::Splitter, "Mouse must capture report/Viewer divider");
-      e.type = wm::EventType::MouseMove; e.x += delta; event(e); record("after_move"); frame(); record("after_move_frame");
+      // Finish this locally dispatched gesture before pumping the OS queue.
+      // Windows can enqueue a hover move at the physical pointer position when
+      // hiding the child; while capture is held it would become another drag.
+      // Leave that original event queued for normal routing after MouseUp.
+      e.type = wm::EventType::MouseMove; e.x += delta; event(e); record("after_move");
       e.type = wm::EventType::MouseUp; event(e); record("after_up"); frame(); record("after_up_frame");
       ++layout_drags;
       require(screen_.capture() == wm::Screen::Capture::None && area.rect().width() < before.width() &&

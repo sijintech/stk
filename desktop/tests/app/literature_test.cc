@@ -120,6 +120,10 @@ class LiteratureBridge : public ::testing::Test {
   std::string create(const LiteratureState::ViewPtr &view)
   {
     EXPECT_TRUE(state().act(view,"corpora.create",{{"name","Owned native fixture"}})); settle(view);
+    EXPECT_TRUE(view->values.contains("corpora.create"))
+        << "Create operation state=" << io::get_string(view->operation,"state")
+        << "; error_code=" << (view->operation.contains("error") && view->operation.at("error").is_object() ?
+            io::get_string(view->operation.at("error"),"code") : std::string());
     if (!view->values.contains("corpora.create")) { return {}; }
     const auto id = io::get_string(view->values.at("corpora.create"),"corpus_id"); EXPECT_TRUE(state().set_corpus(view,id));
     EXPECT_TRUE(state().read(view,"corpora.info",{{"corpus_id",id}})); settle(view); return id;

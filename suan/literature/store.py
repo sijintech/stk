@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import sqlite3
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -35,6 +36,10 @@ MAX_CITATION_CHARACTERS = 65536
 MAX_CITATION_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_CITATION_EVIDENCE_BYTES = 16 * 1024 * 1024
 _JOURNAL_MAGIC = bytes.fromhex("d9d505f920a163d7")
+# Darwin's flock and fcntl locks share an inode lock list. A whole-file flock
+# on the DB can therefore block SQLite's own byte-range locks in this process.
+# Lease the stable corpus directory there; retain Linux's existing DB lease.
+_DIRECTORY_LEASE = sys.platform == "darwin"
 _SQL_TOKEN = re.compile(r''''(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|[A-Za-z_][A-Za-z_0-9]*|[0-9]+|[^\s]''')
 
 
@@ -223,11 +228,21 @@ class Library:
         if os.name != "posix":
             return None  # Cold SQLite operations work; physical recovery is unproven.
         import fcntl
-        named = ordinary(self.path)
-        fd = os.open(self.path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        target = self.root if _DIRECTORY_LEASE else self.path
+        if _DIRECTORY_LEASE:
+            directory(target)
+            named = target.lstat()
+        else:
+            named = ordinary(target)
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        if _DIRECTORY_LEASE:
+            flags |= getattr(os, "O_DIRECTORY", 0)
+        fd = os.open(target, flags)
         try:
             opened = os.fstat(fd)
-            if (not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1
+            valid = stat.S_ISDIR(opened.st_mode) if _DIRECTORY_LEASE else (
+                stat.S_ISREG(opened.st_mode) and opened.st_nlink == 1)
+            if (not valid
                     or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)): fail()
             until = time.monotonic() + 15
             while True:
@@ -236,7 +251,11 @@ class Library:
                 except BlockingIOError:
                     if time.monotonic() >= until: fail("busy", "Local literature database is busy")
                     time.sleep(.01)
-            after = ordinary(self.path)
+            if _DIRECTORY_LEASE:
+                directory(target)
+                after = target.lstat()
+            else:
+                after = ordinary(target)
             if (after.st_dev, after.st_ino) != (opened.st_dev, opened.st_ino): fail()
             self._gate.leased = True
             return fd
@@ -412,7 +431,8 @@ class Library:
             if db is not None:
                 db.close(); self._gate.connections -= 1
             if lease is not None:
-                # Closing ANY raw DB descriptor must follow SQLite close on POSIX.
+                # Keep the corpus lease through SQLite close. On Linux this also
+                # avoids closing any raw DB descriptor while SQLite owns locks.
                 os.close(lease); self._gate.leased = False
 
     @staticmethod

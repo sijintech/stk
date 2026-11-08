@@ -290,24 +290,35 @@ def test_physical_recovery_without_supported_exclusive_lease_fails_closed(tmp_pa
 
 @pytest.mark.skipif(os.name != "posix", reason="Actual POSIX independent recovery lease")
 def test_recovery_copy_holds_cross_process_lease_without_sqlite_connection(tmp_path, monkeypatch):
-    library, _ = _hot_library(tmp_path); copy_file = library._copy_file; checked = False
+    import suan.literature.store as module
     child = """import fcntl,os,sys
 fd=os.open(sys.argv[1],os.O_RDONLY)
 try:
  try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
- except BlockingIOError:sys.exit(0)
- else:sys.exit(1)
+ except BlockingIOError:sys.exit(0 if sys.argv[2]=='blocked' else 1)
+ else:sys.exit(0 if sys.argv[2]=='available' else 1)
 finally:os.close(fd)
 """
-    def check(path, maximum, target=None):
-        nonlocal checked
-        if not checked and target is not None and path == library.path:
-            checked = True; assert library._gate.connections == 0
-            result = subprocess.run([sys.executable, "-c", child, str(library.path)], timeout=5)
-            assert result.returncode == 0, "Recovery pair was not held under its cross-process lease"
-        return copy_file(path, maximum, target)
-    monkeypatch.setattr(library, "_copy_file", check)
-    assert library.info()["generation"] == 1; assert checked
+    # Linux can exercise both policies. Darwin's flock and SQLite fcntl locks
+    # share a namespace, so only the directory policy can open its database.
+    policies = (True,) if sys.platform == "darwin" else (False, True)
+    for directory_lease in policies:
+        monkeypatch.setattr(module, "_DIRECTORY_LEASE", directory_lease, raising=False)
+        case = tmp_path / ("directory" if directory_lease else "database"); case.mkdir()
+        library, _ = _hot_library(case); copy_file = library._copy_file; checked = False
+        def check(path, maximum, target=None):
+            nonlocal checked
+            if not checked and target is not None and path == library.path:
+                checked = True; assert library._gate.connections == 0
+                lease_target = library.root if directory_lease else library.path
+                result = subprocess.run([sys.executable, "-c", child, str(lease_target), "blocked"], timeout=5)
+                assert result.returncode == 0, "Recovery pair was not held under its cross-process lease"
+                if directory_lease:
+                    result = subprocess.run([sys.executable, "-c", child, str(library.path), "available"], timeout=5)
+                    assert result.returncode == 0, "Corpus lease must not block SQLite's own DB-file locks"
+            return copy_file(path, maximum, target)
+        monkeypatch.setattr(library, "_copy_file", check)
+        assert library.info()["generation"] == 1; assert checked
 
 
 @pytest.mark.parametrize("fragment", ["value TEXT DEFAULT '{value}'", '"{value}" TEXT'])

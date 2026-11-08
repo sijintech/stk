@@ -14,7 +14,7 @@ from suan.connectors.mupro import MuFerroConnector, frame_rows  # noqa: E402
 from suan.connectors.mupro import source as adapter  # noqa: E402
 from suan.data.manifest import check, validate_result  # noqa: E402
 from suan.graph.cache import GraphCache  # noqa: E402
-from suan.graph.catalog import default_registry  # noqa: E402
+from suan.graph.catalog import build_registry  # noqa: E402
 from suan.graph.evaluator import EvaluationFailed, evaluate  # noqa: E402
 from suan.graph.resolve import LocalDirResolver  # noqa: E402
 from test_connectors_muferro import FakeClient  # noqa: E402
@@ -36,7 +36,9 @@ def result_graph():
 
 
 def evaluate_result(root, **kwargs):
-    return evaluate(result_graph(), registry=default_registry(), resolver=LocalDirResolver({"run": root}), **kwargs)
+    # Catalog tests reload built-ins; do not reuse an earlier module's functions.
+    return evaluate(result_graph(), registry=build_registry(entry_points=False),
+                    resolver=LocalDirResolver({"run": root}), **kwargs)
 
 
 def test_hdf5_and_dat_are_distinct_and_read_with_native_metadata(tmp_path):
@@ -203,7 +205,8 @@ def test_hdf5_over_budget_does_not_block_the_dat_run_index(tmp_path, monkeypatch
 
 
 def test_replacement_subclass_keeps_its_describe_contract_and_native_format(tmp_path, monkeypatch):
-    from suan.graph.nodes import sources
+    import importlib
+    sources = importlib.import_module("suan.graph.nodes.sources")
     write_case(tmp_path)
     write_outputs(tmp_path)
     document = MuFerroConnector().describe(LocalFiles(tmp_path))
