@@ -296,6 +296,8 @@ class AgentSessions:
                     awaited[item["item_id"]] = item
             elif kind == "approval_receipt" and event.get("ok") and event.get("item_id"):
                 resolved.add(event["item_id"])  # a decision whose action failed leaves its item open
+            elif kind == "approval_decided" and event.get("item_kind") == "start_run" and event.get("item_id"):
+                resolved.add(event["item_id"])  # run decisions are consumed before dispatch, even without a receipt
             elif kind == "observed" and event.get("resolved", False) and event.get("item_id"):
                 resolved.add(event["item_id"])
         open_items = [item for key, item in awaited.items() if key not in resolved][-MAX_AWAITING:]

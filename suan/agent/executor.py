@@ -440,10 +440,22 @@ class AgentExecutor:
                             and event["item_id"] == receipt["item_id"] and event["id"] < receipt["id"]), {})
             facts = {"kind": "decision", "decision": decided.get("decision"), "draft_id": decided.get("draft_id"),
                      **{key: receipt[key] for key in ("ok", "applied_revision", "error") if key in receipt}}
+            if decided.get("item_kind") == "start_run":
+                facts = {"kind": "run_decision", "decision": decided["decision"],
+                         **{key: receipt[key] for key in ("ok", "run_id", "approval", "outcome", "run_status")
+                            if key in receipt}}
             store.agent_sessions.append(session_id, "observed", {"item_id": receipt["item_id"], "facts": facts,
                                                                  "resolved": bool(receipt.get("ok")), "at": time.time()},
                                         turn=turn)
         for item in state["awaiting"]:
+            if item["kind"] == "start_run":
+                from .run_approvals import RunApprovals
+                result = RunApprovals(store).observe(session_id, item["item_id"])
+                store.agent_sessions.append(session_id, "observed", {
+                    "item_id": item["item_id"], "facts": {"kind": "run_approval", "run_id": item["run_id"],
+                                                          "outcome": result["outcome"]},
+                    "resolved": result["outcome"] in ("started", "declined", "other_start"), "at": time.time()}, turn=turn)
+                continue
             facts, resolved = {"kind": item["kind"]}, False
             try:
                 draft = store.drafts.get(item["draft_id"])
