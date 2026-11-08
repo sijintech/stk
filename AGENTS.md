@@ -44,6 +44,32 @@
   `docs/runtime-validation.md`. Run a secret scan (gitleaks with `.gitleaks.toml`) on staged changes before committing.
 - Pending owner decisions are listed in `handoff.md`; do not build on an option the owner has not chosen.
 
+# Agent roles (owner decision 2026-11-07, option A)
+
+Codex and Claude share one working tree on `main`. Only one agent writes product code and integrates.
+
+- **Codex is Root, the integrator.** It owns product code and tests, native builds and full CTest
+  (`/home/mnemora/opt/stk-build/merge-check`), every push, CI follow-up, AOCI loading and maintenance, and the four
+  state docs: `handoff.md`, `docs/development-plan.md`, `docs/development-log.md` and `docs/runtime-validation.md`.
+  Its queue, in order:
+  1. CI of `6f4de650`;
+  2. committing the 11-03 record WIP together with AOCI maintenance;
+  3. the native literature editor and its click acceptance;
+  4. Synthrix normal-startup assembly and its desktop entry;
+  5. D1 implementation.
+- **Claude does design, decision memos and review.** It owns three things:
+  - the D1 pre-work: settling the new schema and compatibility gates that the plan requires before D1 is implemented;
+  - decision memos for the three pending owner decisions in `handoff.md` and for the PET ester-ipso charge;
+  - critical review of Root's deliveries, with findings reported to Root rather than applied by Claude.
+- **Claude's write scope.** Claude writes only files it creates under `docs/design/` or `docs/planning/`, plus this
+  section. It does not edit, stage or commit Root's WIP, product code, the four state docs, `aoci.txt` or `.aoci/`.
+  It does not run native builds or full CTest. Claude commits its own files locally; Root pushes them and records them
+  in the state docs.
+- **Commits.** Before committing, each agent checks that `git diff --cached` holds only its own changes and commits
+  with an explicit pathspec (`git commit --only -- <paths>`).
+- **Designs and changes.** A Claude design is a proposal: Root implements only the options the owner has chosen. Only
+  the owner changes this split.
+
 <!-- aoci:begin -->
 ## AOCI 仓库认知
 
