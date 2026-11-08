@@ -3,6 +3,8 @@
 #include "stk/app/app_store.hh"
 #include "stk/app/literature_state.hh"
 #include "stk/app/literature_contract.hh"
+#include "stk/app/literature_page.hh"
+#include "stk/app/jobs_state.hh"
 #include "stk/bridge/schema.hh"
 #include "stk/bridge/python.hh"
 #include "stk/bridge/process.hh"
@@ -17,6 +19,11 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <map>
+#include <memory>
+#include <set>
+#include <vector>
 
 namespace stk::app {
 namespace {
@@ -96,6 +103,8 @@ class LiteratureBridge : public ::testing::Test {
   bridge::test::TempDir dir{"literature-controller"}; bridge::test::ManualLoop loop;
   wmtest::AppFixture fixture{"en", 1, 1600, 1100}; AppStore &store = fixture.shell->store();
   std::unique_ptr<bridge::Client> client;
+  virtual const char *service_script() const { return script; }
+  virtual void service_environment(bridge::ClientOptions &) const {}
   LiteratureState &state() { return store.literature(); }
   void marker(const std::string &name) { std::ofstream(dir.path() / ("control." + name)) << "marker"; }
   bool exists(const std::string &name) { return std::filesystem::exists(dir.path() / ("control." + name)); }
@@ -109,13 +118,14 @@ class LiteratureBridge : public ::testing::Test {
     std::string python = STK_BRIDGE_TEST_PYTHON_DEFAULT;
     if (const char *p = std::getenv("STK_BRIDGE_TEST_PYTHON"); p && *p) { python = p; }
     if (python.empty()) { python = bridge::find_executable("python3").value_or(""); }
-    ASSERT_FALSE(python.empty()); std::ofstream(dir.path() / "bridge.py") << script;
+    ASSERT_FALSE(python.empty()); std::ofstream(dir.path() / "bridge.py") << service_script();
     bridge::ClientOptions options; options.executor = loop.executor(); options.python.configured = python;
     options.state_dir = dir.str() + "/bridge"; options.cache_dir = dir.str() + "/cache";
     options.env["PYTHONPATH"] = STK_REPO_ROOT; options.env["STK_STATE_DIR"] = dir.str() + "/no-runtime";
     options.env["STK_PROFILES_FILE"] = dir.str() + "/profiles.json";
     options.env["STK_TOKEN_PLAN_API_KEY"] = ""; options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
     options.strict = options.validate = true; options.resume_transfers = false;
+    service_environment(options);
     options.command = {python,"-u",dir.str()+"/bridge.py",dir.str()+"/control","--stdio","--strict","--state-dir",options.state_dir,"--cache-dir",options.cache_dir};
     client = bridge::Client::create(options); ASSERT_TRUE(client->start()); ASSERT_TRUE(client->wait_ready(60));
     loop.run_ready(); store.set_bridge(client.get());
@@ -453,5 +463,338 @@ TEST_P(LiteratureMouse, CachedActionRefusesSameClientRestartBeforeItsStateListen
 }
 
 INSTANTIATE_TEST_SUITE_P(FixedLayouts, LiteratureMouse, ::testing::Bool());
+
+#ifdef STK_LITERATURE_REAL_ASSETS_ACCEPTANCE
+// This wrapper observes owned requests/replies without replacing any DTO or
+// inference. Interpreter selection is trusted Bridge construction, never UI/RPC.
+constexpr const char *real_assets_script = R"PY(
+from pathlib import Path
+import json,sys,threading,os
+control=Path(sys.argv.pop(1))
+sys.path.insert(0,str(Path(os.environ['PYTHONPATH'])/'tests'))
+from test_literature_pdf import make_pdf
+(control.parent/'real-owned.pdf').write_bytes(make_pdf([[
+    'A solar cell converts sunlight into electrical energy.',
+    'Self-authored solar cell sunlight software fixture; no experimental measurements.'
+]]))
+from suan.desktop_bridge import server
+from suan.desktop_bridge.literature import LiteratureService
+BaseBridge=server.Bridge
+lock=threading.Lock()
+calls=LiteratureService.call
+def observed_call(self,action,params):
+    with lock:
+        with control.with_suffix('.calls').open('a') as f:f.write(action+'\n')
+        with control.with_suffix('.requests').open('a') as f:
+            f.write(json.dumps({'action':action,'params':params},allow_nan=False)+'\n')
+    return calls(self,action,params)
+LiteratureService.call=observed_call
+class TrustedBridge(BaseBridge):
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,
+            literature_parser_python=os.environ['STK_LITERATURE_TEST_PYTHON'],
+            literature_encoder_python=os.environ['STK_LITERATURE_E5_PYTHON'],**kwargs)
+    def send(self,message,method=None):
+        if method and method.startswith('literature.') and 'result' in message:
+            with lock,control.with_suffix('.replies').open('a') as f:
+                f.write(json.dumps({'method':method,'result':message['result']},allow_nan=False)+'\n')
+        return super().send(message,method)
+server.Bridge=TrustedBridge
+from suan.desktop_bridge.__main__ import main
+raise SystemExit(main())
+)PY";
+
+class LiteratureRealAssets : public LiteratureMouse {
+ protected:
+  static constexpr const char *manifest_sha = "301ef8fcc5b1cf59cb7f55cd7bbc07e5f852f3deca2f89f4f1c548d20b1c2d71";
+  std::string parser_python_, encoder_python_, assets_;
+  struct Capture {
+    std::map<uint64_t, io::Image> uploaded;
+    std::set<uint64_t> live_textures;
+    std::vector<std::string> events;
+    uint64_t next_texture = 1;
+  };
+  // The editor copies its free hook. Its capture must outlive this derived
+  // fixture even if setup/assertions fail and base-owned UI destruction is late.
+  std::shared_ptr<Capture> capture_ = std::make_shared<Capture>();
+  const char *service_script() const override { return real_assets_script; }
+  void service_environment(bridge::ClientOptions &options) const override
+  {
+    options.env["STK_LITERATURE_TEST_PYTHON"] = parser_python_;
+    options.env["STK_LITERATURE_E5_PYTHON"] = encoder_python_;
+    options.env["HF_HUB_OFFLINE"] = "1"; options.env["TRANSFORMERS_OFFLINE"] = "1";
+  }
+  static std::string required_environment(const char *key)
+  {
+    const char *value = std::getenv(key);
+    if (!value || !*value) { ADD_FAILURE() << "Explicit installed asset is required: " << key; return {}; }
+    return value;
+  }
+  void SetUp() override
+  {
+    parser_python_ = required_environment("STK_LITERATURE_TEST_PYTHON");
+    encoder_python_ = required_environment("STK_LITERATURE_E5_PYTHON");
+    assets_ = required_environment("STK_LITERATURE_E5_ASSETS");
+    const auto selected_sha = required_environment("STK_LITERATURE_E5_MANIFEST_SHA256");
+    ASSERT_FALSE(parser_python_.empty()); ASSERT_FALSE(encoder_python_.empty()); ASSERT_FALSE(assets_.empty());
+    ASSERT_EQ(selected_sha, manifest_sha) << "This acceptance requires the reviewed, fixed E5 manifest";
+    for (const auto &path : {parser_python_, encoder_python_}) {
+      ASSERT_TRUE(std::filesystem::path(path).is_absolute());
+      ASSERT_TRUE(std::filesystem::is_regular_file(path)) << "Required interpreter is absent: " << path;
+    }
+    ASSERT_TRUE(std::filesystem::path(assets_).is_absolute());
+    const auto manifest = std::filesystem::path(assets_) / "manifest.json";
+    ASSERT_TRUE(std::filesystem::is_regular_file(manifest));
+    ASSERT_LE(std::filesystem::file_size(manifest), 16384u);
+    ASSERT_EQ(core::Sha256::hex(wmtest::read_text(manifest.string())), manifest_sha);
+    ASSERT_NO_FATAL_FAILURE(LiteratureMouse::SetUp());
+    ASSERT_TRUE(std::filesystem::is_regular_file(dir.path() / "real-owned.pdf"));
+    auto &jobs = store.jobs();
+    jobs.create_texture = [capture = capture_](const io::Image &image) {
+      const auto handle = capture->next_texture++;
+      EXPECT_TRUE(capture->live_textures.empty()) << "Replacement must release the prior texture before upload";
+      capture->uploaded[handle] = image; capture->live_textures.insert(handle);
+      capture->events.push_back("create/" + std::to_string(handle)); return handle;
+    };
+    jobs.free_texture = [capture = capture_](uint64_t handle) {
+      EXPECT_EQ(capture->live_textures.erase(handle), 1u);
+      capture->events.push_back("free/" + std::to_string(handle));
+    };
+  }
+  void TearDown() override
+  {
+    LiteratureBridge::TearDown(); // Bridge invalidation releases the editor's copied free hook first.
+    state().sync({}); // Also covers a failed setup/close with no queued state notification.
+    EXPECT_TRUE(capture_->live_textures.empty());
+    store.jobs().create_texture = {}; store.jobs().free_texture = {};
+  }
+  std::vector<Json> observations(const char *suffix) const
+  {
+    std::ifstream input(dir.path() / (std::string("control.") + suffix));
+    std::vector<Json> result; std::string line;
+    while (std::getline(input, line)) {
+      // A concurrent append may expose its last incomplete line. Retry on the
+      // next poll, without treating it as a completed receipt or printing bytes.
+      if (line.size() > 8 * 1024 * 1024) { ADD_FAILURE() << "Owned observation exceeds protocol budget"; break; }
+      auto value = Json::parse(line, nullptr, false);
+      if (!value.is_discarded()) { result.push_back(std::move(value)); }
+    }
+    return result;
+  }
+  std::vector<Json> results(const std::string &action) const
+  {
+    std::set<std::string> seen; std::vector<Json> result;
+    for (const auto &record : observations("replies")) {
+      if (io::get_string(record, "method") != "literature.operations.result") { continue; }
+      const auto &envelope = record.at("result"); const auto &op = envelope.at("operation");
+      if (io::get_string(op, "action") == action && seen.insert(io::get_string(op, "operation_id")).second) {
+        result.push_back(envelope);
+      }
+    }
+    return result;
+  }
+  int reply_count(const std::string &method) const
+  {
+    int n = 0;
+    for (const auto &record : observations("replies")) { n += io::get_string(record, "method") == "literature." + method; }
+    return n;
+  }
+  int total_calls() const
+  {
+    std::ifstream input(dir.path() / "control.calls"); std::string line; int n = 0;
+    while (std::getline(input, line)) { ++n; } return n;
+  }
+  bool enabled(const std::string &key) const { const auto *w = widget(key); return w && w->enabled; }
+  void wait_result(const std::string &action, size_t ordinal, const std::function<bool()> &adopted, double timeout = 90)
+  {
+    ASSERT_TRUE(loop.pump_until([&] {
+      frame(); return results(action).size() >= ordinal && calls(action) >= int(ordinal) && adopted();
+    }, timeout)) << "UI did not adopt original result: " << action << " #" << ordinal;
+    ASSERT_EQ(calls(action), int(ordinal));
+    const auto envelope = results(action).at(ordinal - 1); const auto &op = envelope.at("operation");
+    ASSERT_EQ(io::get_string(op, "state"), "completed");
+    ASSERT_TRUE(LiteratureState::operation_matches(op, io::get_string(op, "operation_id")));
+    ASSERT_EQ(LiteratureState::checksum(envelope.at("result")), io::get_string(op, "result_sha256"));
+    bool original = false;
+    for (const auto &request : observations("requests")) {
+      if (io::get_string(request, "action") == action &&
+          io::get_string(request.at("params"), "operation_id") == io::get_string(op, "operation_id")) {
+        EXPECT_EQ(LiteratureState::request_sha256(action, request.at("params")), io::get_string(op, "request_sha256"));
+        original = true;
+      }
+    }
+    EXPECT_TRUE(original) << "Result must bind the actual owned UI request";
+  }
+  void verify_page(const Json &resolved, const Json &rendered)
+  {
+    LiteraturePage expected; ASSERT_TRUE(expected.adopt(resolved, rendered)) << expected.error();
+    ASSERT_TRUE(expected.ready()); ASSERT_TRUE(expected.highlights()); ASSERT_FALSE(expected.highlights()->empty());
+    EXPECT_EQ(core::Sha256::hex(expected.png()), io::get_string(rendered.at("image"), "sha256"));
+    const auto *w = widget("literature_page"); ASSERT_NE(w, nullptr); ASSERT_NE(w->image.texture, 0u);
+    ASSERT_TRUE(capture_->uploaded.contains(w->image.texture)); ASSERT_TRUE(capture_->live_textures.contains(w->image.texture));
+    const auto &actual = capture_->uploaded.at(w->image.texture);
+    EXPECT_EQ(actual.width, expected.image()->width); EXPECT_EQ(actual.height, expected.image()->height);
+    EXPECT_EQ(actual.channels, 4u); EXPECT_EQ(actual.pixels.size(), expected.image()->pixels.size());
+    EXPECT_EQ(core::Sha256::hex(actual.pixels), core::Sha256::hex(expected.image()->pixels));
+    EXPECT_EQ(w->image.width, int(actual.width)); EXPECT_EQ(w->image.height, int(actual.height));
+    ASSERT_TRUE(w->image.highlights); ASSERT_EQ(w->image.highlights->size(), expected.highlights()->size());
+    for (size_t i = 0; i < expected.highlights()->size(); ++i) {
+      for (size_t p = 0; p < 4; ++p) {
+        EXPECT_FLOAT_EQ(w->image.highlights->at(i)[p].x, float(expected.highlights()->at(i).points[p][0]));
+        EXPECT_FLOAT_EQ(w->image.highlights->at(i)[p].y, float(expected.highlights()->at(i).points[p][1]));
+      }
+    }
+  }
+};
+
+TEST_P(LiteratureRealAssets, OwnedPdfAndPinnedE5ThroughExplicitCpuUiPreserveViewerDraftAndRevocation)
+{
+  // Fixture seeding and the two lifecycle injections below are not counted as
+  // mouse navigation. All literature business actions use ordinary input events.
+  auto &bottom = fixture.area("a4"); ASSERT_TRUE(bottom.set_tabs({kEditorLogs, kEditorPython}, 0));
+  auto hidden = bottom.tab(1).save_workspace_state();
+  hidden["source"] = "print('keep exact hidden real literature draft')\n# 未运行草稿";
+  ASSERT_TRUE(bottom.tab(1).load_workspace_state(hidden));
+  store.viewer().set_auto_evaluate(false); store.viewer().prefetch_neighbours = false;
+  auto payload = std::make_shared<io::Payload>(io::read_stkp(std::string(STK_REPO_ROOT) + "/desktop/tests/viewer/fixtures/muferro_domains.stkp"));
+  store.viewer().open_payload(payload, "Public owned real literature UI fixture");
+  ASSERT_TRUE(loop.pump_until([&] { store.viewer().pump(); return !store.viewer().presets().empty() &&
+      store.viewer().catalog().is_object() && store.viewer().colormaps(); }));
+  const auto viewer = store.viewer().save_workspace_state();
+  const auto camera = store.viewer().camera_serial(), serial = store.viewer().payload_serial(); frame();
+
+  ASSERT_NO_FATAL_FAILURE(click("tool_literature")); ASSERT_NE(literature_area(), nullptr);
+  EXPECT_EQ(clicks, 1); EXPECT_EQ(wheels, 0); EXPECT_EQ(total_calls(), 0);
+  EXPECT_FALSE(std::filesystem::exists(dir.path() / "bridge/literature"));
+  ASSERT_NO_FATAL_FAILURE(click("literature_refresh"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return calls("info") == 1 && calls("encoder.info") == 1 && enabled("literature_refresh"); }));
+  EXPECT_FALSE(std::filesystem::exists(dir.path() / "bridge/literature"));
+  ASSERT_NO_FATAL_FAILURE(section(1));
+  ASSERT_NO_FATAL_FAILURE(text("literature_name", "Owned real PDFium E5 UI library"));
+  ASSERT_NO_FATAL_FAILURE(click("literature_create"));
+  ASSERT_NO_FATAL_FAILURE(wait_result("corpora.create", 1, [&] { return enabled("literature_created"); }));
+  const auto scope = io::get_string(results("corpora.create").at(0).at("result"), "corpus_id");
+  ASSERT_TRUE(LiteratureState::corpus_id(scope));
+  ASSERT_NO_FATAL_FAILURE(click("literature_created"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return state().corpus_info(scope) && enabled("literature_source"); }));
+  const auto source = dir.path() / "real-owned.pdf";
+  ASSERT_NO_FATAL_FAILURE(text("literature_source", source.string()));
+  ASSERT_NO_FATAL_FAILURE(text("literature_title", "Self-authored solar cell software fixture"));
+  ASSERT_NO_FATAL_FAILURE(click("literature_basis"));
+  fixture.drv->key(wm::Key::End); fixture.drv->key(wm::Key::Enter); frame();
+  ASSERT_EQ(widget("literature_basis")->index.value(), 1);
+  ASSERT_NO_FATAL_FAILURE(text("literature_evidence", "Self-authored generated software-test PDF; no third-party or private data"));
+  ASSERT_NO_FATAL_FAILURE(text("literature_approved_by", "Owned fixture author"));
+  ASSERT_NO_FATAL_FAILURE(click("literature_authorized"));
+  ASSERT_TRUE(widget("literature_authorized")->boolean.value());
+  ASSERT_NO_FATAL_FAILURE(click("literature_import_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_result("import.review", 1, [&] { return enabled("literature_import_commit"); }));
+  const auto reviewed = results("import.review").at(0); const auto &review = reviewed.at("result");
+  const auto review_id = io::get_string(reviewed.at("operation"), "operation_id");
+  EXPECT_EQ(review.at("authorization").at("basis"), "self_authored");
+  EXPECT_EQ(review.at("authorization").at("approved_by"), "Owned fixture author");
+  EXPECT_EQ(io::get_string(review, "source_sha256"), core::Sha256::hex(wmtest::read_text(source.string())));
+  ASSERT_NO_FATAL_FAILURE(click("literature_import_commit"));
+  ASSERT_NO_FATAL_FAILURE(wait_result("import.commit", 1, [&] { return enabled("literature_index"); }));
+  const auto version = io::get_string(results("import.commit").at(0).at("result").at("receipt"), "version_id");
+  ASSERT_FALSE(version.empty());
+  ASSERT_NO_FATAL_FAILURE(click("literature_index"));
+  ASSERT_NO_FATAL_FAILURE(wait_result("index.start", 1, [&] {
+    const auto r = results("index.start"); const auto *info = state().corpus_info(scope);
+    return !r.empty() && info && info->at("generation") == r.at(0).at("result").at("receipt").at("generation") && enabled("literature_index");
+  }));
+
+  ASSERT_NO_FATAL_FAILURE(section(2));
+  ASSERT_NO_FATAL_FAILURE(text("literature_assets", assets_));
+  ASSERT_NO_FATAL_FAILURE(click("literature_encoder_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_result("encoder.review", 1, [&] { return enabled("literature_encoder_select"); }));
+  const auto encoder_review = results("encoder.review").at(0).at("result");
+  EXPECT_EQ(io::get_string(encoder_review, "assets_sha256"), manifest_sha);
+  EXPECT_EQ(io::get_string(encoder_review, "python"), encoder_python_);
+  ASSERT_NO_FATAL_FAILURE(click("literature_encoder_select"));
+  ASSERT_NO_FATAL_FAILURE(wait_result("encoder.select", 1, [&] {
+    const auto &info = state().encoder_info();
+    return info.is_object() && info.at("selection").is_object() &&
+      info.at("selection").at("fingerprint") == encoder_review.at("fingerprint") && enabled("literature_build");
+  }));
+  ASSERT_NO_FATAL_FAILURE(click("literature_build"));
+  ASSERT_NO_FATAL_FAILURE(wait_result("dense.build", 1, [&] {
+    const auto r = results("dense.build"); const auto *info = state().corpus_info(scope);
+    return !r.empty() && info && info->at("dense_generation") == r.at(0).at("result").at("receipt").at("generation") && enabled("literature_build");
+  }, 630));
+  EXPECT_GE(io::get_int(results("dense.build").at(0).at("result").at("receipt"), "windows", 0), 1);
+
+  ASSERT_NO_FATAL_FAILURE(section(0));
+  ASSERT_NO_FATAL_FAILURE(click("literature_refresh"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return enabled("literature_scope/" + scope) && enabled("literature_query"); }));
+  EXPECT_TRUE(widget("literature_scope/" + scope)->boolean.value());
+  ASSERT_NO_FATAL_FAILURE(text("literature_query", "solar cell sunlight"));
+  ASSERT_NO_FATAL_FAILURE(click("literature_search"));
+  ASSERT_NO_FATAL_FAILURE(wait_result("search", 1, [&] { return enabled("literature_hit/0"); }, 145));
+  const auto search = results("search").at(0).at("result"); ASSERT_FALSE(search.at("hits").empty());
+  const auto hit = search.at("hits").at(0); EXPECT_EQ(io::get_string(hit, "corpus_id"), scope);
+  EXPECT_NE(io::get_string(hit, "text").find("sunlight"), std::string::npos);
+  ASSERT_NO_FATAL_FAILURE(click("literature_hit/0"));
+  ASSERT_NO_FATAL_FAILURE(click("literature_resolve"));
+  ASSERT_NO_FATAL_FAILURE(wait_result("citations.resolve", 1, [&] { return enabled("literature_render"); }));
+  const auto resolved = results("citations.resolve").at(0).at("result");
+  EXPECT_EQ(resolved.at("citation"), hit.at("citation")); EXPECT_EQ(resolved.at("text"), hit.at("text"));
+  EXPECT_EQ(resolved.at("parser").at("pypdfium2"), "5.14.0");
+  EXPECT_EQ(resolved.at("text_status"), "mapped"); EXPECT_EQ(resolved.at("structure_status"), "unreviewed");
+  ASSERT_NO_FATAL_FAILURE(click("literature_render"));
+  ASSERT_NO_FATAL_FAILURE(wait_result("pages.render", 1, [&] { return widget("literature_page") && capture_->live_textures.size() == 1; }));
+  const auto rendered = results("pages.render").at(0).at("result");
+  EXPECT_EQ(rendered.at("source_sha256"), review.at("source_sha256"));
+  ASSERT_NO_FATAL_FAILURE(verify_page(resolved, rendered));
+  const auto first_texture = widget("literature_page")->image.texture;
+  ASSERT_NO_FATAL_FAILURE(click("literature_render"));
+  EXPECT_TRUE(capture_->live_textures.empty()) << "Normal render input releases prior pixels before reply adoption";
+  ASSERT_EQ(capture_->events.size(), 2u); EXPECT_EQ(capture_->events.back(), "free/" + std::to_string(first_texture));
+  ASSERT_NO_FATAL_FAILURE(wait_result("pages.render", 2, [&] { return widget("literature_page") && capture_->live_textures.size() == 1; }));
+  ASSERT_NO_FATAL_FAILURE(verify_page(resolved, results("pages.render").at(1).at("result")));
+  const auto second_texture = widget("literature_page")->image.texture; EXPECT_NE(second_texture, first_texture);
+  EXPECT_EQ(results("pages.render").at(1).at("result").at("image").at("sha256"), rendered.at("image").at("sha256"));
+
+  ASSERT_NO_FATAL_FAILURE(section(1));
+  ASSERT_NO_FATAL_FAILURE(click("literature_revoke"));
+  EXPECT_TRUE(capture_->live_textures.empty()) << "Revoke input must clear real content before queued RPC replies run";
+  EXPECT_EQ(capture_->events.back(), "free/" + std::to_string(second_texture));
+  ASSERT_NO_FATAL_FAILURE(wait_result("versions.revoke", 1, [&] { return enabled("literature_revoke"); }));
+  EXPECT_FALSE(results("versions.revoke").at(0).at("result").at("receipt").at("active").get<bool>());
+  ASSERT_NO_FATAL_FAILURE(section(0)); EXPECT_EQ(widget("literature_page"), nullptr);
+  ASSERT_NE(widget("literature_resolve"), nullptr); EXPECT_FALSE(widget("literature_resolve")->enabled);
+  EXPECT_FALSE(widget("literature_render")->enabled);
+  ASSERT_NO_FATAL_FAILURE(section(3));
+  ASSERT_NO_FATAL_FAILURE(click("literature_operations"));
+  ASSERT_NO_FATAL_FAILURE(click("literature_operation/" + review_id));
+  ASSERT_NO_FATAL_FAILURE(click("literature_check"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("literature_result"));
+  const auto prior_results = reply_count("operations.result");
+  ASSERT_NO_FATAL_FAILURE(click("literature_result"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return reply_count("operations.result") > prior_results && widget("literature_history_previous"); }));
+  ASSERT_NO_FATAL_FAILURE(section(1)); EXPECT_EQ(widget("literature_import_commit"), nullptr);
+  EXPECT_FALSE(widget("literature_authorized")->boolean.value());
+  EXPECT_EQ(calls("import.commit"), 1); EXPECT_EQ(calls("encoder.select"), 1); EXPECT_EQ(calls("pages.render"), 2);
+
+  auto *area = literature_area(); ASSERT_NE(area, nullptr);
+  const auto draft = area->editor().save_workspace_state(); const auto before_lifecycle = total_calls();
+  const int tab = area->active_tab(); ASSERT_TRUE(area->add_tab(kEditorLogs));
+  area->set_active_tab(area->tab_count() - 1); frame(); area->set_active_tab(tab); frame();
+  store.set_bridge(nullptr); store.set_bridge(client.get()); frame(); loop.run_ready(); frame();
+  EXPECT_EQ(total_calls(), before_lifecycle); EXPECT_EQ(area->editor().save_workspace_state(), draft);
+  EXPECT_EQ(widget("literature_source")->string.value(), source.string());
+  EXPECT_FALSE(widget("literature_authorized")->boolean.value()); EXPECT_EQ(widget("literature_import_commit"), nullptr);
+  EXPECT_EQ(bottom.tab(1).save_workspace_state(), hidden); EXPECT_TRUE(bottom.tab(1).has_unsaved_changes());
+  EXPECT_EQ(store.viewer().save_workspace_state(), viewer); EXPECT_EQ(store.viewer().base_payload(), payload);
+  EXPECT_EQ(store.viewer().camera_serial(), camera); EXPECT_EQ(store.viewer().payload_serial(), serial);
+  EXPECT_EQ(capture_->events, (std::vector<std::string>{"create/1", "free/1", "create/2", "free/2"}));
+  std::cout << "LITERATURE_REAL_ASSETS layout=" << (GetParam() ? "zh_CN/1000x1200" : "en/1600x1100")
+            << " scale=1 clicks=" << clicks << " wheels=" << wheels
+            << " lifecycle_injections=2 fixture_seeding=2 cpu_ui_only=true os_gpu_presentation=false"
+            << " original_receipts=true real_pdfium=true real_e5=true render=2 textures=2/2"
+            << " revoke_sync_clear=true historical_authority=false viewer_hidden_draft_preserved=true\n";
+}
+INSTANTIATE_TEST_SUITE_P(RealAssets, LiteratureRealAssets, ::testing::Bool());
+#endif
 }  // namespace
 }  // namespace stk::app
