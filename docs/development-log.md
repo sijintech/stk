@@ -1,5 +1,19 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：时间/MIME 证据、Hub 单实例和原 action 重启恢复
+
+root提交b517554a、2c9729b8、c5d8e503，并将实际Claude13的755212b2三路径选择集成ddd7d7c2。本节未push、远端fd394e46，最终交付见 `d1-hub-restart-20261108-12/root-integration/closure.json`；四文档旧WIP及AOCI预存资产不连带提交。
+
+正常双部署补五个时间字段按自身Runtime精确保真、created_at同任务重放不变和固定text/plain产物；不比较两部署墙钟或收紧未执行任务缺省/null。独立审阅抓到错误MIME原文导出，修后固定错误并用run级五文件反例关闭。原155项绿及12项安装绿另存；最终八文件271通过、零skip、74.57s，实际新CLI和helper稳定。
+
+Hub正式serve加真实状态目录control.lock生命周期，pair不共锁。旧代码真实7红；修后相关49绿/13.48s，独立14纯mock无阻断。覆盖alias/异端口、TERM/KILL后同inode重启、独立目录、pair并行、配置/构造/内部BlockingIOError与退出释放。早期过短低熵令牌夹具被既有校验挡住，单独保留，不作并发证据；直接factory多worker和分布式锁不在保证内。
+
+Claude13初稿驱动摘要错误/缺失仍ok的P2经真实run级反例复现；修后真实文件写后/启动前核SHA，H0和独立run门均必需，篡改/删除零spawn。独立9+2+3+43项纯探针关闭；作者157项联合和source/installed11断言，root最终271项及新最小包11断言通过。两delivery、一次Runtime.submit、一task/run/marker，恢复为节点缓存，原program/worker显式取消后清扫前退出；不冒称第二次Runtime重放、网络分区或科学通过。
+
+root离线重建c5产品归档包，新CLI217e35e3…，ddd到c5产品目录零diff；最小-I安装正常12/断连10/Hub重启11全过，场景11.022404007/23.604974931/7.680591277s，Hub含清理8.607716267s，无残留。未装GUI/科学包。证据与来源见运行验收。
+
+fd整个Runtime13job、Docs实际部署及Secret成功；Desktop已于13:51:08Z失败终态，Linux三项成功。Mac Build的AXValue旧常量类型错误两行已补2c9729b8，未Apple编译；WindowsCPU1445/1446通过、1个PeerMouse空JSON失败/902.99s，Windows原生文档6/6通过/1304.12s；前整轮等待门满足，新本地字节仍待新CI。PR53/54无新头。实际Claude13已交并接CL-NATIVE-PEER-14，仅修peer_test.cc夹具、待固定候选审阅；原八项/D1-D5、文献点击/Synthrix及真实MuPRO/待决不缩减，PET新专项后置。
+
 ## 2026-11-08 UTC：固定原进程断连验收与公共 AX client 集成
 
 root提交原生 `d2f6262262e713d4bf1e986fb15d03a5fea70b59`，来自独立候选c16170c8/0b4b53c0的12文件，随后选择集成Claude12最终a215972d为 `688db5a0889f301f339150f836de8caa3cd1abea` 三文件。当前未push，远端b3，后续交付见本批closure；旧WIP及AOCI资产未连带提交。

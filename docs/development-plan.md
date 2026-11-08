@@ -1,5 +1,14 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：交付 D1 元数据与 Hub 可靠性有限切片
+
+本地源码b517554a补任务时间/MIME验收，c5d8e503补正式Hub serve单实例，Claude13原755212b2选择集成ddd7d7c2；2c9729b8补Mac AX测试helper枚举编译错误。当前未push，远端fd；最终交付和新CI见本批closure及运行验收。
+
+1. 主线联合271项零skip通过/74.57s；重建最小安装包后正常12、断连10、Hub丢结果重启11断言全过，原任务只启动一次且显式取消后清扫前退出。独立审阅关闭驱动摘要假绿与MIME错误原文导出；正式serve锁相关49项及14纯mock通过。收尾四状态/认知/扫描，前整个Desktop已于13:51:08Z失败终态，等待门满足后推送。
+2. fd整轮Desktop已失败终态：Linux三job成功，Mac因AXValue类型错误Build失败，WindowsCPU1445/1446通过、1个PeerMouse空JSON失败，Windows原生文档6/6通过/1304.12s。两行类型化枚举补修尚待新Mac编译及原生20轮；Runtime13job/文档实际部署/Secret均成功不替新头验收。
+3. 下一片输入传输与现有设备撤权，再补其他D1合同/故障和云端项目语义；不擅自引入R3项目/用户授权。原生文献实际点击、Synthrix正常装配、D2-D5及原八项继续，单机故障样例不替跨机/目标OS或真实MuPRO。
+4. root负责main/公共后端/验收与发布，实际Claude独立树已交13并接CL-NATIVE-PEER-14，只改peer_test.cc；先证实空JSON路径，保点击/Viewer/隐藏稿门，待root审阅。MuPRO/MuFerro首期、插件格式自主与MuPRO HDF5、有限S2c已按所有者决定推进；真实执行资产、扫描数值和提案持久形式仍缺，不代选。PET新专项后置，旧WIP保留。
+
 ## 2026-11-08 UTC：交付断连切片，启动 Hub 丢结果恢复验证
 
 本地源码688db5a0集成Claude12最终三路径，root联合90项零skip通过/43.90s，最小安装-I真实10断言通过；原进程取消后、清扫前退出，一任务/run/marker。原生源码d2f62622补公共AX进程测试链，主线两目标构建及43项CPU通过/2.85s，仍待目标Mac CI。本节成文时未push，新CI见本批closure。

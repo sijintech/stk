@@ -1,18 +1,20 @@
 # D1 实施前的最小契约与兼容门清单
 
-任务卡：CL-D1-01、CL-D1-PARITY-11、CL-D1-DISCONNECT-12（见[协作约定](agent-collaboration.md#当前任务卡)）。状态：**正常任务与节点断连切片已本地验收，D1 完整退出门尚未完成；下列新进度优先于历史基线。**
+任务卡：CL-D1-01、CL-D1-PARITY-11、CL-D1-DISCONNECT-12、CL-D1-HUB-RESTART-13（见[协作约定](agent-collaboration.md#当前任务卡)）。状态：**正常任务、节点断连、Hub 丢结果重启及正式 serve 单实例已本地验收，D1 完整退出门尚未完成；下列新进度优先于历史基线。**
 本文不发布新 schema，不改产品代码或数据库格式，也不替所有者选择 D3 领域、剩余未决事项或 PET 新专项。
 2026-11-07 所有者对原三项待决作了新回答，root 已把它们写入任务卡并要求纳入本清单，见 §6。
 
 **历史基线：** 初稿来自 `claude/support` 的 `37d26464591f9191986459f4d70b7320e68f5555`；三份设计当时以 `535b0d63d15521ea7d4294ddfce2ac68a3555667` 为证据，两头当时的产品代码相同。下文未更新的 `路径:行` 仅定位该历史版本，不能据此声称当前源码仍相同。
 
-**2026-11-08 进度核定：** 已推主线 `b3c3b912` 的整个 Runtime 工作流 13 job、文档部署和 Secret 均通过；Windows 排除 server 组，不能算该组的 Windows 验收。本地下述新切片尚未push，不能借旧头CI覆盖新字节。HDF5 和有限 S2c 契约分别见 [MuPRO HDF5/1](../specs/mupro-hdf5-1.md) 和 [agent MuFerro run/1](../specs/agent-muferro-run-1.md)。S2c 仍只允许桌面明确选择的直连/SSH Runtime，不支持 Hub 准备。
+**2026-11-08 最新进度：** 本地 `b517554a` 补五个时间字段按各自原 Runtime 保真及固定产物 MIME 核验；`c5d8e503` 对正式 `suan-control serve` 加同一真实状态目录的全生命周期锁；Claude `755212b2` 三路径选择集成为 `ddd7d7c2`，验证原任务已接受、Hub 尚 queued 时丢结果和同库重启。主线联合271项通过、零skip、74.57s；新最小安装包的正常/断连/Hub重启分别12/10/11断言通过，来源与模块SHA匹配。Hub恢复为两次delivery、一次Runtime.submit、一个任务/run/marker，原进程显式取消后清扫前退出。驱动摘要缺失/不匹配假绿已修并独立关闭，证据 `d1-hub-restart-20261108-12/root-integration/`、`d1-hub-singleton-20261108-14/`。单机进程故障不代表网络分区、云端项目或许可/科学验收。
+
+已推 `fd394e46` 的整个 Runtime 13 job、文档部署和 Secret 均成功；Desktop于13:51:08Z整轮failure终态，Linux三job及Windows原生文档6/6成功；Mac构建的AXValue枚举类型错误已本地补 `2c9729b8`，尚未目标Mac复验。WindowsCPU1445/1446通过、1个PeerMouse空JSON失败，Claude14限定测试夹具定位。本批未push；前整轮等待门已满足，最终交付和新CI以[运行验收](../runtime-validation.md)及本批closure为准，不能借旧头CI覆盖新字节。Windows 排除 server 组，不能算该组的 Windows 验收。HDF5 和有限 S2c 契约分别见 [MuPRO HDF5/1](../specs/mupro-hdf5-1.md) 和 [agent MuFerro run/1](../specs/agent-muferro-run-1.md)。S2c 仍只允许桌面明确选择的直连/SSH Runtime，不支持 Hub 准备。
 
 root 选择 R1(a)，已将 Claude `6cc2d39e` 的[双部署样例](../../examples/backend_parity/README.md)选择集成，并修正清理异常和未舍入预算判断；源码 `6ae96999` 已随文档 `599937f9` 推送。联合测试 61 通过、零跳过；root 在独立、非 system-site-packages 的最小 `server/control/test` 环境，以 `-I --mode installed` 验证真实 Runtime A 和 Hub/Node/Runtime B，9 项断言通过、总耗时 12.1s，两个部署的实际模块来源/摘要一致，任务程序和 worker 均退出，临时目录已删除。包来自 `58fbd03e`，到 `6ae96999` 的 `suan/`、`toolkits/`、`pyproject.toml` 无差异；样例自身另绑 SHA。证据为 `d1-parity-20261108-08/root/parity-integration/`，最终提交/推送以其 closure 和[运行验收](../runtime-validation.md)为准。
 
 CL-D1-DISCONNECT-12 已由 Claude `a215972d` 交付，root 选择集成 `688db5a0`；[断连样例](../../examples/backend_parity/DISCONNECT.md)联合90项零skip通过、43.90s。root 最小安装环境 `-I --mode installed` 的10项断言通过，场景23.544913289s、含清理24.654371985s，实际site-packages来源和模块SHA一致。仅杀本次原NodeAgent且核实际SIGKILL/reap；Hub离线精确读不返回任务状态；同profile重连后观察原任务，显式取消后原program和worker均在清扫前退出，一任务/run/marker、无残留。
 
-初稿两P2已关闭：提前退出不能冒充故障注入，worker元数据替换不能漏掉仍活的原进程。旧假绿及修后拒绝反例均保留，最终证据绑定script `8d75922f…`、helper `c1235e8c…`；见 `d1-node-disconnect-20261108-10/root-integration/` 和独立 `review/candidate-2/`。这只完成单主机进程断连切片，网络分区/长中断、期间自然完成、Hub未完成action重启等仍缺；CL-D1-HUB-RESTART-13 已派实际Claude，验证接受后丢结果、同Hub状态重启和原action重派。节点原缓存恢复与Runtime再次幂等提交须分别报告。
+初稿两P2已关闭：提前退出不能冒充故障注入，worker元数据替换不能漏掉仍活的原进程。旧假绿及修后拒绝反例均保留，原交付绑定script `8d75922f…`、helper `c1235e8c…`；见 `d1-node-disconnect-20261108-10/root-integration/` 和独立 `review/candidate-2/`。本批已在新helper `cf2b13c9…` 和新CLI上复验；仍缺网络分区/长中断和离线期间自然完成。新增[Hub重启样例](../../examples/backend_parity/HUB_RESTART.md)仅覆盖接受后丢结果的精确边界，保节点原缓存，实际恢复不能算再次Runtime幂等提交。
 
 全部合同矩阵、传输/撤权、云端项目语义、跨主机/目标OS、真实MuPRO和科学有效性均未完成。文档CI修正及原生AX候选不能作为这些验收证据。
 
@@ -59,7 +61,7 @@ Claude 编写清单时没有运行产品测试；root 集成时实际运行的�
 | 客户端 | `suan jobs --state-dir A/runtime …`（`LazyClient`，`suan/runtime/cli.py:521-536`）。Bridge 侧对应 `RuntimeBackend`（`suan/desktop_bridge/backends.py:86`） | 先 `suan connect hub-pair`（`suan/runtime/cli.py:338-343`），再 `suan jobs --hub NAME --node NODE_ID …`（`HubCLIClient`，`suan/runtime/cli.py:37`） |
 | 监听 | Runtime 只绑 `127.0.0.1`，不可配置（`suan/runtime/server.py:19-22`） | Hub 默认 `127.0.0.1:8790`（`suan/control/cli.py:60-61`）。节点主动连出，不开放 Runtime 端口（`suan/control/agent.py:664`） |
 | 凭据 | Runtime `config.json` 中的 token（`suan/runtime/common.py:173`） | `control.json` 中的 owner token，0600 独占创建（`suan/control/cli.py:19-26,49-55`）；还有 `node.json` 和客户端配对文件 |
-| 单实例 | `api.lock` 和 `config.lock`（`suan/runtime/server.py:170`；`suan/runtime/common.py:86,148`） | Runtime B 同左。**Hub 没有进程级单实例锁**：`suan/control` 中只有一个进程内的 asyncio 锁（`suan/control/app.py:50`），两个 `serve` 进程可以用不同端口同时写同一个 `control.sqlite3`（缺口，见 C-11） |
+| 单实例 | `api.lock` 和 `config.lock`（`suan/runtime/server.py:170`；`suan/runtime/common.py:86,148`） | Runtime B 同左。正式 `suan-control serve` 解析真实状态目录并全生命周期持 `control.lock`；同目录换端口/符号链接仍拒绝第二实例。pair可并行，退出/崩溃释放且不换inode。直接嵌入create_app需调用方保证单实例，不支持多worker共享目录（见 C-11） |
 | 平台 | 仅 Linux（`suan/runtime/common.py:109`） | 仅 Linux（`suan/control/cli.py:29-42`） |
 | 关闭 | `suan server stop [--supervisor]` 只停 API 和调度，已启动的 worker 继续运行（`suan/runtime/cli.py:319-330`） | 同左，并停止本轮自己启动的 `serve` 和 `node run` 进程 |
 
@@ -86,7 +88,7 @@ Claude 编写清单时没有运行产品测试；root 集成时实际运行的�
 - **部署/策略差异**：必须由能力或策略声明解释；
 - **投影差异**：允许存在，但要写明。
 
-当前样例仅比较 `state/reason/cancel_requested`、同路径重放/冲突、产物 `path/size/sha256` 及下载字节、UTF-8 日志、取消和实际启动数。下表要求的更多状态/时间字段、`media_type`、输入传输、撤权和故障场景仍须补齐，不能据 9 项断言宣称整个矩阵通过。
+正常样例现有12断言：除状态、同路径重放/冲突、下载字节、UTF-8日志、取消和启动数外，核五个时间字段在各部署与自身原Runtime精确一致，以及原任务created_at重放不变、固定text/plain产物MIME。不同部署不比较墙钟大小或假设时间单调；五字段必有值只针对两个确已执行的终态夹具，未执行任务仍按原契约允许缺省/null。更多状态、输入传输、撤权和其他故障仍缺，不能据此宣称整个矩阵通过。
 
 | 命令 | A：直连 Runtime | B：Hub → 节点 → Runtime | 类别 | D1 比较规则 |
 |---|---|---|---|---|
@@ -120,7 +122,7 @@ D1 的任何改动都要先过下面这些门。"测试入口"均为基线中已
 | C-8 | 关闭 API 或 Bridge 不取消 Runtime 任务；Bridge 重启后原 key 幂等 | 已发布：[desktop bridge v1](../specs/stk-desktop-bridge-v1.md)；`suan/runtime/cli.py:319-330` | `tests/test_desktop_bridge_runtime.py:49,164,276` |
 | C-9 | 项目运行记录用冻结方案中的固定 `idempotency_key` 提交，用 `key + ":cancel"` 取消；已接受的 task ID 不可替换 | 现行实现；`suan/desktop_bridge/project_runs.py:49-51`；[项目运行记录](../project-runs.md) | `tests/test_project_runs.py`；`tests/test_bridge_analysis_runs.py` |
 | C-10 | 服务端只在 Linux 运行；在 Windows 和 macOS 上 `suan server init` 与控制服务拒绝初始化，且不创建任何文件 | 现行实现；`suan/runtime/common.py:109`；`suan/control/cli.py:29-42` | CI `.github/workflows/runtime.yml:174-189`（客户端任务） |
-| C-11 | 单写者：同一 Runtime state dir 只有一个 API 实例；同一 Bridge 状态目录只有一个实例，第二个进程回答 `busy` 后退出 | 现行实现；`suan/runtime/common.py:86-99`；`suan/desktop_bridge/server.py:45,72-109`。**Hub 缺少同类锁**（缺口，见 §1.1） | Bridge：`tests/test_hub_desktop_bridge.py:425,432`；`tests/test_scripting_headless.py:30`。Runtime API 锁和 Hub 双实例：没有找到直接测试 |
+| C-11 | 同一Runtime state只有一个API；同一Bridge状态目录第二实例回答busy后退出；正式Hub serve同真实状态目录第二实例报错并退出1 | `suan/runtime/common.py::instance_lock`、`suan/desktop_bridge/server.py::StateDirLock`；新增 `suan/control/cli.py::serve` 全生命周期持control.lock，pair不共用该服务锁，直接factory部署须调用方管理 | Hub：`tests/test_control_singleton.py` 11例含不同端口/alias、TERM/KILL后同inode重启、pair并行、独立目录和异常释放；相关49项及主线271项通过。Bridge原测试保留；Runtime API锁仍无专门双进程新测试 |
 
 **CI 入口：**
 - Linux 服务端测试由 `.github/workflows/runtime.yml:31` 运行：`pytest -m "not desktop and not perf"`，三个 Python 版本。
@@ -139,7 +141,7 @@ ID 前缀 X 是本文编号；括号里给出对应的[跨端验收](../design/d
 | X4（F05） | 排队中取消、运行中取消、取消回复丢失 | 取消意图幂等；只有核实退出后才是 `cancelled` | Runtime 侧已实现；B 侧只在带 key 时幂等 | `tests/test_runtime.py:115,511,556`；`tests/test_runtime_hub_cli.py:153` |
 | X5（F10） | 撤销设备后热缓存读取、冷重开、原 key 重放 | 当前授权先于返回数据 | 设备级撤权已实现（401）。**缺口：** ① 任何已配对客户端都能读所有非联邦 action；② 另一设备用相同 ID 和 body 重放时，`create_action` 直接返回原记录，不检查提交者（`suan/control/store.py:177-186`）；③ 没有按项目或用户的作用域 | `tests/test_control.py:30`；`tests/test_runtime_hub_cli.py:153`。②③没有测试，需要先有授权模型（依赖决定，见 R3） |
 | X6（F13） | 旧 Hub 或旧节点缺 `task.get`；任务超出心跳窗口 | 明确不支持；已知任务不因列表中没有就变成"不存在" | 已实现 | `tests/test_runtime_hub_cli.py:174,225` |
-| X7（F03） | 节点代理或 Hub 重启，期间 worker 完成 | 最后的任务事实和观察可用性分开展示；不把失联写成失败 | 部分实现：节点停止不停Runtime任务；观察状态与执行状态分轴属拟议。新增单Linux主机真实NodeAgent SIGKILL/同profile重连，原任务继续并由显式取消结束；不含离线期间自然完成或网络分区 | `examples/backend_parity/disconnect.py`、`tests/test_backend_parity_disconnect.py`；root10断言及90项联合通过见首节。旧Runtime/控制与CLI测试仍保留。Hub未完成action进程重启由CL-D1-HUB-RESTART-13开发，尚未验收 |
+| X7（F03） | 节点代理或 Hub 重启，期间 worker 完成 | 最后的任务事实和观察可用性分开展示；不把失联写成失败 | 部分实现：真实NodeAgent SIGKILL/同profile重连、Hub接受后丢结果/同库重启两个有限切片已本地验；原任务继续并显式取消。仍不含离线期间自然完成或网络分区，观察/执行分轴仍属拟议 | `examples/backend_parity/disconnect.py`、`hub_restart.py` 及对应测试；新最小安装10/11断言，最终主线271项见首节。Hub两次delivery由节点缓存返回同任务，仅一次Runtime.submit |
 | X8 | 两个实例写同一项目：同修订上的两个不同操作 | 只有一个成功，另一个冲突 | 本地已实现：`expected_revision` CAS（`suan/project/store.py:229,289`）和 format-15 编辑回执（[project-edit-operations-1](../specs/project-edit-operations-1.md)）。**跨部署没有对应承载**（G1-5） | `tests/test_project_edit_operations.py:78,103,196` |
 | X9 | 同一地址换成另一个 Runtime 实例 | 拒绝把新实例当原服务 | **缺口：** 只有配置级 `server_key`，无法认证实例 | 无测试；依赖拟议的 authority 身份 |
 | X10 | 刷新、重开、订阅、等待超时 | 不重新提交，不取消，不调用模型 | 现行实现中提交和取消都是显式命令 | `tests/test_desktop_bridge_runtime.py:405`。D1 要在两部署上各记一次（`requests.jsonl` 中零新增提交） |
@@ -248,7 +250,7 @@ root 描述的链条是：软件发现 → 能力预检 → 冻结输入 → 显
 | R3 | 授权模型：Hub 现在是设备级授权，D1 是否引入按项目或用户的作用域 | D1 先声明现状差异，不扩大开放范围；按项目授权进 D2 前置 | 关闭 X5 的②③；与 Synthrix 的 `authz` 迁移相关 |
 | R4 | `@python` 与 `{python}` 不对称（G1-3）是只在 harness 中规避，还是把 `demo-field` 模板改用 `{python}` | 只在 harness 中规避；改模板会改变已发布模板，须单独审 | 影响 Hub 模板的精确匹配和既有测试 |
 | R5 | 冲突分类依赖英文消息子串（C-5）。是否在 D1 引入版本化的稳定冲突码 | 不在 D1 改；先补一条"文本 → `conflict`"的回归测试锁住现状 | 防止改错误文本时无声地破坏客户端 |
-| R6 | 两个测试缺口：(1) Hub 没有进程级单实例锁，也没有双实例测试；(2) Hub 进程在有未完成 action 时重启 | (2) CL-D1-HUB-RESTART-13已派Claude，仅测试三新路径，须原程序实际运行、Hub尚queued时杀停/同库重启、丢首次结果后原action重派和一次启动；节点缓存不能冒充再次Runtime提交。(1)仍待补，Hub是否加锁由root决定 | 两项均未以新任务交付关闭；节点断连模块通过不替代 C-11/X7 的其余故障 |
+| R6 | (1)正式Hub serve单实例；(2)Hub有未完成action时进程重启 | root已选择正式serve生命周期锁并提交c5d8e503，相关49项通过；Claude13三路径集成ddd7d7c2，最终主线271项及新最小安装11断言通过。保原缓存，驱动绑定须真实文件核验且参与成功门 | 这两个有限缺口已本地关闭；直接create_app多worker、分布式租约及X7其余故障仍未验，未push不继承旧CI |
 | R7 | MuFerro 的 `--license-dir`、`--sdk-prefix`、`--env-script` 路径都写进 argv（`suan/mupro/spec.py:35-40`），因而随 TaskSpec 存进 Runtime 库和项目运行计划；直连 `task.get` 能看到，Hub 投影会去掉 | 这些是节点本地路径，不是秘密（许可内容从不读取）。建议先列为已知现状；是否改为节点本地配置由 root 决定 | 影响 P-2，以及任何把 TaskSpec 原文导出或送入模型的路径 |
 | R8 | HDF5 陈旧输出及最终状态输入边界 | 本轮已用 CLI 和制造求解器复现 `run.h5` 遗留混入，补可选输出预检及反例；不把所有 `.h5` 都当输出，也不把可选文件变成 DAT 必需文件。最终状态的文件/字节上限继续保留 | 不证明 HDF5-only 完成或真实许可运行；最终测试与提交见运行验收 |
 | R9 | 同一批准不能重复启动；扩权不等于自动执行 | 已实现：消费一次后只观察原证据，任何历史 started 都使批准首次 claim 失败；消费前已有手工 started 会拒绝消费并保持待决；决定已消费后的手工竞争启动才观察为 other_start，不能冒充原批准。未授权本地轻量自动开始 | 决定先落盘、claim 同事务复核；两事务间崩溃保留 uncertain，不用新 ID 或换路径补发 |

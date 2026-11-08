@@ -1,5 +1,20 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：D1 元数据、Hub 单实例与丢结果重启最终主线验证
+
+本地源码b517554a、2c9729b8、c5d8e503及ddd7d7c2（Claude原755212b2）；本节未push、远端fd394e46。最终提交/推送和新CI见 `d1-hub-restart-20261108-12/root-integration/closure.json`。本批没有产品UI交付或新点击验收，Viewer/隐藏稿及明确run/save/send门保留。
+
+- `d1-contract-fields-20261108-13/root/`：真实旧oracle31红/3绿，固定candidate2原联合155项零skip通过/51.70s；五时间字段按同原task/state的各自Runtime逐值核对，created_at同任务重放稳定，不比较跨部署时钟。固定夹具执行完才要求全五字段；未执行任务缺省/null不变。MIME缺/错先固定错误拒绝，不导出原值；独立run级5文件反例关闭P2，旧候选/试跑保留。script cf2b13c9…，原安装12项结果只证当时产品字节。
+- `d1-hub-singleton-20261108-14/root/`：修正过短测试令牌后，旧代码真正7失败/1未选/11.13s，均到达缺锁行为；早期错误夹具日志保留、不作并发证据。最终49通过、零skip、13.48s（singleton/模板平台/控制/联邦），独立candidate2三SHA稳定，14纯mock通过。实际双进程异端口/alias竞争、TERM/KILL同inode重启、pair并行和独立state均验；配置/工厂/serve内部BlockingIOError、正常退出/SystemExit/KeyboardInterrupt均释放且不误标busy。正式serve生命周期锁才是保证，嵌入create_app多worker需外部单实例约束；无DDL或凭据迁移。
+- `d1-hub-restart-20261108-12/review/candidate-2/`：初稿错误/缺失driver SHA仍ok的P2已关闭。独立9个proof/run、2个强制全断言pass仍被独立门拒绝、3个真实临时文件篡改/删除零mock spawn及43个保留故障反例通过，未起服务；作者修后157项、source/installed各11项另存，不替最终主线证据。
+- `d1-hub-restart-20261108-12/root-integration/joint-main.log/xml`：最终主线8个测试文件271通过、零skip、74.57s；1个既有Starlette testclient/httpx弃用警告。所有测试key空/model unset，无收费模型或真实求解器。三份候选集成SHA相符，旧WIP保留。
+- `d1-hub-singleton-20261108-14/root/installed-source.json`、installed-check.json：从已提交c5产品目录归档离线构建wheel，wheel SHA d65b9897…；ddd到c5的suan/toolkits/pyproject零diff。实际最小独立venv非system-site-packages，CLI SHA217e35e3…；未装NumPy、VTK、PySide6、Torch、h5py。首选旧测试解释器无pip，首次打包命令未构建；后改用已缓存uv离线构建/安装成功，原失败日志保留。
+- 同批 `root-integration/installed-parity/`、installed-disconnect/、installed-hub-restart/：-I installed实际site-packages来源和全部关键模块SHA匹配新主线。正常12断言，场景11.022404007s/总13.1s；断连10断言，场景23.604974931s/总24.721151801s；Hub重启11断言，场景7.680591277s/总8.607716267s。均预算内、清理完成且无残留。新helper cf2b13c9…，Hub script dd29a3dd…/driver a76fb69b…，driver双次文件SHA匹配；Hub两delivery/一次Runtime.submit/节点缓存恢复同task，一task/run/marker。原program和worker均显式取消后清扫前退出，清理不代取消；不是再次Runtime幂等提交或全部故障通过。
+- 暂存检查：元数据/Mac补修各自gitleaks零发现；singleton三路径14071字节、Hub三路径81597字节扫描零发现，Claude自身暂存扫描亦零。最终文档增量另扫，见closure。
+- 前远端fd：Runtime42481547894于13:01:05Z整轮success，13job全过；Docs42481547906于12:43:46Z实际构建部署成功；Secret42481547877于12:43:24Z成功。Desktop42481548048于13:51:08Z整轮completed/failure，4job成功/2失败：Linux GPU/包/新24.04冒烟均成功；Mac128734373211于Build失败，AXValueGetValue旧UInt32常量不能转AXValueType，CPU/Metal/原生未跑。2c9729b8仅改kAXValueTypeCGPoint/CGSize两行，未目标Mac编译，不称修复通过。WindowsCPU128734373360为1445/1446通过、1个PeerMouse.ActualClicksSelectTwoFilesHostReceiptEnablesOfferAndPreservesOtherDraftAndViewer空JSON解析失败，902.99s；Windows原生文档job128745117982六项全过/1304.12s（实际required-evidence门成功）。Claude14仅在独立树peer_test.cc定位/修夹具，未交付；前整轮等待门已满足，本批新字节仍须新CI，不继承旧头结果。PR53/54头c9f13994/2dd3e4ee仍未变、未合无关旧差异。
+
+这只补D1时间/MIME、正式serve单实例和接受后丢结果重启边界；输入传输/撤权、其他合同与故障、云端项目、目标OS/跨机、真实MuPRO/HDF5-only完成和科学有效性仍未完成。研究扫描数值及分析修改提案持久形式不代选；原八项、文献实际点击、Synthrix正常装配、D2-D5继续，PET新专项后置。
+
 ## 2026-11-08 UTC：主线 AX 候选与节点断连最终字节复验
 
 本地源码 `d2f6262262e713d4bf1e986fb15d03a5fea70b59`（原生12路径）及 `688db5a0889f301f339150f836de8caa3cd1abea`（Claude12三路径）；本节成文时未push，远端b3c3b912。最终交付/新CI见 `native-ax-client-20261108-09/root-integration/closure.json`。无新产品UI或实际点击交付，既有Viewer/隐藏稿保护和原原生验收门保留。

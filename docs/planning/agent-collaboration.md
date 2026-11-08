@@ -76,17 +76,31 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
 
 ### CL-D1-HUB-RESTART-13：已接受任务的 Hub 丢结果与重启
 
-- **状态/基线：** 同一实际Claude会话已接单，在独立 `stk-claude / claude/support` 的 `a215972d` 上开发；尚无候选交付。root同时收口主线原生与节点断连，不共写路径。
+- **状态/基线：** 实际Claude独立树从a215972d交付 `755212b2b5636ca07e4fe18974c1c97af0df7a72`，root选择集成为 `ddd7d7c286c306a25eb0d1640fdaa2ebe47404e7`。三路径SHA匹配独立candidate-2，双方暂存扫描零发现；本批未push，最终交付见closure。
 - **唯一新增写入：** `examples/backend_parity/hub_restart.py`、`examples/backend_parity/HUB_RESTART.md`、`tests/test_backend_parity_hub_restart.py`。既有offline/disconnect helper、产品、全局docs/AOCI/CI只读，不push或另委派peer。
 - **目标：** 原Runtime已接受且原program/worker运行，Hub原action仍queued无结果时，仅SIGKILL/reap自有Hub；原Node/Runtime存活、首次结果在断线时被丢弃后，以同库/端口重启Hub，真实重派原action并恢复同任务。保留节点原缓存，缓存恢复与再次Runtime幂等提交分别记录，不删缓存制造重放。
 - **验收：** 只一次客户端提交、冻结action/key/request摘要和原进程身份；实际故障、重派/缓存、一次启动及显式取消前退出证据。source/installed同字节、helper/driver摘要、绝对预算、清理失败拒绝及受控反例；不以只排队未运行的简单重启替代该边界。
-- **证据/限制：** `d1-hub-restart-20261108-12/`；单Linux主机公开程序，不含单实例锁、网络分区/跨站、云端项目、真实MuPRO或科学验收。越界依赖先报root，最终仍由root审查、集成和维护状态。
+- **实际验收：** 作者修后157项联合及source/installed各11断言；root在新CLI生命周期锁和新offline元数据helper上最终联合271项零skip通过/74.57s，独立最小包-I installed的11断言通过，场景7.680591277s、含清理8.607716267s。两次delivery、一次Runtime.submit、节点缓存恢复原任务，一task/run/marker，原program/worker显式取消后清扫前退出，清理完成。
+- **审阅：** 初稿驱动SHA错误/缺失仍可ok的P2已关闭：真实文件写后和启动前均核固定SHA，H0及run成功门必需完整匹配。独立9个proof/run用例、2个绕过全部断言仍被独立门拒绝的反例、3个真实临时文件篡改/删除零spawn反例及43个保留故障反例通过。旧候选/旧trial保留，不代新字节；script dd29a3dd…，主线helper cf2b13c9…。
+- **证据/限制：** `d1-hub-restart-20261108-12/root-integration/`、`review/candidate-2/`。单实例锁由root另行开发c5d8e503；本切片仍不含网络分区/跨站、云端项目、真实MuPRO或科学验收。Claude保留交付头并接下列14任务；全局状态/认知/共享构建仍由root独占。
+
+### CL-NATIVE-PEER-14：Windows PeerMouse 空 JSON 失败
+
+- **状态/基线：** 同一实际Claude会话已接单，独立 `stk-claude / claude/support` 保持755212b2，不同步其他root改动。唯一可写跟踪路径 `desktop/tests/app/peer_test.cc`，当前与main/fd相同SHA157262a7…；先交固定候选，root审阅后再批准扫描提交。尚未交付或验收。
+- **真实失败：** fd的WindowsCPU128734373360在1446项中仅PeerMouse.ActualClicksSelectTwoFilesHostReceiptEnablesOfferAndPreservesOtherDraftAndViewer失败，空JSON解析异常，整组902.99s。日志无法单独证明是哪条读路径或Windows根因；需结合发布/读取时序与确定性反例定位。
+- **边界/证据：** 不改产品peer/bridge/UI、CI/预算或共享support，不删点击/两文件/session手改值/业务次数/Viewer和隐藏稿检查，不靠固定sleep或吞永久坏JSON。测试KEY空/MODEL unset、只清自有进程；root统一stk-peer-app-tests构建和目标OS CI。证据 `native-peer-fixture-20261108-16/`，不是传输/撤权或真实helper新验收。
+
+### root D1 元数据与 Hub 单实例
+
+- `b517554a` 为正常双部署样例加五时间字段按各自原Runtime保真、created_at重放不变和固定产物MIME门；不比较跨部署时间大小，不收紧未执行任务的缺省/null契约。MIME错误私有文本不进入失败证据；独立反例已关闭。
+- `c5d8e503` 只给正式serve按真实状态目录持control.lock至退出，pair仍可并行。真实旧代码7红，修后相关49绿/零skip/13.48s，独立14纯mock覆盖异常归类与释放；直接create_app多worker由部署方管理。最小包重建后正常12/断连10/Hub重启11断言全过，主线联合271项零skip通过。
 
 ### root 原生 AX client 测试候选
 
 - **归属：** 另一 Codex 辅助代理，独立 detached `/home/mnemora/xcheng/sijin/stk-native-ax`、基线 `304ba0be`；不是 Claude。旧 `stk-native-runs` worktree 保留。
 - **范围：** 报告测试夹具、新公共 AX helper、numeric 协议/所属进程控制和 CPU 反例；root 已扩展 `test_media_probe.hh` 和 `native_view_cocoa.mm` 的 Apple TEST_PROBES 部分，只读核真实 WKWebView/session/导航代次。不改非测试行为、权限或网络。root 统一共享构建、原生验收、认知及发布。
 - **当前候选：** 独立提交 `c16170c8` 及绝对时限后续 `0b4b53c0` 已审阅并选择集成 `d2f62622`。12路径SHA与候选一致，root两个主线目标构建通过、43项相关CPU测试零skip通过/2.85s；暂存106792字节gitleaks零发现。独立源码审阅无新增实质问题，未执行Apple分支。
+- **新Mac实况：** 已推fd394e46的Mac job128734373211在Build失败：AXValueGetValue收到旧UInt32常量，尚未跑CPU/Metal/原生。root提交 `2c9729b8` 改用类型化kAXValueTypeCGPoint/CGSize两行，暂存扫描零发现，未Apple编译；仍须新MacCI。整个Desktop42481548048于13:51:08Z失败终态，Linux三job和Windows原生文档6/6成功、WindowsCPU另有上述14任务失败；前整轮等待门满足，本批未push。
 - **待验：** 已实现父端泵UI、owned child的2s绝对时限/有限kill-reap和关闭前drain、真实窗口/WKWebView/session/导航/布局代次及新DOM再核；8s原seek期限不因重试续期。唯一slider、原生输入、DOM/OS像素和20轮门保留。仍须目标Mac编译/实际原生CI，Linux/审阅不算修复；同步AppKit查询不可抢占，只拒绝晚结果。
 
 ### CL-D1-01：D1 实施前的最小契约与兼容门清单

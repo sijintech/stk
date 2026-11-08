@@ -1,5 +1,21 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：D1 元数据、Hub 单实例与丢结果重启已本地验收
+
+本地源码 `b517554a64f0049b681d4601299bf4b40817d6f5`、`2c9729b853a11cf6aa4bde6e650a9ae1ff3fd3ba`、`c5d8e503b00eded5d37f03326cbe878a5bbe793f`、`ddd7d7c286c306a25eb0d1640fdaa2ebe47404e7` 已提交；本节成文时未push，远端fd394e46。最终交付/推送和新CI见 `d1-hub-restart-20261108-12/root-integration/closure.json`，须先核真实Git与整轮Desktop终态。旧WIP及AOCI预存资产保留。
+
+正常双部署增至12断言：五时间字段各与自身原Runtime精确一致，created_at同任务重放不变，固定产物MIME及下载字节受验；不比较跨部署墙钟或假设时间单调，不收紧未执行任务的缺省/null。MIME错误原文不导出。原单独155项通过，最终主线八文件联合271项零skip通过/74.57s。
+
+正式suan-control serve对真实状态目录全生命周期持control.lock，同目录换端口/alias仍拒绝第二实例；pair可并行，TERM/KILL释放后同inode重启。配置、构造、内部BlockingIOError与退出异常保持正确归类。真正旧代码7红；修后相关49绿/零skip/13.48s，独立14纯mock通过；直接create_app嵌入和多worker须部署方保证单实例，不是分布式租约。
+
+实际Claude13从a215交755212b2，root三路径选择集成ddd7d7c2。原Runtime已接受、Hub尚queued时杀原Hub，首次结果在断线时丢弃，同状态重启后原action重派并由节点缓存返回同任务；两delivery、一次Runtime.submit、一task/run/marker。原program/worker显式取消后清扫前退出，清理完成。驱动SHA错误/缺失假绿P2已修并独立关闭，旧试跑保留；当前script dd29a3dd…/helper cf2b13c9…，不能把缓存恢复当再次Runtime幂等提交。
+
+root从c5已提交产品归档离线重建最小包，ddd到c5产品目录零差异；-I installed新包正常12、断连10、Hub重启11断言全过，实际site-packages模块SHA匹配，场景分别11.022404007/23.604974931/7.680591277s，均清理完成。Hub重启含清理8.607716267s；未装NumPy/VTK/PySide6/Torch/h5py，不替逐服务完整sys.modules采样。
+
+远端fd整个Runtime42481547894已于13:01:05Z success/13job，Docs42481547906完整部署12:43:46Z success，Secret42481547877于12:43:24Z success。Desktop42481548048于13:51:08Z整轮failure终态：Linux三job和Windows原生文档job成功，Mac128734373211因AXValue旧UInt32常量传AXValueType编译失败，CPU/Metal/原生未跑；root 2c9729b8改两行类型化枚举，未目标Mac编译。WindowsCPU1445/1446通过、1个PeerMouse点击测试空JSON解析失败/902.99s；原生文档job128745117982六项全过/1304.12s。前整轮等待门已满足，新本地字节仍待新CI。PR53/54头仍c9f13994/2dd3e4ee，未合无关旧差异。
+
+root继续独占main、共享构建、四状态文档、认知和推送；Claude独立stk-claude / claude/support已交13，并在755212b2基线接CL-NATIVE-PEER-14，仅修peer_test.cc的Windows夹具问题，尚未交付，另一原生辅助不是Claude。后续仍含输入传输/撤权、其他D1合同故障和云端项目语义、原八项、文献实际点击、Synthrix正常装配及D2-D5；PET新专项后置。MuPRO/MuFerro首试点、插件自定格式/MuPRO HDF5及有限S2c扩权已确认；真实主机/SDK/许可/小算例、扫描具体数值和分析修改提案形式仍缺，HDF5仍需DAT完成验证，不代选或冒称科学通过。
+
 ## 2026-11-08 UTC：节点断连已复验，原生 AX 候选已接主线
 
 本地源码 `688db5a0889f301f339150f836de8caa3cd1abea`，前一源码 `d2f6262262e713d4bf1e986fb15d03a5fea70b59`；本节成文时未push，远端b3c3b912，最终交付/新CI见 `native-ax-client-20261108-09/root-integration/closure.json`。root先提交原生12路径，再选择集成Claude `a215972d` 三条节点断连路径，产品Python后端和既有helper未改。
