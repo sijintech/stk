@@ -1,5 +1,15 @@
 # STK 当前交接
 
+## 2026-11-08 UTC：S2c 首次启动门与单次批准记录已本地提交
+
+root/main已选择集成Claude首次启动模块 `afef46c52336ba6dec00594ad1edad560e582b86`（原独立树867eef9b），并提交批准记录/观察 `67670ae30c137fb45903b9f0e90d7421cb4ebdde`。尚未推送；远端仍a506cc69。
+运行批准绑定原tool call、确定run UUID、原计划/请求摘要和准备修订；先持久消费再派发，同卡重开/丢回执不再执行。原started匹配才能恢复成功收据，手工启动不能冒充；历史收据与当前run_status分开。
+Claude复核发现旧下一轮观察把运行卡当草稿；root两红例复现并修复。最终8文件联合99通过、19.14s、12记录输入前后稳定；既有MuPRO/agent合成Runtime链8通过、114.88s。真实许可、模型、目标OS和新产品UI未验。
+当前仍是内部组件：未注册prepare_muferro_run、未接自动派发/桥start-decline和原生卡片，现有agent权限不变，不能称S2c可用。后续root负责会话busy、明确桌面资源/完整计划复核及既有MuPRO案例行入口，不限AI新增行。
+Claude转CL-S2C-EXECUTOR-08，独立树仅开发后台执行器approval转交和新测试；两路径由其独占，root负责剩余接线、契约与集成。全局四文档及共享构建仍由root维护。
+前远端a506的Runtime42459561111、Docs、Secret成功；整个Desktop42459561098仍运行：Linux三项成功，Mac CPU/Metal已过，Windows CPU进行中、目标原生媒体结果待出。整轮终态前不push。原八项/D1和文献/Synthrix入口保留，扫描数值/提案形式仍待决。
+本批证据 `s2c-agent-run-20261108-06/root/closure.json`；以实际Git/同头CI为准。四文档旧WIP及AOCI预存改动保留，工作树治理不等于已发布索引对齐。
+
 ## 2026-11-08 UTC：前 Desktop 已终态，补 AX 时序候选并拆出 S2c 原子启动模块
 
 main新增源码 `598a069b`：macOS原生视频夹具的完整空AX查询后实际泵UI至少250ms，仍4次查询、唯一时间匹配slider、DOM/OS像素与20轮；不是关闭验收。旧artifact四次仅34.067/45.657ms，WebKit公开初始化竞态支持此候选，目标Mac尚未验证。Linux报告目标重建退出0，但新增APPLE分支未在本机编译/运行。

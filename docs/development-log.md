@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-08 UTC：首次批准启动与单次消费组件
+
+Claude独立claude/support交 `867eef9b`，root审查后选择集成 `afef46c5`；仅两个分配文件。WorkflowRuns.start可选approval在追加started同一事务核原计划/请求、当前修订与归档并拒绝历史started，普通人工重启保留。Claude38+13项回归通过，禁用started/归档门分别出现2/1个预期失败。
+root随后提交 `67670ae3`：RunApprovals利用现有会话哈希链，绑定原工具调用、确定UUID和冻结请求；start/decline先原子消费，重复决定无dispatch。observe只认原approval的started证据，不运行/恢复/取消；未认证用户标记、历史收据与当前状态明确保留。
+CL-S2C-LEDGER-REVIEW-07发现旧_observe对start_run读取draft_id；root两个红例先失败，再补运行卡/收据观察和decline来源，最终joint-04为99通过/零跳过、19.14s、12输入稳定。MuPRO/agent既有合成Runtime兼容链8通过、114.88s，无真实许可或模型调用。
+尚无prepare工具/派发/桥路由/原生卡片，现有AGENT_LEVELS未扩；不是完整S2c或真实执行验收。Claude接CL-S2C-EXECUTOR-08仅改后台执行器和新测试，root保全局集成/契约/四文档。C2仅AI新增行范围不采用，最终也支持既有MuPRO案例行。
+a506cc69的Runtime42459561111/Docs/Secret成功，Desktop42459561098整轮仍在跑；本批源码未push、无新CI。PR53/54头c9f13994/2dd3e4ee未变，未合入旧重复实现或历史交接。证据见s2c-agent-run-20261108-06/root/closure.json。
+
 ## 2026-11-08 UTC：AX 异步调度候选与 S2c 方案审阅
 
 源码 `598a069b` 仅改报告原生夹具：每次完整空AX查找后泵UI至少250ms，再进入原四次上限的下一次；成功输入、唯一时间匹配slider、DOM/OS像素和20轮门均保留。

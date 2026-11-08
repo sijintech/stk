@@ -1,5 +1,15 @@
 # STK 开发计划
 
+## 2026-11-08 UTC：先收口批准组件，再接 MuPRO 工具与桌面
+
+main本地 `afef46c5`（Claude首次启动门）和 `67670ae3`（root单次批准记录/观察）已提交，未push。冻结计划/请求/修订与首次started同事务；会话决定先落盘且只消费一次，丢回执只查询原证据。
+最终联合99通过，旧MuPRO/agent合成Runtime链8通过；仍未注册新工具、派发、桥start/decline或原生UI，也未做真实许可运行。S2c方向已批准，当前发布权限尚未扩展。
+
+1. 等a506cc69整个Desktop42459561098终态并记录目标OS结果后push；同头Runtime/Docs/Secret已成功。Linux三项、Mac CPU/Metal成功不代原生媒体或整轮完成。
+2. root审查Claude新卡CL-S2C-EXECUTOR-08，将approval转交后台执行器；root继续准备工具、会话busy门、桌面明确资源/完整计划复核、桥及原生卡片和契约。入口支持既有MuPRO案例/工作流行，不仅AI新增行；未知不得重派。
+3. 真实MuPRO资产到位后验证许可执行与HDF5-only完成协议；现有HDF5附加收集仍要求DAT完成验证。
+4. D1同后端双部署、原生文献实际点击、Synthrix正常装配/桌面入口及原八项继续；PET新专项后置。扫描数值与分析修改提案持久形式仍不代选。
+
 ## 2026-11-08 UTC：转入 S2c 首次启动的原子边界
 
 root本地新增 `598a069b`，为Mac AX完整空查询保留真实250ms调度间隔；Linux目标仅构建，不覆盖新增APPLE分支。它与dc5890b1的文献锁/Windows夹具/插件测试修正待新目标OS CI。

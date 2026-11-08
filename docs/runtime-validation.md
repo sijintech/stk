@@ -1,5 +1,30 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-08 UTC：S2c 批准组件与既有 MuPRO 路径回归
+
+源码本地main `afef46c52336ba6dec00594ad1edad560e582b86`（Claude原867eef9b）及 `67670ae30c137fb45903b9f0e90d7421cb4ebdde`（root），尚未push，远端a506cc69。证据根 `/home/mnemora/.local/state/stk-validation/s2c-agent-run-20261108-06/root/`，最终Git/CI与治理见closure。
+所有测试KEY为空、MODEL unset；仅制造数据/受控模型适配器与临时本地Runtime，不调用外部或收费模型、真实MuPRO许可软件。未改端点、凭据或网络策略。
+
+| 实际检查 | 结果和范围 |
+|---|---|
+| Claude first-claim final.xml / related.log | 38项工作流+13项归档/关注回归通过；独立树只交两文件 |
+| Claude red-no-started-check / red-no-archive-recheck | 去掉历史started门2失败；去掉事务内归档门1失败；源码恢复后绿 |
+| root ledger-first / ledger-second | 各15通过，早期组件检查；不覆盖最终新增观察接线 |
+| root joint-01 | 路径预检错误，缺不存在的拆分测试文件，退出4且未跑测试；改用实际test_agent.py后继续 |
+| root joint-02 | 97通过，21.29s；尚未覆盖后续_observe修正 |
+| root observe-red.log | 2失败，17 deselected：运行卡draft_id错误、运行收据丢原run身份 |
+| root joint-03 | 修正后99通过，18.55s；后续decline来源小修正另由joint-04覆盖 |
+| root joint-04.xml / .log | **最终8文件99通过、零跳过，19.14s，退出0**；12个记录输入SHA前后相同，不宣称覆盖全部依赖 |
+| root muferro-final.xml（最终源码67670ae3） | 既有工作流MuPRO/agent合成Runtime链8通过、114.88s，退出0；非真实许可求解 |
+| root claude/ledger staged gitleaks | .gitleaks.toml扫描20.55KB/27.86KB零发现；没有把旧扫描当本批结果 |
+
+另muferro-legacy.xml为观察接线修正前8通过/114.89s，最终另跑muferro-final，不借旧结果覆盖新源码。
+四个spawn进程争抢同一决定仅一次dispatch；真实跨进程workflow首次启动竞争、编辑器先启动/停止、归档/修订漂移、丢回执不重派和历史原approval回执均有检查。批准前记录和运行claim是两个事务：会话先消费，运行claim再原子排除手工竞争；中间失败不解锁重派。observe不会启动、恢复或取消。
+Claude只读审查R1已由root修复并补两条回归；其外部报告审查时38项不是root最终99项。新账本未授认证身份，不增DDL/对象种类；只支持内部组件，目前没有注册prepare_muferro_run、后台派发转交、桥start/decline或原生卡片。CL-S2C-EXECUTOR-08已另派，仅独立树两路径，尚未集成。
+没有新产品UI交付、固定布局或实际点击数，不能以后端测试代UI验收。真实许可软件、目标OS、科学有效性、D1双部署及HDF5-only完成仍未验；原DAT完成验证保留。
+同远端a506的[Runtime42459561111](https://github.com/sijintech/stk/actions/runs/42459561111)已success（07:54:07Z），Docs/Secret成功。[Desktop42459561098](https://github.com/sijintech/stk/actions/runs/42459561098)整轮仍in_progress：Linux三项成功、Mac CPU和Metal成功，Windows CPU测试进行中，原生媒体待出；须整轮终态后push本批，不能借成功子job宣称全绿。
+PR53/54头仍c9f13994/2dd3e4ee；未把旧重复实现或历史交接隐式合入。四文档仅前置新节，旧WIP保留，AOCI托管改动与代码分开；本轮工作树对齐不代表尚未push的发布索引。
+
 ## 2026-11-08 UTC：AX 真实调度间隔与前整轮 Desktop 终态
 
 新源 `598a069b`，前修正源dc5890b1；证据根 `native-ax-20261108-05/root/`。本节不新增产品UI或点击验收，没有真实MuPRO/模型调用；测试构建KEY为空且MODEL移除。

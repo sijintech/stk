@@ -117,12 +117,24 @@ AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当�
 
 ### CL-S2C-FIRST-CLAIM-06：工作流首次批准启动的原子门
 
-- **状态：已派发实现任务，尚未交付。** Claude继续独立 `stk-claude / claude/support`，基线c975f58d；root核对其workflow_runs.py与当前main相同，不切分支、不改变权限设置。
+- **状态：Claude已交 `867eef9b7565a46f69dfba7c02a1b2e835de721c`，root选择集成 main `afef46c5`。** 两文件限定提交，38项工作流及13项归档/关注回归通过；去掉历史started门时2失败，去掉事务内归档门时1失败。root联合及MuPRO旧链另见运行验收，不将本模块当完整S2c。
 - **唯一写入：** `suan/project/workflow_runs.py`、新增 `tests/test_workflow_run_approval.py`。不改两树其他源码、全局文档、契约或认知资产；不推送、不运行共享CMake/真实Runtime/许可软件/模型。
 - **接口：** `WorkflowRuns.start(..., approval=None)`；省略时保留原人工启动/重启行为。非空为封闭四键 `{approval_id, plan_sha256, request_sha256, expected_revision}`，严格核UUID、小写SHA和非bool整数。
 - **原子约束：** 与追加started同一BEGIN IMMEDIATE内核原计划/请求摘要、当前项目修订、当前workflow_run归档状态，并拒绝任何历史started；started保存验证后独立复制的approval。此对象是前置条件和审计绑定，不是身份认证或可复用授权。
 - **验收：** 错形/漂移无新事件，批准后停止不可再批，普通启动后停止不可转首次批准，原人工重启兼容；不同store并发及真实跨进程SQLite竞争不能双认领，归档/输入变更不绕过。测试KEY空/MODEL缺席、暂存gitleaks后仅提交两文件并交精确SHA。
 - **root职责：** 会话批准记录的单次消费、原身份恢复、工具/桥/桌面接线及版本契约仍由root负责。单独会话锁不能排除编辑器并发启动，所以本门必须落在工作流事务内；本模块交付也不等于完整S2c可用。
+
+### CL-S2C-LEDGER-REVIEW-07：单次批准持久层复核
+
+- **状态：只读报告已回报；R1已由root修复并提交 `67670ae3`。** 旧`_observe`把运行卡当草稿导致KeyError；root两个红例先失败、修正后最终联合99通过。Claude独立探针确认修复，审查时小组38项通过不等于root最终99项；报告在外部证据目录，不改两树产品文件。
+- **已核：** SQLite原子消费、重放不再派发、原tool call/计划/请求/修订绑定、归档、原started回执及普通手工重启；未知回执只观察。身份明确未认证，工具/派发/桥/桌面尚未接入。
+- **root裁决：** 既有MuPRO案例/工作流行也在最终范围内，C2“仅AI新增行”不作为强制条件；会话busy与桌面资源选择须在接线时实现。先消费后失败仍不能再次派发。
+
+### CL-S2C-EXECUTOR-08：将批准传入后台执行器
+
+- **状态：已派发，尚未集成。** Claude独立树从`867eef9b`继续，仅写`suan/desktop_bridge/workflow_runs.py`及新`tests/test_workflow_run_executor_approval.py`；root不并发修改这两路径。
+- **接口与验收：** `WorkflowRunExecutor.start(store, run_id, *, approval=None)`；省略时原行为不变，非空须经store原子首次启动门，不能因已有活job就返回批准成功。保留容量/关闭检查、线程失败stop及原手工重启；真实SQLite/受控线程覆盖错绑定、并发、线程失败和已启动拒绝。
+- **边界：** 不新增工具、桥路由或权限，不改并发上限/CMake/全局状态/AOCI，不运行Runtime、许可软件或模型；暂存扫描后只提交两文件，由root审查、集成和推送。不得另向peer委派。
 
 root 已核对 `6f4de650` 整个 Desktop 失败终态；继续按最新决定优先 MuPRO/MuFerro 执行器与 HDF5 试点，
 原生文献 UI、Synthrix 正常装配/桌面入口及 D1-D5 保留在队列，按真实依赖推进。
