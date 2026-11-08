@@ -88,8 +88,10 @@ def ready(child, port):
     pytest.fail("The owned Hub did not start before the deadline")
 
 
-@pytest.mark.parametrize("exit_signal", [signal.SIGTERM, signal.SIGKILL])
-def test_second_hub_is_refused_through_an_alias_and_crash_releases_the_same_lock(tmp_path, exit_signal):
+@pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGKILL"])
+def test_second_hub_is_refused_through_an_alias_and_crash_releases_the_same_lock(tmp_path, signal_name):
+    # Resolve Linux-only signals after collection and the platform skip.
+    exit_signal = getattr(signal, signal_name)
     state = state_at(tmp_path / "state")
     alias = tmp_path / "alias"
     alias.symlink_to(state, target_is_directory=True)
