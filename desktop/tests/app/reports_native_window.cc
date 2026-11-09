@@ -461,12 +461,53 @@ class Exercise {
     int scrolls = 0;
     if (scroll_to_second_page) { native_scroll(cycle, bounds); ++scrolls; }
     std::unique_ptr<document_preview::WindowEvidenceCapture> pending;
-    wait([&] {
-      if (!pending) { pending = document_preview::capture_window_evidence(window_.native_window_handle()); return false; }
+    const bool windows = window_.native_window_handle().kind == wm::NativeWindowKind::Win32;
+    const auto started = Clock::now();
+    const auto starting_frames = window_.frames_drawn();
+    auto last_activity = started;
+    int64_t longest_start_ms = 0, longest_poll_ms = 0;
+    uint64_t capture_requests = 0, polls = 0, empty_polls = 0, samples = 0, restarts = 0;
+    reports_native_test::StalledCaptureRestart restart;
+    const auto elapsed_ms = [](Clock::time_point from, Clock::time_point to) -> int64_t {
+      return std::chrono::duration_cast<std::chrono::milliseconds>(to - from).count();
+    };
+    const auto capture_progress = [&] {
+      const auto now = Clock::now();
+      const auto *viewport = widget("reports_document_viewport");
+      const auto *focus = widget("reports_document_focus");
+      return Json{{"cycle", cycle}, {"phase", phase}, {"requests", capture_requests}, {"polls", polls},
+          {"empty_polls", empty_polls}, {"samples", samples}, {"abandoned_empty_sessions", restarts},
+          {"host_frames", window_.frames_drawn() - starting_frames}, {"elapsed_ms", elapsed_ms(started, now)},
+          {"longest_start_ms", longest_start_ms}, {"longest_poll_ms", longest_poll_ms},
+          {"since_capture_activity_ms", elapsed_ms(last_activity, now)},
+          {"viewport_layout_visible", viewport && visible(viewport)}, {"focus_enabled", focus && focus->enabled}};
+    };
+    auto next = [&] {
+      const auto began = Clock::now();
+      if (!pending) {
+        ++capture_requests;
+        pending = document_preview::capture_window_evidence(window_.native_window_handle());
+        last_activity = Clock::now();
+        longest_start_ms = std::max(longest_start_ms, elapsed_ms(began, last_activity));
+        restart.started(last_activity);
+        return false;
+      }
+      ++polls;
       auto image = pending->poll();
+      last_activity = Clock::now();
+      longest_poll_ms = std::max(longest_poll_ms, elapsed_ms(began, last_activity));
       check_native_scroll();
-      if (!image) { return false; } pending.reset();
+      if (!image) {
+        ++empty_polls;
+        if (windows && restart.due(last_activity)) {
+          pending.reset();
+          ++restarts;
+        }
+        return false;
+      }
+      pending.reset();
       require(image->error.empty(), "OS client capture: " + image->error);
+      ++samples;
       const auto &pixels = image->image;
       require(pixels.channels == 4 && pixels.width == uint32_t(window_.width()) &&
           pixels.height == uint32_t(window_.height()), "OS capture must match the exact STK client framebuffer");
@@ -507,6 +548,7 @@ class Exercise {
           {"body_text_marker_outside_viewport", text_elsewhere}, {"native_scroll_requests_this_phase", scrolls},
           {"host_colored_samples", colored}, {"viewport_top_left", {x, y, width, height}},
           {"client_size", {pixels.width, pixels.height}}};
+      if (windows) { result_["last_observation"]["capture_progress"] = capture_progress(); }
       if (consecutive >= 2) { result_["images"].push_back(result_["last_observation"]); }
       save();
       // Deliver at most one local wheel event after an actual nonmatching OS frame. Never
@@ -516,7 +558,18 @@ class Exercise {
         native_scroll(cycle, bounds); ++scrolls;
       }
       return consecutive >= 2;
-    }, "OS pixels " + phase, 45);
+    };
+    try { wait(next, "OS pixels " + phase, 45); }
+    catch (...) {
+      if (windows) {
+        try {
+          result_["last_capture_failure"] = capture_progress();
+          std::fprintf(stderr, "STK_NATIVE_CAPTURE_FAILURE %s\n", result_["last_capture_failure"].dump().c_str());
+        }
+        catch (...) {} // Keep the original timeout or capture error.
+      }
+      throw;
+    }
   }
   void save()
   {

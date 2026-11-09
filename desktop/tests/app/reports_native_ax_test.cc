@@ -62,6 +62,17 @@ void waiting_cases() {
       []() -> bool { throw std::runtime_error("predicate after expired start"); },
       [](bool) { throw std::runtime_error("pump after expired start"); },
       [] { throw std::runtime_error("yield after expired start"); }), "expired wait accepted");
+  stk::reports_native_test::StalledCaptureRestart restart;
+  check(!restart.due(start), "capture restart was armed before the first request");
+  restart.started(start);
+  check(!restart.due(start + milliseconds(1999)) && restart.due(start + seconds(2)),
+        "stalled capture did not wait for the initial sample");
+  check(!restart.due(start + seconds(8)), "replaced capture was retried before a fresh start");
+  restart.started(start + seconds(8));
+  check(!restart.due(start + seconds(9)) && restart.due(start + seconds(10)),
+        "capture restart timing did not follow the replacement request");
+  restart.started(start + seconds(10));
+  check(!restart.due(start + seconds(44)), "capture restarts exceeded the phase budget");
   std::cout << "PASS: external completion polls without an OS event and rejects late results\n";
 }
 ax::Request request() {
