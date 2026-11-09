@@ -351,13 +351,18 @@ retrying (`final: true` when the subscription ended because of it, e.g. `not_fou
 | `download.start` | `connection, node?, task_id \| workspace_id, path, dest?` (absolute; default `<download_dir>/<server key>/<task or workspace id>/<path>`), `idempotency_key?, expected_connection_identity?` | `{transfer}` |
 | `transfer.list` / `transfer.get {id}` | – / `id` | `{transfers}` / `{transfer}` |
 | `transfer.resume` | `id` | `{transfer}` (continues an `interrupted`, `failed`, or `cancelled` transfer) |
-| `transfer.cancel` | `id` | `{transfer}` in state `cancelled` |
+| `transfer.cancel` | `id` | `{transfer}` with the current state after requesting cancellation |
 
 `transfer = {id, kind: upload|download, state: queued|running|interrupted|completed|failed|cancelled,
 connection, node?, workspace_id?, task_id?, local, remote, bytes_done, bytes_total, files_done,
 files_total, current?, sha256?, error?, action?, created_at, updated_at}` (`action`: the hub
 `workspace.import` of an upload through a hub). `transfer.updated {transfer}` is sent
 on every state change and at most every 250 ms while bytes move.
+
+- **Cancellation.** An already `completed`, `failed`, or `cancelled` transfer is returned unchanged.
+  A worker can reach a terminal state while cancellation is being requested. If the cancellation
+  wait ends while the worker is still active, the reply contains its current state and later changes
+  arrive through `transfer.updated`.
 
 - **Idempotency.** With `idempotency_key` the transfer id is `sha256("<kind>.start\0<key>")[:32]`
   (`kind` = `upload` / `download`, so the two key spaces are separate) and the key and request are
