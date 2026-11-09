@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-09 19:54 UTC · Runtime 单实例与 X7 链路切断
+
+D1 C-11 的 Runtime 单实例、目录别名和崩溃重启已有持久回归 `a5239e05`，部署联测 17/17。X7 已获得单机纯链路切断的严格 Bridge 证据。跨主机分区、产品观察界面与完整 D1 退出继续。 [D1 矩阵](planning/d1-compatibility-gates.md) [运行验收](runtime-validation.md)
+
+`16dcd349` 同步 MuPRO HDF5 已发布流程与实际验收边界。Claude64 正在固化 X7 链路切断样例。 [试点设计](design/mupro-executor-pilot.md)
+
+远端 `fa2ff5e2` Desktop `42679509572` 仍在运行。3 个 Linux 作业通过，macOS CPU 和 Metal 通过，主原生 WKWebView 步骤失败且诊断继续，Windows CPU 测试运行中。同头 Runtime `42679509438` 终态 13/13。本地提交等待 Desktop 整轮终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42679509572) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42679509438)
+
 ## 2026-11-09 19:42 UTC · 切换任务后的制品打开复核
 
 `91b9d860` 保留派发时的制品条目。用户切换任务后，迟到回执仍可履行原来的显式打开，并在打开前使用原制品摘要复核本地文件。缺少原摘要时使用同一传输回执，两份摘要冲突时拒绝打开。复核沿用 256 MiB 本地检查上限，读取固定长度的普通文件。 [验收记录](runtime-validation.md)

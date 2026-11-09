@@ -1,5 +1,19 @@
 # STK 当前交接
 
+## 2026-11-09 19:54 UTC · Runtime 单实例与 X7 链路切断
+
+`a5239e05` 为 D1 C-11 增加 Linux 真实 API 双进程回归。两个进程均请求临时端口，目录别名启动的第二实例被拒绝，首个 PID 记录与工作区仍可读取。SIGKILL 后在同一锁 inode 上恢复原工作区。部署与 Hub 单实例联测 17/17，外部副本禁用 flock 后第二实例持续运行，回归按预期失败。
+
+Claude63 的 `ed59d42a` 由 root 审阅并修订为 `16dcd349`。MuPRO 试点文档补齐已发布的原生 HDF5 列出、显式选择和打开，以及只读查找重试。50 个本地链接检查通过。Linux 合成实窗验收与 Windows 客户端读取 CI 分开记录，真实许可输出、HDF5-only 完成与研究参考仍待验证。 [试点设计](docs/design/mupro-executor-pilot.md)
+
+在 `62b94d1a` 上用真实严格 Bridge、NodeAgent、Hub 与 Runtime 做了 X7 单机传输诊断。仅切断节点到 Hub 的 TCP 连接，Hub 在 18.82 秒后报告离线。三次精确读取均返回 unavailable，原任务在断线期间完成。恢复同一链路后的首个精确答复为同一任务成功，固定日志与产物摘要核对通过。只有一次程序启动，Hub 动作记录一致，零协议违规，子进程均已回收。跨主机分区与产品观察界面待验。
+
+Claude64 已在独立 `claude/x7-socket-partition-64` 开始固化 opt-in Linux 场景及拒绝假绿的回归。root 负责审阅、独立复跑和集成。
+
+远端 `fa2ff5e2` Desktop `42679509572` 仍在运行。3 个 Linux 作业通过，macOS CPU 和 Metal 通过，主原生 WKWebView 步骤失败且诊断继续，Windows CPU 测试运行中。同头 Runtime `42679509438` 终态 13/13。本地提交等待 Desktop 整轮终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42679509572) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42679509438)
+
+PR #53 的原分支仍与当前 worker 退场逻辑冲突。PR #54 仍包含与现行路径冲突的交接文件。两个 PR 继续保留审阅状态。 [PR #53](https://github.com/sijintech/stk/pull/53) · [PR #54](https://github.com/sijintech/stk/pull/54)
+
 ## 2026-11-09 19:42 UTC · 切换任务后的制品打开复核
 
 `91b9d860` 保留派发时的制品条目。用户切换任务后，迟到回执仍可履行原来的显式打开，并在打开前使用原制品摘要复核本地文件。缺少原摘要时使用同一传输回执，两份摘要冲突时拒绝打开。复核沿用 256 MiB 本地检查上限，读取固定长度的普通文件。
