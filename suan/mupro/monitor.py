@@ -100,6 +100,13 @@ def header_labels(line):
     return labels if all(labels) and text[:-width].strip().lower() == "step" else DEFAULT_LABELS
 
 
+def _open_native_output(path):
+    try:
+        return open_regular(path, follow_symlinks=False)
+    except (FileNotFoundError, NotRegularFile):
+        return None
+
+
 class MuferroAdapter:
     """Poll one muFerro case directory and write what is new through ``emitter``."""
 
@@ -107,8 +114,8 @@ class MuferroAdapter:
         self.emitter = emitter
         self.folder = Path(folder)
         self.prefix = "" if case_dir in ("", ".") else case_dir.rstrip("/") + "/"
-        self.progress = LineTail(self.folder / "mupro_progress.jsonl", follow_symlinks=False)
-        self.energy = LineTail(self.folder / "energy_out.dat", follow_symlinks=False)
+        self.progress = LineTail(self.folder / "mupro_progress.jsonl", open_binary=_open_native_output)
+        self.energy = LineTail(self.folder / "energy_out.dat", open_binary=_open_native_output)
         self.frames = StableFiles(self.folder, FRAME, stable_polls)
         self.progress_step = None
         self.declared = False
@@ -195,14 +202,15 @@ class MuferroAdapter:
         if self.completion_seen:
             return
         try:
-            with open_regular(path, follow_symlinks=False) as stream:
+            stream = _open_native_output(path)
+            if stream is None:
+                return
+            with stream:
                 data = json.loads(stream.read(65536))
             if not isinstance(data, dict):
                 raise ValueError("not an object")
             details = ", ".join(f"{key}={data[key]}" for key in ("completed_steps", "final_step") if key in data)
             text = "muFerro wrote mupro_completion.json" + (f": {details}" if details else "")
-        except (FileNotFoundError, NotRegularFile):
-            return
         except (OSError, ValueError, RecursionError):
             if not final:
                 return  # it may still be being written

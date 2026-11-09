@@ -3,6 +3,8 @@
 import json
 import os
 import re
+import subprocess
+import sys
 import threading
 import time
 
@@ -180,6 +182,14 @@ def test_line_tail_returns_new_complete_lines(tmp_path):
     chunked = LineTail(path)
     path.write_bytes(b"".join(b"%d\n" % n for n in range(100)))
     assert chunked.poll(max_bytes=50)[:2] == ["0", "1"] and chunked.drain()[-1] == "99"
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="Named pipes are tested on POSIX")
+def test_line_tail_skips_fifo_without_waiting_for_a_writer(tmp_path):
+    fifo = tmp_path / "native.log"
+    os.mkfifo(fifo)
+    program = "import sys; from suan.monitor.tail import LineTail; assert LineTail(sys.argv[1]).poll() == []"
+    subprocess.run([sys.executable, "-c", program, str(fifo)], timeout=8, check=True)
 
 
 def test_stable_files_need_unchanged_size_over_polls(tmp_path):

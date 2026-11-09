@@ -19,8 +19,6 @@ import stat
 import sys
 import threading
 
-from suan.connectors.files import NotRegularFile, open_regular
-
 MAX_TAIL_LINE = 1024 * 1024  # longer native lines are skipped
 POLL_BYTES = 8 * 1024 * 1024  # bytes read per poll; the rest waits for the next poll
 
@@ -39,19 +37,24 @@ def report(text):
         pass
 
 
+def _open_nonblocking(path, flags):
+    return os.open(path, flags | getattr(os, "O_NONBLOCK", 0))
+
+
 class LineTail:
     """Complete lines appended to a text file, read incrementally by byte offset.
 
     ``poll()`` returns the new lines without their newline, decoded as UTF-8 (invalid bytes
     replaced). A trailing line without a newline waits for a later poll. If the file shrinks
     (it was truncated or replaced) reading starts again at 0. ``line_number`` counts the
-    lines returned so far (0-based index of the next line).
+    lines returned so far (0-based index of the next line). An optional
+    ``open_binary`` receives the path and can return None to skip it.
     """
 
-    def __init__(self, path, max_line=MAX_TAIL_LINE, *, follow_symlinks=True):
+    def __init__(self, path, max_line=MAX_TAIL_LINE, *, open_binary=None):
         self.path = Path(path)
         self.max_line = max_line
-        self.follow_symlinks = follow_symlinks
+        self._open_binary = open_binary
         self.offset = 0
         self.line_number = 0
         self.restarts = 0
@@ -59,11 +62,18 @@ class LineTail:
 
     def poll(self, max_bytes=POLL_BYTES):
         try:
-            stream = open_regular(self.path, follow_symlinks=self.follow_symlinks)
-        except (FileNotFoundError, NotRegularFile):
+            if self._open_binary is None:
+                stream = open(self.path, "rb", opener=_open_nonblocking)
+            else:
+                stream = self._open_binary(self.path)
+        except (FileNotFoundError, IsADirectoryError):
+            return []
+        if stream is None:
             return []
         with stream:
             info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                return []
             if info.st_size < self.offset:
                 self.offset, self.line_number, self._skipping = 0, 0, False
                 self.restarts += 1
