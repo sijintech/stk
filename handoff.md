@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · C++ 精确读取和 MuFerro 表格
+
+远端 `15531049` 已推送，Desktop 和 Runtime 新轮运行。root 在本地 `85015dc1` 集成 Claude40 的 C++ 实时读取入口，相关 66 项通过。Claude41 在独立 worktree 核对 C++ 经真实单机 Hub 的窗口外读取、断线及恢复。Jobs 界面已复现选中任务退出窗口后详情丢失，候选与点击验收进行中。
+
+本地 `3ff96c0a` 修复 MuFerro 图索引能量和进度的缓存身份，能量表与 QOI 共用已核对字节。源码和隔离 wheel 各 95 项通过、一项按条件跳过。后续推送待 `15531049` Desktop 整轮终态。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · Windows 原生通过与 Cocoa 可见基线
 
 远端 `3d2fcea7` Desktop 于 10:32:33Z 整轮结束。Windows 原生 6/6，Windows CPU 与 Linux 三项通过，macOS 原生失败。Runtime 13 项通过。上一轮终态已核对，本批可推送。

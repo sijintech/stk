@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · C++ 入口与图表格核验
+
+root 推送 `15531049`，本地集成 Claude40 为 `85015dc1` 并以 `3ff96c0a` 修复 MuFerro 表格和结果摘要的绑定。已安排 Claude41 完成原生到真实 Hub 的单机验证。Jobs 状态候选保持独立。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · Windows 原生与 Cocoa 首轮诊断
 
 root 核对 `3d2fcea7` Desktop 整轮终态，Windows 原生六项通过。 `2308c680` 加入独立的 Cocoa 首轮可见暂停基线，补关闭前的原生代次和可见性。Linux 相关 19 项通过，目标结果待新头。 [验收记录](runtime-validation.md)

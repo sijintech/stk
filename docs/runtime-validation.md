@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 原生 C++ 实时读取与 MuFerro 表格
+
+`85015dc1d4e88b6cd0a253ec8fb76071adb59069` 集成 Claude40 `c7b9f983e58e12a02fb28afa17563f5113dd3a21`。C++ 桥两参及显式 false 发送省略字段的请求，true 发送布尔值 `require_live`。原生测试校验完整 Target 和 task ID、桥重启后重发以及严格 Python 桥的错误映射。作者 Linux 桥测试 64 项，root 独立 Linux 构建的桥及相关 schema 共 66 项通过、零跳过。真实 Hub 的 Python 证据已在 `49169e0e`，C++ 到真实 Hub 的完整成功路径由 Claude41 复验。 [桥契约](specs/stk-desktop-bridge-v1.md)
+
+`3ff96c0a2ca6cc0282d6562dc7f48b13c91fc255` 让内置 MuFerro 能量和进度表核对计划中的存在性与摘要。能量表与 QOI 共用一次解析，清单记录同一摘要。本地和自定义来源按实际字节规划，Runtime 按发布摘要计划并核对读取字节。八条旧反例涵盖出现、消失、追加、改写及暖缓存，另补自定义来源短读。恢复原内容后可重新求值。源码和隔离 wheel 各 95 项通过，性能基准各跳过一项。替换连接器调用和直读 DAT 回归通过。 [图契约](specs/stk-graph-v1.md)
+
+远端 `15531049c5c027153c232a2c4ac82c13deb6fe55` 已核对推送。新 Desktop 与 Runtime 正在执行，Secret scan 和部署成功。Jobs 的原生 UI 证据待独立候选。证据见本机 `root-delivery-20261109-82`。 [Desktop](https://github.com/sijintech/stk/actions/runs/42601829902) [Runtime](https://github.com/sijintech/stk/actions/runs/42601829951)
+
 ## 2026-11-09 UTC · Windows 原生终态和 Cocoa 首轮可见对照
 
 远端 `3d2fcea7fa25ef1c210b453f63a32c37494ad846` Desktop 于 10:32:33Z 终态 failure。Windows 原生作业 10:32:32Z 终态 success，六项必需 CTest 与零跳过检查通过，工件上传通过。Windows CPU 与 Linux 三项成功。macOS CPU 1516/1516、Metal 254/254，原生基线 4/6、三个隐藏对照各 0/2。Runtime 13 项、Docs 和 Secret scan 成功。 [Desktop](https://github.com/sijintech/stk/actions/runs/42593218935) [Windows 作业](https://github.com/sijintech/stk/actions/runs/42593218935/job/129097962786) [Runtime](https://github.com/sijintech/stk/actions/runs/42593219053)
