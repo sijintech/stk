@@ -642,6 +642,67 @@ def test_real_native_endpoint_retains_existing_large_shared_read_page_budget(con
     assert text.encode() in encoded and store.info()["revision"] == revision
 
 
+def test_real_peer_and_bridge_refuse_a_true_over_8_mib_shared_read_page_and_keep_serving(connected, sides, inproc):
+    """CP-0 F13 live: no budget patch. 500 normal 17,000-byte ASCII cells exceed the shared 8 MiB read
+    budget; the strict Bridge and an authenticated UDP peer both refuse that page with invalid_params, and
+    the same connection then serves bounded pages of the same records unchanged."""
+    store, target = sides[1].store, sides[1].target
+    table, field = uuid(), uuid()
+    store.apply([{"op": "create_table", "id": table, "name": "Over budget page"},
+                 {"op": "add_field", "id": field, "table_id": table, "name": "Text", "type": "text"}],
+                expected_revision=0)
+    text, revision = "y" * 17000, 1
+    for _ in range(20):
+        commands = []
+        for record in (uuid() for _ in range(25)):
+            commands.extend([{"op": "add_record", "id": record, "table_id": table},
+                             {"op": "set_cell", "table_id": table, "field_id": field,
+                              "record_id": record, "value": text}])
+        store.apply(commands, expected_revision=revision)
+        revision += 1
+    assert 500 * len(text.encode()) > 8 * 1024 * 1024  # cell payload alone, before DTO overhead
+    before = store.info(), store.history()
+    client, _ = connected()
+    bridge = inproc()
+    handle = bridge.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    method = "project.table.read"
+
+    def page(offset, limit):
+        params = {"table_id": table, "expected_revision": revision, "offset": offset, "limit": limit}
+        remote = client.request(method, {**target, **params}, timeout=30)
+        assert remote == bridge.call(method, {"handle": handle, **params})
+        return remote
+
+    first = page(0, 250)
+    assert (first["revision"], first["total"], first["next_offset"]) == (revision, 500, 250)
+    over = {"table_id": table, "expected_revision": revision, "offset": 0, "limit": 500}
+    with pytest.raises(PeerProtocolError) as rejected:
+        client.request(method, {**target, **over}, timeout=30)
+    # Fixed wire text: the shared store refused it remotely, not the client's pre-send schema.
+    assert rejected.value.code == "invalid_params" and str(rejected.value) == "Peer request was rejected"
+    error = bridge.error(method, {"handle": handle, **over})
+    assert error["code"] == "invalid_params" and "Project read exceeds 8 MiB" in error["message"]
+
+    second = page(250, 250)  # the same connection keeps serving bounded reads
+    assert (second["offset"], second["next_offset"]) == (250, None)
+    records = first["table"]["records"] + second["table"]["records"]
+    assert len({item["id"] for item in records}) == 500
+    assert all(item["values"] == {field: text} for item in records)
+    # The refused page's records alone, without the page envelope, exceed the published budget.
+    assert len(json.dumps(records, ensure_ascii=False, separators=(",", ":")).encode()) > 8 * 1024 * 1024
+    # Published schema: an out-of-range limit is refused before send; a catalog continuation
+    # without expected_revision crosses the wire and is refused by the shared store.
+    for name, params in ((method, {"table_id": table, "expected_revision": revision, "limit": 501}),
+                         ("project.catalog", {"offset": 1})):
+        with pytest.raises(PeerProtocolError) as refused:
+            client.request(name, {**target, **params})
+        assert refused.value.code == "invalid_params"
+        assert bridge.error(name, {"handle": handle, **params})["code"] == "invalid_params"
+    assert page(0, 250) == first
+    assert (store.info(), store.history()) == before and store.info()["revision"] == revision
+    bridge.assert_clean()
+
+
 def test_real_grant_revocation_generation_and_peer_revocation_are_checked_each_request(connected, sides):
     a, _ = connected()
     target = sides[1].target
