@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 13:49 UTC · 面板点击、导出共存与原批准观察
+
+`7ac983e8bd69505652b0bc692ee483ad4ce6c09e` 集成 Claude49 的 `2846d935`。只丢弃一次成功 `run_decide` 的已序列化回执，合成 MuFerro 在真实本机 Runtime 完成后普通关闭桥。新严格 Bridge 以新句柄和执行器打开同一项目，通过 `run_observe` 读到原审批和执行器，历史 `started` 与当前 `stopped` 分别匹配。原批准、启动日志、任务 ID 和一次真实提交均可追踪。源码联跑 64 项，隔离 wheel 2 项通过。独立在原候选记录真实 HTTP 服务的一次 submit、零 cancel 和工作流零 recover/cancel。范围为同一进程中重建 Bridge，实际进程中断及执行中重开仍待验。证据 `root-delivery-20261109-91/claude49-source.xml`、`claude49-wheel/installed.xml` 与 `claude49-lost-approval-review/`。
+
+`3f48687021d355093d7f8d08f2e0767752ce286b` 给原生分类传入显式预设。旧版遇到普通 `input.toml` 与合法 `result.json` 同目录时，分类为保存结果，丢掉收集预设。新版显式选 `muferro-collected-domains` 时打开算例，默认打开和直接选 `result.json` 保留保存结果。C++ 红例失败在来源类型及预设，修复后查看器测试 31/31。二进制 SHA-256 `a4acb1b27a9ac9dd6363a53bc02f961d508091e59e548675074d317c21656d43`。证据 `root-delivery-20261109-91/viewer-classification-{red,full}.xml`。 [桌面脚本契约](scripting-viewer.md)
+
+真实 Linux 面板验收在英语 X11/Xvfb 1440×1600、缩放 1、软件 OpenGL，项目编辑器最大化，Simulations 与 Simulation runs 已展开，选中唯一成功的合成 MuFerro 运行，Viewer 为空，项目修订 8。准备布局的 10 次左键和 1 次右键另记。一次 XTest 左键 `(1130,595)` 点击 View collected result，恢复分区布局，显示预设 `muferro-collected-domains`、第 2 步、步选 `[0,2]`、140 个三角面。基线用桌面 `757383af77`，导出共存复跑用修复后构建，两组后端均为 `2eb64f04`。共存用例在算例放入真实导出的第 0 步 `result.json` 和渲染数据。独立三次探查点击确认默认打开为保存结果，图求值新增 0 次。批准、计划和任务写调用均为零。修订、两份数据库、36 个 Runtime 任务文件、29 个本地算例文件的摘要均一致。两次正常退出，子进程回收。证据 `root-delivery-20261109-88/collected-native-review/evidence/panel/panel-receipt.json` 与 `collision/evidence/{panel-collision-receipt.json,fixed-start.png,after-view.png}`。
+
+远端 `249698d05dc13d9c08a2aebd9e906ebc38873a9d` 的 Windows CPU 于 13:49:06Z 通过，1460/1460，1179 项必需，934.83 秒。MSVC 已编译窗口捕获诊断并链接原生验收工具。此前 Linux 三项通过。macOS 原生主验收及三组隐藏对照失败，两组可见暂停对照通过。已核对六条隐藏轨迹，派发时 WebView 实际可见且已无焦点，派发后约 0.14–0.40 毫秒隐藏，约 11.94–24.34 毫秒后在隐藏态收到派发确认。原生查询回执各组为 24/27、28/26、28/26 次 Playing。主验收视频在初始暂停提前失败，HTML 到隐藏后像素条件即失败，两条主验收未提供可比的查询序列。Windows 原生 `129199406869` 在运行。`2eb64f04` 本地 Python 3.11 全量仍在运行。两个开放 PR 的精确头与上次审阅一致。本批等待整轮 Desktop 终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42621953590) [macOS evidence](https://github.com/sijintech/stk/actions/runs/42621953590/artifacts/13680007342)
+
 ## 2026-11-09 13:36 UTC · 冷重开、输入字节和收集后的 DAT 末帧
 
 `5e3eba2b5ec1130b95763c644e4bdbe99cc450de` 集成 Claude48 的 `49d3742a`。同一进程中关闭并重建严格 Bridge，重新打开同一项目，句柄更新，卡片、完整计划与摘要保留。显式观察后仍无法批准。重新审阅后原计划批准成功，观察和重放仍绑定原执行器，真实本机 Runtime 仅有一个合成任务。root 的转发计数确认只有一次启动调用，故意在重放时调用一次启动的变异例按预期失败。独立作者候选联跑 14 项，root 源码联跑 63 项通过。证据 `root-delivery-20261109-90/claude48-source.xml` 和 `cold-replay-negative/result.xml`。实际 OS 进程重启和许可软件待验。

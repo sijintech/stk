@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 13:49 UTC · 丢失批准回复和收集目录消歧
+
+root 以 `7ac983e8` 集成 Claude49 的 `2846d935`，加入提交调用计数。`3f486870` 统一原生入口与 Viewer 的收集预设消歧，Linux C++ 红绿和实际面板点击已验。Claude50 接手已收集 HDF5 显式查看核对。前一轮 Windows CPU 通过，原生正在运行，macOS 可见与隐藏对照已有回执。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 13:36 UTC · 审批冷重开和 MuFerro 本地验收
 
 root 以 `5e3eba2b` 集成 Claude48 的 `49d3742a`，加入实际启动调用计数。`173d0534` 修复输入快照路径重新打开与旧准备目录 FIFO，`2eb64f04` 集成独立末帧复现、补旧节点预设回退，并取得 Linux 原生脚本入口证据。Claude49 接手丢失批准响应后的冷重开。远端前批 Runtime 13/13，本批在整个 Desktop 终态后推送。 [验收记录](runtime-validation.md)
