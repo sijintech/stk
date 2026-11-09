@@ -1,5 +1,19 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 18:55 UTC · 传输完成状态与迟到回执
+
+`d7fbc3f1` 按原传输 ID 记录桌面已采纳的观测。迟到的继续、取消回执或刷新快照保留请求后已采纳的变化。刷新列表若先观察到已知在途传输完成，复用已有完成处理，随后同一完成事件只更新显示。
+
+Linux X11/Xvfb 1440×1600，软件 OpenGL、英文、缩放 1。固定起点为 Transfers 已打开、选中真实 Runtime 的已取消下载、Viewer 为空。两次点击刷新、继续，零滚动、零键入，只有列表和原 ID 的继续请求。真实桥依次交付运行、完成、原排队回执和原取消列表。旧版从完成 100% 退到排队 76%，再退到已取消 76%。新版在两份迟到快照后仍显示完成 100%。两版均校验同一文件的 2,755,000 字节，Runtime 工作区和 Viewer 保持一致。
+
+另以 Jobs 和 Transfers 可见、已选工作区、另存对话框已打开、Viewer 为空为起点。三次点击、一组快捷键和绝对路径输入，零滚动。真实桥先返回已完成列表，1.531 秒后交付原完成事件。新版收到列表时即显示“已下载并校验”，后续事件保持该状态，两版的 1,570 字节 PNG 均通过摘要校验。两组旧版和最终候选进程均正常退出。
+
+Jobs 原生定向 47/47、零跳过。持久用例覆盖两份旧快照和先完成列表两种顺序，并核对已知上传完成后仅刷新一次工作区文件。隔离 Python 3.11 全量 `7cdaece6` 为 6477 通过、180 跳过、4 排除、零失败。随后加入的晚到 Hub 拒绝修复已由此前 141 项定向联测覆盖。
+
+远端 `15dff6ac` Desktop `42669507898` 有四个作业通过。Linux 主作业 2142/2142，Windows CPU 1466/1466，Linux 打包和冷环境通过。macOS CPU 和 Metal 步骤通过，主原生验收的 MP4 和 HTML 视频仍失败。新的 Cocoa 诊断 2/2，分别在约 183 和 182 ms 收到 WebKit Playing，各两次 DOM 采样均为暂停，位置分别停在先前 seek 的 0.234 和 0.102 秒。两组都在原一秒窗口内确认了位置回退。下一步用同一 seek 历史做保持可见的暂停对照。Windows 原生仍在运行，本地提交等待整轮终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42669507898) · [macOS 原生工件](https://github.com/sijintech/stk/actions/runs/42669507898/artifacts/13701990267)
+
+本机证据包括 `root-delivery-20261109-106/final-jobs-v2.xml`、`late-transfer-native/{red-list,final-green-list}/evidence/receipt.json` 和 `root-delivery-20261109-107/owned-transfer-native/{red-owned-final,green-owned}/evidence/receipt.json`。PNG 实窗验收核对的是 Jobs 校验状态。
+
 ## 2026-11-09 18:25 UTC · 原传输继续与 HDF5 回执回归
 
 `7cdaece6` 将已取消的传输纳入桌面继续操作。直连下载使用原传输 ID。Hub 上传仅在核对原导入确已拒绝后推进审阅编号，并在派发前持久化下一次尝试。若批准先到，继续跟踪原动作。`abaf0a31` 覆盖原动作在查询与同 ID 重放之间才被拒绝的时序。
