@@ -102,6 +102,79 @@ def test_reopened_transfer_refuses_changed_endpoint_before_any_bytes_move(tmp_pa
     reopened.stop()
 
 
+def test_cold_restarted_guarded_download_completes_only_after_the_original_endpoint_returns(tmp_path, monkeypatch):
+    payload = b"synthetic frozen result bytes"
+    digest = hashlib.sha256(payload).hexdigest()
+    observed = []
+
+    class SyntheticBackend(Backend):
+        def __init__(self, name, identity):
+            super().__init__(identity)
+            self.name = name
+
+        def describe(self, owner, owner_id, path):
+            observed.append((self.name, "describe", owner, owner_id, path))
+            return {"path": path, "size": len(payload), "sha256": digest}
+
+        def read_chunk(self, owner, owner_id, path, offset):
+            observed.append((self.name, "read_chunk", offset))
+            return payload[offset:offset + 8]  # several reads through the real append loop
+
+    original, replacement = SyntheticBackend("original", "a" * 16), SyntheticBackend("replacement", "b" * 16)
+    active = [original]  # the mock desktop profile's current Runtime
+
+    def resolve(connection, node=None):
+        return active[0]
+
+    dest = tmp_path / "downloads" / "result.dat"  # its directory is only created after describe
+    start = ("runtime:lab", "task", "c" * 32, "case/result.dat", dest)
+    key = "frozen-collect-result"
+
+    first = TransferManager(tmp_path / "bridge", lambda *args: None, resolve)
+    monkeypatch.setattr(first, "_launch", lambda identity: None)  # crash after journaling, before worker dispatch
+    transfer = first.start_download(*start, idempotency_key=key, expected_connection_identity=original.server_key)
+    journaled = first.load(transfer["id"])
+    assert transfer["id"] == TransferManager.keyed_id("download", key) and journaled["state"] == "queued"
+    assert journaled["connection_identity"] == original.server_key and journaled["idempotency_key"] == key
+    assert "expected_connection_identity" not in journaled["request"]
+    first.stop()
+    assert observed == [] and not dest.parent.exists()
+
+    active[0] = replacement  # the desktop profile now names another Runtime
+    reopened = TransferManager(tmp_path / "bridge", lambda *args: None, resolve)
+    assert reopened.load(transfer["id"])["state"] == "interrupted"
+    reopened.resume(transfer["id"])
+    reopened.threads[transfer["id"]].join(5)
+    assert not reopened.threads[transfer["id"]].is_alive()
+    refused = reopened.load(transfer["id"])
+    assert refused["state"] == "failed" and refused["error"]["code"] == "conflict"
+    assert refused.get("sha256") is None and refused["bytes_done"] == 0
+    assert observed == [] and not dest.parent.exists()
+
+    active[0] = original  # restore the approved profile and explicitly resume the same transfer
+    resumed = reopened.resume(transfer["id"])
+    assert resumed["id"] == transfer["id"]
+    reopened.threads[transfer["id"]].join(5)
+    assert not reopened.threads[transfer["id"]].is_alive()
+    done = reopened.load(transfer["id"])
+    assert done["state"] == "completed" and done.get("error") is None
+    assert done["sha256"] == digest and done["bytes_done"] == done["bytes_total"] == len(payload)
+    assert done["files_done"] == 1 and done["items"][0]["done"] is True
+    assert dest.read_bytes() == payload and hashlib.sha256(dest.read_bytes()).hexdigest() == digest
+    assert sorted(path.name for path in dest.parent.iterdir()) == [dest.name]  # part and its meta published away
+    for field in ("id", "request", "idempotency_key", "connection_identity", "created_at", "local", "remote"):
+        assert done[field] == journaled[field]
+    assert observed == [("original", "describe", "task", "c" * 32, "case/result.dat")] + [
+        ("original", "read_chunk", offset) for offset in range(0, len(payload), 8)]
+    assert all(name == "original" for name, *_ in observed)  # the replacement saw no describe or read
+
+    replay = reopened.start_download(*start, idempotency_key=key, expected_connection_identity=original.server_key)
+    assert replay["id"] == transfer["id"] and replay["state"] == "completed"
+    assert [entry["id"] for entry in reopened.list()] == [transfer["id"]]
+    assert len(observed) == 1 + len(range(0, len(payload), 8))
+    reopened.stop()
+
+
 def test_guarded_keyed_download_replays_the_matching_journal_and_preserves_legacy_calls(inproc, tmp_path, monkeypatch):
     h = inproc()
     a, b = Backend("a" * 16), Backend("b" * 16)
