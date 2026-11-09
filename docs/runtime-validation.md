@@ -1,5 +1,26 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 56 的整轮终态和 CP-0 证据
+
+[Desktop 42542944337](https://github.com/sijintech/stk/actions/runs/42542944337) 绑定 `56b432d0`，attempt 1 于 02:00:59Z 完成，整轮 failure。任务时间为 UTC。
+
+| 任务 | 结果 | 结束 |
+|---|---|---|
+| Linux 包 128921691191 | success | 01:04:28 |
+| Linux 包 smoke 128923650851 | success | 01:05:51 |
+| macOS 128921691132 | failure | 01:28:19 |
+| Linux GL/Vulkan 128921691262 | success | 01:31:09 |
+| Windows CPU 128921690979 | success | 01:39:54 |
+| Windows 原生 128933290782 | success | 02:00:58 |
+
+Windows 原生 20 轮步骤于 02:00:45Z 通过。Mac CPU 1516/1516、Metal 254/254、原生 4/6。独立视频首次暂停样本在播放采样后 60.581ms 由 0.336489 秒回到 0.234000 秒，低于播放样本减 0.05 秒的下限。HTML 视频在保持阶段第 4 样本由暂停基线 0.246369 秒回到 0.102000 秒，超过 0.10 秒界限。两者均回到各自最后一次 AX 定位值，采样时已暂停、未结束、未 seek，导航代次为 1。新暂停代次的 ACK 已到，采样时 `verified=false`。首次定位前也观察到约 84 毫秒的回退，下一步做定位前隐藏对照。 [Mac 日志](https://github.com/sijintech/stk/actions/runs/42542944337/job/128921691132#step:18:1) · [Mac 产物](https://github.com/sijintech/stk/actions/runs/42542944337/artifacts/13643187676)
+
+[Runtime 42542944387](https://github.com/sijintech/stk/actions/runs/42542944387) 于 01:16:23Z 完成，13 个任务逐项成功。同头 Docs 和 Secret 也成功。终态已登记，可以推送下一批提交。
+
+- CP-0 `a4a07a41` 以真实 SQLite 热回滚日志验证 owner 绑定读取原字节拒绝和 peer 目录物理恢复，源码和隔离安装核心各 110 项通过。两种反向改动仅在一次性源码副本执行，分别触发 2 和 1 项预期失败。
+- CP-0 `bd49fd40` 验证本机桥与已授权 peer 保留同一合成文件索引值，撤销项目授权后 peer 拒绝目录及表读取。源码和隔离安装核心各 111 项通过，零跳过。宽套件 243 项通过，2 项跳过需原生 helper 安装前缀。
+- 双仓试验对隔离 Linux Runtime 真实任务执行五次状态 GET 及一次缺失 GET，读前后数据库、WAL、工作区字节一致。另用关闭监听的真实服务验证不可达，用合成 DTO 验证后端 `unknown` 等分支。严格类型检查绑定 Synthrix `a15ab6b`。本次仅为服务器观察映射，真实产品路由和权限另行验证。证据见 `root-delivery-20261109-46/closure.json`。
+
 ## 2026-11-09 UTC · CP-0 分页及回执回归
 
 - 本地 `994a3b1a` 使用真实桌面桥 NDJSON 与已授权 `PeerProjects`，核对 peer 方法响应编码。两页目录、三页记录的结果一致，两种陈旧续页均被拒。相同 UUID 在两个 scope 各有一个原回执，分别精确重放。源码四套 143 项，隔离 Python 3.12 wheel 核心两套 107 项，零跳过。用例与证据见 `root-delivery-20261109-45/closure.json`。

@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · CP-0 新回归和 56 的 Desktop 终态
+
+`a4a07a41` 集成 Claude 的两条热日志恢复回归，`bd49fd40` 集成文件索引授权与撤权回归。最新源码和隔离安装核心套件各 111 项通过。Claude 独立分支保留两份作者提交。Synthrix 只读观察原型已用真实合成 Runtime 任务验证，产品路由与授权待设计，R2/R3 待决定。
+
+[Desktop 42542944337](https://github.com/sijintech/stk/actions/runs/42542944337) 对应 `56b432d0`，于 02:00:59Z 完成。六项中五项成功，含 Windows 原生 20 轮。macOS 原生 4/6，两个视频都回到各自最近一次 AX 定位时间。失败样本暂停 ACK 已到，原生核验当时未完成。Runtime 13 项成功。整轮结果已登记，推送门已满足。实测和当前 Git 见 `root-delivery-20261109-46/closure.json`。
+
 ## 2026-11-09 UTC · D1 设计比较稿与 CP-0 回归已在本地 main
 
 root 本地 `994a3b1a` 增加桌面桥与已授权 peer 的分页及回执回归，源码 143 项和隔离安装核心 107 项通过，零跳过。`07c91e85` 集成 Claude 的 D1 云项目设计，作者提交 `2f2e6ef7`。R2/R3 待决定。Claude 已切到独立 `claude/cp0-recovery-evidence-20`，将两条物理热日志路径补成回归。
