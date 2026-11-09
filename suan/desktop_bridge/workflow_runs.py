@@ -31,6 +31,7 @@ from uuid import uuid4
 
 from suan.project.analysis_runs import AnalysisChanged
 from suan.project.store import ProjectError, RevisionConflict
+from suan.workflows.common import _revision
 
 from .protocol import BridgeError
 
@@ -355,7 +356,7 @@ class WorkflowRunExecutor:
             try:
                 return call(job.store.info()["revision"])
             except ValueError as error:
-                if "Project changed" not in str(error):
+                if isinstance(error, RowChanged) or "Project changed" not in str(error):
                     raise
             except BridgeError as error:
                 if error.code == "cancelled":
@@ -376,12 +377,16 @@ class WorkflowRunExecutor:
         job.remote[key] = {"attempt": attempt, "simulation_run_id": None, "state": None, "errors": 0}
         simulation = plan["simulation"]
         connection, options = simulation["connection"], simulation["options"]
-        try:
-            live = template.describe_values(job.store.snapshot(), row["id"], connection, options)
-        except ValueError as error:
-            raise RowChanged(f"Row {row['number']} cannot be run as frozen: {error}") from None
-        if json.dumps(live, sort_keys=True) != json.dumps(plan["parameters"][step][row["id"]], sort_keys=True):
-            raise RowChanged(f"Row {row['number']} changed since this run was frozen; re-run it as a new run")
+
+        def require_frozen_row(model):
+            try:
+                live = template.describe_values(model, row["id"], connection, options)
+            except ValueError as error:
+                raise RowChanged(f"Row {row['number']} cannot be run as frozen: {error}") from None
+            if json.dumps(live, sort_keys=True) != json.dumps(plan["parameters"][step][row["id"]], sort_keys=True):
+                raise RowChanged(f"Row {row['number']} changed since this run was frozen; re-run it as a new run")
+
+        require_frozen_row(job.store.snapshot())
         api = self._api(job)
         p = api.project
         previous = task.get("progress") or {}
@@ -397,8 +402,13 @@ class WorkflowRunExecutor:
                     p.runs.submit(run["id"])
                 return
         identity = f"workflow-run:{job.run_id}:{step}:{row['id']}:{attempt}"
-        run = self._console(job, lambda revision: template.prepare(api, p, row["id"], connection, options, revision,
-                                                                   identity=identity))
+
+        def prepare_child(revision):
+            # Bind every retry's row check to the revision the engine must prepare.
+            require_frozen_row(_revision(job.store, revision))
+            return template.prepare(api, p, row["id"], connection, options, revision, identity=identity)
+
+        run = self._console(job, prepare_child)
         job.remote[key]["simulation_run_id"] = run["id"]
         self._progress(job, step, row, attempt, stage="prepared", simulation_run_id=run["id"])
         submitted = p.runs.submit(run["id"])

@@ -163,6 +163,48 @@ def test_a_row_changed_after_freezing_is_refused_without_submitting(scan):
             "before": 300, "after": 350} in reasons
 
 
+@pytest.mark.parametrize("change_at", ["after_check", "retry"])
+def test_row_is_rechecked_at_the_revision_used_to_prepare(scan, monkeypatch, change_at):
+    s = scan
+    row = s["rows"][0]
+    run = prepare(s, rows=[row])
+    assert run["parameters"]["simulate"][row]["temperature"] == 300
+    executor = s["h"].bridge.workflow_executor
+    original_bind = executor.bound_scripting
+    original_prepare = muferro.MuFerro.prepare
+    edits, prepare_calls = [], []
+
+    def edit_row():
+        revision = s["store"].info()["revision"]
+        edits.append(s["store"].apply([{"op": "set_cell", "table_id": muferro.TABLE_ID, "record_id": row,
+            "field_id": muferro.FIELD_IDS["temperature"], "value": 350}], expected_revision=revision)["revision"])
+
+    def bind(store, cancel, **options):
+        if change_at == "after_check" and not edits:
+            edit_row()
+        return original_bind(store, cancel, **options)
+
+    def prepare_child(self, *args, **options):
+        prepare_calls.append(options["expected_revision"])
+        if change_at == "retry" and not edits:
+            edit_row()  # MuFerro.prepare now receives a stale revision and asks for a retry.
+        return original_prepare(self, *args, **options)
+
+    monkeypatch.setattr(executor, "bound_scripting", bind)
+    monkeypatch.setattr(muferro.MuFerro, "prepare", prepare_child)
+    workspaces = s["client"].workspaces()
+    s["h"].call("project.workflow_runs.start", {"handle": s["handle"], "run_id": run["id"]})
+    until(lambda: get(s, run["id"])["status"] == "stopped" or s["client"].tasks(), s, tick=False)
+    assert s["client"].tasks() == [] and s["client"].workspaces() == workspaces
+    done = settled(s, run["id"], tick=False)
+    simulate = tasks(done)[("simulate", row)]
+    assert simulate["status"] == "failed" and simulate["error"]["code"] == "row_changed"
+    assert tasks(done)[("energy", row)]["status"] == "pending"
+    assert s["store"].runs.list()["runs"] == []
+    assert len(edits) == 1
+    assert prepare_calls == ([] if change_at == "after_check" else [edits[0] - 1])
+
+
 def test_a_task_stk_stopped_following_is_adopted_on_the_next_start(scan):
     s = scan
     run = prepare(s, rows=[s["rows"][0]])
