@@ -3,13 +3,14 @@ import {createRoot} from 'react-dom/client';
 import {action,api,ApiError,events,hasToken,Json,readNode,setToken,uid} from './api';
 import ErrorBoundary from './ErrorBoundary';
 import TaskObservation from './TaskObservation';
-import {type TaskScope} from './taskFacts';
+import {isTerminalTaskState,type TaskFact,type TaskScope} from './taskFacts';
 import './style.css';
 const Viewer=React.lazy(()=>import('./Viewer'));
 const GraphPanel=React.lazy(()=>import('./GraphPanel'));
 // Development only: `?example=1` renders the payload v2 example without a hub (not part of production builds).
 const ExampleView=import.meta.env.DEV&&new URLSearchParams(location.search).has('example')?React.lazy(()=>import('./ExampleView')):null;
 const lostAccess=(error:unknown)=>error instanceof ApiError&&(error.status===401||error.status===403);
+type ObservedTask = {scope:TaskScope;name:string;state:string;verifiedIdentity:boolean;exactTerminal:boolean};
 
 function App(){
   const [connected,setConnected]=useState(hasToken());
@@ -34,7 +35,7 @@ function Connect({connected}:{connected:()=>void}){
 function Workbench({disconnect}:{disconnect:()=>void}){
   const [devices,setDevices]=useState<Json[]>([]),[actions,setActions]=useState<Json[]>([]),[node,setNode]=useState(''),[workspace,setWorkspace]=useState('');
   const [selection,setSelection]=useState<TaskScope|null>(null),[artifacts,setArtifacts]=useState<Json[]>([]),[path,setPath]=useState(''),[scene,setScene]=useState<Json|null>(null);
-  const [verifiedTask,setVerifiedTask]=useState<{scope:TaskScope;terminal:boolean}|null>(null);
+  const [observedTask,setObservedTask]=useState<ObservedTask|null>(null);
   const [readKinds,setReadKinds]=useState<string[]|null>(null),[taskRefresh,setTaskRefresh]=useState(0);
   const [analysis,setAnalysis]=useState<'file'|'graph'>('file'),[mode,setMode]=useState('slice'),[axis,setAxis]=useState(2),[index,setIndex]=useState(0),[level,setLevel]=useState(0),[probe,setProbe]=useState<number[]>([0,0,0]);
   const [session,setSession]=useState(()=>sessionStorage.getItem('stk-session')||uid()),[sessions,setSessions]=useState<Json[]>([]),[messages,setMessages]=useState<Json[]>([]),[chat,setChat]=useState('');
@@ -46,9 +47,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const tasks:Json[]=selected?.snapshot?.tasks||[];
   const task=selected&&selection?.node===node?selection.task:'';
   const heartbeat=task&&tasks.find(t=>t.id===task&&t.workspace_id===selection?.workspace);
-  const verified=verifiedTask?.scope===selection?verifiedTask:null;
-  const taskBound=!!task&&(!!heartbeat||!!verified);
-  const exactTerminal=verified?.terminal===true;
+  const observed=observedTask?.scope===selection?observedTask:null;
+  const taskBound=!!task&&(!!heartbeat||observed?.verifiedIdentity===true);
+  const exactTerminal=observed?.exactTerminal===true;
+  let graphTasks=tasks;
+  if(taskBound&&observed){
+    const row={id:task,name:observed.name,state:observed.state};
+    graphTasks=tasks.some(item=>item.id===task)?tasks.map(item=>item.id===task?row:item):[row,...tasks];
+  }
   const shownScene=taskBound?scene:null;
   const features:unknown=selected?.snapshot?.features;
   const canRead=Array.isArray(features)&&features.includes('read');
@@ -58,15 +64,18 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const taskOnline=online&&selected?.online===true;
   const clearTask=useCallback(()=>{
     generation.current++;scopeVersion.current++;activeScope.current=null;
-    setSelection(null);setVerifiedTask(null);setPath('');setArtifacts([]);setScene(null);setLogs('');
+    setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);setScene(null);setLogs('');
   },[]);
   const clearNode=useCallback(()=>{clearTask();setNode('');setWorkspace('');},[clearTask]);
   const nodeGone=useCallback((scope:TaskScope)=>{if(activeScope.current===scope)clearNode();},[clearNode]);
-  const verifyTask=useCallback((scope:TaskScope,terminal=false)=>{
+  const observeTask=useCallback((scope:TaskScope,fact:TaskFact,verifiedIdentity:boolean)=>{
     if(activeScope.current!==scope)return;
-    setVerifiedTask(known=>{
-      if(known?.scope===scope&&(known.terminal||!terminal))return known;
-      return {scope,terminal};
+    setObservedTask(previous=>{
+      const known=previous?.scope===scope?previous:null;
+      const exactTerminal=known?.exactTerminal===true||(fact.exact&&isTerminalTaskState(fact.state));
+      if(known&&known.state===fact.state&&known.name===fact.name&&known.verifiedIdentity===verifiedIdentity&&
+         known.exactTerminal===exactTerminal)return known;
+      return {scope,name:fact.name,state:fact.state,verifiedIdentity,exactTerminal};
     });
   },[]);
   const acceptArtifacts=useCallback((version:number,request:number,result:unknown)=>{
@@ -153,14 +162,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       </form>}
       {task&&selection&&<TaskObservation key={`${node}/${selection.workspace}/${task}`} scope={selection}
         heartbeat={heartbeat} online={taskOnline} supported={canReadTask} refresh={taskRefresh}
-        onVerified={verifyTask} onAccessLost={disconnect} onNodeGone={nodeGone}/>}
+        onObservation={observeTask} onAccessLost={disconnect} onNodeGone={nodeGone}/>}
       {taskBound&&<div className="inline"><button disabled={busy} onClick={()=>void run(readLogs)}>读取日志</button><button disabled={busy} onClick={()=>void run(files)}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
       {actions.filter(a=>a.state==='review').map(a=><article className="review" key={a.id}><strong>等待执行复核</strong><p>{a.review_reason}</p><pre>{JSON.stringify(a.request.payload,null,2)}</pre>{[true,false].map(approved=><button key={String(approved)} disabled={busy} onClick={()=>void run(async()=>{await api(`actions/${a.id}/review`,'POST',{approved});})}>{approved?'批准执行':'拒绝'}</button>)}</article>)}
       <details><summary>最近操作与重试</summary>{actions.filter(a=>a.request.kind!=='task.events').slice(0,20).map(a=><p key={a.id}><small>{a.request.kind} · {a.state}<br/>{a.error}</small></p>)}<button onClick={()=>void run(async()=>{const saved=sessionStorage.getItem('stk-last-action');if(saved)await api('actions','POST',JSON.parse(saved));})}>以相同 ID 重试上次操作</button></details>
     </aside>
     <section className={`analysis mobile-${tab==='view'?'show':'hide'}`}><div className="view-title"><div><span className="eyebrow">RESULT EXPLORER</span><h1>{analysis==='graph'?'图谱视图':shownScene?.manifest.field||'科学结果'}</h1></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span></div>
       <div className="mode-switch" role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>setAnalysis(key)}>{label}</button>)}</div>
-      {analysis==='graph'?<React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={selected?.id||''} node={selected?node:''} task={taskBound?task:''} tasks={tasks} artifacts={taskBound?artifacts:[]} canReadEvents={canReadEvents&&taskOnline} onError={setError} onLog={setLogs}/></React.Suspense>:<>
+      {analysis==='graph'?<React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={selected?.id||''} node={selected?node:''} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} canReadEvents={canReadEvents&&taskOnline} onError={setError} onLog={setLogs}/></React.Suspense>:<>
       <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" value={taskBound?path:''} onChange={e=>{setPath(e.target.value);generation.current++;}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(a=>/\.(vti|vtk|npy|dat)$/.test(a.path)).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
       <label>视图<select value={mode} onChange={e=>setMode(e.target.value)}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>
       {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>setAxis(Number(e.target.value))}>{['X','Y','Z'].map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={index} onChange={e=>setIndex(Number(e.target.value))}/></label></>}

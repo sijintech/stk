@@ -276,7 +276,7 @@ export default function GraphPanel({node, task, tasks, artifacts, canReadEvents,
   }
 
   // Minimal live progress for the bound running task (task.events, see stk-events-v1.md §5).
-  const progressTask = bindings[names[0]] || task;
+  const progressTask = bindings[names[0]] ?? task;
   const taskState = tasks.find(t => t.id === progressTask)?.state;
   // Polls only while the page is visible and the task runs, every 10 s backing off to 30 s while no new
   // events arrive, and stops once the Runtime reports the task terminal.
