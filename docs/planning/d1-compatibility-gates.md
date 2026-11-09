@@ -151,7 +151,7 @@ D1 的任何改动都要先过下面这些门。"测试入口"均为基线中已
 | C-8 | 关闭 API 或 Bridge 不取消 Runtime 任务；Bridge 重启后原 key 幂等 | 已发布：[desktop bridge v1](../specs/stk-desktop-bridge-v1.md)；`suan/runtime/cli.py:319-330` | `tests/test_desktop_bridge_runtime.py:49,164,276` |
 | C-9 | 项目运行记录用冻结方案中的固定 `idempotency_key` 提交，用 `key + ":cancel"` 取消；已接受的 task ID 不可替换 | 现行实现；`suan/desktop_bridge/project_runs.py:49-51`；[项目运行记录](../project-runs.md) | `tests/test_project_runs.py`；`tests/test_bridge_analysis_runs.py` |
 | C-10 | 服务端只在 Linux 运行；在 Windows 和 macOS 上 `suan server init` 与控制服务拒绝初始化，且不创建任何文件 | 现行实现；`suan/runtime/common.py:109`；`suan/control/cli.py:29-42` | CI `.github/workflows/runtime.yml:174-189`（客户端任务） |
-| C-11 | 同一Runtime state只有一个API；同一Bridge状态目录第二实例回答busy后退出；正式Hub serve同真实状态目录第二实例报错并退出1 | `suan/runtime/common.py::instance_lock`、`suan/desktop_bridge/server.py::StateDirLock`；新增 `suan/control/cli.py::serve` 全生命周期持control.lock，pair不共用该服务锁，直接factory部署须调用方管理 | Hub：`tests/test_control_singleton.py` 11例含不同端口/alias、TERM/KILL后同inode重启、pair并行、独立目录和异常释放；相关49项及主线271项通过。Bridge原测试保留；Runtime API锁仍无专门双进程新测试 |
+| C-11 | 同一Runtime state只有一个API；同一Bridge状态目录第二实例回答busy后退出；正式Hub serve同真实状态目录第二实例报错并退出1 | `suan/runtime/common.py::instance_lock`、`suan/desktop_bridge/server.py::StateDirLock`；新增 `suan/control/cli.py::serve` 全生命周期持control.lock，pair不共用该服务锁，直接factory部署须调用方管理 | Hub：`tests/test_control_singleton.py` 11例含不同端口/alias、TERM/KILL后同inode重启、pair并行、独立目录和异常释放。Runtime：`tests/test_deployment.py` 两个真实API均请求临时端口，目录别名启动的第二实例被锁拒绝，首个PID记录与工作区保持可读，SIGKILL后同锁inode恢复原工作区。两模块17项通过，外部禁用文件锁的反例失败。Bridge沿用既有门。 |
 
 **CI 入口：**
 - Linux 服务端测试由 `.github/workflows/runtime.yml:31` 运行：`pytest -m "not desktop and not perf"`，三个 Python 版本。

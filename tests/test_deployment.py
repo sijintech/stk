@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import json
+import os
 import subprocess
 import sys
 import time
@@ -73,6 +74,65 @@ def test_real_api_and_supervisor_restart_preserve_worker(deployed):
     assert restored.wait(task["id"], timeout=15)["state"] == "succeeded"
     assert restored.logs(task["id"], offset=offset)["bytes"] == b"finished\n"
     assert restored.logs(task["id"])["bytes"].count(b"started") == 1
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Runtime servers are Linux-only")
+def test_runtime_api_rejects_an_aliased_second_instance_and_recovers_after_kill(tmp_path):
+    state = tmp_path / "runtime"
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    token = "abcdefghijklmnopqrstuvwxyz"
+    atomic_json(state / "config.json", {
+        "state_dir": str(state), "workspace_root": str(shared), "port": 0,
+        "concurrency": 1, "token": token, "python": sys.executable,
+    })
+    alias = tmp_path / "alias"
+    alias.symlink_to(state, target_is_directory=True)
+    pid_file = state / "api.pid"
+    lock_file = state / "api.lock"
+    child_env = {key: os.environ[key] for key in ("PATH", "HOME", "LANG", "LC_ALL") if key in os.environ}
+    child_env.update(PYTHONPATH=str(Path(__file__).resolve().parents[1]), STK_TOKEN_PLAN_API_KEY="")
+    command = [sys.executable, "-m", "suan.runtime.server", "--state-dir"]
+
+    def client_for(child):
+        deadline = time.monotonic() + 15
+        while child.poll() is None and time.monotonic() < deadline:
+            record = read_json(pid_file, {})
+            if record.get("pid") == child.pid:
+                assert record["port"] > 0
+                return RuntimeClient(f"http://127.0.0.1:{record['port']}", token, timeout=3)
+            time.sleep(0.05)
+        pytest.fail(f"Runtime API {child.pid} did not publish its endpoint (exit {child.poll()})")
+
+    child = subprocess.Popen([*command, str(state)], cwd=tmp_path, env=child_env)
+    try:
+        client = client_for(child)
+        workspace = client.create_workspace("singleton", "singleton-workspace")["id"]
+        record_bytes = pid_file.read_bytes()
+        lock = lock_file.stat()
+
+        # Both processes request ephemeral ports, so a bind collision cannot enforce exclusivity.
+        duplicate = subprocess.run([*command, str(alias)], cwd=tmp_path, env=child_env,
+                                   capture_output=True, text=True, timeout=10)
+        assert duplicate.returncode == 1 and "BlockingIOError" in duplicate.stderr
+        assert child.poll() is None and pid_file.read_bytes() == record_bytes
+        assert [item["id"] for item in client.workspaces()] == [workspace]
+
+        child.kill()
+        assert child.wait(timeout=5) < 0
+        child = subprocess.Popen([*command, str(alias)], cwd=tmp_path, env=child_env)
+        restored = client_for(child)
+        assert [item["id"] for item in restored.workspaces()] == [workspace]
+        assert restored.create_workspace("singleton", "singleton-workspace")["id"] == workspace
+        assert restored.tasks() == []
+        restarted_lock = lock_file.stat()
+        assert (restarted_lock.st_dev, restarted_lock.st_ino) == (lock.st_dev, lock.st_ino)
+        child.terminate()
+        assert child.wait(timeout=5) == 0
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=5)
 
 
 def test_shipped_parameter_sweep(deployed, tmp_path):
