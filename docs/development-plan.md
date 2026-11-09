@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · 原生报告暂停与回执复验
+
+Claude28B 的重复暂停修复经 root 整合和 Linux 真窗口复验。新头在 macOS 分别核对首次显式暂停的代次、媒体时点和隐藏期的原生状态。上一轮隐藏对照已确认收到回复，持续返回 Playing。Windows 保持现有验收门。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · MuPRO 布局核验与 D1 实线竞争
 
 MuPRO 启动后的结果按预检布局验收，保留离线核验入口。D1 的 F3/F11d 已用本机桥和真实 WebRTC 验证单库同修订竞争，目标平台和跨部署另验。Windows Mesa 准备通过，原生报告运行中。Claude28B 已交候选，root 继续核对窗口提前关闭时的测试夹具及 Linux 必跑门。 [验收记录](runtime-validation.md)

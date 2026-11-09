@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 报告暂停合并与 Cocoa 回复取证
+
+`ab9707df660e6a1fcac3c351e79ff2a6c29d19dd` 集成 Claude `1736233d` 的宿主改动。Linux Xvfb 从 1280×800 默认工作台的 `a3` 测试标签开始。七个 Pause 点击分属不同生命周期场景，每个由一次按下和松开组成。首个点击在隐藏前只派发一次，重显后可再次派发，关窗撤销资源会话。视图为测试替身。关窗红例在旧夹具中调用谓词两次，修复后一次。联合 114 项全过，14 项宿主无窗口测试和 Xvfb 精确门均通过。缺失、跳过、未运行和失败的必跑门反例均被拒绝。证据见本机 `root-delivery-20261109-64`。
+
+`a8872719` 的 macOS CPU 1516/1516、Metal 254/254，原生 4/6，定位前隐藏对照 0/2。独立视频首次显式暂停为代次 2、派发时已隐藏，DOM 时点从约 0.107 秒退到 0.042 秒。两项隐藏对照在失去挂载前保持判据通过，关闭分别记录为 `pause_watchdog` 与 `pause_reply_after_deadline`。两者均收到暂停 ACK，状态核验未通过，关闭前 25 次查询收到 25 次 Playing 回复。HTML 原组另在第三个保持采样超过时间差上限，当时没有关闭记录。 [macOS 原生证据](https://github.com/sijintech/stk/actions/runs/42570072786/artifacts/13654776484)
+
+Windows 3.11 Runtime 同头重跑于 06:39:14Z 成功，使用旧热日志夹具。Windows Desktop 原生仍在运行，Mesa 准备已完成。 [Runtime 重跑](https://github.com/sijintech/stk/actions/runs/42570072715/attempts/2) [Windows 原生](https://github.com/sijintech/stk/actions/runs/42570072786/job/129016929205)
+
 ## 2026-11-09 UTC · MuPRO 布局绑定与 D1 同修订竞争
 
 `9a357f75abe3842c7a75e59f267ce1e088de5845` 的旧码反例让合成求解器把预检三步改为一步，旧启动器退出 0。修复后退出 3，`case_layout` 失败，保留三步预检及空 QoI，独立离线核验仍读当前一步目录。源码联合 126 项通过、2 项仅真实许可资产跳过。隔离 wheel 启动器 47 项通过、1 项仅真实资产跳过。 [节点入口](runtime-mupro.md)
