@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · a8872719 Desktop 终态
+
+Windows WebView2 原生六项和证据门全过，Linux 三项与 Windows CPU 成功。macOS 的媒体两项及定位前隐藏对照失败，整轮于 06:57:24Z 终态。Claude28B 的宿主去重已在本地主线验证，Claude29 从 `8e3b5f8e` 在独立 worktree 接手 F15 的真实 WebRTC 验收。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 报告单次点击的暂停派发
 
 root 以 `ab9707df` 集成 Claude28B `1736233d` 的宿主实现，补关窗安全和 Linux 精确必跑门。旧夹具关窗后会再调用一次谓词，红例实测两次；修复后只调用一次，资源会话被撤销。Linux 联合 114 项通过。上一轮 macOS 两项隐藏对照在关闭前持续收到 Playing 回复。 [验收记录](runtime-validation.md)

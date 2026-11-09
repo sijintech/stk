@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · a8872719 Desktop 终态
+
+精确 `a88727199d25a5651789d79e2e6650547145e5ee` 的 Desktop 于 06:57:24Z 完成，结论为失败。Linux 三项、Windows CPU 和 Windows 原生成功。Windows 原生通过固定发布地址直连获取 Mesa 26.2.4，大小和 SHA-256 校验通过。WebView2 和生产 ReportsEditor 六项全部执行并通过，精确必跑检查通过。macOS CPU 1516/1516、Metal 254/254，原生 4/6，定位前隐藏对照 0/2。 [Desktop](https://github.com/sijintech/stk/actions/runs/42570072786) [Windows 原生证据](https://github.com/sijintech/stk/actions/runs/42570072786/artifacts/13655576418) [macOS 原生证据](https://github.com/sijintech/stk/actions/runs/42570072786/artifacts/13654776484)
+
+Cocoa 目标环境为 macOS 15.8.2、Xcode 16.4。两项定位前隐藏对照中，单视频 DOM 保持暂停约 0.77 秒，原生分别收到 25 次 Playing 回复后关闭。下一轮用单次派发的新头复验，将原生回执与 DOM 采样的影响分开取证。Runtime 的 Windows 3.11 同头重跑成功。 [Runtime 第 2 次](https://github.com/sijintech/stk/actions/runs/42570072715/attempts/2)
+
 ## 2026-11-09 UTC · 报告暂停合并与 Cocoa 回复取证
 
 `ab9707df660e6a1fcac3c351e79ff2a6c29d19dd` 集成 Claude `1736233d` 的宿主改动。Linux Xvfb 从 1280×800 默认工作台的 `a3` 测试标签开始。七个 Pause 点击分属不同生命周期场景，每个由一次按下和松开组成。首个点击在隐藏前只派发一次，重显后可再次派发，关窗撤销资源会话。视图为测试替身。关窗红例在旧夹具中调用谓词两次，修复后一次。联合 114 项全过，14 项宿主无窗口测试和 Xvfb 精确门均通过。缺失、跳过、未运行和失败的必跑门反例均被拒绝。证据见本机 `root-delivery-20261109-64`。

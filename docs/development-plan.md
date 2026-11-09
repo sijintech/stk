@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · 桌面交付与 Cocoa 对照
+
+Windows 原生在 `a8872719` 完整通过。新头在 Cocoa 核对宿主去重后的显式暂停与隐藏期状态。若隐藏期仍报告 Playing，比较同一固定素材的独立会话，一组在隐藏后仅采原生回执，一组继续采样 DOM。上游公开探针入口带有用户手势标志，该对照用于验证探针是否影响结果。保留现有截止和关闭判据。 [上游入口](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/API/Cocoa/WKWebView.mm#L1192-L1205)
+
+Claude29 已在独立分支补 D1 F15 的真实线路回归。目标是格式 14 可读，回执操作明确拒绝，旧 schema 和项目状态完整保留。 [CP-0 矩阵](design/cloud-project-service.md)
+
 ## 2026-11-09 UTC · 原生报告暂停与回执复验
 
 Claude28B 的重复暂停修复经 root 整合和 Linux 真窗口复验。新头在 macOS 分别核对首次显式暂停的代次、媒体时点和隐藏期的原生状态。上一轮隐藏对照已确认收到回复，持续返回 Playing。Windows 保持现有验收门。 [验收记录](runtime-validation.md)

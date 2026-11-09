@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · Desktop 终态与 Claude29
+
+`a8872719` Desktop 整轮已结束。Windows 原生 6/6，Windows CPU 和 Linux 三项通过，macOS 原生 4/6、定位前隐藏 0/2。Windows 3.11 Runtime 同头重跑通过。本轮主线的宿主去重、MuPRO 布局核验和 D1 实线竞争已本地验收。 [验收记录](docs/runtime-validation.md)
+
+Claude29 在 `claude/cp0-f15-wire-29` 从 `8e3b5f8e` 开始验证格式 14 的桥和真实 WebRTC 线路。任务证据在本机 `root-delivery-20261109-65`。root 继续追新头的 Cocoa 原生结果，准备分离 DOM 采样的对照。
+
 ## 2026-11-09 UTC · 报告暂停集成与 macOS 回执
 
 `ab9707df` 本地集成 Claude28B 的单次暂停，补关窗安全与 Linux 必跑门。Xvfb 与相关无窗口联合 114 项通过。远端 `a8872719` macOS 原生 4/6、定位前隐藏对照 0/2。两项隐藏对照的 25 次状态回复均为 Playing。Windows 3.11 Runtime 同头重跑成功，Windows Desktop 原生仍在执行，本地提交待整轮终态。 [验收记录](docs/runtime-validation.md)
