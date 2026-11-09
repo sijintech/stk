@@ -26,6 +26,7 @@ mantissas are rounded in binary floating point, so the last digit can differ
 from C ``printf`` in rare halfway cases (the reader parses whatever is written).
 """
 from collections import deque
+from contextlib import nullcontext
 from dataclasses import dataclass
 import io
 import math
@@ -632,6 +633,9 @@ def _read_general(stream, header, layout, dtype):
 def read_dat(path, *, layout="zyxc", dtype="float64", chunk_bytes=DEFAULT_CHUNK_BYTES, check=None, threads=None):
     """Read a field DAT into a C-contiguous array.
 
+    Accepts a path or an open, seekable binary file positioned at the start. The caller
+    owns the open file.
+
     ``layout="zyxc"`` gives ``(nz, ny, nx, nc)`` (VTK order, the STK in-memory
     layout); ``"xyzc"`` gives ``(nx, ny, nz, nc)`` (``read_field``'s order).
     ``dtype`` is ``float64`` or ``float32`` (values are decoded in float64 first).
@@ -647,7 +651,8 @@ def read_dat(path, *, layout="zyxc", dtype="float64", chunk_bytes=DEFAULT_CHUNK_
     dtype = np.dtype(dtype)
     if dtype not in (np.float64, np.float32):
         raise ValueError("dtype must be float64 or float32")
-    with open(path, "rb") as stream:
+    opened = nullcontext(path) if hasattr(path, "read") else open(path, "rb")
+    with opened as stream:
         header = _parse_header(stream)
         try:
             return _read_fixed(stream, header, layout, dtype, chunk_bytes, check, threads)
@@ -666,15 +671,16 @@ def read_dat_image(path, *, name=None, id=None, dtype="float64", spacing=None, o
                    step=None, provenance=None, chunk_bytes=DEFAULT_CHUNK_BYTES, check=None, threads=None):
     """Read a field DAT as :class:`suan.data.model.ImageData` with one point field.
 
-    The field is named ``name`` (default: the frame stem of ``<Stem>.<step:08d>.dat``,
-    else the file stem); ``step`` defaults to the frame name's step. Geometry
+    For paths, ``name`` defaults to the frame or file stem and ``step`` to the frame name's
+    step. Open binary files use the explicit name and step, with ``field`` as the default
+    name. Geometry
     defaults to origin 0 and spacing 1 in ``grid_index`` units (DAT indices).
     ``float32`` marks the field ``lossy``. Units are never guessed.
     """
     from .model import ImageData, TimeInfo
-    path = Path(path)
-    stem, frame_step = frame_name(path.name)
-    name = name or stem or _identifier(path.name.split(".")[0], r"^[A-Za-z0-9_]", "field")
+    filename = "" if hasattr(path, "read") else Path(path).name
+    stem, frame_step = frame_name(filename)
+    name = name or stem or _identifier(filename.split(".")[0], r"^[A-Za-z0-9_]", "field")
     step = frame_step if step is None else step
     values = read_dat(path, layout="zyxc", dtype=dtype, chunk_bytes=chunk_bytes, check=check, threads=threads)
     nz, ny, nx, _ = values.shape

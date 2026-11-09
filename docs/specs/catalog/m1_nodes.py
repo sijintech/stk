@@ -109,7 +109,7 @@ def muferro_run(ctx, inputs, params):
     _todo()
 
 
-@node("stk.source.muferro_frame", title={"en": "muFerro frame", "zh": "muFerro 帧"},
+@node("stk.source.muferro_frame", impl_version=2, title={"en": "muFerro frame", "zh": "muFerro 帧"},
       description={"en": "Read one published field frame '<dataset>.<step:08d>.dat' of a muFerro run as an "
                          "image dataset (VTK order (z,y,x,c)). Reports the available steps as choices."},
       inputs=[Port("frames", "table", accepts=["frames"])],

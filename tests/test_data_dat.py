@@ -252,6 +252,10 @@ def test_float32_and_image(tmp_path):
     single = read_dat_image(path, dtype="float32", name="P", spacing=(0.5, 0.5, 1), step=7)
     assert single.field("P").lossy and single.field("P").dtype == "float32" and single.time.step == 7
     np.testing.assert_array_equal(single.array("P"), image.array("Polar").astype(np.float32))
+    with path.open("rb") as stream:
+        snapshot = read_dat_image(stream, name="Polar", step=2)
+        assert not stream.closed and snapshot.time.step == image.time.step
+    np.testing.assert_array_equal(snapshot.array("Polar"), image.array("Polar"))
     with pytest.raises(ValueError):
         read_dat(path, layout="xzyc")
 

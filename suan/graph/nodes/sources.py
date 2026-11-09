@@ -112,7 +112,7 @@ def _muferro_run_fingerprint(ctx, inputs, params):
                 if path in names:
                     if names[path].size > _RUN_TABLE_LIMIT:
                         raise ConnectorError(f"{path} is larger than {_RUN_TABLE_LIMIT} bytes", "invalid_data")
-                    hashed[path] = _table_content_sha256(source, path, _RUN_TABLE_LIMIT, ctx.check)
+                    hashed[path] = _planned_file_sha256(source, path, ctx.check, limit=_RUN_TABLE_LIMIT)
         if launcher_report and launcher_report["sha256"] is not None:
             hashed[RESULT] = launcher_report["sha256"]
         from suan.connectors.mupro.source import ContentChanged, FILE_LIMIT, file_fingerprint
@@ -243,7 +243,7 @@ def _frame_rows(frames, stem):
     for i in range(table.n_rows):
         if str(datasets[i]) == stem:
             rows.append({"step": int(table.column("step")[i]), "path": str(table.column("path")[i]),
-                         "sha256": str(table.column("sha256")[i]) or None, "reader": str(table.column("reader")[i]),
+                         "reader": str(table.column("reader")[i]),
                          "components": int(table.column("components")[i]) or None})
     return rows
 
@@ -264,25 +264,23 @@ def _resolve_frame(ctx, inputs, params):
         ctx.report_choices("step", steps)
         raise NodeExecutionError(f"{params['dataset']}: {exc}", code=exc.code) from None
     ctx.report_choices("step", steps, value=chosen["step"])
-    source = _source(ctx, frames.attrs["binding"])
-    # Always the file's current hash (memoized by path, size, mtime_ns and inode for local runs; the listed
-    # hash of an immutable Runtime artifact): the frames table may come from the cache of an earlier
-    # evaluation, or from another run directory with the same listing.
-    try:
-        chosen = dict(chosen, sha256=source.sha256(chosen["path"]))
-    except ConnectorError as exc:
-        raise _failure(exc) from None
-    return source, chosen
+    return _source(ctx, frames.attrs["binding"]), chosen
 
 
 def _muferro_frame_fingerprint(ctx, inputs, params):
+    from suan.connectors.api import ConnectorError
     # Everything the node takes from the frames table: the key does not include the table's key.
-    _, chosen = _resolve_frame(ctx, inputs, params)
-    return {"path": chosen["path"], "sha256": chosen["sha256"], "reader": chosen["reader"],
+    source, chosen = _resolve_frame(ctx, inputs, params)
+    path = chosen["path"]
+    try:
+        digest = _planned_file_sha256(source, path, ctx.check)
+    except ConnectorError as exc:
+        raise _failure(exc) from None
+    return {"path": path, "sha256": digest, "reader": chosen["reader"],
             "components": chosen["components"]}
 
 
-@node("stk.source.muferro_frame", title={"en": "muFerro frame", "zh": "muFerro 帧"},
+@node("stk.source.muferro_frame", impl_version=2, title={"en": "muFerro frame", "zh": "muFerro 帧"},
       description={"en": "Read one published field frame '<dataset>.<step:08d>.dat' of a muFerro run as an "
                          "image dataset (VTK order (z,y,x,c)). Reports the available steps as choices."},
       inputs=[Port("frames", "table", accepts=["frames"])],
@@ -300,11 +298,16 @@ def _muferro_frame_fingerprint(ctx, inputs, params):
       },
       time_dependent=True, cache="disk", fingerprint=_muferro_frame_fingerprint, selectors=("step", "policy"))
 def muferro_frame(ctx, inputs, params):
-    from suan.connectors.files import materialize
+    from tempfile import TemporaryFile
     from suan.connectors.mupro import CONNECTOR_ID, READER, VERSION, stem_field
     from suan.data.dat import DatError, read_dat_image
     from suan.data.model import Provenance
+    from suan.graph.registry import BudgetExceeded, Cancelled
     source, chosen = _resolve_frame(ctx, inputs, params)
+    path = chosen["path"]
+    planned = ctx.source_fingerprint
+    if any(chosen[key] != planned[key] for key in ("path", "reader", "components")):
+        raise NodeExecutionError("MuFerro frame selection changed after planning", code="invalid_data")
     stem = params["dataset"]
     try:
         entry = stem_field(stem, chosen["components"])
@@ -312,13 +315,22 @@ def muferro_frame(ctx, inputs, params):
         raise _failure(exc) from None
     provenance = Provenance(activity={"kind": "run", "id": None},
                             agent={"connector": f"{CONNECTOR_ID}@{VERSION}", "reader": READER, "node": ctx.node_id},
-                            used=[{"path": chosen["path"], "sha256": chosen["sha256"], "role": "input"}])
+                            used=[{"path": path, "sha256": planned["sha256"], "role": "input"}])
     try:
-        image = read_dat_image(materialize(source, chosen["path"]), name=stem, id=stem, dtype=params["precision"],
-                               spacing=params["spacing"], origin=params["origin"], length_unit=params["length_unit"],
-                               unit=params["unit"], quantity=params["quantity"] or entry.get("quantity"),
-                               tensor=entry["tensor"], component_names=entry.get("component_names"),
-                               step=chosen["step"], provenance=provenance, check=ctx.check)
+        with TemporaryFile(mode="w+b", prefix="stk-muferro-frame-") as snapshot:
+            digest = _stream_sha256(source, path, ctx.check, destination=snapshot)
+            if digest != planned["sha256"]:
+                raise NodeExecutionError(f"MuFerro frame {path} changed after planning", code="invalid_data")
+            ctx.check()
+            snapshot.flush()
+            snapshot.seek(0)
+            image = read_dat_image(snapshot, name=stem, id=stem, dtype=params["precision"],
+                                   spacing=params["spacing"], origin=params["origin"], length_unit=params["length_unit"],
+                                   unit=params["unit"], quantity=params["quantity"] or entry.get("quantity"),
+                                   tensor=entry["tensor"], component_names=entry.get("component_names"),
+                                   step=chosen["step"], provenance=provenance, check=ctx.check)
+    except (BudgetExceeded, Cancelled, NodeExecutionError):
+        raise
     except DatError as exc:
         raise NodeExecutionError(f"{chosen['path']}: {exc}", code="invalid_data") from None
     except Exception as exc:
@@ -480,23 +492,31 @@ def _table_format(path, text, wanted):
     return "columns"
 
 
-def _table_content_sha256(source, path, limit, check):
+def _planned_file_sha256(source, path, check, *, limit=None):
     from suan.connectors.files import RuntimeFiles
     if isinstance(source, RuntimeFiles):
         return source.sha256(path).lower()
     # A rewrite can preserve every field of the FileSource hash memo key.
+    return _stream_sha256(source, path, check, limit=limit)
+
+
+def _stream_sha256(source, path, check, *, limit=None, destination=None):
     digest = sha256()
     remaining = limit
     with source.open(path) as stream:
         while True:
             check()
-            chunk = stream.read(min(1 << 20, remaining + 1))
+            size = min(1 << 20, remaining + 1) if remaining is not None else 1 << 20
+            chunk = stream.read(size)
             if not chunk:
                 break
-            remaining -= len(chunk)
-            if remaining < 0:
-                raise NodeExecutionError(f"{path} is larger than {limit} bytes", code="budget_exceeded")
+            if remaining is not None:
+                remaining -= len(chunk)
+                if remaining < 0:
+                    raise NodeExecutionError(f"{path} is larger than {limit} bytes", code="budget_exceeded")
             digest.update(chunk)
+            if destination is not None:
+                destination.write(chunk)
     return digest.hexdigest()
 
 
@@ -505,7 +525,7 @@ def _table_fingerprint(ctx, inputs, params):
     source = _source(ctx, params["binding"])
     path = params["path"]
     try:
-        identity = _table_content_sha256(source, path, TABLE_LIMIT, ctx.check)
+        identity = _planned_file_sha256(source, path, ctx.check, limit=TABLE_LIMIT)
     except ConnectorError as exc:
         raise _failure(exc) from None
     return {"path": path, "sha256": identity, "format": params["format"]}

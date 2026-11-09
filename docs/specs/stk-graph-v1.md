@@ -1363,10 +1363,10 @@ Unless stated otherwise: input fields are kept (zero-copy), coordinates are phys
   field named after the stem, `time.step` = the resolved step, provenance `used` = the file. Geometry:
   spacing/origin overrides else 1/0 with `length_unit` (default `grid_index`); `unit` and `quantity`
   (default from the connector, e.g. Polar → `polarization`) apply to the field. `precision:
-  "float32"` marks the field `lossy`. Fingerprint `{path, sha256, reader, components}` with the
-  sha256 of the file as it is now (`FileSource.sha256`, memoized by path, size, mtime and inode;
-  never the frames table's column, which may come from a cached index or another run with the same
-  listing); two steps resolving to one file share a cache entry. Rows the DAT reader cannot parse
+  "float32"` marks the field `lossy`. Fingerprint `{path, sha256, reader, components}` uses the
+  actual source bytes or the published digest of a Runtime artifact. On a cache miss, the node
+  verifies a private snapshot against that digest before parsing it. Two steps resolving to one
+  file share a cache entry. Rows the DAT reader cannot parse
   (e.g. a frame being written) are `invalid_data`.
 - `file`: `format: auto` by extension (`.dat`, `.npy`, `.vti`, `.vtk`, `.vtkhdf`/`.hdf`/`.h5` with
   a `/VTKHDF` group). NPY holds `(x, y, z)` or `(x, y, z, c)` like today's `read_field`. VTI/VTK honour

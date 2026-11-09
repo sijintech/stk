@@ -378,6 +378,76 @@ def test_a_frame_rewritten_in_place_is_read_again(live):
     assert fourth.outputs["polar"].provenance.used[0]["sha256"] == _sha(frame)
 
 
+def test_frame_key_tracks_actual_bytes_with_unchanged_metadata(live):
+    first = live(parameters={"step": 2}, outputs=["polar"])
+    frame = live.run / "Polar.00000002.dat"
+    stamp = frame.stat()
+    _frame(frame, (4, 3, 2), 3, 7)
+    os.utime(frame, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert frame.stat().st_size == stamp.st_size
+
+    second = live(parameters={"step": 2}, outputs=["polar"])
+    assert "polar" in second.evaluated and second.keys["polar"] != first.keys["polar"]
+    assert second.outputs["polar"].provenance.used[0]["sha256"] == _sha(frame)
+    assert np.array_equal(second.outputs["polar"].array("Polar"), read_dat_image(frame, name="Polar").array("Polar"))
+
+
+def test_frame_execution_rejects_bytes_other_than_the_planned_frame(live):
+    frame = live.run / "Polar.00000002.dat"
+    stamp = frame.stat()
+    original = frame.read_bytes()
+    cache = GraphCache()
+
+    def replace(event):
+        if event["type"] == "node.started" and event["node"] == "polar":
+            _frame(frame, (4, 3, 2), 3, 7)
+            assert frame.stat().st_size == stamp.st_size
+            os.utime(frame, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+
+    with pytest.raises(EvaluationFailed) as error:
+        live(parameters={"step": 2}, outputs=["polar"], on_event=replace, cache=cache)
+    assert error.value.errors[0]["code"] == "invalid_data"
+    frame.write_bytes(original)
+    os.utime(frame, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    restored = live(parameters={"step": 2}, outputs=["polar"], cache=cache)
+    assert "polar" in restored.evaluated
+    assert np.array_equal(restored.outputs["polar"].array("Polar"), read_dat_image(frame, name="Polar").array("Polar"))
+
+
+def test_frame_execution_rejects_tampered_runtime_cache(live, tmp_path):
+    from test_connectors_files import FakeClient
+
+    name = "Polar.00000002.dat"
+    original = (live.run / name).read_bytes()
+    client = FakeClient({name: original})
+    source = RuntimeFiles(client, "test-task", tmp_path / "runtime-cache")
+    cache = GraphCache()
+
+    def read_frame(cache):
+        return evaluate(GRAPH, registry=default_registry(), resolver={"run": source},
+                        outputs=["polar"], parameters={"step": 2}, cache=cache)
+
+    first = read_frame(cache)
+    artifact = source.fetch(name)
+    stamp = artifact.stat()
+    _frame(artifact, (4, 3, 2), 3, 7)
+    assert artifact.stat().st_size == stamp.st_size
+    os.utime(artifact, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert np.array_equal(read_frame(cache).outputs["polar"].array("Polar"), first.outputs["polar"].array("Polar"))
+
+    new_cache = GraphCache()
+    with pytest.raises(EvaluationFailed) as error:
+        read_frame(new_cache)
+    assert error.value.errors[0]["code"] == "invalid_data"
+    artifact.write_bytes(original)
+    os.utime(artifact, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    restored = read_frame(new_cache)
+    assert "polar" in restored.evaluated
+    assert restored.outputs["polar"].provenance.used[0]["sha256"] == hashlib.sha256(original).hexdigest()
+    assert np.array_equal(restored.outputs["polar"].array("Polar"), first.outputs["polar"].array("Polar"))
+    assert client.downloads == 1
+
+
 def test_run_directories_with_identical_listings_are_told_apart(tmp_path):
     runs = {}
     for name, offset in (("a", 0), ("b", 50)):
