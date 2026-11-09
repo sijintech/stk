@@ -221,15 +221,33 @@ def test_cli_exact_task_survives_more_than_200_heartbeat_tasks(live, paired, mon
 
 
 def test_cli_observes_real_outbound_node_disconnect_and_reconnect(live, paired, inproc):  # noqa: F811
-    target, _ = paired
+    target, state = paired
     workspace = live.client.create_workspace("offline")["id"]
     submitted = value(invoke(jobs, target + ["submit", "--workspace", workspace, "--template", "echo", "--key", "offline"]))
     task = resolve(target, submitted["action"]["id"])["task"]["id"]
     invoke(jobs, target + ["watch", task, "--interval", "0.1", "--timeout", "15"])
     bridge = inproc()
-    _, desktop_target = pair(bridge, live, profile=None)
+    connection, desktop_target = pair(bridge, live, profile=None)
     strict_read = {**desktop_target, "task_id": task, "require_live": True}
-    actions = live.actions()
+
+    def device():
+        devices = bridge.call("hub.devices", {"connection": connection})["devices"]
+        return next(device for device in devices if device["id"] == live.node_id)
+
+    def listed_node():
+        nodes = json.loads(invoke(connect, ["hub-nodes", "lab", "--hub-state-dir", str(state)]).stdout)
+        return next(node for node in nodes if node["id"] == live.node_id)
+
+    deadline = time.monotonic() + 15
+    while task not in {item["id"] for item in device()["snapshot"]["tasks"]}:
+        assert time.monotonic() < deadline
+        time.sleep(0.05)
+    features = device()["snapshot"]["features"]
+    assert {"read", "task.get"} <= set(features)
+    exact = bridge.call("task.get", strict_read)
+    assert exact["task"]["id"] == task and exact["task"]["state"] == "succeeded"
+    actions, tasks = live.actions(), live.client.tasks()
+    action_events = [event for event in live.store.events() if event["kind"] == "actions.changed"]
     live.agent_loop.call_soon_threadsafe(live.agent_task.cancel)
     live.agent_thread.join(timeout=10)
     assert not live.agent_thread.is_alive()
@@ -240,7 +258,26 @@ def test_cli_observes_real_outbound_node_disconnect_and_reconnect(live, paired, 
         assert observations[0]["observation"] == "unavailable" and observations[0]["last_state"] is None
         assert live.client.task(task)["state"] == "succeeded"
         error = bridge.error("task.get", strict_read)
+        assert error["code"] == "unavailable" and error["retryable"] is True and "503" in error["message"]
+        last = device()
+        assert last["online"] is True and last["snapshot"]["features"] == features
+        listed = listed_node()
+        assert listed["online"] is True and listed["features"] == features
+        recent_tasks = value(invoke(jobs, target + ["list"]))
+        assert recent_tasks["observation"] == "heartbeat_snapshot" and recent_tasks["online"] is True
+
+        # Age only the disconnected node's stored heartbeat so the test need not sleep for the TTL.
+        with live.store.db() as db:
+            db.execute("UPDATE devices SET last_seen=last_seen-21 WHERE id=?", (live.node_id,))
+        aged = device()
+        assert aged["online"] is False and aged["snapshot"] == last["snapshot"]
+        listed = listed_node()
+        assert listed["online"] is False and listed["features"] == features
+        aged_tasks = value(invoke(jobs, target + ["list"]))
+        assert aged_tasks["online"] is False and aged_tasks["tasks"] == recent_tasks["tasks"]
+        error = bridge.error("task.get", strict_read)
         assert error["code"] == "unavailable" and error["retryable"] is True
+        assert "its task state is not current" in error["message"]
     finally:
         live.agent_thread = threading.Thread(target=live._run_agent, daemon=True)
         live.agent_thread.start()
@@ -252,8 +289,13 @@ def test_cli_observes_real_outbound_node_disconnect_and_reconnect(live, paired, 
             assert time.monotonic() < deadline, result.output
             time.sleep(0.05)
     assert value(result)["state"] == "succeeded"
-    assert bridge.call("task.get", strict_read) == {"task": value(result)}
-    assert live.actions() == actions and not bridge.violations
+    current = device()
+    assert current["online"] is True and current["last_seen"] > last["last_seen"]
+    assert current["snapshot"]["features"] == features
+    assert bridge.call("task.get", strict_read) == {"task": value(result)} == exact
+    assert live.actions() == actions and live.client.tasks() == tasks
+    assert [event for event in live.store.events() if event["kind"] == "actions.changed"] == action_events
+    assert not bridge.violations
 
 
 @pytest.mark.parametrize("node_features,read_kinds", [([], ["task.get"]), (["task.get"], ["task.get"]),
