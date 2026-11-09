@@ -1266,6 +1266,7 @@ Read one explicit /tNNNNNNNN/field from MuPRO HDF5, preserving numeric dtype and
 | `binding` | string (pattern) | **required** | data |
 | `path` | string (pattern) | `"run.h5"` | data |
 | `selector` | string (pattern) | **required** | data |
+| `expected_sha256` | string (pattern) \| null | `null` | data |
 | `extent` | integer \| null (>=0)[6] | `[null, null, null, null, null, null]` | data |
 | `stride` | integer (>=1)[3] | `[1, 1, 1]` | data |
 

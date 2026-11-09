@@ -415,7 +415,7 @@ def test_catalog_patterns_keep_their_meaning():
     texts = ["", "a", "abc", "Polar", "a/b", "a.b", "../x", "x/../y", "x/..", "..", "/abs", "\\x", "C:x", "run:1",
              "stk:cubic", "a_b-c", "A9", "12", ".3g", "+.1e", "08,.2f", "d", "{}", "999999", "中文", "x" * 128,
              "x" * 129, "ab cd", "tab\there", "Polar.00000000.dat", "sub/dir/file.h5",
-             "/t00000002/Polar", "/t٢0000002/Polar"]
+             "/t00000002/Polar", "/t٢0000002/Polar", "0123456789abcdef" * 4, "a" * 63, "A" * 64]
     for pattern in patterns:
         accepted = [t for t in texts if pattern_search(pattern, t)]
         assert accepted, pattern

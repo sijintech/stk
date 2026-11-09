@@ -67,6 +67,34 @@ def test_selectors_separate_cached_frames_and_reopen_disk_cache(tmp_path):
     np.testing.assert_array_equal(again.outputs["field"].array("Polar"), first.outputs["field"].array("Polar"))
 
 
+def test_expected_sha256_guards_local_reads_before_using_the_cache(tmp_path):
+    path = tmp_path / "run.h5"
+    values = write_file(path)
+    before = path.stat()
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    pinned = graph(expected_sha256=digest)
+    cache = GraphCache(tmp_path / "cache")
+
+    ordinary = run(tmp_path, cache=cache)
+    exact = run(tmp_path, pinned, cache=cache)
+    assert exact.keys == ordinary.keys and exact.evaluated == []
+    assert exact.outputs["field"].provenance.used[0]["sha256"] == digest
+
+    with h5py.File(path, "r+") as container:
+        container["t00000002/Polar"][0, 0, 0, 0] = values[0, 0, 0, 0] + 999
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert path.stat().st_size == before.st_size
+    events = []
+    with pytest.raises(EvaluationFailed) as raised:
+        run(tmp_path, pinned, cache=cache, on_event=lambda event: events.append(event["type"]))
+    assert raised.value.errors[0]["code"] == "invalid_data"
+    assert "expected SHA-256" in raised.value.errors[0]["message"] and "node.started" not in events
+
+    current = run(tmp_path, cache=cache)
+    assert current.keys != ordinary.keys and current.evaluated == ["field"]
+    assert current.outputs["field"].array("Polar")[0, 0, 0, 0] == 999
+
+
 def test_missing_reader_fails_before_graph_execution_or_source_reads(tmp_path, monkeypatch):
     from suan.connectors.mupro import hdf5
 

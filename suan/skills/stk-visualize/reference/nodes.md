@@ -106,6 +106,7 @@ Index of a muFerro run directory: published field frames, the energy trace, the 
 |---|---|---|---|---|
 | `binding` | string | **required** | data | Run binding; binding |
 | `case_dir` | string | "auto" | data | Case directory; path |
+| `live` | boolean | true | data | Live run |
 
 ## `stk.source.mupro_hdf5@1` — MuPRO HDF5 field
 
@@ -119,6 +120,7 @@ Read one explicit /tNNNNNNNN/field from MuPRO HDF5, preserving numeric dtype and
 | `binding` | string | **required** | data | binding |
 | `path` | string | "run.h5" | data | path |
 | `selector` | string | **required** | data |  |
+| `expected_sha256` | string \| null | null | data | Expected container SHA-256 |
 | `extent` | array[6] of integer \| null | [null, null, null, null, null, null] | data | Inclusive [i0, i1, j0, j1, k0, k1] |
 | `stride` | array[3] of integer (≥1) | [1, 1, 1] | data |  |
 

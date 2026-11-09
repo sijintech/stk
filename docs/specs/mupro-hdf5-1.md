@@ -80,6 +80,11 @@ The graph node requires `binding` and `selector`; `path` defaults to `run.h5`. O
 The selected allocation limit is 256 MiB, further restricted by the evaluation's memory budget.
 The content fingerprint, selector, extent and stride participate in the data key. Execution verifies
 the fingerprint used to plan that key, preventing changed source bytes from populating the old entry.
+An optional `expected_sha256` pins the container to a lowercase SHA-256, such as the digest recorded
+for a collected artifact. Planning compares the actual stream with that expectation before looking
+up cached results and reports `invalid_data` on a mismatch. A matching expectation uses the same
+content key as an unpinned request for the same bytes and selector. Omit the option to read the
+version observed during planning.
 
 ```json
 {"schema":"stk.graph/1","catalog":{"stk":1},"nodes":[

@@ -475,9 +475,13 @@ def file_source(ctx, inputs, params):
 
 def _mupro_hdf5_fingerprint(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
-    from suan.connectors.mupro.source import fingerprint
+    from suan.connectors.mupro.source import ContentChanged, fingerprint
     try:
-        return fingerprint(_source(ctx, params["binding"]), params["path"], params["selector"], check=ctx.check)
+        planned = fingerprint(_source(ctx, params["binding"]), params["path"], params["selector"], check=ctx.check)
+        expected = params["expected_sha256"]
+        if expected is not None and planned["sha256"] != expected:
+            raise ContentChanged("The MuPRO HDF5 source does not match the expected SHA-256")
+        return planned
     except ConnectorError as exc:
         raise _failure(exc) from None
 
@@ -490,11 +494,13 @@ def _mupro_hdf5_fingerprint(ctx, inputs, params):
           "binding": binding(),
           "path": rel_path("run.h5"),
           "selector": string(pattern=r"^/t[0-9]{8}/[A-Za-z][A-Za-z0-9_]{0,63}$"),
+          "expected_sha256": _nullable_string(pattern=r"^[0-9a-f]{64}$", max_length=64,
+                                              title="Expected container SHA-256"),
           "extent": array({"type": ["integer", "null"], "minimum": 0}, [None] * 6, min_items=6, max_items=6,
                           title="Inclusive [i0, i1, j0, j1, k0, k1]"),
           "stride": int3([1, 1, 1], minimum=1),
       },
-      cache="disk", fingerprint=_mupro_hdf5_fingerprint)
+      cache="disk", fingerprint=_mupro_hdf5_fingerprint, selectors=("expected_sha256",))
 def mupro_hdf5_source(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
     from suan.connectors.mupro.source import read
