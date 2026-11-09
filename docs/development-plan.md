@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-09 23:44 UTC · 前一 Desktop 终态与 Cocoa 帧号回执
+
+远端 `5cb7cdb9` Desktop `42712877920` 于 23:39:58 UTC 终态 failure，6 个作业全部结束，5 个成功。Linux 主测 2162/2162，两个打包作业成功；Windows CPU 1481/1481，独立原生 6/6 且每项 20/20 轮、零跳过。macOS CPU 1540/1540、Metal 254/254，主原生 4/6。整轮终态满足本批推送前提。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42712877920) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42712877920/artifacts/13720252143)
+
+新帧号控制已取得可核验 OS 截图；它未复现回退，仍不解决旧夹具失败。 [运行验收](runtime-validation.md)
+
+本批推送包含已本地验证的 `6333178e` Viewer 失败保护与 `83302698` 固定派发来源证明断言修正。同头 Runtime 的 10/13 终态及旧断言失败已记录于上一节；修正后的三版本结果仍待下一远端头验证。实际 Claude73 在独立 worktree 补 Python 面板集成回归。root 同时开发文献命中单击打开，现有真实资产回归中两布局各由 37 降为 35 次点击，命中至页图 3→1；窗口验证和迟到回复回归仍在进行，产品改动尚未提交。
+
 ## 2026-11-09 23:23 UTC · 受约束打开保留 Viewer 与草稿
 
 `6333178e` 完成带来源证明的候选验证与失败时 Viewer/草稿保护；等待接口支持唯一打开请求。 [运行验收](runtime-validation.md)
