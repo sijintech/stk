@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import sqlite3
 import threading
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5
 
 import pytest
 
@@ -223,6 +223,65 @@ def test_managed_index_checks_every_path_and_digest_before_writing(inproc, files
         (path, "project", item["size"]) for path, item in zip(paths, proof)]
     ordinary = harness.call("project.files.index", {"handle": handle, "expected_revision": 1, "paths": [str(external)]})
     assert ordinary["revision"] == 2 and not harness.violations
+
+
+def test_muferro_publication_verifies_the_last_literal_manifest_and_preserves_cas(inproc, files, monkeypatch):
+    from suan.workflows import muferro
+
+    store, _, _ = files
+    harness = inproc()
+    handle = harness.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    run_id = str(uuid4())
+    case = f"results/muferro/{run_id}/case"
+    first, second = (store.directory / case / name for name in ("run.h5", "energy_out.dat"))
+    first.parent.mkdir(parents=True)
+    for path, content in ((first, b"first"), (second, b"second")):
+        path.write_bytes(content)
+    manifest = [{"path": path.relative_to(store.directory).as_posix(),
+                 "sha256": hashlib.sha256(path.read_bytes()).hexdigest()} for path in (first, second)]
+    table, field = muferro.RESULT_TABLE_ID, muferro.RESULT_FIELD_IDS["files"]
+    row = str(uuid5(UUID(run_id), "muferro-result"))
+    cell = {"op": "set_cell", "table_id": table, "record_id": row, "field_id": field, "value": manifest}
+    commands = [{"op": "create_table", "id": table, "name": "MuFerro results"},
+                {"op": "add_field", "id": field, "table_id": table, "name": "Files", "type": "json"},
+                {"op": "add_record", "id": row, "table_id": table}, cell]
+    proof = {"run_id": run_id, "sizes": [first.stat().st_size, second.stat().st_size]}
+    params = {"handle": handle, "expected_revision": 0, "commands": commands, "muferro_result": proof}
+    events_before = len(harness.events_of("project.changed"))
+
+    def reject(refused):
+        assert harness.error("project.apply", refused)["code"] == "invalid_params"
+        assert store.info()["revision"] == 0
+        assert len(harness.events_of("project.changed")) == events_before
+
+    reject({**params, "muferro_result": {**proof, "sizes": [5]}})
+    reject({**params, "commands": commands + [commands[0]]})
+    reject({**params, "commands": [*commands[:-1], {**cell, "value": [manifest[0], manifest[0]]}]})
+    outside = {**manifest[0], "path": "inputs/other.h5"}
+    reject({**params, "commands": [*commands[:-1], {**cell, "value": [outside, manifest[1]]}]})
+    extra = first.with_name("Polar.00000008.dat")
+    extra.write_bytes(b"unregistered")
+    reject(params)
+    extra.unlink()
+
+    inventory = muferro._check_local_result_inventory
+
+    def replace_first_during_inventory(*args):
+        inventory(*args)
+        replacement = first.with_name("replacement")
+        replacement.write_bytes(b"other")
+        replacement.replace(first)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(muferro, "_check_local_result_inventory", replace_first_during_inventory)
+        reject(params)
+    first.write_bytes(b"first")
+    assert harness.call("project.apply", params)["revision"] == 1
+    assert harness.wait_event(lambda event: event["event"] == "project.changed")["data"] == {"handle": handle, "revision": 1}
+    assert harness.error("project.apply", params)["code"] == "conflict"
+    result = next(item for item in store.snapshot()["tables"] if item["id"] == table)
+    assert result["records"][0]["values"][field] == manifest
+    assert not harness.violations
 
 
 def test_shutdown_does_not_wait_again_on_an_inflight_database_operation():

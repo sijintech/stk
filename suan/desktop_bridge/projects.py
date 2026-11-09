@@ -5,6 +5,7 @@ accepted edit still uses its handle. SQLite revisions arbitrate external CLI wri
 """
 
 from contextlib import contextmanager
+from copy import deepcopy
 from pathlib import Path
 import threading
 from uuid import uuid4
@@ -175,6 +176,22 @@ class ProjectSessions:
             return self._get(params["handle"]).read_table(**{key: value for key, value in params.items() if key != "handle"})
 
     def apply(self, params):
+        if "muferro_result" in params:
+            from suan.workflows.muferro import verify_result_publication
+
+            handle, revision = params["handle"], params["expected_revision"]
+            with self._operation():
+                store = self._get(handle)
+                current = store.info()["revision"]
+                if revision != current:
+                    raise RevisionConflict(f"Expected revision {revision}, current revision is {current}")
+            commands = deepcopy(params["commands"])
+            with self._errors():
+                verify_result_publication(store.directory, commands, deepcopy(params["muferro_result"]))
+            with self._operation():
+                if self._get(handle) is not store:
+                    raise BridgeError("conflict", "The project was reopened during MuFerro result verification")
+                return store.apply(commands, expected_revision=revision)
         with self._operation():
             store = self._get(params["handle"])
             return store.apply(params["commands"], expected_revision=params["expected_revision"])

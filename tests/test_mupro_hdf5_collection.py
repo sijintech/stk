@@ -418,10 +418,81 @@ def test_collect_registers_only_the_verified_hdf5_bytes(project, scripts, runtim
     }
     assert observed == {"rejected": True, "result_rows": [], "external_files": [],
                         "submissions": 1, "cancels": 0, "tasks": 1}, (observed, collected)
-    if mode == "late":
-        assert isinstance(error, ProjectError) and "digest changed" in str(error)
-    else:
-        assert isinstance(error, BridgeCallError) and error.code == "invalid_params"
+    assert isinstance(error, BridgeCallError) and error.code == "invalid_params"
+
+    [restore] = restorers
+    restore()
+    retried = api.muferro.collect(run["id"])
+    _assert_registered_verified_bytes(p, retried, run["id"], task_id, original, values)
+    assert (len(submissions), cancels, len(client.tasks())) == (1, [], 1)
+
+
+def _tamper_at_first_result_publish(patch, project_type, root, tamper):
+    """Change run.h5 just before the first MuFerro result-row edit reaches the Bridge, then forward that call."""
+    fired, original_apply = [], project_type.apply
+
+    def apply(self, commands, **kwargs):
+        cells = [c for c in commands if c.get("op") == "set_cell" and c.get("table_id") == RESULT_TABLE_ID
+                 and c.get("field_id") == RESULT_FIELD_IDS["files"]]
+        if cells and not fired:
+            [target] = [root / f["path"] for f in cells[0]["value"] if f["path"].endswith("/case/run.h5")]
+            fired.append(target)
+            tamper(target)
+        return original_apply(self, commands, **kwargs)
+    patch.setattr(project_type, "apply", apply)
+    return fired
+
+
+@pytest.mark.parametrize("mode", ["control", "rewrite", pytest.param("relink", marks=_POSIX_LINKS)])
+def test_collect_refuses_hdf5_changed_just_before_result_publish(project, scripts, runtime, tmp_path,
+                                                                 monkeypatch, mode):
+    """After indexing, a same-size same-mtime voxel rewrite or a byte-identical case link
+    must stop the result row; restoring the exact bytes then allows an explicit retry of the same task."""
+    api, p = project
+    client, server = runtime[0], runtime[2]
+    submissions, cancels = [], []
+    submit, cancel = server.service.submit, server.service.cancel
+    monkeypatch.setattr(server.service, "submit", lambda spec, key: submissions.append(key) or submit(spec, key))
+    monkeypatch.setattr(server.service, "cancel", lambda task_id: cancels.append(task_id) or cancel(task_id))
+    sidecar = tmp_path / "synthetic-run.h5"
+    values = np.arange(4 * 3 * 2 * 3, dtype=np.float32).reshape(4, 3, 2, 3)
+    with h5py.File(sidecar, "w") as file:
+        file.create_dataset(SELECTOR, data=values)
+    original = sidecar.read_bytes()
+    run, task_id = _synthetic_hdf5_run(project, scripts, runtime, tmp_path, monkeypatch, sidecar)
+    root = Path(next(item["directory"] for item in api.projects.list() if item["handle"] == p.handle))
+    restorers = []
+
+    def tamper(path):
+        assert path.read_bytes() == original  # verified and indexed already
+        if mode == "rewrite":
+            restorers.append(_same_size_same_mtime(path, original, _overwrite_voxel))
+        elif mode == "relink":
+            restorers.append(_link_case_elsewhere(path.parent, tmp_path / "outside-case"))
+
+    with monkeypatch.context() as patch:
+        fired = _tamper_at_first_result_publish(patch, type(p), root, tamper)
+        try:
+            collected, error = api.muferro.collect(run["id"]), None
+        except BridgeCallError as exc:
+            collected, error = None, exc
+    assert len(fired) == 1, "collection no longer reached the result-row publish seam; retarget it"
+    if mode == "control":
+        assert error is None
+        _assert_registered_verified_bytes(p, collected, run["id"], task_id, original, values)
+        assert (len(submissions), cancels, len(client.tasks())) == (1, [], 1)
+        return
+
+    observed = {
+        "rejected": error is not None,
+        "result_rows": [row["id"] for table in p.snapshot()["tables"] if table["id"] == RESULT_TABLE_ID
+                        for row in table["records"]],
+        "submissions": len(submissions), "cancels": len(cancels), "tasks": len(client.tasks()),
+    }
+    assert observed == {"rejected": True, "result_rows": [], "submissions": 1, "cancels": 0, "tasks": 1}, (
+        observed, collected)
+    assert error.code == "invalid_params"
+    assert all(item["location"] == "project" for item in p.files.list()["records"])
 
     [restore] = restorers
     restore()

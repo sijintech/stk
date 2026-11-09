@@ -567,7 +567,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.snapshot` | `{handle}` | `{snapshot}` |
 | `project.catalog` | `{handle, expected_revision?, offset?, limit?}` | `{format_version, project, tables, total, offset, next_offset, edit_history?, file_index?}` |
 | `project.table.read` | `{handle, table_id, expected_revision, offset?, limit?, record_id?}` | `{project_id, revision, format_version, table, total, offset, next_offset}` |
-| `project.apply` | `{handle, expected_revision, commands}` | `{revision, commands}` |
+| `project.apply` | `{handle, expected_revision, commands, muferro_result?: {run_id, sizes: [integer]}}` | `{revision, commands}` |
 | `project.edit_operations.apply_once` | `{handle, operation_id, expected_revision, commands}` | `{receipt, replayed: boolean}` |
 | `project.edit_operations.get` | `{handle, operation_id}` | `{receipt}` |
 | `project.preview` | `{handle, expected_revision, commands}` | `{persisted: false, base_revision, proposed_revision, commands, snapshot}` |
@@ -1085,6 +1085,12 @@ for native navigation, explicit import into an empty shared Viewer, and project-
   Supply one byte size and lower-case SHA-256 per path, in the same order. Managed paths must be distinct canonical
   project-relative POSIX paths. Every file must exist, with ordinary directory components and no symlinks or reparse points.
   A mismatch refuses the batch before any file-index edit. The index still stores observations and does not freeze bytes.
+- For MuFerro result publication, `project.apply.muferro_result` supplies the canonical run UUID and the sizes for
+  the manifest in the last `set_cell` command. The command must set the built-in file manifest field of that run's
+  deterministic result row to 1–10,000 literal `{path, sha256}` entries. The bridge checks sizes, digests and the
+  native directory inventory before the revisioned edit. Paths must be distinct canonical project-relative files
+  under that run's `case/` directory or its `stk-mupro.json`. Verification observes local files at publication time.
+  Later edits to files remain possible. A verification failure refuses the edit batch and emits no change event.
 - Added 2026-10-14: `project.files.children` lists metadata for one real project directory, at most 4096 inspected entries and 200 entries per page. It does not recurse, register resources or open file contents. Hidden/internal paths and parent traversal are rejected. Link/reparse entries may be visible as links; they are never followed or opened, and link/reparse path components are rejected. Saved registration summaries (at most 200) are distinct from live observations; external registered paths are not automatically probed. Pagination is a live view, not a filesystem snapshot. `resolve_path` rechecks an explicitly selected relative regular file or real directory (including the empty root path); it does not execute or read file contents. The desktop retains at most 64 directories and 8192 entries per editor.
 - `project.snapshots.*` requires format 4 and explicitly manages frozen input bytes, distinct from
   `project.snapshot` (the current editable model). Capture selects 1–100 indexed files, default total budget

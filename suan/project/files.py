@@ -105,8 +105,8 @@ def _check_database_path(root, candidate):
         raise ProjectError("The live project database and its transaction files are not indexable resources")
 
 
-def observe_managed_file(root, path, expected=None):
-    """Observe exactly one project-relative file, optionally binding the bytes to a manifest."""
+def _read_managed_file(root, path, expected=None):
+    """Return the verified file's stat, optionally binding its bytes to a manifest."""
     from suan.connectors.files import open_regular
     from suan.runtime.models import relative_path
     from .file_tree import _directory, _link
@@ -146,8 +146,14 @@ def observe_managed_file(root, path, expected=None):
                     raise ProjectError(f"Managed file changed while checking: {path}")
     except (OSError, RuntimeError) as exc:
         raise ProjectError(f"Managed file is unavailable or has an unsafe path: {path}") from exc
-    return {"kind": _kind(path), "size": after.st_size, "state": "present",
-            "modified": datetime.fromtimestamp(after.st_mtime, timezone.utc).isoformat(),
+    return after
+
+
+def observe_managed_file(root, path, expected=None):
+    """Observe metadata from exactly one verified project-relative file."""
+    info = _read_managed_file(root, path, expected)
+    return {"kind": _kind(path), "size": info.st_size, "state": "present",
+            "modified": datetime.fromtimestamp(info.st_mtime, timezone.utc).isoformat(),
             "checked": datetime.now(timezone.utc).isoformat()}
 
 

@@ -18,7 +18,9 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from suan.connectors.files import open_regular
 from suan.connectors.mupro.inputs import dump_toml
-from suan.project.files import observe_managed_file
+from suan.project.files import _read_managed_file
+from suan.project.snapshots import _signature
+from suan.project.store import ProjectError
 from .common import (_canonical, _capture, _cells, _copy_input, _create_table, _directory, _folder,  # noqa: F401
                      _hash, _revision, _table)
 from suan.mupro.run import (_toml_document, read_case, check_case, verify_run, expected_frame_count, expected_frames,
@@ -162,6 +164,56 @@ def _check_local_result_inventory(root, folder, expected):
         if any(folder / entry.name not in expected and (entry.name in native or FRAME.search(entry.name))
                for entry in entries):
             raise ValueError("MuFerro case contains an unregistered result file; inspect the collected directory")
+
+
+def verify_result_publication(root, commands, proof):
+    """Verify the literal manifest in this MuFerro result edit before publishing it."""
+    if (not isinstance(proof, dict) or set(proof) != {"run_id", "sizes"}
+            or not isinstance(proof["run_id"], str)):
+        raise ProjectError("MuFerro result verification requires a run ID and file sizes")
+    run_id, sizes = proof["run_id"], proof["sizes"]
+    try:
+        identity = UUID(run_id)
+    except ValueError:
+        raise ProjectError("MuFerro result verification requires a canonical run ID") from None
+    if str(identity) != run_id:
+        raise ProjectError("MuFerro result verification requires a canonical run ID")
+    cell = commands[-1] if isinstance(commands, list) and commands else None
+    expected_cell = {"op": "set_cell", "table_id": RESULT_TABLE_ID,
+                     "record_id": str(uuid5(identity, "muferro-result")), "field_id": RESULT_FIELD_IDS["files"]}
+    if not isinstance(cell, dict) or {k: v for k, v in cell.items() if k != "value"} != expected_cell:
+        raise ProjectError("The last edit must set this MuFerro run's result files")
+    manifest = cell.get("value")
+    if (not isinstance(manifest, list) or not 1 <= len(manifest) <= 10000
+            or not isinstance(sizes, list) or len(sizes) != len(manifest)
+            or any(type(size) is not int or not 0 <= size < 2**63 for size in sizes)):
+        raise ProjectError("MuFerro result sizes must match the file manifest in order")
+
+    prefix = f"results/muferro/{run_id}/"
+    files = {}
+    for entry, size in zip(manifest, sizes):
+        if (not isinstance(entry, dict) or set(entry) != {"path", "sha256"}
+                or not isinstance(entry["sha256"], str) or re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]) is None):
+            raise ProjectError("MuFerro result manifest requires a path and SHA-256 for each file")
+        path = entry["path"]
+        try:
+            if (relative_path(path) != path or len(path) > 32768 or not
+                    (path == prefix + RESULT or path.startswith(prefix + "case/"))):
+                raise ValueError
+        except ValueError:
+            raise ProjectError("MuFerro result paths must belong to this run's project directory") from None
+        key = os.path.normcase(path)
+        if key in files:
+            raise ProjectError("MuFerro result paths must be distinct")
+        files[key] = (path, {"size": size, "sha256": entry["sha256"]})
+
+    verified = [(path, _signature(_read_managed_file(root, path, expected))) for path, expected in files.values()]
+    try:
+        _check_local_result_inventory(root, root / prefix / "case", {root / path for path, _ in files.values()})
+    except (OSError, ValueError) as exc:
+        raise ProjectError("MuFerro result directory changed or contains unregistered output") from exc
+    if any(_signature(_read_managed_file(root, path)) != signature for path, signature in verified):
+        raise ProjectError("MuFerro result files changed during publication verification")
 
 
 def _matches_file(path, expected_sha256, *, expected_size=None, copy_to=None):
@@ -437,11 +489,8 @@ class MuFerro:
                   "files": [{"path": path, "sha256": expected_file["sha256"]}
                             for path, expected_file in zip(relative, manifest)]}
         commands += _cells(RESULT_TABLE_ID, row_id, values, RESULT_FIELD_IDS)
-        # Earlier batches may have been edited while later ones were checked. Publish only the rechecked result.
-        _check_local_result_inventory(root, case_folder, set(paths))
-        for path, expected_file in zip(relative, manifest):
-            observe_managed_file(root, path, expected_file)
-        p.apply(commands, expected_revision=revision)
+        p.apply(commands, expected_revision=revision,
+                muferro_result={"run_id": run_id, "sizes": [item["size"] for item in manifest]})
         print("Collected MuFerro run:", run_id, "— final energy:", values["energy"], flush=True)
         return {"run_id": run_id, "table_id": RESULT_TABLE_ID, "record_id": row_id,
                 "directory": str(case_folder), "qoi": verification["qoi"], "files": values["files"]}

@@ -62,10 +62,12 @@ class Project:
         return self._call("ui.project.select", {"handle": self.handle, "expected_revision": expected_revision,
                                                "table_id": table_id, "record_id": record_id})
 
-    def apply(self, commands, *, expected_revision):
+    def apply(self, commands, *, expected_revision, muferro_result=None):
         """One atomic edit, with an explicit base revision; never retried automatically."""
-        return self._call("project.apply", {"handle": self.handle, "commands": commands,
-                                            "expected_revision": expected_revision})
+        params = {"handle": self.handle, "commands": commands, "expected_revision": expected_revision}
+        if muferro_result is not None:
+            params["muferro_result"] = muferro_result
+        return self._call("project.apply", params)
 
     @property
     def edit_operations(self):
