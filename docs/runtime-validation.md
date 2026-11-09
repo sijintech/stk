@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 12:12 UTC · 图文件字节、HDF5 依赖和 Windows 计时
+
+`23ad9f90add2c07facf21a8edc0388a628c78393` 以实际文件字节规划本地缓存，Runtime 使用发布摘要。缓存未命中时校验解析用的私有副本。四个旧反例覆盖原时间和长度不变的本地改写、规划后两种本地改写及 Runtime 暖缓存改写，均在旧实现失败。新回归核对 VTKHDF 外部链接、外部虚拟数据集和外部原始存储被拒绝，同文件虚拟数据集、内部软链接与 VTI/legacy VTK 单位仍可读。无 `/STK` 描述符时，图数据集 ID 取绑定内文件名。源码、独立 wheel 各 206 项通过，两个性能基准按条件跳过。隔离首轮漏复制 `graph_testnodes.py`，补齐后整组重跑。VTI 和 legacy VTK 因原生库需要实际路径，正常退出清理具名副本。图缓存已配置时，强制终止后可能残留的副本纳入缓存暂存目录的裁剪。证据 `root-delivery-20261109-86/file-source-final.xml` 与 `file-wheel/installed-final.xml`。
+
+`0a0b0f2f3946d5249fb689dba7497e323095b6a7` 在打开容器前检查 h5py/NumPy。源码 295 项通过、1 个性能基准跳过。三个独立 wheel 环境分别验证 `[server]`、NumPy-only 和 `[science]`。NumPy-only 的可选发现与索引从 6056/12112 字节降到零，仍可读取 DAT，HDF5 诊断为 `unavailable`。NumPy-only 和 `[server]` 的显式 HDF5 图均在 `node.started` 前拒绝，容器读零字节。`[science]` 读到合成 float32 第 4 步首值 100。没有真实许可输出或跨主机验收。证据 `root-delivery-20261109-86/f5-installed-review/matrix_receipt.json`。
+
+远端 `ab86c2ee` Runtime 于 12:07:33Z 终态失败，8 项通过、5 项失败，五项都只失败在 `test_run_index_preserves_a_replacement_connector_table_reader`。按目录、模拟导入失败、替换读取器的固定顺序复现 2 过 1 败。`d02a59386de1384af6db92fb079401139e78a5cd` 只隔离目标模块并恢复 finder 后再检查，固定顺序 3/3，联跑 198 过 1 跳过，Python 3.11 与 3.14 定向各 163 过 1 跳过。`d02a5938` 的 Python 3.11 本地广跑仍在执行，环境与 hosted 矩阵的可选包有差异。证据 `root-delivery-20261109-86/ci-order-*.xml`。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42611844074)
+
+`cd5ba5ae52961efd0cd3198f89e5303c7fead3db` 集成 Claude43 两个提交。Windows 验收捕获的慢启动有固定步骤、单调时间和独立的日志上限。Linux 独立合成对照把约 1030 毫秒的正常析构记入 `scope-exit`，把模拟异常展开记入 `failed-step-and-unwind`。现有证据门 12 项、7 个子测试通过。Windows 编译、真实 WGC 归因及一直不返回的调用尚无证据。`ab86c2ee` Desktop 已通过 Linux 包和干净机，整轮仍在运行。证据 `root-delivery-20261109-86/wgc43b-root/`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42611844039)
+
 ## 2026-11-09 11:45 UTC · Desktop 推送门和 HDF5 最小安装
 
 `15531049c5c027153c232a2c4ac82c13deb6fe55` 的 Desktop 整轮于 11:45:32Z 终态失败。Linux 三项及 Windows CPU 通过，macOS 原生失败。Windows 原生六项执行五项通过，唯一失败 `reports_native_pdf_opengl` 耗时 134.26 秒，PDF 重新准备后等待第一页像素超时。视频和 HTML 视频通过。JUnit 记录零跳过，后续必需用例检查因 CTest 失败未运行。第一轮重准备阶段启动捕获一次即耗时 120070 毫秒，零轮询、采样和宿主帧。可见及关闭前已有七张有效截图，原重试条件尚未触发。工件已上传，本地新批可以推送。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42601829902) [Windows 原生](https://github.com/sijintech/stk/actions/runs/42601829902/job/129130779464) [Windows 工件](https://github.com/sijintech/stk/actions/runs/42601829902/artifacts/13669449664)

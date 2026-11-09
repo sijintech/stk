@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 12:12 UTC · 图文件内容绑定、MuPRO 依赖与 WGC 定位
+
+本地 `23ad9f90` 把通用图文件源实际解析的字节绑定到缓存计划。源码、隔离 wheel 各 206 项通过、两项性能例跳过。`0a0b0f2f` 将 MuPRO HDF5 依赖检查前移，源码 295 项通过，三种最小安装对照通过。Claude44 在独立 worktree 接手 NumPy 缺失的稳定诊断。
+
+远端 `ab86c2ee` Runtime 终态 8 通过、5 失败，五项都是同一测试顺序问题。本地 `d02a5938` 修复导入测试污染。`cd5ba5ae` 集成 Claude43B 的 Windows 捕获启动诊断，Linux 合成计时和证据门通过。Windows 编译和 Mac 第二次可见暂停均待目标 CI。前轮 Desktop 仍运行，当前本地批次等待整轮终态再推送。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 11:45 UTC · 上一轮 Desktop 终态与 HDF5 依赖
 
 远端 `15531049` Desktop 于 11:45:32Z 结束，Windows 原生 5/6，PDF 重准备后等待第一页像素超时。Windows CPU 1460/1460，Linux 三项通过，macOS 原生失败。整轮已满足推送等待条件。Claude42 的 F-5 文档已集成为 `d2fcfc72`，root 补 NumPy-only 对照。 [验收记录](docs/runtime-validation.md)

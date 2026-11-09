@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 12:12 UTC · 通用文件、HDF5 预检和原生定位
+
+通用图文件源已核对实际解析的内容。单文件 VTKHDF 保持内部链接，外部存储明确拒绝。MuPRO HDF5 缺依赖时在读取容器前报告，按执行节点声明能力和真实许可算例仍待验证。Claude44 在独立 worktree 核对 MuFerro DAT 与运行索引缺 NumPy 时的诊断。Windows PDF 的捕获启动已加入分步计时，下一轮要区分 WinRT/DWM、设备、会话、启动和 COM 释放。macOS 当前头第二次可见暂停仍待结果。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 11:45 UTC · 原生验收终态与 MuPRO 读取依赖
 
 Windows 原生余下 PDF 重准备后的像素超时，macOS 下一轮验证第二次可见暂停对照。MuPRO HDF5 已区分可选依赖诊断与只装 `server` 时的 NumPy 缺失。按执行节点声明能力、提前报告缺失依赖和真实许可输出验证仍待处理。 [验收记录](runtime-validation.md) [D1 兼容门](planning/d1-compatibility-gates.md)

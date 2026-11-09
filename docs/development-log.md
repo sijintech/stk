@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 12:12 UTC · 文件缓存、读取器预检和 CI 隔离
+
+root 以 `23ad9f90` 绑定通用文件解析与原始内容，以 `0a0b0f2f` 前移 HDF5 读取器检查，另以 `d02a5938` 修复 Runtime 矩阵暴露的测试顺序问题。`cd5ba5ae` 集成 Claude43 的 `cfa84a5d` 和 `0ed23ea0`。Claude44 接手 NumPy 缺失诊断。前 Desktop 未结束，新批保留在本地。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 11:45 UTC · Desktop 终态和 F-5 安装对照
 
 `15531049` Desktop 整轮结束。Windows 原生 5/6，CPU 和 Linux 三项通过，macOS 原生失败。root 以 `d2fcfc72` 集成 Claude42 的 `59dee90e`，补单装 NumPy 的隔离对照，记录 HDF5 及 DAT 各入口行为。 [验收记录](runtime-validation.md)
