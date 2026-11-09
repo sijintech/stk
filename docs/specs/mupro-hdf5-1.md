@@ -50,6 +50,10 @@ promising an operating-system snapshot or locking an external producer.
 
 ## FileSource and graph
 
+The FileSource adapter checks for h5py and NumPy before opening the container. Missing dependencies
+return `unavailable`. Optional MuFerro discovery records this diagnostic and continues to expose
+supported DAT data. An explicit HDF5 graph request reports `unavailable` during planning.
+
 `suan.connectors.mupro.source.fingerprint(source, path, selector)` hashes actual stream bytes, with
 no metadata hash shortcut. `source.read(..., expected_sha256=...)` streams the exact input into a
 private temporary file, verifies the planned SHA, then invokes the same selected-field reader on

@@ -501,6 +501,8 @@ class MuFerroConnector:
             except ContentChanged:
                 raise
             except ConnectorError as exc:
+                if isinstance(expected, str) and exc.code == "unavailable":
+                    raise ContentChanged("The planned MuPRO HDF5 reader became unavailable") from None
                 # HDF5 profile errors remain visible without disabling existing DAT/tables.
                 hdf5_error = {"code": exc.code, "message": str(exc)}
         qoi = []

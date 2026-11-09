@@ -70,9 +70,10 @@ def fingerprint(source, path, selector, *, check=None):
 
 
 def file_fingerprint(source, path, *, check=None):
-    """Whole-container content identity, also used to plan metadata discovery."""
-    from .hdf5 import READER
+    """Check reader availability, then plan a whole-container content identity."""
+    from .hdf5 import READER, _modules
     path = check_path(path)
+    _modules()
     sha, size = _stream(source, path, check=check)
     return {"path": path, "sha256": sha, "size": size, "reader": READER}
 
@@ -102,11 +103,12 @@ def _verified(source, path, expected_sha256, check):
 def describe(source, path, *, expected_sha256=None, max_entries=4096, check=None):
     """Enumerate native field metadata from one verified copy, without reading values."""
     from .discovery import _discover_hdf5_stream
-    from .hdf5 import READER
+    from .hdf5 import READER, _modules
     if type(max_entries) is not int or max_entries < 1:
         raise ConnectorError("max_entries must be a positive integer", "invalid_param")
     path = check_path(path)
     _check_expected_sha256(expected_sha256, optional=True)
+    _modules()
     with ExitStack() as stack:
         try:
             stream, sha, size = stack.enter_context(_verified(source, path, expected_sha256, check))
@@ -123,11 +125,12 @@ def describe(source, path, *, expected_sha256=None, max_entries=4096, check=None
 def read(source, path, selector, *, expected_sha256, region=None, stride=None,
          max_bytes=256 * 1024 * 1024, check=None):
     """Read only bytes matching the fingerprint that planned the caller's execution."""
-    from .hdf5 import READER, _parse_selector, _read_hdf5_stream
+    from .hdf5 import READER, _modules, _parse_selector, _read_hdf5_stream
     from suan.data.model import FrameRef, Provenance, SourceRef
     _parse_selector(selector)
     path = check_path(path)
     _check_expected_sha256(expected_sha256)
+    _modules()
     # POSIX unlinks this file immediately; Windows opens it with delete-on-close.
     # Closing descriptors on worker death also releases the private source copy.
     with _verified(source, path, expected_sha256, check) as (target, sha, size):

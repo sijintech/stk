@@ -67,6 +67,36 @@ def test_selectors_separate_cached_frames_and_reopen_disk_cache(tmp_path):
     np.testing.assert_array_equal(again.outputs["field"].array("Polar"), first.outputs["field"].array("Polar"))
 
 
+def test_missing_reader_fails_before_graph_execution_or_source_reads(tmp_path, monkeypatch):
+    from suan.connectors.mupro import hdf5
+
+    path = tmp_path / "run.h5"
+    write_file(path)
+    source = LocalFiles(tmp_path)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    opened, events = [], []
+    open_source = LocalFiles.open
+
+    def unavailable():
+        raise ConnectorError("Reading MuPRO HDF5 needs h5py and NumPy", "unavailable")
+
+    def record_open(source, path):
+        opened.append(path)
+        return open_source(source, path)
+
+    monkeypatch.setattr(hdf5, "_modules", unavailable)
+    monkeypatch.setattr(LocalFiles, "open", record_open)
+    with pytest.raises(EvaluationFailed) as raised:
+        run(tmp_path, on_event=lambda event: events.append(event["type"]))
+    assert raised.value.errors[0]["code"] == "unavailable"
+    for operation in (lambda: adapter.describe(source, "run.h5", expected_sha256=digest),
+                      lambda: adapter.read(source, "run.h5", "/t00000002/Polar", expected_sha256=digest)):
+        with pytest.raises(ConnectorError) as error:
+            operation()
+        assert error.value.code == "unavailable"
+    assert opened == [] and "node.started" not in events
+
+
 def test_rewrite_after_planning_cannot_poison_cache(tmp_path):
     path = tmp_path / "run.h5"
     write_file(path)

@@ -448,6 +448,50 @@ def test_hdf5_unavailable_at_planning_keeps_dat_run_index(tmp_path, monkeypatch)
     assert result.outputs["result"]["extensions"]["mupro"]["hdf5_error"]["code"] == "unavailable"
 
 
+def test_hdf5_dependency_unavailable_keeps_dat_without_caching_the_available_result(tmp_path, monkeypatch):
+    from suan.connectors.mupro import hdf5
+
+    write_case(tmp_path)
+    write_outputs(tmp_path)
+    write_hdf5(tmp_path / "run.h5")
+    source = LocalFiles(tmp_path)
+    cache = GraphCache(tmp_path / "graph-cache")
+    opened = []
+    open_source = LocalFiles.open
+
+    def unavailable():
+        raise ConnectorError("Reading MuPRO HDF5 needs h5py and NumPy", "unavailable")
+
+    def record_open(source, path):
+        if path == "run.h5":
+            opened.append(path)
+        return open_source(source, path)
+
+    monkeypatch.setattr(LocalFiles, "open", record_open)
+    with monkeypatch.context() as missing:
+        missing.setattr(hdf5, "_modules", unavailable)
+        absent = evaluate_result(tmp_path, cache=cache)
+        assert absent.outputs["frames"].n_rows > 0
+        for manifest in (absent.outputs["result"], MuFerroConnector().describe(source)):
+            assert manifest["extensions"]["mupro"]["hdf5_error"]["code"] == "unavailable"
+            assert all(not dataset["id"].startswith("hdf5:") for dataset in manifest["datasets"])
+    assert opened == []
+    available = evaluate_result(tmp_path, cache=cache)
+    assert available.keys != absent.keys and available.evaluated == ["run"]
+    assert {"Polar", "hdf5:Polar"} <= {d["id"] for d in available.outputs["result"]["datasets"]}
+    assert opened
+
+    with monkeypatch.context() as missing:
+        def drop_reader(event):
+            if event["type"] == "node.started":
+                missing.setattr(hdf5, "_modules", unavailable)
+
+        with pytest.raises(EvaluationFailed) as failure:
+            evaluate_result(tmp_path, cache=GraphCache(), on_event=drop_reader)
+        assert failure.value.errors[0]["code"] == "invalid_data"
+        assert not failure.value.partial.outputs
+
+
 def test_describe_budget_is_checked_before_streaming(tmp_path):
     class NoRead:
         def open(self, path):
