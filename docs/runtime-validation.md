@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · CP-0 分页及回执回归
+
+- 本地 `994a3b1a` 使用真实桌面桥 NDJSON 与已授权 `PeerProjects`，核对 peer 方法响应编码。两页目录、三页记录的结果一致，两种陈旧续页均被拒。相同 UUID 在两个 scope 各有一个原回执，分别精确重放。源码四套 143 项，隔离 Python 3.12 wheel 核心两套 107 项，零跳过。用例与证据见 `root-delivery-20261109-45/closure.json`。
+- 本次范围是现有项目操作，原生 helper、远端云服务与 R2/R3 待各自验收。两条物理热日志路径目前有外部探针证据，独立回归正在编写。
+- 远端 `56b432d0` 的 [Desktop 42542944337](https://github.com/sijintech/stk/actions/runs/42542944337) 与 [Runtime 42542944387](https://github.com/sijintech/stk/actions/runs/42542944387) 尚在运行。Docs 与 Secret 已成功。
+
 ## 2026-11-09 UTC：315 的 Desktop 整轮终态
 
 [Desktop 42536615591](https://github.com/sijintech/stk/actions/runs/42536615591) 绑定 `315620f9`，attempt 1 于 00:55:35Z 完成，整轮 failure。六项结果如下，时间为 UTC。

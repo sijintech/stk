@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · D1 设计比较稿与 CP-0 回归已在本地 main
+
+root 本地 `994a3b1a` 增加桌面桥与已授权 peer 的分页及回执回归，源码 143 项和隔离安装核心 107 项通过，零跳过。`07c91e85` 集成 Claude 的 D1 云项目设计，作者提交 `2f2e6ef7`。R2/R3 待决定。Claude 已切到独立 `claude/cp0-recovery-evidence-20`，将两条物理热日志路径补成回归。
+
+远端 `56b432d0` 的 [Desktop](https://github.com/sijintech/stk/actions/runs/42542944337) 和 [Runtime](https://github.com/sijintech/stk/actions/runs/42542944387) 仍运行。Desktop 整轮终态登记后再推。Synthrix `a15ab6b` 仍绑定本地 LAMMPS 任务，现有 UI 缺少 STK 的 `unknown`。保留既有工作树改动。证据见 `root-delivery-20261109-45/closure.json`。
+
 ## 2026-11-09 UTC：315 的 Desktop 已终态
 
 [Desktop 42536615591](https://github.com/sijintech/stk/actions/runs/42536615591) 于 00:55:35Z 结束。六个任务中五个成功，含 00:55:34Z 结束的 Windows 原生 20 轮。macOS 的两项隐藏保持仍失败。Runtime 13 项成功。前轮终态已登记，`749076d9` 的暂停阶段诊断可推送到下一代码头。Claude 的 D1 云项目候选 3 已冻结，等待 root 核对。

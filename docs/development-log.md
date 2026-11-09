@@ -1,5 +1,11 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · CP-0 复用回归和云项目设计复审
+
+本地 `994a3b1a` 复用真实桌面桥测试工具和已授权 peer 项目夹具。源码相关四套 143 项，隔离 wheel 两个核心套件 107 项，均零跳过。Claude 在独立 worktree 提交已扫描的 `2f2e6ef7`。root 在 `07c91e85` 集成设计稿，明确线上 get 返回 `{receipt}`、内部返回原回执，以及各 scope 内核对原操作。
+
+下一项已交 Claude，范围为两个现有入口的物理恢复回归。远端 Desktop 42542944337 整轮仍运行，本地提交等待终态。
+
 ## 2026-11-09 UTC：核对 315 的完整 Desktop 终态
 
 [Desktop 42536615591](https://github.com/sijintech/stk/actions/runs/42536615591) 于 00:55:35Z 为 failure。Windows 原生最后成功完成，唯一失败任务为 macOS。终态逐项记录于验收文档。CP-0 源码、隔离安装和 Claude 候选 3 的证据已收拢到 `root-delivery-20261109-43/closure.json`。
