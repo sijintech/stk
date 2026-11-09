@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · CLI 结果状态、F8b 与新头 CI
+
+远端 `bc25f579` 已开始 Desktop 和 Runtime，Docs 与 Secret scan 已过。Cocoa 静默对照和 Windows 原生联接点在该远端头验证。本地后续批次待 Desktop 整轮终态。 [验收记录](docs/runtime-validation.md)
+
+本地 `8bf08606` 要求 `suan mupro result` 在报告通过且 Runtime 任务成功时才退出 0。报告输出和另存仍可用于失败或取消任务。Linux 源码 80 项、隔离 wheel 64 项通过。
+
+Claude34 `a7572ba9` 已集成为 `210036e3`，实际 UDP 验证同字节新 inode 触发持久撤权，需显式重新绑定。Linux 源码 172 项和隔离安装定向通过。Claude35 在独立 worktree 验证同 inode 恢复到低于已观察修订的 F9。
+
 ## 2026-11-09 UTC · Desktop 终态与主线批次
 
 `bb4cea9d` Desktop 于 08:11:18Z 整轮结束。Windows 原生 6/6、Windows CPU 1460/1460、Linux 三项通过。macOS 原生 4/6、定位前隐藏 0/2，整轮结论失败。已满足前一轮整轮终态推送门。下一轮含 Cocoa 静默隐藏对照和 Windows 联接点实测。 [验收记录](docs/runtime-validation.md)

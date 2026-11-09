@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · CLI 成功条件、F8b 与 bc25f579 CI
+
+`8bf086068ae9a0e02873f2236a791c268e2daf2f` 使 `suan mupro result` 在报告校验通过后再读取原任务状态，只有 Runtime 成功才返回 0。实际合成求解器完成并写入通过报告，Runtime 因缺少另一个必需产物判失败。取消态客户端夹具也保留通过报告。两例旧 CLI 都退出 0，修复后退出 3，仍打印并另存报告。Linux 源码 80 项、隔离 wheel 64 项通过，各有 Windows 联接点与真实许可两项条件跳过。Python 3.11、3.12、3.14 的 Linux 结果命令定向各三项通过。 [命令文档](runtime-mupro.md)
+
+`210036e303be1b3a379cd183da2faf4dc58296e3` 集成 Claude34 最终 `a7572ba923583021b7142996b606d27cf216e9ee`。真实已认证 UDP 首次观察到字节相同、inode 不同的数据库替换后，持久撤销绑定、授权及旧连接权限。恢复原 inode 后须显式重新绑定。新连接在新授权下读取原内容，原回执保持在旧 scope。Linux 源码 172 项和隔离 wheel 定向一项通过，零跳过。隔离反例屏蔽 inode 变化后在预期的首次拒绝断言失败。证据在本机 `root-delivery-20261109-72`。 [CP-0 矩阵](design/cloud-project-service.md)
+
+精确远端 `bc25f579b9c4ddd645145f7c7d29963dbb6ea7f6` 已推送。Docs 与 Secret scan 通过，Runtime 和 Desktop 核对时仍运行。本地后续提交待当前 Desktop 整轮终态后推送。 [Runtime](https://github.com/sijintech/stk/actions/runs/42584441104) [Desktop](https://github.com/sijintech/stk/actions/runs/42584441296)
+
 ## 2026-11-09 UTC · bb4cea9d 终态和主线新批次
 
 精确 `bb4cea9df632e3a0fd7b107694a7dff56052190e` Desktop 于 08:11:18Z 终态失败。Linux 三项通过，Windows CPU 1460/1460 和原生六项全过，Windows 原生作业于 08:11:17Z 终态。固定 Mesa 26.2.4 的 70,257,286 字节存档通过校验并解包。macOS CPU 1516/1516、Metal 254/254，原生 4/6、定位前隐藏 0/2。Runtime 13 项通过。本地 Cocoa 静默对照、Windows 联接点和同批修复随下一轮验收。 [Desktop](https://github.com/sijintech/stk/actions/runs/42576437438) [Windows 原生证据](https://github.com/sijintech/stk/actions/runs/42576437438/artifacts/13658685452) [macOS 原生证据](https://github.com/sijintech/stk/actions/runs/42576437438/artifacts/13657571015) [Runtime](https://github.com/sijintech/stk/actions/runs/42576437407)

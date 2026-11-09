@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · CLI 终态与 F8b
+
+本地 MuPRO CLI 校验报告后核对原 Runtime 任务状态。D1 F8b 已在真实 UDP 验证物理替换与重新绑定，Claude35 接手 F9 的同 inode 旧修订恢复。Cocoa 静默对照及 Windows 原生联接点等待远端 `bc25f579` 复验。 [CP-0 矩阵](design/cloud-project-service.md) [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · Desktop 新轮和结果登记
 
 上一轮已完成 Windows 原生和全轮验收，进入含 Cocoa 静默对照的下一轮。传输取消保护已完成发布的日志，MuFerro 收集补启动器成功报告和程序摘要格式核对。真实许可、目标 Windows junction 和 Cocoa 隐藏行为分别验收。Claude34 继续真实线路数据库替换。 [验收记录](runtime-validation.md)

@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · Runtime 结果出口与物理替换
+
+root 提交 `8bf08606`，真实 Runtime 在合成求解器通过后因另一必需产物缺失而判失败，CLI 现在退出 3 并保留原报告。root 以 `210036e3` 集成 Claude34 `a7572ba9`。Claude35 已在独立分支接手 F9。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 前轮 Desktop 终态、传输与报告核对
 
 root 核实 `bb4cea9d` 全轮终态，Windows 原生 6/6 和 CPU 1460/1460，macOS 仍有隐藏期失败。 `6dacac40` 从 PR #53 单独接入取消读取锁，经真实下载发布和精确事件测试。 `bdae4432` 拒绝四种合成矛盾成功报告。 [验收记录](runtime-validation.md)
