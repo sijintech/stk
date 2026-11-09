@@ -10,6 +10,7 @@
 #include "../bridge/support.hh"
 #include "../wm/support.hh"
 
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 
@@ -1282,6 +1283,165 @@ TEST_F(ScriptPython, ViewerOpensSyntheticResultsAndReevaluatesExplicitParameters
   EXPECT_TRUE(viewer.overlays());
   execute("stk.viewer.configure(parameters={'path': 'missing.vtk'})\nstk.viewer.evaluate()\n"
           "failed = stk.viewer.wait(timeout=25)\nassert failed['error']");
+}
+
+TEST_F(ScriptPython, ViewerWaitFollowsOneGuardedCollectedOpenThroughFailureAndRetry)
+{
+  auto &viewer = f.shell->store().viewer();
+  ASSERT_TRUE(pump([&] { viewer.pump(); return viewer.presets_loaded() && !viewer.catalog().is_null(); }, 60));
+  // Two small synthetic muFerro runs (tests/mupro_fake: no licence, solver or Runtime task) with their exact
+  // registered SHA-256 manifests, as the collected-result "View" action passes them.
+  ASSERT_NO_FATAL_FAILURE(execute(R"PY(
+import hashlib, importlib.util, os
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('mupro_fake', )PY" + Json(std::string(STK_REPO_ROOT) + "/tests/mupro_fake.py").dump() + R"PY()
+mupro_fake = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mupro_fake)
+root = Path()PY" + Json(dir.str() + "/collected").dump() + R"PY()
+run_a, run_b = root / 'run-a', root / 'run-b'
+for run in (run_a, run_b):
+    mupro_fake.write_domain_run(run, grid=(16, 12, 10), steps=2, interval=1)
+def proof_of(run):
+    files = [{'path': item.relative_to(root).as_posix(), 'sha256': hashlib.sha256(item.read_bytes()).hexdigest()}
+             for item in sorted(run.rglob('*')) if item.is_file()]
+    return {'project_root': str(root), 'case_path': run.name, 'files': files}
+proof_a, proof_b = proof_of(run_a), proof_of(run_b)
+preset = 'muferro-collected-domains'
+stk.viewer.configure(prefetch=False)
+opened_a = stk.viewer.open(run_a, preset=preset, source_proof=proof_a, focus=False)
+assert 'opening' not in opened_a, opened_a  # the first source has no previous Viewer to guard
+shown_a = stk.viewer.wait(timeout=25)
+assert shown_a['has_payload'] and not shown_a['error'] and shown_a['shown_step'] == 2, shown_a
+assert 'opening' not in shown_a, shown_a
+a_key = shown_a['source']['key']
+stk.viewer.configure(auto_evaluate=False, parameters={'min_magnitude': 0.3}, expected_source=a_key)
+draft_a = stk.viewer.status()
+assert draft_a['pending_edit'] == 'data' and draft_a['parameters']['min_magnitude'] == 0.3, draft_a
+assert not draft_a['auto_evaluate'] and draft_a['evaluation']['id'] == shown_a['evaluation']['id'], draft_a
+)PY"));
+  ASSERT_FALSE(HasFailure()) << "Viewer A precondition";
+  ASSERT_EQ(viewer.pending_edit(), "data");
+  ASSERT_FALSE(viewer.auto_evaluate);
+  const auto a_path = viewer.source().path;
+  const auto a_proof = viewer.source().source_proof;
+  ASSERT_EQ(a_proof.value("case_path", ""), "run-a");
+  const auto a_base = viewer.base_payload(), a_payload = viewer.payload();
+  ASSERT_TRUE(a_payload);
+  const auto a_payload_serial = viewer.payload_serial(), a_camera = viewer.camera_serial();
+  const auto a_parameters = viewer.parameters();
+  const auto a_step = viewer.shown_step();
+  const auto a_intact = [&] {
+    EXPECT_EQ(viewer.source().path, a_path) << "the previous Viewer source was dropped";
+    EXPECT_EQ(viewer.source().source_proof, a_proof);
+    EXPECT_TRUE(viewer.base_payload() == a_base) << "base payload replaced";
+    EXPECT_TRUE(viewer.payload() == a_payload) << "rendered payload replaced";
+    EXPECT_EQ(viewer.payload_serial(), a_payload_serial);
+    EXPECT_EQ(viewer.camera_serial(), a_camera);
+    EXPECT_EQ(viewer.parameters(), a_parameters) << "A's unsent parameter draft was dropped";
+    EXPECT_EQ(viewer.pending_edit(), "data");
+    EXPECT_FALSE(viewer.auto_evaluate);
+    EXPECT_EQ(viewer.shown_step(), a_step);
+  };
+
+  // B keeps its original exact proof, but the frame its latest step reads changes (same size, restored
+  // mtime) before the accepted open. The open result and the wait observations come from the real facade;
+  // the recorder only appends what Viewer.wait itself read through status().
+  ASSERT_NO_FATAL_FAILURE(execute(R"PY(
+frame = run_b / 'Polar.00000002.dat'
+original = frame.read_bytes()
+before = frame.stat()
+digit = max(index for index, byte in enumerate(original) if 48 <= byte <= 57)
+modified = bytearray(original)
+modified[digit] = 49 if original[digit] == 48 else 48
+def rewrite(data):
+    with open(frame, 'r+b') as stream:
+        stream.write(data)
+    os.utime(frame, ns=(before.st_atime_ns, before.st_mtime_ns))
+    after = frame.stat()
+    assert after.st_size == before.st_size and after.st_mtime_ns == before.st_mtime_ns
+    assert frame.read_bytes() == bytes(data)
+def recorded_wait():
+    seen, status = [], stk.viewer.status
+    def recording():
+        result = status()
+        seen.append(result)
+        return result
+    stk.viewer.status = recording
+    try:
+        return stk.viewer.wait(timeout=25), seen
+    finally:
+        del stk.viewer.status
+rewrite(modified)
+assert 'opening' not in stk.viewer.status()
+opened_b = stk.viewer.open(run_b, preset=preset, source_proof=proof_b, focus=False)
+opening = opened_b['opening']
+assert opening['state'] == 'pending' and opening['source']['path'] == str(run_b), opened_b
+b_key = opening['source']['key']
+assert b_key != a_key and opened_b['source']['key'] == a_key and opened_b['source']['path'] == str(run_a), opened_b
+assert opening['id'] != shown_a['evaluation']['id'], opened_b
+assert opened_b['evaluating'] and opened_b['has_payload'] and opened_b['parameters'] == draft_a['parameters'], opened_b
+assert opened_b['pending_edit'] == 'data' and opened_b['camera_serial'] == draft_a['camera_serial'], opened_b
+failed, seen = recorded_wait()
+assert seen[0]['source']['key'] == a_key and seen[0]['opening']['id'] == opening['id'], seen[0]
+assert all(item['opening']['id'] == opening['id'] and item['source']['key'] == a_key for item in seen), seen
+assert failed is seen[-1], failed
+assert failed['opening'] == {**opening, 'state': 'failed'}, failed
+assert 'Polar.00000002.dat' in failed['error'] and 'changed' in failed['error'], failed['error']
+assert failed['source'] == opened_b['source'] and failed['parameters'] == draft_a['parameters'], failed
+assert failed['pending_edit'] == 'data' and not failed['auto_evaluate'] and not failed['evaluating'], failed
+assert failed['has_payload'] and failed['shown_step'] == 2, failed
+assert failed['camera_serial'] == draft_a['camera_serial'], failed
+assert failed['evaluation'] == draft_a['evaluation'], failed
+desired = stk.viewer.graph_configuration(displayed=False)['configuration']
+assert desired['source']['key'] == a_key and desired['source']['source_proof'] == proof_a, desired['source']
+assert desired['parameters']['min_magnitude'] == 0.3, desired['parameters']
+print('GUARDED_OPEN_FAILURE', failed['error'], len(seen))
+)PY"));
+  ASSERT_FALSE(HasFailure()) << "failed guarded open of B through the Python Viewer facade";
+  const auto marked = [&](const std::string &marker) {
+    const auto text = output();
+    const auto at = text.find(marker);
+    return at == std::string::npos ? std::string() : text.substr(at, text.find('\n', at) - at);
+  };
+  ASSERT_NE(marked("GUARDED_OPEN_FAILURE"), "") << output();
+  std::printf("METRIC %s\n", marked("GUARDED_OPEN_FAILURE").c_str());
+  a_intact();
+  ASSERT_FALSE(HasFailure()) << "Viewer A after the failed open";
+
+  // Restore B's registered bytes and explicitly reopen it: the same wait follows that opening's A-to-B
+  // source change to its success instead of reporting the expected switch as a changed source.
+  ASSERT_NO_FATAL_FAILURE(execute(R"PY(
+rewrite(original)
+reopened = stk.viewer.open(run_b, preset=preset, source_proof=proof_b, focus=False)
+retry = reopened['opening']
+assert retry['state'] == 'pending' and retry['id'] != opening['id'], reopened
+assert retry['source'] == opening['source'] and reopened['source']['key'] == a_key, reopened
+shown_b, seen = recorded_wait()
+assert all(item['opening']['id'] == retry['id'] for item in seen), seen
+assert all(item['source']['key'] == (b_key if item['opening']['state'] == 'succeeded' else a_key)
+           for item in seen), seen
+assert shown_b is seen[-1], shown_b
+assert shown_b['opening'] == {**retry, 'state': 'succeeded'}, shown_b
+assert shown_b['source']['key'] == b_key and shown_b['source']['path'] == str(run_b), shown_b
+assert not shown_b['error'] and not shown_b['metadata_error'], shown_b
+assert shown_b['has_payload'] and not shown_b['evaluating'] and not shown_b['pending_edit'], shown_b
+assert shown_b['shown_step'] == 2 and shown_b['parameters'].get('min_magnitude') != 0.3, shown_b
+assert shown_b['evaluation']['id'] not in (shown_a['evaluation']['id'], opening['id']), shown_b
+assert shown_b['camera_serial'] > draft_a['camera_serial'], shown_b
+desired = stk.viewer.graph_configuration(displayed=False)['configuration']
+assert desired['source']['key'] == b_key and desired['source']['source_proof'] == proof_b, desired['source']
+print('GUARDED_OPEN_RETRY', shown_b['evaluation']['id'], len(seen))
+)PY"));
+  ASSERT_FALSE(HasFailure()) << "explicit reopen of restored B through the Python Viewer facade";
+  ASSERT_NE(marked("GUARDED_OPEN_RETRY"), "") << output();
+  std::printf("METRIC %s\n", marked("GUARDED_OPEN_RETRY").c_str());
+  EXPECT_NE(viewer.source().path, a_path);
+  EXPECT_EQ(viewer.source().source_proof.value("case_path", ""), "run-b");
+  ASSERT_TRUE(viewer.payload());
+  EXPECT_NE(viewer.base_payload(), a_base);
+  EXPECT_GT(viewer.camera_serial(), a_camera);
+  EXPECT_TRUE(viewer.eval_error().empty()) << viewer.eval_error();
+  EXPECT_TRUE(viewer.open_error().empty()) << viewer.open_error();
 }
 #endif
 
