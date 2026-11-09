@@ -1,5 +1,7 @@
 # Codex / Claude worktree 协作约定
 
+2026-11-09 起，两个 worktree 都按 [AGENTS.md](../../AGENTS.md) 约定按需使用 AOCI，由 root 在里程碑维护 main 的索引。下方此前日期的任务状态按历史保留。
+
 ## 2026-11-08 当前补充：Claude18第四版已由root集成，19准备项目服务设计
 
 root选择集成冻结六路径第四版为397a464d；作者225、root完整源码234和最小安装232（另2科学用例明确排除、完整源码覆盖）均零skip，独立发布12场景及读取11组通过。root共同依赖54d含6c，作者531仍旧；目标OS worker和外部站点待验。已授权实际Claude仅把原六文件在claude/hub-upload-cli-18扫描后提交留档，不push或改候选，原会话/worktree保留；root仍独占main、共享构建、公共契约和最终验收推送。
@@ -119,9 +121,8 @@ root 独占 `/home/mnemora/opt/stk-build/merge-check`。Claude 如任务需要�
 Git 仅带入已提交文件，root 现有未提交 WIP 留在 root。不要复制用户凭据、本机私有状态、身份或模型资产。
 测试使用 `env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY=`；所有既有隐私、显式执行和目标平台验收要求保持。
 
-AOCI 的认知身份包含仓库根；Claude 不把 root-bound MCP 的回执当作自身 worktree 的认知。
-在自己的工作区按当前合同建立认知；若工具仍绑定 main，报告绑定差异，使用对应工作区的受支持入口，不改写 root 的运行资产。
-两边各自保持认知约束，正式合入 main 后由 root 在最终稳定状态维护 main 索引；不直接拷贝/合并 Claude 的 `.aoci` baseline。
+AOCI 的认知和回执绑定实际 worktree。Claude 按需使用对应工作区的入口。若工具绑定 main，报告差异，必要时用 Claude worktree 中的源码和契约继续。
+root 按里程碑用 main 的实际文件维护正式索引。Claude 的 `.aoci` 运行资产与 main 分开保留。
 
 ## 当前任务卡
 

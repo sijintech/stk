@@ -1,5 +1,9 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · AOCI 使用约定
+
+所有者已采纳 Claude 的提案。新会话和压缩后从交接、相关源码和发布契约继续，按需查询 AOCI。root 在里程碑维护 main 的索引。详见 [AGENTS.md](AGENTS.md)。
+
 ## 2026-11-09 UTC · 39780e6d Desktop 终态与原生补验
 
 `39780e6d` 的 Desktop 于 05:46:10Z 终态失败。Mac 原组 4/6、定位前对照 0/2，HTML 对照确认同会话由暂停 watchdog 关闭。Windows CPU 1,460 项通过，原生在 Mesa 三次 HTTP 504 后跳过六项。Linux 三项通过。root 加入 Cocoa 查询与回调取证 `59183cd0`，以及同一 Mesa 资产的 API 备用下载 `46bab2cf`。下一轮保持既有验收门。
@@ -503,7 +507,7 @@ Root收口再次GET同3ef/attempt1的整个前头Desktop41178119889：completed/
 <a id="当前续接与下一步"></a>
 
 1. **接手整个工作区。** `/home/mnemora/xcheng/sijin/stk`，`main`。11-03恢复时HEAD/local origin/main/远端main均为 `3ef4b2716d42304d708062f9715edae0afb5874f`，91 WIP（33 tracked/58 untracked），暂存空；本次收口再次核本地HEAD仍为该3ef，暂存空。后续新增接线/测试使91不再是当前路径计数。wheel见上方及运行验收；尚无本批commit/push/新头CI或包含全部WIP的便携交接包。只clone main会遗漏实现；不要reset/clean/覆盖WIP。
-2. 读 AGENTS，按实时规则建立新 Run 的完整 AOCI 认知，再核源码。索引仍 Dirty/Stale；此文件和历史收据不能代替当前认知。
+2. 读 AGENTS，核对交接、相关源码和发布契约。按需查询 AOCI，历史收据可用于定位当时的证据。
 3. encoder profiles 真实联合69/69、14输入稳定；服务三父Python各26/26、20输入稳定。公开Bridge最终54/54、27输入稳定；一次真实E5链发现Schema遗漏已修，实际缓存DTO重验/页渲染/撤权完成，详见下节。原生UI仍待完成。
 4. 独立heldout已按冻结release一次完成：Qwen同语120/120、跨语119/120通过原门；E5 reference同语120/120、跨语24/120。仅一般段落检索诊断，原科学PDF质量失败保留；INT8不采用、不按曝光heldout调参。
 5. S6最终Schema下三Python各430/430、零skip、334输入稳定，绑定后续file_store.accept修复前SHA。S4最小CAS补修2红→绿；当前联合460pass/2个Windows-only skip、来源稳定，独立三Python各10/10、220输入稳定。Linux原生整合2075/2075、Python整合02为5489pass/74skip/4deselected（973输入稳定）、wheel安装299/299均已终态；各自平台/依赖边界见运行验收，01失败与旧全量不替当前来源。
@@ -658,13 +662,13 @@ native cache开启STK_PEER_NATIVE_APP_ACCEPTANCE=ON，完整ctest须STK_TEST_PEE
 11-02 交接时全部协作代理冻结、INT8 session62558已终态并回收自有child，这是历史记录；11-03 当前协作任务见首节和实时工具状态。
 共享机器可能有其他会话/CI，不宣称全机空闲、不杀未知进程，观察超时不等于进程终态。
 
-提交前独立审查最终diff、适当联合回归、wheel/sdist/隔离安装，四状态文档同步、最终稳定AOCI维护；暂存变更须gitleaks `.gitleaks.toml`过再commit。默认main，不routine分支/PR，不合无关PR；push前再核前整个Desktop终态，跟新头CI如实记失败。本批已运行上述软件测试/构建与wheel隔离安装；本次四文档收口不改业务源码、不stage/commit/push。最终sdist、治理、提交与新头CI仍待Root完成。
+提交前独立审查最终diff、适当联合回归、wheel/sdist/隔离安装，四状态文档同步，AOCI 按里程碑维护；暂存变更须gitleaks `.gitleaks.toml`过再commit。默认main，不routine分支/PR，不合无关PR；push前再核前整个Desktop终态，跟新头CI如实记失败。本批已运行上述软件测试/构建与wheel隔离安装；本次四文档收口不改业务源码、不stage/commit/push。最终sdist、治理、提交与新头CI仍待Root完成。
 
-## AOCI 当前状态和安全续接
+## 2026-11-03 AOCI 状态和安全续接记录
 
-MCP0.1.0-rc21，CLI `/home/mnemora/.local/bin/aoci`。11-03最新Root完整Overview已24/24交付confirmed、Challenge9/10 pass，覆盖1144条、estimated165707 tokens；完整交付与严格校验通过，治理仍Dirty/Stale，不能称全量aligned或当前完整系统认知可靠。此前同日context_compaction链在21/24块后于第22块返回 `cognition_snapshot_unavailable`，该失败链未确认/未Attest，保留为历史，不再作为最新状态。下一Agent不能继承Root当前Run认知资格，仍按AGENTS建立自己的可靠认知。
+MCP0.1.0-rc21，CLI `/home/mnemora/.local/bin/aoci`。11-03最新Root完整Overview已24/24交付confirmed、Challenge9/10 pass，覆盖1144条、estimated165707 tokens；完整交付与严格校验通过，治理仍Dirty/Stale，不能称全量aligned或当前完整系统认知可靠。此前同日context_compaction链在21/24块后于第22块返回 `cognition_snapshot_unavailable`，该失败链未确认/未Attest，保留为历史，不再作为最新状态。此记录对应当时的 worktree 与索引。
 
-此前失败链仅供排错的安全身份：index/scope `289be6ffd55ee88d742bbee3164d450f0e4ec90f41c9b417397f3dcea834e3a6`，Composite `86d326dc722396408b1f9df4812b22f6d9ae0f96f288749f862a300e36ff94a0`。不保存正式Whole-Index/Header/Entry/Chunk/Challenge/Attestation正文。新Run rules→普通完整overview；已知压缩声明context_compaction和新event ID，跟原cursor到completed，确认交付，仅按新正文提交一次attestation，不用check_only/probe/源码补答。
+此前失败链仅供排错的安全身份：index/scope `289be6ffd55ee88d742bbee3164d450f0e4ec90f41c9b417397f3dcea834e3a6`，Composite `86d326dc722396408b1f9df4812b22f6d9ae0f96f288749f862a300e36ff94a0`。不保存正式Whole-Index/Header/Entry/Chunk/Challenge/Attestation正文。当前按需使用和正式交付的规则见 [AGENTS.md](AGENTS.md)。
 
 旧`OWNER_NEW/handoff-20261102T2022Z/`维护为31missing/31stale/31unbaselined/21Observed、候选0/remaining62、无pending tx/Recovery/conflict；之后profile等又变，旧计数不作当前事实。11-02的Maintain/Verify/Check/Guide见历史HANDOFF_EVIDENCE/closure.json，不作为当前债务计数。11-03 Root已逐条审查29条Observed事实并核当前SHA/精确pending set，acknowledge status applied、txn `40bc59963d92d5d733245239`，证据 `OWNER_NEW/observed-review-20261103-01/acknowledge-29.json`。这仅确认Observed基线，不是Entry语义维护或全量aligned；最终维护待四文档冻结后由Root按实时Guide完成，不套模板/缩scope/复用旧ACK。
 
