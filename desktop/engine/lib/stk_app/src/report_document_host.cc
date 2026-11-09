@@ -27,6 +27,10 @@ struct ReportDocumentHost::State : std::enable_shared_from_this<State> {
   ui::Context *ui_identity = nullptr; // Compared only; access comes from the live Screen.
   ui::WidgetId viewport = 0, previous_anchor = 0, next_anchor = 0;
   bool visible_requested = false, surface_visible = false, has_media = false;
+  // Compared only: a hide pause request accepted for this exact view/session while the surface
+  // has stayed hidden since. Acceptance is not verification; the native watchdog decides that.
+  const NativeDocumentView *hidden_pause_view = nullptr;
+  const ResourceSession *hidden_pause_session = nullptr;
   struct FocusRequest {
     ResourceSession *session;
     Editor *owner;
@@ -51,6 +55,7 @@ struct ReportDocumentHost::State : std::enable_shared_from_this<State> {
         if (has_media && was_visible) {
           std::string pause_error;
           if (!view->pause_media(pause_error)) { failed = true; }
+          else { hidden_pause_view = view.get(); hidden_pause_session = resources.get(); }
         }
         view->set_visible(false);
         const auto actual = view->state();
@@ -60,6 +65,7 @@ struct ReportDocumentHost::State : std::enable_shared_from_this<State> {
     catch (...) { failed = true; }
     if (failed) {
       // Do not recurse through close_session()/hide() after a platform hide failure.
+      hidden_pause_view = nullptr; hidden_pause_session = nullptr;
       if (resources) { resources->close(); }
       stop_poll();
       try { if (view) { view->set_focus_exit_handler({}); view->close(); } } catch (...) {}
@@ -76,6 +82,7 @@ struct ReportDocumentHost::State : std::enable_shared_from_this<State> {
   {
     stop_poll();
     hide();
+    hidden_pause_view = nullptr; hidden_pause_session = nullptr;
     if (resources) { resources->close(); }
     try { if (view) { view->set_focus_exit_handler({}); view->close(); } } catch (...) {}
     view.reset(); resources.reset(); entry.clear(); error.clear(); has_media = false; status = NativeViewStatus::Closed;
@@ -193,6 +200,9 @@ struct ReportDocumentHost::State : std::enable_shared_from_this<State> {
     const int top = sr.ymax - int(std::ceil(clipped.y));
     if (right <= x || top <= y) { hide(); return; }
     view->set_bounds({x, y, right - x, top - y});
+    // Any show attempt (even one the platform reports as not visible) ends the coalescing:
+    // media may be played once shown, so a later explicit Pause must reach the view again.
+    hidden_pause_view = nullptr; hidden_pause_session = nullptr;
     view->set_visible(true);
     const auto actual = view->state();
     const bool was_visible = surface_visible;
@@ -320,6 +330,17 @@ bool ReportDocumentHost::pause_media()
   if (!state.has_media || !state.view || !state.resources || !state.resources->active() ||
       state.scope_epoch != state.store.project_scope_epoch()) { return false; }
   try {
+    // A Pause click hides the child on mouse-down (issuing the hide pause), then runs this
+    // action on mouse-up while the same surface is still hidden. Do not supersede that request.
+    if (!state.surface_visible && state.hidden_pause_view == state.view.get() &&
+        state.hidden_pause_session == state.resources.get()) {
+      const auto actual = state.view->state();
+      if (!actual.visible && actual.status != NativeViewStatus::Failed &&
+          actual.status != NativeViewStatus::Closed && actual.status != NativeViewStatus::Unsupported) {
+        if (state.screen && state.layout) { state.screen->tag_redraw(); }
+        return true;
+      }
+    }
     std::string error;
     if (!state.view->pause_media(error)) {
       state.fail(error.empty() ? "Video playback could not be paused and was closed" : error);
