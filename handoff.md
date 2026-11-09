@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · 双语文献实窗与 macOS 隐藏对照
+
+root 用 `2bf4bd50` 在 Linux X11 软件 OpenGL 的默认工作台完成简体中文引用页验收。8 次点击显示完整页图和逐字高亮，再 5 次撤销合成授权并确认页图消失。中英文两次使用独立合成库，桥返回的 PNG 字节相同。两次的网格 Viewer 区域各自保持像素一致。证据见 `root-delivery-20261109-51/closure.json`。目标 Mac/Windows 的文献页面待验。
+
+远端 `fbe4b0cc` 的 Runtime 13 项成功，Windows CPU 成功，Windows 原生文档仍在运行。macOS 原组 4/6，两项定位前对照 0/2。对照均通过约 0.75 秒的隐藏暂停保持，第一次隐藏截图匹配，第二次检查时会话已脱离。未进入重显，关闭来源待确认。前整个 Desktop 终态登记后推送本地 main。
+
+Claude23 在独立 worktree 的双入口竞争候选通过 30 次重复，Bridge 赢 3 次，peer 赢 27 次。测试提交和 F13/F15 兼容边界候选待交付，root 负责复核与集成。
+
 ## 2026-11-09 UTC · Linux 文献引用页实窗
 
 root 用本地 `2bf4bd50` 二进制，在 Linux X11/Mesa 软件 OpenGL 上从英文默认布局实测文献引用页。预先建立合成 PDF 文献库和固定 E5 索引，8 次点击显示页图，再 5 次撤销合成授权并确认页图消失，全程零滚轮。证据见 `root-delivery-20261109-50/closure.json`。中文实窗全链和目标 Mac/Windows 待验。
