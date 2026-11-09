@@ -119,8 +119,8 @@ python -m suan.mupro check [--sdk-prefix DIR] [--program muFerro] [--env-script 
 `run` 在任务的 `work` 目录中执行：
 
 1. source 环境脚本；有 `--license-dir` 时设置 `MUPROROOT`，超过 256 字节即拒绝。
-2. `--example` 从 SDK 复制 `input.toml`、`material.toml` 到案例目录；目录中已有
-   `input.toml` 时拒绝覆盖。
+2. `--example` 从 SDK 复制 `input.toml`、`material.toml` 到案例目录。`check` 用同一份清单检查样例是否齐全。
+   缺少文件时启动前拒绝。案例目录中已有 `input.toml` 时拒绝覆盖。
 3. 读取 `input.toml`，按 MuPRO 的规则合并 `include`：一个路径或路径列表，相对写出它的文件；
    本文件优先，先列出的优先，子表逐键合并，最多嵌套 16 层。被包含的文件必须在任务 `work`
    目录内，缺失、循环或越界都按配置错误处理；案例目录之外的文件须列入任务输入

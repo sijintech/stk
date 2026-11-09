@@ -29,6 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 import tomllib
 
 from suan.monitor.events import ENV_PATH as MONITOR_ENV
@@ -41,6 +42,7 @@ RESULT = "stk-mupro.json"
 VERIFIER = "stk-mupro-1"
 ENVIRONMENT = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "MUPROROOT", "SRUN_CPUS_PER_TASK")
 EXAMPLES = Path("share/mupro/skills/mupro-muferro/examples")
+EXAMPLE_FILES = ("input.toml", "material.toml")
 # muFerro's 8-character field stems and component counts (muprosdk tools/mupro/mupro/worker.py:40-44).
 COMPONENTS = {"Charges": 1, "Displace": 3, "Eigen_St": 6, "Elas_For": 3, "Elast_En": 1, "Elast_St": 6,
               "Elec_For": 3, "Elec_Phi": 1, "Elect_En": 1, "Elefield": 3, "LandPFor": 3, "LandP_En": 1,
@@ -357,16 +359,34 @@ def _launch_command(program, ranks, threads, launcher, env):
                        missing_hint="source the Intel MPI environment with --env-script")
 
 
+def _missing_example_files(example):
+    return [name for name in EXAMPLE_FILES if not (example / name).is_file()]
+
+
 def _stage_example(prefix, folder):
     if not prefix:
         raise MuproError("--example needs the SDK prefix; pass --sdk-prefix or set MUPRO_SDK_PREFIX")
-    if (folder / "input.toml").exists():
+    case_input = folder / "input.toml"
+    if case_input.exists():
         raise MuproError("--example would overwrite the case's input.toml")
+    example = Path(prefix) / EXAMPLES
+    missing = _missing_example_files(example)
+    if missing:
+        raise MuproError("The SDK example case is missing: " + ", ".join(missing))
+    created_input = False
     try:
         folder.mkdir(parents=True, exist_ok=True)
-        for name in ("input.toml", "material.toml"):
-            shutil.copyfile(Path(prefix) / EXAMPLES / name, folder / name)
+        with TemporaryDirectory(prefix=".stk-mupro-example-", dir=folder) as scratch:
+            material = Path(scratch) / "material.toml"
+            shutil.copyfile(example / material.name, material)
+            # Reserve the input exclusively before publishing the material in this case.
+            with (example / case_input.name).open("rb") as source, case_input.open("xb") as target:
+                created_input = True
+                shutil.copyfileobj(source, target)
+            material.replace(folder / material.name)
     except OSError as exc:
+        if created_input:
+            case_input.unlink(missing_ok=True)
         raise MuproError(f"Cannot stage the SDK example case: {exc}") from exc
 
 
@@ -527,9 +547,12 @@ def check(args):
         add("license_dir", "fail", "MUPROROOT is not a directory")
     else:
         add("license_dir", "pass", "MUPROROOT is a directory (contents not read)")
-    example = Path(prefix) / EXAMPLES / "input.toml" if prefix else None
-    add("example_case", "pass" if example and example.is_file() else "warn",
-        str(example) if example and example.is_file() else "The SDK example case is not installed")
+    example = Path(prefix) / EXAMPLES if prefix else None
+    missing = _missing_example_files(example) if example else EXAMPLE_FILES
+    if missing:
+        add("example_case", "warn", "The SDK example case is missing: " + ", ".join(missing))
+    else:
+        add("example_case", "pass", str(example / "input.toml"))
     report = {"ok": not any(item["status"] == "fail" for item in checks), "checks": checks}
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))

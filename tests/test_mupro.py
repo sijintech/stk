@@ -17,7 +17,7 @@ import pytest
 from mupro_fake import make_fake_mpiexec, make_fake_sdk, make_fake_srun, write_case, write_outputs
 from suan.mupro import cli as mupro_cli
 from suan.mupro import muferro_spec
-from suan.mupro.run import FRAME, RUN_OUTPUTS, MuproError, expected_frames, main, read_case, verify_run
+from suan.mupro.run import EXAMPLES, FRAME, RUN_OUTPUTS, MuproError, expected_frames, main, read_case, verify_run
 from suan.runtime.common import sha256
 
 WORKSPACE = "a" * 32
@@ -759,6 +759,48 @@ def test_check_reports_node_toolchain(node, tmp_path, capsys):
     checks = {check["id"]: check["status"] for check in report["checks"]}
     assert not report["ok"] and checks["sdk_prefix"] == checks["program"] == "fail"
     assert checks["license_dir"] == "warn" and checks["example_case"] == "warn"
+
+
+@pytest.mark.server
+def test_incomplete_sdk_example_warns_without_staging_and_can_retry(node, tmp_path, capsys):
+    work, _ = node
+    sdk = make_fake_sdk(tmp_path / "sdk")
+    material = sdk / EXAMPLES / "material.toml"
+    material_bytes = material.read_bytes()
+    material.unlink()
+
+    assert main(["check", "--sdk-prefix", str(sdk), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    check = next(item for item in report["checks"] if item["id"] == "example_case")
+    assert check["status"] == "warn" and "material.toml" in check["message"]
+
+    code, record = launch(sdk, "--example", "--case-dir", "case")
+    case = work / "case"
+    assert (code, record["classification"], record["exit_code"]) == (2, "configuration", None)
+    assert "material.toml" in record["reason"]
+    assert not (case / "input.toml").exists() and not (case / "material.toml").exists()
+
+    material.write_bytes(material_bytes)
+    code, record = launch(sdk, "--example", "--case-dir", "case")
+    assert code == 0 and record["verification"]["status"] == "passed"
+
+
+@pytest.mark.server
+def test_sdk_example_does_not_keep_input_if_material_cannot_be_published(node, tmp_path):
+    work, _ = node
+    sdk = make_fake_sdk(tmp_path / "sdk")
+    case = work / "case"
+    target = case / "material.toml"
+    target.mkdir(parents=True)
+
+    code, record = launch(sdk, "--example", "--case-dir", "case")
+    assert (code, record["classification"], record["exit_code"]) == (2, "configuration", None)
+    assert not (case / "input.toml").exists()
+    assert list(case.iterdir()) == [target]
+
+    target.rmdir()
+    code, record = launch(sdk, "--example", "--case-dir", "case")
+    assert code == 0 and record["verification"]["status"] == "passed"
 
 
 @pytest.mark.server
