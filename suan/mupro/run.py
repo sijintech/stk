@@ -196,6 +196,22 @@ def _reject_constant(value):
     raise ValueError(f"JSON constant {value} is not allowed")
 
 
+def _native_result_json(text):
+    def unique_fields(pairs):
+        record = {}
+        for key, value in pairs:
+            if key in record:
+                raise ValueError("Duplicate JSON object member")
+            record[key] = value
+        return record
+
+    return json.loads(text, parse_constant=_reject_constant, object_pairs_hook=unique_fields)
+
+
+def _same_native_record(record, expected):
+    return record == expected and all(type(record[key]) is type(value) for key, value in expected.items())
+
+
 def _case_folder(work, case_dir):
     """Normalize a case dir and resolve it inside the task work dir."""
     try:
@@ -243,9 +259,8 @@ def verify_run(work_dir=".", case_dir=".", *, expected_case=None):
 
     final = case["start_step"] + case["steps"]
     try:
-        completion = json.loads((folder / "mupro_completion.json").read_text(encoding="utf-8"),
-                                parse_constant=_reject_constant)
-        if completion == {"app": "muFerro", "completed_steps": case["steps"], "final_step": final}:
+        completion = _native_result_json((folder / "mupro_completion.json").read_text(encoding="utf-8"))
+        if _same_native_record(completion, {"app": "muFerro", "completed_steps": case["steps"], "final_step": final}):
             add("completion", f"muFerro completed {case['steps']} steps")
         else:
             add("completion", "Native completion does not match the requested case", "incomplete_result")
@@ -274,7 +289,8 @@ def verify_run(work_dir=".", case_dir=".", *, expected_case=None):
                 for step in range(1, case["steps"] + 1)]
     try:
         text = (folder / "mupro_progress.jsonl").read_text(encoding="utf-8")
-        if [json.loads(line) for line in text.splitlines()] == expected:
+        records = [_native_result_json(line) for line in text.splitlines()]
+        if len(records) == len(expected) and all(_same_native_record(actual, row) for actual, row in zip(records, expected)):
             add("progress", f"{len(expected)} progress records")
         else:
             add("progress", "Native progress is incomplete or stale", "incomplete_result")

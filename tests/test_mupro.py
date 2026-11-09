@@ -261,6 +261,28 @@ def test_verify_mirrors_muprosdk_worker_classification(tmp_path, edit, check, cl
     assert [c["id"] for c in report["verification"]["checks"] if c["status"] == "fail"] == [check]
 
 
+@pytest.mark.parametrize("edit, check, classification", [
+    (_replace("mupro_completion.json", '"completed_steps":1', '"completed_steps":true'),
+     "completion", "incomplete_result"),
+    (_replace("mupro_completion.json", '"final_step":1', '"final_step":1.0'),
+     "completion", "incomplete_result"),
+    (_replace("mupro_completion.json", '"final_step":1', '"final_step":9,"final_step":1'),
+     "completion", "invalid_result"),
+    (_replace("mupro_progress.jsonl", '"step":1', '"step":true'), "progress", "incomplete_result"),
+    (_replace("mupro_progress.jsonl", '"completed_steps":1', '"completed_steps":1.0'),
+     "progress", "incomplete_result"),
+    (_replace("mupro_progress.jsonl", '"total_steps":1', '"total_steps":9,"total_steps":1'),
+     "progress", "invalid_result"),
+])
+def test_verify_rejects_ambiguous_native_step_records(tmp_path, edit, check, classification):
+    write_case(tmp_path, steps=1)
+    write_outputs(tmp_path, steps=1)
+    edit(tmp_path)
+    report = verify_run(tmp_path)
+    assert report["classification"] == classification and report["qoi"] is None, report
+    assert [c["id"] for c in report["verification"]["checks"] if c["status"] == "fail"] == [check]
+
+
 def test_verify_accepts_fortran_d_exponents_and_restarts(tmp_path):
     write_case(tmp_path)
     write_outputs(tmp_path)

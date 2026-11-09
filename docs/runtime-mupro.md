@@ -225,11 +225,12 @@ Runtime 取消任务时会终止启动器，`stk-mupro.json` 可能停留在 `ru
 案例布局通过后，按 muprosdk `tools/mupro/mupro/worker.py` 的顺序执行全部输出检查，由第一个失败项分类：
 
 - `completion`：`mupro_completion.json` 必须恰为 `{"app": "muFerro", "completed_steps": 步数,
-  "final_step": 起始步 + 步数}`；缺失或无法读取为 `invalid_result`，内容不符为 `incomplete_result`。
+  "final_step": 起始步 + 步数}`。缺失或 JSON 无法解析为 `invalid_result`，记录的值或类型不符为 `incomplete_result`。
 - `energy`：`energy_out.dat` 表头之后每步一行 `kt: … energy: …`，步号从起始步 + 1 连续到最后
   一步，每行 5 个有限值（接受 Fortran `D` 指数）；值个数不对或非有限为 `numerical_failure`，
   步号缺失、重复或过期为 `incomplete_result`。
-- `progress`：`mupro_progress.jsonl` 每步一条记录，与请求的案例一致。
+- `progress`：`mupro_progress.jsonl` 每步一条记录，步号和计数使用 JSON 整数，与请求的案例一致。
+  完成及进度记录的 JSON 对象出现重复键时，均按 `invalid_result` 处理。
 - `frames`：所需场帧齐全，首行头部的网格等于案例网格，分量数正确。只读首行，不解析场值。
 
 ## 输出与结果解读
