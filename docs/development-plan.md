@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-09 20:45 UTC · MuPRO 收集文件登记一致性
+
+`537b774b` 拒绝 MuPRO 收集验证后登记阶段的内容替换和路径重定向，保留同一任务恢复。真实许可与目标平台回归继续验收。 [运行验收](runtime-validation.md)
+
+远端 `a7fce899` Desktop `42692999966` 仍在运行，2 个作业通过，本地提交等待整轮终态。同头 Runtime `42692999627` 当前 10/13 作业通过。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42692999966) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42692999627)
+
 ## 2026-11-09 20:25 UTC · CLI 续读游标与前一 Desktop 终态
 
 `4169e528` 修正 CLI 中断时的 UTF-8 字节续读，最终联测 120/120。MuPRO 结果收集一致性已复现并进入后续修复。 [运行验收](runtime-validation.md)
