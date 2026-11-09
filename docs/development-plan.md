@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · MuPRO 证据边界与 D1 F13
+
+MuPRO 启动链已在 Linux 验证终态精确步数和连接前完整清单检查。Windows junction 和真实许可小算例仍待对应环境。D1 F13 的真实 8 MiB 预算已有单机 Linux 源码与安装态证据。Claude 接手 F11b，验收同一操作 UUID 在本机桥和已认证 peer 上各自持久和重放。 [验收记录](runtime-validation.md) [CP-0 矩阵](design/cloud-project-service.md)
+
 ## 2026-11-09 UTC · Cocoa 对照与 D1 F15
 
 新增 Cocoa 静默隐藏对照。每种素材复用既有 Play 和隐藏，直到原生核验时限结束才读取 DOM。比较在首次 DOM 采样前的原生状态和现有采样组，继续保留原失败关闭。D1 F15 已通过同一 Linux 项目上的真实 WebRTC 和本机桥验收，其他目标平台另验。 [验收记录](runtime-validation.md)

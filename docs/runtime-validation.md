@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · MuPRO 严格证据、完整清单和 F13
+
+`207902bb883be2b06a0b286c6e9d1d52b990a003` 要求 MuPRO 原生终态记录中的步数和值使用精确类型，JSON 重复键或非标准数值归为 `invalid_result`，数值类型与预期不符归为 `incomplete_result`。旧源码接受六种反例并产生 QoI。修复后终态与实时监视联合 65 项通过，真实许可用例条件跳过一项。
+
+`b7272392cffb888f553cbcc207fef7e845cc25c4` 在读取根 `input.toml` 内容和连接前核对完整上传清单。拒绝链接、Windows junction、特殊条目、`key/`、`.lic` 以及非法相对路径。旧源码在六个负例失败，正常的 `Polar.in`、嵌套 HDF5 和 `--remote-dir .` 通过。覆盖稳定的本地输入树，Windows junction 待 Windows 复验。两个 MuPRO 修复的最终 Linux 源码 95 项通过、2 项按真实许可条件跳过。隔离 wheel 启动器 59 项通过、1 项同类跳过。Python 3.11、3.12、3.14 的 Linux 客户端各 42 项通过。
+
+`e03a955ab8e89e57a0bfe7d76072e9aa97c3f394` 集成 Claude30 `957dc0a298b6396a56b53a58581b0441dda85a43` 的真实 8 MiB 响应预算回归。两条线路均拒绝包含 8,500,000 字节文本的表页，保持项目修订及历史，同一连接继续读取拆分后的两页。Linux 源码 187 项和隔离 wheel 两项均通过，零跳过。独立副本将上限改为 16 MiB，新例在预期拒绝处失败。原始证据见本机 `root-delivery-20261109-67`。 [CP-0 矩阵](design/cloud-project-service.md)
+
+远端 `bb4cea9d` 的 Runtime 13 个任务全部通过，含 Windows Python 3.11 和 3.12。Docs 和 Secret scan 通过，Desktop 整轮仍在运行。以上本地代码尚待推送和目标平台 CI。 [Runtime](https://github.com/sijintech/stk/actions/runs/42576437407) [Desktop](https://github.com/sijintech/stk/actions/runs/42576437438)
+
 ## 2026-11-09 UTC · Cocoa 静默对照与 F15 实线
 
 `207beb8a503932a023873ed1b61cb9c68d09642d` 增加两个 macOS 定位前隐藏对照。相同固定素材经真实 Play 和切页，切页后等原生时限加 250 ms，期间只泵窗口事件、观察资源会话。若关闭则记录同会话原生关闭原因，隐藏阶段 DOM 样本为零。若仍存活，只取一次隐藏 DOM 样本，验证采样派发前同一导航恰有一次新暂停、已 ACK 且已核验。隐藏截图保留 OS 像素检查，随后保留重显、草稿及资源撤销。两项原采样对照继续以原名称运行。

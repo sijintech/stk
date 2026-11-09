@@ -444,6 +444,8 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 
 **1j. F15 的真实线路。** root 以 `718f3cdf` 集成 Claude29 的最终测试 `ba7a63a4`。严格本机桥和已认证 UDP WebRTC 读取同一合成格式 14 项目的目录与非空表页。两入口的回执写入及查询均返回 `unsupported`。随后复读一致，格式、schema、修订、项目状态和历史保持，回执表仍不存在。Linux 源码联跑 186 项全过，隔离 wheel 定向通过。作者的错误映射和隐式升级两个反例在预期断言处失败。证据见 `root-delivery-20261109-65/claude29` 与 `root-delivery-20261109-66`。
 
+**1k. F13 的真实响应上限。** root 以 `e03a955a` 集成 Claude30 的最终测试 `957dc0a2`。严格本机桥和已认证 UDP WebRTC 读取同一个 Linux 合成项目。500 个单元格的文本已占 8,500,000 字节，两条线路均按实际 8 MiB 上限返回 `invalid_params`。随后同一连接仍可读取拆分的两页，项目修订与历史保持。Linux 源码联跑 187 项全过，隔离 wheel 的上下界两项均通过。隔离副本将上限调至 16 MiB 后，新测试在预期拒绝处失败，原有界读取通过。证据见 `root-delivery-20261109-66/claude30` 与 `root-delivery-20261109-67`。
+
 **2. root 外部探针（仓库外，未提交）。** 证据记录在 `root-delivery-20261109-43/closure.json` 的 `cp0` 节：
 - 两个脚本：`cp0-parity-probe.py`（sha256 `23de877c…`）和 `cp0-hot-journal-probe.py`（sha256 `1d951c7c…`）；
 - 用合成项目，在 source 和同一份 Python 源码的中性隔离安装中运行；
@@ -465,7 +467,7 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 这些探针仍是有效的历史观察。F23 与 F5b/F5c 现在另有 1c 中的已提交测试，探针不再是这几行的唯一证据。
 
 **3. 仍待验证。**
-- **活 peer：** F3/F11d、F12、F14、F15 和 F23 见 1d、1f、1h–1j。其余缺少真实通道证据的场景仍待 `PeerEndpoint` 与原生 helper 验收。
+- **活 peer：** F3/F11d、F12–F15 和 F23 见 1d、1f、1h–1k。其余缺少真实通道证据的场景仍待 `PeerEndpoint` 与原生 helper 验收。
 - **平台：** Windows、macOS 上这些行的复验。
 - **F14 配额监控：** 实际上限及拒绝路径见 1e、1f，监控仍待验证。
 - **F5c：** 保留现行恢复行为还是改为拒绝，仍由 root 决定。

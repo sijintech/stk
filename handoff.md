@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · MuPRO 终态与上传预检、Claude30 集成
+
+本地 `207902bb` 要求 MuPRO 终态步数证据使用精确整数并拒绝有歧义的 JSON。 `b7272392` 在连接前检查完整输入清单，保留合法的 HDF5 和 `Polar.in`。Linux 源码 95 项通过，隔离 wheel 59 项通过，真实许可用例按条件跳过。Windows junction 拒绝路径仍待目标平台验证。
+
+Claude30 `957dc0a2` 已集成为 `e03a955a`，两条真实线路都拒绝超过 8 MiB 的表页。源码 187 项全过，隔离 wheel 两项通过。Claude31 在独立 worktree 的 `claude/cp0-f11b-wire-31` 从 `e03a955a` 接手同一操作 UUID 的跨 scope 真实线路测试。
+
+远端 `bb4cea9d` 的 Runtime 13 项任务全过，Desktop 仍在运行。本地批次待 Desktop 整轮终态后推送。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · Cocoa 静默对照和 Claude29 集成
 
 本地 `207beb8a` 增加两项 macOS 静默隐藏对照。公共目标已在 Linux 构建，相关 8 项通过，实际 Cocoa 待新头。Claude29 最终 `ba7a63a4` 已集成为 `718f3cdf`，真实线路联跑 186 项和隔离安装定向通过。远端 `bb4cea9d` Desktop 正在运行，整轮终态后推送本地候选。 [验收记录](docs/runtime-validation.md)
