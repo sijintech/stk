@@ -1,5 +1,14 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC：Mac 原失败产物关联及测试用暂停阶段快照
+
+- 4d6426fb / Desktop42531177137 / Mac128885487773 / artifact13639166231。经受支持的产物引用有界读取中央目录及两个失败 result.json（96,385/99,201字节），核 ZIP 成员 CRC、尺寸和文件 SHA；未下载或独立核验整个 ZIP 摘要，未读截图或其他夹具文件。八文件冻结清单复核通过，关联报告 SHA238d696efb469726a69c625b6c7a75bb7710866a54d8abdb0873c4c44c2a7de7。
+- 两项 cycle1/nav1 的隐藏失败与公开日志对象精确相等，播放样本取自同一 fresh play；最后一次 AX 辅助定位已交付、helper 已回收，其后0.25s hold 稳定在0.234及0.102s。隐藏失败的时间精确回到这两个值。首次 AX 前，显式暂停 hold 已分别0.1240178333→0.039724584及0.126095125→0.042174916s，约84ms回退且仍满足0.10s。前序 AX 不是出现回退的必要条件；隐藏失稳根因仍未隔离，无完整隐藏/重显无自动续播验收。
+- [WebKit 上游媒体时间实现](https://chromium.googlesource.com/external/github.com/WebKit/webkit/%2B/c2c1343a292141aa20c260463e8cbb95042c544a/Source/WebKit/WebProcess/GPU/media/MediaPlayerPrivateRemote.cpp)包含远端时间估算及回退更新，这为进一步区分时钟校正提供一个解释。该源码不是 CI 所用 WebKit 二进制的版本或实际分支执行证明。
+- 新本地749076d9：TEST_PROBES 下记录隐藏前、首次 paused 与最新观察的原生暂停代次、导航、ACK 和原 verified，分别绑定派发与回调。旧回调不污染新请求；无可用事实用null；verified仅表示现有WK非Playing核验在原期限内通过，不代表DOM时间已稳定或此刻仍暂停。有效view/session/nav而DOM失败时仍保原生回调事实。17字段脚本/解析、原ACK与时序、1秒期限、20轮及全部断言不变。
+- Linux最终测试驱动构建和关闭宏语法通过。42个资源/探针/宿主CPU测试全部通过、零skip、0.46s，XML SHA5da5aa95664dda22d8a7a45279fa7407cb255d257ebbbd89a68cfff54aa15e82。独立源码复核确认关闭探针宏后三文件保留字节一致；旧失败对象叠加最大新字段约3460/3391字节，仍低于8192。此批未编译Cocoa、未执行新原生点击/像素，不宣称Mac修复。证据`native-media-pause-phase-20261108-40/validation.json`。
+- 315620f9 的 Desktop42536615591 整轮仍运行（Linux包与冒烟两项成功）；Runtime42536615619 12项成功、Windows3.11未终态，Docs42536615604部署及Secret42536615677成功。749本地未推，等前整个Desktop终态并记录后才推。实际后续状态见本批closure；已有文档WIP保留。
+
 ## 2026-11-08 UTC：上传第四版完整源码/最小安装验收与前4d整轮终态
 
 源码集成397a464d来自实际Claude分支claude/hub-upload-cli-18、基线a0f77fa3的冻结六路径第四版；patch SHA d83af30da18b22c37116a446ba1674e4b7c4350f33e0b1ae14f1248566f9dfdf。CLI a2010de0…、worker b8891128…与两项测试保持作者冻结字节；root只补设计文档实际验收状态。共同transfers.py为54d47290…、含6c481e59；不把作者531旧依赖当修后版本。
