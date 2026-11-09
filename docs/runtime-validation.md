@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · bb4cea9d 终态和主线新批次
+
+精确 `bb4cea9df632e3a0fd7b107694a7dff56052190e` Desktop 于 08:11:18Z 终态失败。Linux 三项通过，Windows CPU 1460/1460 和原生六项全过，Windows 原生作业于 08:11:17Z 终态。固定 Mesa 26.2.4 的 70,257,286 字节存档通过校验并解包。macOS CPU 1516/1516、Metal 254/254，原生 4/6、定位前隐藏 0/2。Runtime 13 项通过。本地 Cocoa 静默对照、Windows 联接点和同批修复随下一轮验收。 [Desktop](https://github.com/sijintech/stk/actions/runs/42576437438) [Windows 原生证据](https://github.com/sijintech/stk/actions/runs/42576437438/artifacts/13658685452) [macOS 原生证据](https://github.com/sijintech/stk/actions/runs/42576437438/artifacts/13657571015) [Runtime](https://github.com/sijintech/stk/actions/runs/42576437407)
+
+`6dacac4084c775564a673afff75e933ad9cf0f22` 集成 PR #53 的取消锁调整。测试让真实下载完成并等待 worker 退出，再放行已到达管理锁的取消。旧代码把日志从 `completed` 改为 `cancelled`。修复后取消返回原完成态，下载字节、日志字节与事件保持。Linux 源码联合 44 项全过。 [PR #53](https://github.com/sijintech/stk/pull/53)
+
+`bdae4432b7140815822c396ead1827f493dc68e7` 要求 MuFerro 项目收集的报告 v1 与求解器整数退出码、成功状态和原生复验一致，程序摘要须符合 SHA-256 格式。用真实合成 Runtime 在首次计算产物清单前更改报告，旧代码接受非零退出、布尔退出、失败分类和无效程序摘要四种报告，修复后均在登记前拒绝。Linux 源码 23 项通过，1 项真实许可条件跳过。两个修复的隔离 wheel 联合 50 项通过，1 项真实许可条件跳过。证据见本机 `root-delivery-20261109-71`。 [MuFerro 工作流](simulation-muferro.md)
+
 ## 2026-11-09 UTC · 项目工作目录边界和 F10 实线
 
 `2bf8d83bb8f746c300772461349aab6550fc409a` 检查仿真工作流已有目录组件的真实元数据。Linux 用实际符号链接模拟 Windows 联接点的目录类型和重解析标志。旧 MuFerro 导入返回成功，在项目外创建 `input.toml` 和 `material.toml`。修复后导入拒绝，项目修订、表和外部哨兵均保持。Windows 夹具直接创建真实目录联接点，待目标矩阵执行。测试覆盖稳定目录和已有组件的检查。Linux 源码联合 108 项通过，2 项真实许可条件跳过。隔离 wheel 的 MuFerro 工作流 13 项通过，1 项真实许可条件跳过。Python 3.11、3.12、3.14 的 Linux 导入定向各 6 项通过。 [项目工作流](simulation-muferro.md)

@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · 前轮 Desktop 终态、传输与报告核对
+
+root 核实 `bb4cea9d` 全轮终态，Windows 原生 6/6 和 CPU 1460/1460，macOS 仍有隐藏期失败。 `6dacac40` 从 PR #53 单独接入取消读取锁，经真实下载发布和精确事件测试。 `bdae4432` 拒绝四种合成矛盾成功报告。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 共享工作目录和真实撤权
 
 root 提交 `2bf8d83b`，按实际目录元数据拒绝重定向的工作目录。旧 MuFerro 导入反例创建了项目外的输入文件和项目记录，修复后在复制和索引前拒绝。root 以 `fb4dbd39` 集成 Claude33 `4e176747` 的真实 UDP 撤权并发测试。Claude34 已在独立分支接手 F8b。 [验收记录](runtime-validation.md)

@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · Desktop 终态与主线批次
+
+`bb4cea9d` Desktop 于 08:11:18Z 整轮结束。Windows 原生 6/6、Windows CPU 1460/1460、Linux 三项通过。macOS 原生 4/6、定位前隐藏 0/2，整轮结论失败。已满足前一轮整轮终态推送门。下一轮含 Cocoa 静默隐藏对照和 Windows 联接点实测。 [验收记录](docs/runtime-validation.md)
+
+`6dacac40` 采纳 PR #53 的取消日志锁调整，下载完成后仍保留原日志状态。 `bdae4432` 在 MuFerro 项目收集中拒绝矛盾退出证据及无效程序摘要。源码 44 项和 23 项通过，隔离 wheel 联合 50 项通过。Claude34 仍在独立 worktree 验证 F8b。
+
 ## 2026-11-09 UTC · 项目工作目录与 F10 撤权并发
 
 本地 `2bf8d83b` 拒绝共享仿真工作目录中的符号链接和 Windows 联接点。MuFerro 合成导入反例在旧代码向项目外写入两个 TOML，修复后在写入和登记前拒绝。Linux 源码联合 108 项、隔离 wheel 13 项通过。原生联接点待 Windows 客户端矩阵。

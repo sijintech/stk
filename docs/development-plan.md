@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · Desktop 新轮和结果登记
+
+上一轮已完成 Windows 原生和全轮验收，进入含 Cocoa 静默对照的下一轮。传输取消保护已完成发布的日志，MuFerro 收集补启动器成功报告和程序摘要格式核对。真实许可、目标 Windows junction 和 Cocoa 隐藏行为分别验收。Claude34 继续真实线路数据库替换。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 项目目录边界和 F10
 
 项目仿真共享目录已在 Linux 用合成 Windows 元数据和真实导入路径验证，真 junction 由 Windows 矩阵复验。D1 F10 已有 Linux 真实线路和安装态证据。Claude34 继续 F8b，核对同内容数据库被物理替换后的授权失效。Cocoa 静默对照仍随待推批次。 [CP-0 矩阵](design/cloud-project-service.md) [验收记录](runtime-validation.md)
