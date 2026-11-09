@@ -2,6 +2,8 @@
 import shutil
 import sqlite3
 import json
+import os
+import time
 from uuid import uuid4
 
 from click.testing import CliRunner
@@ -9,7 +11,7 @@ from click.testing import CliRunner
 import pytest
 
 from suan.project import ProjectStore, ProjectError, RevisionConflict
-from suan.project.files import TABLE_ID, FIELD_IDS, PLATFORM
+from suan.project.files import TABLE_ID, FIELD_IDS, PLATFORM, managed_file_signature
 from suan.project.cli import project
 
 
@@ -22,6 +24,20 @@ def files(tmp_path):
     outside = tmp_path / "外部 image.png"
     outside.write_bytes(b"not actually an image")
     return store, inside, outside
+
+
+def test_managed_file_signature_detects_a_rewrite_with_restored_mtime(files):
+    store, inside, _ = files
+    relative = inside.relative_to(store.directory).as_posix()
+    metadata = inside.stat()
+    before = managed_file_signature(store.directory, relative)
+    time.sleep(0.05)
+    with inside.open("r+b") as stream:
+        stream.write(b'{"temperature":301}')
+    os.utime(inside, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+    after = managed_file_signature(store.directory, relative)
+    assert before[:4] == after[:4]
+    assert before[4] != after[4]
 
 
 def test_index_uses_shared_table_and_stable_ids_with_relative_and_external_paths(files):

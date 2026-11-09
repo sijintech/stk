@@ -106,8 +106,8 @@ def _check_database_path(root, candidate):
 
 
 def _read_managed_file(root, path, expected=None):
-    """Return the verified file's stat, optionally binding its bytes to a manifest."""
-    from suan.connectors.files import open_regular
+    """Return the verified file's stat and native change time."""
+    from suan.connectors.files import file_change_time, open_regular
     from suan.runtime.models import relative_path
     from .file_tree import _directory, _link
 
@@ -124,6 +124,7 @@ def _read_managed_file(root, path, expected=None):
             target = parts[-1] if descriptor is not None else directory / parts[-1]
             with open_regular(target, follow_symlinks=False, dir_fd=descriptor) as stream:
                 before = os.fstat(stream.fileno())
+                before_change = file_change_time(stream.fileno(), before)
                 if expected is not None:
                     remaining = expected["size"]
                     if before.st_size != remaining:
@@ -138,23 +139,30 @@ def _read_managed_file(root, path, expected=None):
                     if stream.read(1) or digest.hexdigest() != expected["sha256"]:
                         raise ProjectError(f"Managed file digest changed: {path}")
                 after = os.fstat(stream.fileno())
+                after_change = file_change_time(stream.fileno(), after)
                 current = os.lstat(target, dir_fd=descriptor)
                 if (_link(current) or not os.path.samestat(after, current)
                         or before.st_size != after.st_size or after.st_size != current.st_size
                         or before.st_mtime_ns != after.st_mtime_ns or after.st_mtime_ns != current.st_mtime_ns
-                        or before.st_ctime_ns != after.st_ctime_ns):
+                        or before_change != after_change):
                     raise ProjectError(f"Managed file changed while checking: {path}")
     except (OSError, RuntimeError) as exc:
         raise ProjectError(f"Managed file is unavailable or has an unsafe path: {path}") from exc
-    return after
+    return after, after_change
 
 
 def observe_managed_file(root, path, expected=None):
     """Observe metadata from exactly one verified project-relative file."""
-    info = _read_managed_file(root, path, expected)
+    info, _ = _read_managed_file(root, path, expected)
     return {"kind": _kind(path), "size": info.st_size, "state": "present",
             "modified": datetime.fromtimestamp(info.st_mtime, timezone.utc).isoformat(),
             "checked": datetime.now(timezone.utc).isoformat()}
+
+
+def managed_file_signature(root, path, expected=None):
+    """Read the identity and native change time for a later comparison."""
+    info, changed = _read_managed_file(root, path, expected)
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, changed
 
 
 def _observe(root, location, path):

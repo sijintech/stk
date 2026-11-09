@@ -54,7 +54,7 @@ import uuid
 from .api import ConnectorError, FileInfo
 
 __all__ = ["MAX_DOWNLOAD_BYTES", "HashMemo", "LocalFiles", "MissingFile", "NotRegularFile", "PathNotAllowed",
-           "RuntimeFiles", "check_path", "materialize", "open_regular"]
+           "RuntimeFiles", "check_path", "file_change_time", "materialize", "open_regular"]
 
 MAX_DOWNLOAD_BYTES = 1024**3  # same first-release field limit as view.build
 _SUFFIX_RE = re.compile(r"^\.[A-Za-z0-9_]{1,16}$")
@@ -78,6 +78,37 @@ class PathNotAllowed(ConnectorError, PermissionError):
 
 class NotRegularFile(OSError):
     """``open_regular``: the path names a FIFO, device, socket or directory, not a regular file."""
+
+
+def _windows_change_time(descriptor):
+    """Read the pinned Windows handle's ChangeTime, distinct from creation time."""
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+
+    class FileBasicInfo(ctypes.Structure):
+        _fields_ = [("CreationTime", ctypes.c_int64), ("LastAccessTime", ctypes.c_int64),
+                    ("LastWriteTime", ctypes.c_int64), ("ChangeTime", ctypes.c_int64),
+                    ("FileAttributes", wintypes.DWORD)]
+
+    query = ctypes.WinDLL("kernel32", use_last_error=True).GetFileInformationByHandleEx
+    query.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD)
+    query.restype = wintypes.BOOL
+    handle = msvcrt.get_osfhandle(descriptor)
+    info = FileBasicInfo()
+    if not query(handle, 0, ctypes.byref(info), ctypes.sizeof(info)):  # 0 = FileBasicInfo
+        raise OSError(ctypes.get_last_error(), "GetFileInformationByHandleEx failed")
+    return int(info.ChangeTime)
+
+
+def file_change_time(descriptor, info=None):
+    """Return the descriptor's native change time, reusing its fstat result on POSIX."""
+    try:
+        if os.name == "nt":
+            return _windows_change_time(descriptor)
+        return (os.fstat(descriptor) if info is None else info).st_ctime_ns
+    except (AttributeError, ValueError) as exc:
+        raise OSError("The file change time cannot be verified") from exc
 
 
 def _is_reparse(info):

@@ -2,15 +2,18 @@
 
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import os
 import sqlite3
+import stat
 import threading
 from uuid import UUID, uuid4, uuid5
 
 import pytest
 
 from suan.project import ProjectStore
+from suan.project.files import PLATFORM, TABLE_ID
 from suan.project.store import DATABASE_NAME, FORMAT_VERSION
-from test_desktop_bridge import bridge_env, inproc, ProcessBridge  # noqa: F401
+from test_desktop_bridge import bridge_env, inproc, BridgeCallError, ProcessBridge  # noqa: F401
 from test_project_values import model, legacy, command, reference  # noqa: F401
 from test_project_files import files  # noqa: F401
 
@@ -282,6 +285,115 @@ def test_muferro_publication_verifies_the_last_literal_manifest_and_preserves_ca
     result = next(item for item in store.snapshot()["tables"] if item["id"] == table)
     assert result["records"][0]["values"][field] == manifest
     assert not harness.violations
+
+
+def _link_directory(link, target):
+    """A real directory symlink on POSIX, or an actual NTFS junction on Windows."""
+    if os.name == "nt":
+        import _winapi
+
+        # (existing target, new junction), positional only. Failure is a test failure, not a skip.
+        _winapi.CreateJunction(str(target), str(link))
+        assert link.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        assert not link.is_symlink()
+    else:
+        link.symlink_to(target, target_is_directory=True)
+        assert link.is_symlink()
+    assert link.samefile(target)
+
+
+def _remove_link(link):
+    """Remove only the link itself, never traversing into its target; False if it is not a link."""
+    try:
+        info = link.lstat()
+    except FileNotFoundError:
+        return False
+    reparse = getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    if not (stat.S_ISLNK(info.st_mode) or reparse):
+        return False
+    if os.name == "nt":
+        link.rmdir()  # Removes the junction itself without touching its target's contents.
+    else:
+        link.unlink()
+    return True
+
+
+def test_muferro_guarded_index_and_publication_reject_a_linked_case_component(bridge_env, files):  # noqa: F811
+    """Strict child-process Bridge, no Runtime: only the parent link differs from an accepted case."""
+    from suan.workflows import muferro
+
+    store, _, _ = files
+    run_id = str(uuid4())
+    case = store.directory / "results" / "muferro" / run_id / "case"
+    case.mkdir(parents=True)
+    linked, outside = case / "fields", bridge_env / "outside-fields"
+    outside.mkdir()
+    contents = {"run.h5": b"\x89HDF\r\n\x1a\nsynthetic run", "fields/material.toml": b'[material]\nname = "synthetic"\n'}
+    (case / "run.h5").write_bytes(contents["run.h5"])
+    (outside / "material.toml").write_bytes(contents["fields/material.toml"])
+    paths = [f"results/muferro/{run_id}/case/{name}" for name in contents]
+    proof = [{"size": len(data), "sha256": hashlib.sha256(data).hexdigest()} for data in contents.values()]
+    manifest = [{"path": path, "sha256": item["sha256"]} for path, item in zip(paths, proof)]
+    table, field = muferro.RESULT_TABLE_ID, muferro.RESULT_FIELD_IDS["files"]
+    row = str(uuid5(UUID(run_id), "muferro-result"))
+    commands = [{"op": "create_table", "id": table, "name": "MuFerro results"},
+                {"op": "add_field", "id": field, "table_id": table, "name": "Files", "type": "json"},
+                {"op": "add_record", "id": row, "table_id": table},
+                {"op": "set_cell", "table_id": table, "record_id": row, "field_id": field, "value": manifest}]
+    harness = ProcessBridge(bridge_env / "junction-bridge")
+    try:
+        _link_directory(linked, outside)
+        handle = harness.call("project.open", {"directory": str(store.directory)}, timeout=30)["project"]["handle"]
+        index = {"handle": handle, "expected_revision": 0, "paths": paths, "expected_files": proof}
+        publish = {"handle": handle, "expected_revision": 0, "commands": commands,
+                   "muferro_result": {"run_id": run_id, "sizes": [item["size"] for item in proof]}}
+        for method, params in (("project.files.index", index), ("project.apply", publish)):
+            with pytest.raises(BridgeCallError) as refused:
+                harness.call(method, params, timeout=30)  # Checked: the request itself is schema-valid.
+            assert refused.value.code == "invalid_params"
+            # The parent-link refusal, not a size, digest or inventory mismatch.
+            assert refused.value.error["message"] == "Tree directories must be real directories without links or reparse points"
+            assert harness.call("project.files.list", {"handle": handle}, timeout=30) == {
+                "revision": 0, "table_id": TABLE_ID, "records": []}
+            assert store.info()["revision"] == 0 and store.history() == [] and store.snapshot()["tables"] == []
+        assert harness.events_of("project.changed") == []
+        assert [item.name for item in outside.iterdir()] == ["material.toml"]
+
+        external = outside / "material.toml"  # Ordinary metadata registration of an explicit external file.
+        mark = harness.mark()
+        ordinary = harness.call("project.files.index", {"handle": handle, "expected_revision": 0,
+                                                        "paths": [str(external)]}, timeout=30)
+        assert ordinary["revision"] == 1 and len(ordinary["record_ids"]) == 1
+        assert harness.wait_event(lambda event: event["event"] == "project.changed", timeout=30,
+                                  start=mark)["data"] == {"handle": handle, "revision": 1}
+
+        assert _remove_link(linked) and not os.path.lexists(linked)
+        assert external.read_bytes() == contents["fields/material.toml"]
+        linked.mkdir()
+        (linked / "material.toml").write_bytes(contents["fields/material.toml"])
+        mark = harness.mark()
+        guarded = harness.call("project.files.index", {**index, "expected_revision": 1}, timeout=30)
+        assert guarded["revision"] == 2 and len(guarded["record_ids"]) == 2
+        assert harness.wait_event(lambda event: event["event"] == "project.changed", timeout=30,
+                                  start=mark)["data"] == {"handle": handle, "revision": 2}
+        listed = harness.call("project.files.list", {"handle": handle}, timeout=30)["records"]
+        assert [(item["path"], item["location"], item["size"]) for item in listed] == [
+            (str(external), "external:" + PLATFORM, proof[1]["size"]),
+            *((path, "project", item["size"]) for path, item in zip(paths, proof))]
+        mark = harness.mark()
+        assert harness.call("project.apply", {**publish, "expected_revision": 2}, timeout=30)["revision"] == 3
+        assert harness.wait_event(lambda event: event["event"] == "project.changed", timeout=30,
+                                  start=mark)["data"] == {"handle": handle, "revision": 3}
+        result = next(item for item in store.snapshot()["tables"] if item["id"] == table)
+        assert result["records"][0]["values"][field] == manifest
+        assert harness.events_of("project.changed") == [{"handle": handle, "revision": revision} for revision in (1, 2, 3)]
+        assert not harness.violations
+    finally:
+        try:
+            _remove_link(linked)
+        finally:
+            assert harness.close() == 0
+    assert (outside / "material.toml").read_bytes() == contents["fields/material.toml"]
 
 
 def test_shutdown_does_not_wait_again_on_an_inflight_database_operation():

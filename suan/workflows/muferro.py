@@ -18,8 +18,7 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from suan.connectors.files import open_regular
 from suan.connectors.mupro.inputs import dump_toml
-from suan.project.files import _read_managed_file
-from suan.project.snapshots import _signature
+from suan.project.files import managed_file_signature
 from suan.project.store import ProjectError
 from .common import (_canonical, _capture, _cells, _copy_input, _create_table, _directory, _folder,  # noqa: F401
                      _hash, _revision, _table)
@@ -207,12 +206,12 @@ def verify_result_publication(root, commands, proof):
             raise ProjectError("MuFerro result paths must be distinct")
         files[key] = (path, {"size": size, "sha256": entry["sha256"]})
 
-    verified = [(path, _signature(_read_managed_file(root, path, expected))) for path, expected in files.values()]
+    verified = [(path, managed_file_signature(root, path, expected)) for path, expected in files.values()]
     try:
         _check_local_result_inventory(root, root / prefix / "case", {root / path for path, _ in files.values()})
     except (OSError, ValueError) as exc:
         raise ProjectError("MuFerro result directory changed or contains unregistered output") from exc
-    if any(_signature(_read_managed_file(root, path)) != signature for path, signature in verified):
+    if any(managed_file_signature(root, path) != signature for path, signature in verified):
         raise ProjectError("MuFerro result files changed during publication verification")
 
 

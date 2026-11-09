@@ -63,6 +63,7 @@ import re
 import stat as _stat
 
 from ..api import ConnectorError
+from ..files import file_change_time
 
 __all__ = ["DEFAULT_MAX_BYTES", "READER", "read_hdf5_image"]
 
@@ -148,33 +149,12 @@ def _same_file(a, b, *, ctime=False):
     return same and (not ctime or _WINDOWS or a.st_ctime_ns == b.st_ctime_ns)
 
 
-def _windows_change_time(descriptor):
-    """``FILE_BASIC_INFO.ChangeTime`` of the HANDLE behind ``descriptor`` (GetFileInformationByHandleEx)."""
-    import ctypes
-    from ctypes import wintypes
-    import msvcrt
-
-    class FileBasicInfo(ctypes.Structure):
-        _fields_ = [("CreationTime", ctypes.c_int64), ("LastAccessTime", ctypes.c_int64),
-                    ("LastWriteTime", ctypes.c_int64), ("ChangeTime", ctypes.c_int64),
-                    ("FileAttributes", wintypes.DWORD)]
-
-    query = ctypes.WinDLL("kernel32", use_last_error=True).GetFileInformationByHandleEx
-    query.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD)
-    query.restype = wintypes.BOOL
-    handle = msvcrt.get_osfhandle(descriptor)
-    info = FileBasicInfo()
-    if not query(handle, 0, ctypes.byref(info), ctypes.sizeof(info)):  # 0 = FileBasicInfo
-        raise OSError(ctypes.get_last_error(), "GetFileInformationByHandleEx failed")
-    return int(info.ChangeTime)
-
-
 def _change_time(descriptor):
     """Last data or metadata change of the open file: POSIX ``fstat().st_ctime_ns``; Windows the HANDLE's
     ``FILE_BASIC_INFO.ChangeTime``. Any failure is fail-closed (``invalid_data``)."""
     try:
-        return _windows_change_time(descriptor) if _WINDOWS else os.fstat(descriptor).st_ctime_ns
-    except (OSError, AttributeError, ValueError):
+        return file_change_time(descriptor)
+    except OSError:
         raise ConnectorError("The HDF5 file's change time cannot be verified", "invalid_data") from None
 
 

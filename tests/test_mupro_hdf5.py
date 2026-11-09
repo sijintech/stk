@@ -595,6 +595,7 @@ def test_windows_change_time_is_not_creation_time(tmp_path):
     import ctypes
     import msvcrt
     from ctypes import wintypes
+    from suan.connectors.files import _windows_change_time
     path = tmp_path / "win.bin"
     path.write_bytes(b"0123456789abcdef")
     descriptor = os.open(path, os.O_RDONLY | os.O_BINARY)
@@ -612,11 +613,11 @@ def test_windows_change_time_is_not_creation_time(tmp_path):
         # Python's path/fd stat APIs and versions need not expose the same ctime.
         # Query creation time independently of the reader's ChangeTime API.
         created = creation_time()
-        changed = hdf5._windows_change_time(descriptor)
+        changed = _windows_change_time(descriptor)
         rewrite_restoring_mtime(path, 0, b"ABCD")
         assert creation_time() == created
-        assert hdf5._windows_change_time(descriptor) != changed  # FILE_BASIC_INFO.ChangeTime does
-        assert hdf5._change_time(descriptor) == hdf5._windows_change_time(descriptor)
+        assert _windows_change_time(descriptor) != changed  # FILE_BASIC_INFO.ChangeTime does
+        assert hdf5._change_time(descriptor) == _windows_change_time(descriptor)
     finally:
         os.close(descriptor)
     with pytest.raises(ConnectorError):
