@@ -6,6 +6,9 @@
 - 本版以 candidate 4 为底稿，按 root 的两项修订意见更正：
   - F1 的线上结果分层：内部 `get` 返回裸回执，线上 `get` 返回 `{receipt}`，`apply_once` 返回 `{receipt, replayed}`；
   - CP-0 的证据层级：反映 root 本地 main 提交 `994a3b1a` 中新增的已提交测试。
+- 2026-11-09 证据对齐（CL-D1-CP0-EVIDENCE-MATRIX-25，基线 `5c4723f4`）：只更新 §8.3、§8.4、§9、§10 中的 CP-0 证据。
+  - 新增证据以测试名和集成提交绑定，不用行号；原有行号仍绑定 `397a464d`。
+  - 设计选项、R2/R3 与已发布契约不变。
 
 **本文不做的事：**
 - 不实现任何功能；不新增或修改已发布的方法、schema、认证与授权；不声称已有部署。
@@ -323,6 +326,7 @@ peer 端点（已认证身份；本机原生传输，两进程验收）───
 | F11d | 用一个从未用过的新 UUID、陈旧修订做首次写入：冲突，不插入回执，此后 `get` 为 `not_found` |
 | F12 | 首页取得修订 r；外部写入使修订变为 r+1；用 r 读续页时，两个入口都冲突，不拼接。正对照：带 r 的续页在无写入时成功，`next_offset` 链在最后一页为 `null` |
 | F13 | `limit=201`（结构页）、`limit=501`（表页）、带 offset 但没有 `expected_revision`、8 MiB 预算（用 monkeypatch 降低上限）：两个入口都拒绝，状态不变 |
+| F14 | 项目级回执数量与字节预算（用 monkeypatch 缩小）由两个入口共用：新 UUID 在两个入口都被拒，状态与已存回执不变，原回执仍可读、可精确重放。原先列在 (b)，现在已有两入口的同一调用 |
 | F15 | 格式 14 项目：两个入口都能读；`apply_once`/`get` 要求显式升级，读取时不隐式升级 |
 | F23 | **路径内容现状对照：** 已授权读文件索引表时，两个入口都原样返回 `external:*` 的绝对路径值。这一行把现状记录下来，不当作漏洞修复，也不过滤 |
 
@@ -335,7 +339,6 @@ peer 端点（已认证身份；本机原生传输，两进程验收）───
 | F6 | 撤销后重放：撤销只在桥/store 上进行，重放可在两个入口上观察 |
 | F7 | undo/redo 回复丢失 |
 | F8a | store 检测到数据库被替换 |
-| F14 | 回执容量耗尽 |
 | F16 | 快照对象校验 |
 | F17 | 解析 `external:*` |
 | F18 | 便携工作区导入 |
@@ -379,7 +382,7 @@ peer 端点（已认证身份；本机原生传输，两进程验收）───
 - source：106 passed，0 skipped，3.22 s；
 - 隔离安装：106 passed，0 skipped，2.78 s，Python 3.12.14。
 
-**1b. root 本地 main 提交 `994a3b1a5c330db953ef4bc610c60a0f9e58e44f`。** 此提交在本设计基线之后，此前一轮 Desktop CI 尚待结束。它新增了已提交测试 `tests/test_peer_projects.py::test_bridge_and_peer_project_pages_and_scoped_receipts`，用两个入口验收：
+**1b. 提交 `994a3b1a5c330db953ef4bc610c60a0f9e58e44f`。** 此提交在本设计基线之后，已在本分支历史中（基线 `5c4723f4` 可达）。它新增了已提交测试 `tests/test_peer_projects.py::test_bridge_and_peer_project_pages_and_scoped_receipts`，用两个入口验收：
 - 严格的真实本机桥；
 - 已认证的 `PeerProjects`，加按方法校验的 peer codec。
 
@@ -394,6 +397,34 @@ root 记录的结果，均为 0 skipped：
 - 隔离安装的核心套件 107 passed。
 
 因此，F1/F11b 的跨入口情形和 F12 的两入口一致性，已有已提交测试（在 `994a3b1a`，不在本设计基线中）。
+
+**1c. 之后的已提交测试（均在 [`tests/test_peer_projects.py`](../../tests/test_peer_projects.py)，按本分支历史中的集成提交列出）。** 入口都是同进程的严格本机桥（`InProcessBridge`，经 `Bridge.handle_line` 分发）和/或已认证的 `PeerProjects` 适配器；只有 F23 另外经过按方法校验的 peer codec。都不建立活的 `PeerEndpoint` 会话，也不经过原生 helper 通道。
+
+| 行 | 测试 | 提交 | 验收内容 |
+|---|---|---|---|
+| F5b | `test_current_bound_owner_observation_refuses_a_physical_hot_journal_without_any_write`（`first_owner_observation`、`cached_owner_store` 两例） | `a4a07a41` | 用 [`tests/test_project_edit_operations.py`](../../tests/test_project_edit_operations.py) 的 `_spill` 子进程造出真实热回滚日志（不模拟错误码）。`bound_project` 拒绝，且异常链指向 "explicit local recovery"。数据库、热日志与授权库的字节都不变，grant 仍有效 |
+| F5c | `test_current_peer_catalog_physically_recovers_the_preimage_without_a_receipt` | `a4a07a41` | 同样的热日志下，已认证的 `PeerProjects.catalog` 恢复到前像，返回修订 0、无表。被杀操作在任何 scope 都没有回执 |
+| F23 | `test_current_authorized_file_index_content_is_identical_on_bridge_and_peer_until_revoked` | `bd49fd40` | 用现有文件索引 API 登记项目外的合成文件。桥、`PeerProjects` 和 peer codec 原样返回同一行的路径与平台位置值，元数据保持封闭。撤销 grant 后 peer 读取被拒 |
+| F3、F11d | `test_bridge_and_peer_race_two_identities_at_one_revision_with_one_winner_and_no_loser_receipt` | `b8e42c66` | 两个入口各用新 UUID，在修订 0 竞争：恰一成功，修订只加一，败方为 `conflict` 且无回执。同一项目上，两入口用陈旧修订做首次写入都冲突（F11d） |
+| F13 | `test_shared_paging_and_serialized_response_budgets_are_not_relaxed`（扩展到桥） | `b8e42c66` | 桥对同样的越界读取返回 `invalid_params`。`limit` 越界由桥的已发布 schema 在分发前拒绝；续页缺修订和 8 MiB 预算在共享 store 中拒绝 |
+| F15 | `test_legacy_project_reads_remain_supported_without_implicit_format_upgrade`（扩展到桥） | `b8e42c66` | 格式 14 项目桥可读；回执接口在桥上返回 `unsupported`，不隐式升级 |
+| F14 | `test_bridge_and_peer_share_the_project_receipt_quota_without_evicting_original_receipts`（`count`、`bytes_exhausted_before_write`、`bytes_exceeded_by_new_edit` 三例） | `5c4723f4` | 测试内用 monkeypatch 缩小预算，三例的拒绝时机各不相同：<br>- 数量上限、字节已耗尽：在编辑前拒绝；<br>- 新事务越过字节上限：编辑已执行后回滚。<br>两入口各自的错误映射都成立，状态与已存回执字节不变，原回执可读、可精确重放 |
+
+**F3 竞争的边界：** 不持锁时，采样中总是桥抢先。因此测试先持有 SQLite 写锁，直到观察到两个调用都到达 `ProjectStore._connect(write=True)` 才释放。这一观察只证明两个调用到了写入口，不证明它们已在 SQLite 中等待。赢家由 SQLite 决定，断言不依赖赢家是谁。
+
+**root 记录的运行（仓库外证据）：**
+- `root-delivery-20261109-53/closure.json`：
+  - 集成 `b8e42c66` 时，root 在 source 模式下对五个相关测试文件（含整份 `tests/test_peer_projects.py`）联跑，显式使用已安装的 Linux peer helper，246 passed，0 skipped；
+  - 竞争测试固定文件重复 30 次全过，peer 赢 27、桥赢 3（采样，不是保证的分布）；
+  - 隔离导出中三项改动各使对应测试失败（`claude-red.json`）：
+    - 去掉 CAS（F3 竞争测试）；
+    - 关闭读取结果的字节预算（F13）；
+    - 改错旧格式的桥错误映射（F15）。
+- `root-delivery-20261109-54/closure.json`：
+  - 集成 `5c4723f4` 时，同样的已安装 helper 联跑 249 passed，0 skipped；
+  - 三项故障注入（scope、写后预算、重放顺序）各使对应用例失败（`claude-red.json`）。
+
+已安装 helper 只服务于该联跑中 `tests/test_desktop_bridge_peer.py` 的 helper 验收用例。它不把上表各行变成活 peer 或线上证据。
 
 **2. root 外部探针（仓库外，未提交）。** 证据记录在 `root-delivery-20261109-43/closure.json` 的 `cp0` 节：
 - 两个脚本：`cp0-parity-probe.py`（sha256 `23de877c…`）和 `cp0-hot-journal-probe.py`（sha256 `1d951c7c…`）；
@@ -413,11 +444,16 @@ root 记录的结果，均为 0 skipped：
 - 云服务；
 - 任何 R2/R3 验证。
 
-**3. 尚缺：已提交的专门测试。** `994a3b1a` 中仍没有以下测试，它们只有仓库外的探针证据：
-- F23：路径内容对照；
-- F5b/F5c：两条热日志路径。
+这些探针仍是有效的历史观察。F23 与 F5b/F5c 现在另有 1c 中的已提交测试，探针不再是这几行的唯一证据。
 
-CP-0 要把它们固化为已提交测试，外部探针不能代替这一步。活的 `PeerEndpoint`、原生 helper、云端部署和 R2/R3 都不在这一结果范围内。
+**3. 仍待验证。** 下列场景在本分支历史中没有找到证据，保持待验：
+- **活 peer：** 经活的 `PeerEndpoint` 与原生 helper 通道走 `stk.peer/1` 的 CP-0 各行，包括线上错误码映射。现有测试只在适配器层按 Python 异常比较 peer 一侧。
+- **隔离安装：** 1c 中新增各行在隔离 wheel 安装态下的复验。已有的安装态结果只对应 1 中的 106 项和 1b。
+- **平台：** Windows、macOS 上这些行的复验。
+- **F5b/F5c/F23 的旧代码反例：** 已找到的 RED 证据只覆盖 F3、F13、F15、F14。
+- **F14 的真实上限：** 按真实的 10000 条与 64 MiB 实际写满。现有测试只缩小预算。
+- **F5c：** 保留现行恢复行为还是改为拒绝，仍由 root 决定。
+- **第 (d) 组：** 跨部署并发（F3′）、网络分区与换设备（F21′）、两个服务实例（F22）；以及云服务、R2/R3。
 
 ## 9. 故障验收矩阵
 
@@ -428,12 +464,12 @@ CP-0 要把它们固化为已提交测试，外部探针不能代替这一步。
 |---|---|---|---|---|---|
 | F1 | a | 提交后回复丢失 | 不同层返回不同形状：<br>- 原 ID 显式 `get`：内部 `EditOperations.get` 与 `PeerProjects.get` 返回裸回执；线上的桥与 `PeerEndpoint` 返回 `{"receipt": <原回执>}`（`edit_operations.py:148-156`；`desktop_bridge/projects.py:185-186`；`endpoint.py:516-517`）；<br>- 完全相同的请求再发一次：返回 `{receipt, replayed: true}`，不再执行（`edit_operations.py:173-177`）。<br>测试：`test_project_edit_operations.py:78`、`213`；`test_peer_projects.py:121`。两入口在各自 scope 中的精确重放，见 §8.4 | 同左。不确定结果记为 `unknown`，不自动重试（§4.4） | 网络适配器；客户端的持久请求记录 |
 | F2 | a | 同 ID、不同命令 | `RevisionConflict`，不 rebase，状态不变（`edit_operations.py:175-176`；`test_project_edit_operations.py:103`；`test_peer_projects.py:143-145` 中的不同命令一例）。修改原 CAS 的情况见 F11c | 固定的 `conflict` 码，原回执不变 | 错误映射测试 |
-| F3 | a | 同一修订上两个不同操作 | 一个成功，一个冲突（`test_project_edit_operations.py:196`） | 跨部署同样只能成功一个（X8，见 F3'） | 两实例共同归属规则（I14） |
+| F3 | a | 同一修订上两个不同操作 | 一个成功，一个冲突（`test_project_edit_operations.py:196`）。两入口竞争见 `test_bridge_and_peer_race_two_identities_at_one_revision_with_one_winner_and_no_loser_receipt`（`b8e42c66`，同进程；测试持写锁至两调用到达写入口，见 §8.4 1c） | 跨部署同样只能成功一个（X8，见 F3'） | 两实例共同归属规则（I14） |
 | F3' | d | 跨部署并发写同一项目 | 本地没有对应场景 | 只有事实归属服务接受写入 | 归属与转发实现 |
 | F4 | b | 进程在提交前后退出 | 不留下部分成功；提交后的回执仍可读（`test_project_edit_operations.py:267`、`573`） | 服务崩溃后重启，结果同左 | 服务级崩溃测试 |
 | F5a | b | 初次只读遇到精确 776 | 一次物理回滚，不做业务编辑（`store.py:391-461`；`test_project_edit_operations.py:561-656`） | 是否允许服务做这种恢复，须决定 | 服务恢复策略 |
-| F5b | c | owner 观察已绑定项目时遇热日志 | `_BoundProjectStore` 拒绝，要求显式本地恢复（`authority.py:54-57`、`405-441`）。root 外部探针在真实热回滚日志上观察到拒绝，数据库与日志字节都不变（§8.4）。仓库中没有已提交的专门测试 | 同左 | 已提交的热日志构造测试 |
-| F5c | c | peer 项目方法遇热日志 | 经 `_local_project` 用普通 `ProjectStore`，继承 776 恢复（`authority.py:377-386`、`518`）。root 外部探针观察到：`PeerProjects.catalog` 恢复到前像，返回修订 0，没有未提交的回执（§8.4）。仓库中没有已提交的专门测试 | 由 root 决定保留，或改为拒绝 | 决定，以及已提交的测试 |
+| F5b | c | owner 观察已绑定项目时遇热日志 | `_BoundProjectStore` 拒绝，要求显式本地恢复（`authority.py:54-57`、`405-441`）。root 外部探针在真实热回滚日志上观察到拒绝，数据库与日志字节都不变（§8.4 2）。已提交测试 `test_current_bound_owner_observation_refuses_a_physical_hot_journal_without_any_write`（`a4a07a41`，首次观察与缓存 store 两例）：数据库、日志与授权库字节不变，grant 仍有效（§8.4 1c） | 同左 | 服务级恢复流程；安装态与非 Linux 复验 |
+| F5c | c | peer 项目方法遇热日志 | 经 `_local_project` 用普通 `ProjectStore`，继承 776 恢复（`authority.py:377-386`、`518`）。root 外部探针观察到：`PeerProjects.catalog` 恢复到前像，返回修订 0，没有未提交的回执（§8.4 2）。已提交测试 `test_current_peer_catalog_physically_recovers_the_preimage_without_a_receipt`（`a4a07a41`）固定这一现行行为，被杀操作在任何 scope 都没有回执（§8.4 1c） | 由 root 决定保留，或改为拒绝 | 决定 |
 | F6 | b | 撤销后重放旧回执 | 返回原回执，不再执行，也不恢复效果（`test_project_edit_operations.py:78`） | 同左；回执注明是历史观察 | DTO 说明 |
 | F7 | b | undo/redo 回复丢失 | 没有回执。用同一 `expected_revision` 重试时，如果第一次已提交，会因修订冲突失败（`store.py:747-752`） | 首片不开放；如要开放，先设计回执或观察规则 | 设计决定 |
 | F8a | b | 数据库文件被替换（store） | 打开后 ID 变化即报错（`store.py:386-389`）；旧 store 的操作访问不被继承（`test_project_edit_operations.py:485`） | 同左 | 服务注册表实现 |
@@ -441,13 +477,13 @@ CP-0 要把它们固化为已提交测试，外部探针不能代替这一步。
 | F9 | c | 恢复旧备份 | 显式 rebind 轮换 generation（`test_peer_projects.py:260`）；观察到修订回退即拒绝（`authority.py:519-526`）；同 inode、未观察到的带外恢复和注册表丢失都无法证明安全（`authority.py:8-11`） | 恢复在服务归属下进行，并轮换 generation；不宣称全局恰好一次 | 恢复运维手册与测试 |
 | F10 | c | 撤权与写入并发 | 撤权确认要等已接受的调用完成（`test_peer_projects.py:294`）；撤权后会话被拒（第 209 行） | 同左 | R3 实现 |
 | F11a | c | 另一个 scope 的 `get` 查第一个回执 | 第二个调用方用同一 UUID 做 `get`，得到 `OperationNotFound`，找不到第一个回执（`test_peer_projects.py:185-186`） | 同左。Hub action 的同类缺口（X5 ②）不能照搬 | R3 实现 |
-| F11b | a | 两个独立 scope 用同一 UUID 先后写入 | 第一个 scope 在修订 r 写入；第二个 scope 用当时的当前修订 r+1 写入，得到 `replayed=false` 的另一个新回执。两个回执的 scope 不同，各自 `get` 返回各自的回执（`test_peer_projects.py:187-190`）。主键是 `(scope, operation_id)`。桥 `local` 与 peer scope 的跨入口情形，由 root 本地 main `994a3b1a` 的已提交测试覆盖（§8.4 1b） | 同左；scope 由服务推导 | 云端服务上的同一验收 |
+| F11b | a | 两个独立 scope 用同一 UUID 先后写入 | 第一个 scope 在修订 r 写入；第二个 scope 用当时的当前修订 r+1 写入，得到 `replayed=false` 的另一个新回执。两个回执的 scope 不同，各自 `get` 返回各自的回执（`test_peer_projects.py:187-190`）。主键是 `(scope, operation_id)`。桥 `local` 与 peer scope 的跨入口情形，由 `994a3b1a` 的已提交测试覆盖（§8.4 1b） | 同左；scope 由服务推导 | 云端服务上的同一验收 |
 | F11c | a | 同一 scope、同一 UUID，重放时修改了原 CAS | 冲突，状态与原回执都不变（`test_peer_projects.py:143-145` 中 `(None, 1)` 一例，第 151 行断言） | 同左 | 无 |
-| F11d | a | 新 UUID、陈旧修订的首次写入 | 冲突，不插入回执，之后 `get` 为 `not_found`（`test_peer_projects.py:146-151`） | 同左 | 无 |
+| F11d | a | 新 UUID、陈旧修订的首次写入 | 冲突，不插入回执，之后 `get` 为 `not_found`（`test_peer_projects.py:146-151`）。同一项目上的两入口情形（桥 `conflict`、peer `RevisionConflict`）见 `b8e42c66` 的竞争测试（§8.4 1c） | 同左 | 无 |
 | F12 | a | 翻页途中项目被修改 | 续页因修订冲突而失败（`catalog.py:20-25`、`52-53`；`test_peer_projects.py:114-118`）。两入口一致性，以及结构页、表页的陈旧续页被拒，由 `994a3b1a` 的已提交测试覆盖（2 页结构页、3 页记录页，§8.4 1b）；root 的外部探针另有观察（§8.4 2） | 同左，不拼接不同修订的页 | 云端服务上的同一验收 |
-| F13 | a | 页过大，或参数越界 | 超过页数上限、缺少续页修订、超过 8 MiB 都拒绝，状态不变（`catalog.py:14-31`；`test_peer_projects.py:355-372`） | 同左；网络层不放宽 | 网络帧上限 |
-| F14 | b | 回执容量耗尽 | 新写入被拒，旧回执仍可读（`test_project_edit_operations.py:353`） | 同左，并报警；不做 GC | 监控 |
-| F15 | a | 旧格式项目 | 1–14 可读；新 API 要求显式升级（`test_project_edit_operations.py:427`；`test_peer_projects.py:390`） | 服务不隐式升级 | 升级审批流程 |
+| F13 | a | 页过大，或参数越界 | 超过页数上限、缺少续页修订、超过 8 MiB 都拒绝，状态不变（`catalog.py:14-31`；`test_peer_projects.py:355-372`）。`b8e42c66` 将 `test_shared_paging_and_serialized_response_budgets_are_not_relaxed` 扩展到桥：均为 `invalid_params`，其中 `limit` 越界由桥的已发布 schema 在分发前拒绝（§8.4 1c） | 同左；网络层不放宽 | 网络帧上限 |
+| F14 | a | 回执容量耗尽 | 新写入被拒，旧回执仍可读（`test_project_edit_operations.py:353`）。两入口共用项目级配额：`test_bridge_and_peer_share_the_project_receipt_quota_without_evicting_original_receipts`（`5c4723f4`）。三例的拒绝时机：<br>- 数量上限：编辑前拒绝；<br>- 字节已耗尽：编辑前拒绝；<br>- 新事务越过字节上限：编辑执行后回滚。<br>桥 `invalid_params`、peer `ProjectError`；状态与已存回执字节不变，原回执可读、可精确重放。预算由 monkeypatch 缩小，未按真实上限写满（§8.4 1c） | 同左，并报警；不做 GC | 监控；真实上限下的验证 |
+| F15 | a | 旧格式项目 | 1–14 可读；新 API 要求显式升级（`test_project_edit_operations.py:427`；`test_peer_projects.py:390`）。`b8e42c66` 将该测试扩展到桥：格式 14 可读，回执接口返回 `unsupported`，不隐式升级（§8.4 1c） | 服务不隐式升级 | 升级审批流程 |
 | F16 | b | 快照对象缺失或损坏 | `resolve` 时校验失败，拒绝（`snapshots.py:103-123`、`333-341`） | 结果元数据中不带本机对象路径。清单中的路径值属于内容（I15），默认不开放快照，或单独设计 | 对象存储归属 |
 | F17 | b | `external:*` 文件不在服务主机 | 只有原机能解析（`files.py:82-95`） | 报不可用，不改写成别的路径 | 文件归属模型 |
 | F18 | b | 便携工作区导入另一台机器 | 保留项目身份与回执，但不授予访问（规范第 177–182 行） | 新主机须在服务归属下重新注册，产生新 generation | 注册流程 |
@@ -456,7 +492,7 @@ CP-0 要把它们固化为已提交测试，外部探针不能代替这一步。
 | F21 | c | 断开后重新认证 | 回执仍在（`test_peer_projects.py:249`）；`PeerCallUncertain` 保留原 ID 和修订（peer 规范第 250–259 行） | 满足 §4.4，调用方身份稳定（I4） | — |
 | F21' | d | 网络分区，或客户端换设备重连 | 本地没有对应场景 | 同 F21，加真实网络验证 | 网络适配器、R3、真实网络测试 |
 | F22 | d | 两个服务实例打开同一个库 | 本地没有对应场景。每个状态目录只有一个桥（`bridge.lock`，stk-desktop-bridge-v1 第 52–53 行），但外部 CLI 写入者仍可同时写，靠 SQLite 修订仲裁（`projects.py:1-4`） | 禁止；必须有单一归属，并检测重复打开（I14） | 归属锁设计 |
-| F23 | a | 授权读取含路径的用户内容 | peer 与桥都原样返回文件索引的 `path`/`location` 值。peer codec 只封闭元数据，不过滤单元格内容（`protocol.py:282-300`；peer 规范第 121–141 行）；桥直接返回 store 的结果（`projects.py:173-175`）。root 外部探针：合成的 `external:posix` 单元格原样出现在两个入口的响应中，也通过了 peer codec（§8.4）。仓库中没有已提交的专门测试 | 默认不开放文件索引表、写入它的命令及其原回执，或单独设计。负对照：网络适配器默认不返回这些值，也不改写任何已存的回执或摘要 | 内容策略设计与测试 |
+| F23 | a | 授权读取含路径的用户内容 | peer 与桥都原样返回文件索引的 `path`/`location` 值。peer codec 只封闭元数据，不过滤单元格内容（`protocol.py:282-300`；peer 规范第 121–141 行）；桥直接返回 store 的结果（`projects.py:173-175`）。root 外部探针：合成的 `external:posix` 单元格原样出现在两个入口的响应中，也通过了 peer codec（§8.4 2）。已提交测试 `test_current_authorized_file_index_content_is_identical_on_bridge_and_peer_until_revoked`（`bd49fd40`）在桥、`PeerProjects` 与 peer codec 上固定这一现状，撤销 grant 后 peer 读取被拒（§8.4 1c） | 默认不开放文件索引表、写入它的命令及其原回执，或单独设计。负对照：网络适配器默认不返回这些值，也不改写任何已存的回执或摘要 | 内容策略设计与测试 |
 
 ## 10. 缺失资产清单
 
@@ -465,7 +501,11 @@ CP-0 要把它们固化为已提交测试，外部探针不能代替这一步。
 3. 方案 B 的仓储端口与 PostgreSQL 适配：没有。
 4. 服务级的项目归属锁、重复打开检测、恢复运维流程：没有。
 5. 网络候选的内容策略（文件索引、含路径的命令与回执、快照清单）及其负对照：没有（F23）。
-6. F23（路径内容对照）与 F5b/F5c（两条热日志路径）的已提交专门测试：root 本地 main `994a3b1a` 中仍没有，只有仓库外的探针证据（§8.4）。F1/F11b 的跨入口情形和 F12 的两入口一致性，已由 `994a3b1a` 的 `test_bridge_and_peer_project_pages_and_scoped_receipts` 覆盖（该提交此前一轮的 Desktop CI 待结束）。以上结果都不覆盖活的 `PeerEndpoint`、原生 helper、远端监听、云服务或 R2/R3。
+6. CP-0 的同进程已提交测试已覆盖下列行（§8.4 1b、1c）：F1/F11b、F12（`994a3b1a`）；F5b/F5c（`a4a07a41`）；F23（`bd49fd40`）；F3/F11d、F13、F15（`b8e42c66`）；F14（`5c4723f4`）。仍缺的是：
+   - 这些行经活 `PeerEndpoint` 与原生 helper 的线上验证；
+   - 新增行的隔离安装态与非 Linux 复验；
+   - F5b/F5c/F23 的旧代码反例；
+   - F14 在真实上限下的验证（§8.4 3）。
 7. 快照对象与项目文件的远端归属与传输模型：没有。peer 文件扩展是另一份契约，不授予项目权限（stk-peer-files-1 第 1–13 行）。
 8. 网络 DTO 与已发布 schema：没有，本文也不定义。
 9. 真实部署、跨主机、网络分区、目标 OS 的验收证据：没有。
