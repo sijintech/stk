@@ -7,6 +7,9 @@
 #endif
 
 #import <AppKit/AppKit.h>
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+#  import <CoreFoundation/CoreFoundation.h>
+#endif
 #import <WebKit/WebKit.h>
 #import <dispatch/dispatch.h>
 
@@ -37,6 +40,7 @@ struct State {
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
   test::NativePauseSnapshot test_last_pause;
   std::shared_ptr<test::NativeCloseObservation> test_close_observation;
+  uint64_t test_isolated_pause_navigation = 0;
 #endif
 };
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
@@ -117,6 +121,9 @@ static bool relinquish_focus(const std::shared_ptr<State> &state)
 static void shutdown(const std::shared_ptr<State> &state, NativeViewStatus status, const char *message);
 static constexpr char kPauseWatchdogFailure[] = "Could not verify paused document media playback";
 static constexpr char kPauseReplyFailure[] = "Could not pause document media playback";
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+static constexpr char kIsolatedPauseFailure[] = "The isolated test pause did not pause its media element";
+#endif
 
 struct PauseRequest {
   std::weak_ptr<State> state;
@@ -646,6 +653,9 @@ static void shutdown(const std::shared_ptr<State> &state, NativeViewStatus statu
     else if (failure == kPauseReplyFailure) {
       reason = "pause_reply_after_deadline";
     }
+    else if (failure == kIsolatedPauseFailure) {
+      reason = "isolated_pause_actuator_failed";
+    }
     *state->test_close_observation = {reason, detail::MediaPauseVerification::Clock::now(),
         state->media_generation, state->result.navigation_generation, test_pause_snapshot(state)};
   }
@@ -749,9 +759,47 @@ class CocoaDocumentView final : public NativeDocumentView {
         state, generation, detail::MediaPauseVerification::Clock::now());
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
     const auto navigation = state->result.navigation_generation;
+    const auto isolated_navigation = std::exchange(state->test_isolated_pause_navigation, 0);
+    if (isolated_navigation && isolated_navigation != navigation) {
+      error = "The armed test pause navigation changed";
+      return false;
+    }
     state->test_last_pause = {true, generation, navigation, false, false, !state->view.hidden};
 #endif
     cocoa::verify_pause(request);
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+    if (isolated_navigation) {
+      state->test_last_pause.isolated_actuator = true;
+      // Only the acceptance fixture arms this once. The production state query and deadline
+      // still decide whether the pause succeeded; the script reply is an acknowledgement.
+      NSString *script = @"(() => { const media = document.querySelectorAll('video, audio'); "
+                          @"if (media.length !== 1) return false; "
+                          @"media[0].pause(); return media[0].paused && !media[0].ended; })()";
+      [state->view evaluateJavaScript:script inFrame:nil
+          inContentWorld:[WKContentWorld worldWithName:@"STKReportPauseControl"]
+          completionHandler:^(id value, NSError *failure) {
+        auto completed = request->state.lock();
+        if (!cocoa::live(completed) || completed->view != request->view ||
+            completed->media_generation != generation || completed->result.navigation_generation != navigation) {
+          return;
+        }
+        auto &pause = completed->test_last_pause;
+        if (failure || ![value isKindOfClass:NSNumber.class] ||
+            CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID()) {
+          pause.isolated_reply = "error";
+        }
+        else {
+          request->acknowledged = [(NSNumber *)value boolValue];
+          pause.isolated_reply = request->acknowledged ? "paused" : "refused";
+        }
+        pause.acknowledged = request->acknowledged;
+        if (!request->acknowledged) {
+          cocoa::shutdown(completed, NativeViewStatus::Failed, cocoa::kIsolatedPauseFailure);
+        }
+      }];
+      return true;
+    }
+#endif
     // Public macOS 12+ API; project JavaScript remains disabled. Pausing never resumes media.
     // Completion acknowledges the pause command; independently verify the resulting
     // state within the original deadline rather than treating the first sample as final.
@@ -973,6 +1021,20 @@ std::shared_ptr<const NativeCloseObservation> observe_native_close(wm::NativeWin
     state->test_close_observation = std::make_shared<NativeCloseObservation>();
   }
   return state->test_close_observation;
+}
+
+bool arm_isolated_pause(wm::NativeWindowHandle parent, std::string_view session_id,
+                        uint64_t navigation_generation)
+{
+  std::string error;
+  const auto state = find_view(parent, session_id, error);
+  if (!state || !state->view || !state->visible || state->view.isHiddenOrHasHiddenAncestor ||
+      state->result.status != NativeViewStatus::Ready || !navigation_generation ||
+      state->result.navigation_generation != navigation_generation || state->test_isolated_pause_navigation) {
+    return false;
+  }
+  state->test_isolated_pause_navigation = navigation_generation;
+  return true;
 }
 
 bool matches_native_view(wm::NativeWindowHandle parent, std::string_view session_id,

@@ -62,6 +62,7 @@ struct Options {
   fs::path output, media_fixture;
   bool pre_seek_hide_control = false;
   bool quiet_hidden_hold = false;
+  bool isolated_pause_control = false;
   int reading_cycles() const { return pre_seek_hide_control ? 1 : 20; }
 };
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
@@ -86,6 +87,8 @@ Json native_pause_json(const NativePause &pause)
       {"navigation_generation", pause.navigation_generation},
       {"acknowledged", pause.acknowledged}, {"verified", pause.verified},
       {"visible_at_dispatch", pause.visible_at_dispatch},
+      {"pause_actuator", pause.isolated_actuator ? "isolated_world" : "native"},
+      {"isolated_reply", pause.isolated_reply.empty() ? Json(nullptr) : Json(std::string(pause.isolated_reply))},
       {"query_count", pause.query_count}, {"reply_count", pause.reply_count},
       {"playing_reply_count", pause.playing_reply_count},
       {"first_query_seconds", pause.query_count ? Json(pause.first_query_seconds) : Json(nullptr)},
@@ -635,6 +638,10 @@ class Exercise {
     catch (...) { hidden_media_.reset(); }
   }
 #ifdef __APPLE__
+  bool arm_isolated_pause(const std::string &session, uint64_t navigation)
+  {
+    return document_preview::test::arm_isolated_pause(window_.native_window_handle(), session, navigation);
+  }
   std::shared_ptr<const document_preview::test::NativeCloseObservation> observe_native_close(
       const std::string &session) noexcept
   {
@@ -1570,6 +1577,10 @@ raise SystemExit(main())
           if (options.quiet_hidden_hold) {
             require(bool(close), "Quiet hidden hold needs the exact native close observer");
           }
+          if (options.isolated_pause_control) {
+            require(ui.arm_isolated_pause(session, playing.navigation_generation),
+                "Could not arm the isolated pause on the playing report navigation");
+          }
 #endif
           ui.hidden_media_checkpoint("tab-begin");
           ui.tab(*area, 1);
@@ -1602,7 +1613,9 @@ raise SystemExit(main())
                 previous.navigation_generation == playing.navigation_generation &&
                 pause.navigation_generation == playing.navigation_generation &&
                 pause.media_generation == previous.media_generation + 1 && pause.visible_at_dispatch &&
-                pause.acknowledged && pause.verified,
+                pause.acknowledged && pause.verified &&
+                pause.isolated_actuator == options.isolated_pause_control &&
+                (!options.isolated_pause_control || pause.isolated_reply == "paused"),
                 "Quiet hidden hold must verify one new native pause on the same navigation before DOM sampling");
             require(hidden.navigation_generation == playing.navigation_generation && hidden.paused && !hidden.seeking,
                 "The first post-hold DOM sample must show the same media paused");
@@ -1821,9 +1834,10 @@ int main(int argc, char **argv)
     const std::string arg = argv[i];
 #if defined(__APPLE__) && defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES)
     if (arg == "--pre-seek-hide-control") { options.pre_seek_hide_control = true; continue; }
-    if (arg == "--quiet-pre-seek-hide-control") {
+    if (arg == "--quiet-pre-seek-hide-control" || arg == "--isolated-quiet-pre-seek-hide-control") {
       options.pre_seek_hide_control = true;
       options.quiet_hidden_hold = true;
+      options.isolated_pause_control = arg == "--isolated-quiet-pre-seek-hide-control";
       continue;
     }
 #endif
@@ -1842,14 +1856,18 @@ int main(int argc, char **argv)
        && options.source != "video" && options.source != "html-video"
 #endif
       )) {
-    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control]\n"); return 2;
+    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control]\n"); return 2;
   }
   Json result = {{"format", "stk.reports-native-evidence/1"}, {"status", "running"}, {"required_cycles", options.reading_cycles()},
       {"completed_cycles", 0}, {"images", Json::array()}, {"native_scroll_requests", Json::array()},
       {"claim", "Production ReportsEditor app actions, frozen bridge resources and OS-composited STK client pixels; opt-in media also records bounded local native child input and fixed read-only media observations"},
       {"not_proven_here", "OS hardware input, IME, arbitrary PDF fidelity/search/selection, modal same-OS-batch ordering, physical scanout and browser memory stability; URL410/parent-close are separate Host CPU and spike native tests; final guarded memory is the separate after-static spike gate"}};
   if (options.pre_seek_hide_control) {
-    result["scenario"] = options.quiet_hidden_hold ? "quiet-pre-seek-hide-control" : "pre-seek-hide-control";
+    result["scenario"] = options.isolated_pause_control ? "isolated-quiet-pre-seek-hide-control" :
+        (options.quiet_hidden_hold ? "quiet-pre-seek-hide-control" : "pre-seek-hide-control");
+    if (options.isolated_pause_control) {
+      result["control"] = "One fixed test-only pause action in a private WKContentWorld; native playback state and the original deadline decide verification";
+    }
   }
   fs::path directory;
   try {
@@ -1868,7 +1886,8 @@ int main(int argc, char **argv)
     write(directory / "result.json", result.dump(2));
     const char *scenario = "native evidence";
     if (options.pre_seek_hide_control) {
-      scenario = options.quiet_hidden_hold ? "quiet pre-seek hide control" : "pre-seek hide control";
+      scenario = options.isolated_pause_control ? "isolated quiet pre-seek hide control" :
+          (options.quiet_hidden_hold ? "quiet pre-seek hide control" : "pre-seek hide control");
     }
     std::fprintf(stdout, "PASS: production ReportsEditor %s; cycles=%d; OS images=%zu; %s\n",
         scenario, options.reading_cycles(), result.at("images").size(), core::path_to_utf8(directory).c_str());

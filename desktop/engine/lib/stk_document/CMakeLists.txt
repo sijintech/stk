@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Confined report bytes are CPU-only; platform browser adapters are an explicit candidate.
 option(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_TEST_PROBES
-  "Build fixed, read-only own-window media probes for native document acceptance tests" OFF)
+  "Build fixed own-window media probes and controls for native document acceptance tests" OFF)
 if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_TEST_PROBES AND NOT STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW)
   message(FATAL_ERROR "Native document test probes require the explicit native preview candidate")
 endif()
@@ -37,6 +37,10 @@ if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW AND APPLE)
   find_library(_stk_preview_appkit AppKit REQUIRED)
   target_link_libraries(stk_document_native PRIVATE
     "${_stk_preview_webkit}" "${_stk_preview_appkit}")
+  if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_TEST_PROBES)
+    find_library(_stk_preview_core_foundation CoreFoundation REQUIRED)
+    target_link_libraries(stk_document_native PRIVATE "${_stk_preview_core_foundation}")
+  endif()
 elseif(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW AND WIN32)
   if(NOT MSVC)
     message(FATAL_ERROR "The WebView2 preview candidate requires MSVC-compatible Windows SDK/WRL headers")

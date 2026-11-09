@@ -40,6 +40,8 @@ struct NativePauseSnapshot {
   bool visible_at_dispatch = false;
   uint64_t query_count = 0, reply_count = 0, playing_reply_count = 0;
   double first_query_seconds = 0, last_reply_seconds = 0;
+  bool isolated_actuator = false;
+  std::string_view isolated_reply{};
 };
 
 struct MediaProbeResult {
@@ -69,6 +71,9 @@ struct NativeCloseObservation {
 /** UI-thread only. The observation survives view destruction without owning the view or its resources. */
 std::shared_ptr<const NativeCloseObservation> observe_native_close(wm::NativeWindowHandle parent,
                                                                  std::string_view session_id);
+/** UI-thread only: arm a fixed, one-shot pause action on this visible test navigation. */
+bool arm_isolated_pause(wm::NativeWindowHandle parent, std::string_view session_id,
+                        uint64_t navigation_generation);
 /** UI-thread only: bind an input target to the unique ready session and its native navigation.
  * expected_view is compared with the real WKWebView; no native object is returned or sent over IPC.
  */
