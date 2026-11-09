@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · Linux 文献引用页实窗
+
+root 用本地 `2bf4bd50` 二进制，在 Linux X11/Mesa 软件 OpenGL 上从英文默认布局实测文献引用页。预先建立合成 PDF 文献库和固定 E5 索引，8 次点击显示页图，再 5 次撤销合成授权并确认页图消失，全程零滚轮。证据见 `root-delivery-20261109-50/closure.json`。中文实窗全链和目标 Mac/Windows 待验。
+
+远端仍为 `fbe4b0cc`，同头 Runtime 13 项已成功。Desktop 整轮仍在运行，GUI 修复与实窗记录留在本地 main。Claude23 正在独立 worktree 复测 D1 双入口写入竞争，候选待交付。
+
 ## 2026-11-09 UTC · GUI 桥目录修复和 Linux 文献入口实窗
 
 root 在 `2bf4bd50` 修复 GUI 忽略 `--state-dir`。默认工作台从顶栏进入文献，Linux X11 软件 OpenGL 中英文均实测 1 点击、0 滚轮，桥各用独立目录。37 项 CTest 通过。证据见 `root-delivery-20261109-49/closure.json`。真实引用页的 GPU 呈现及 Mac/Windows 仍待验。
