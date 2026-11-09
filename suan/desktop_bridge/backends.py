@@ -223,6 +223,8 @@ class HubBackend:
         device = next((d for d in devices if d["id"] == self.node_id and d["role"] == "node"), None)
         if device is None:
             raise BridgeError("not_found", "Execution node not found on this hub")
+        if device.get("revoked"):
+            raise BridgeError("unauthorized", "Execution node access has been revoked")
         return device
 
     def snapshot(self):

@@ -236,6 +236,8 @@ Connection ids are opaque to the app; the bridge resolves them:
   when `require_live` is omitted or false. With `require_live: true` it returns `unsupported`
   if exact lookup is unavailable on the installed Hub or node, even when the snapshot contains
   the task. If exact lookup is supported and the node is offline, it returns `unavailable`.
+  When the Hub lists the execution node as revoked, both snapshot and exact task reads return
+  `unauthorized`, and the node's task watch ends with that error.
   Node errors on the live Hub read path, including a missing Runtime task, use the existing
   `remote_error` mapping. Direct and SSH connections always use the exact Runtime read and
   report a missing task as `not_found`. Clients requiring a live lookup propagate validation

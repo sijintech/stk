@@ -45,7 +45,7 @@ class Hub:
             assert time.monotonic() < deadline
             time.sleep(0.02)
         self.url = f"http://127.0.0.1:{self.server.servers[0].sockets[0].getsockname()[1]}"
-        self.http = httpx.Client(base_url=self.url, timeout=30)
+        self.http = httpx.Client(base_url=self.url, timeout=30, trust_env=False)
         code = self.http.post("/api/v1/pairings", json={"role": "node"}, headers=AUTH).json()["code"]
         node = self.http.post("/api/v1/pairings/claim", json={"code": code, "name": "计算节点"}).json()
         self.node_id, self.node_token = node["device_id"], node["token"]
@@ -114,6 +114,38 @@ def pair(harness, hub, name="lab"):
             return connection["id"]
         assert time.monotonic() < deadline, devices
         time.sleep(0.1)
+
+
+def test_revoked_node_stops_serving_cached_task_facts(hub, inproc):
+    harness = inproc()
+    hub_id = pair(harness, hub)
+    target = {"connection": hub_id, "node": hub.node_id}
+    workspace = harness.call("workspace.create", {**target, "name": "revocation"})["workspace"]["id"]
+    task = harness.call("task.submit", {**target, "idempotency_key": "revoke-task", "template": "echo",
+                                        "workspace_id": workspace})["task"]["id"]
+    watch = harness.call("watch", {**target, "workspace_id": workspace, "interval": 0.5})["sub"]
+    harness.wait_event(lambda e: e["event"] == "watch.snapshot" and e["data"]["sub"] == watch and
+                       any(t["id"] == task for t in e["data"]["tasks"]))
+    assert harness.call("task.get", {**target, "task_id": task})["task"]["id"] == task
+    action_count = len(hub.store.actions())
+    mark = harness.mark()
+
+    revoked = hub.http.delete(f"/api/v1/devices/{hub.node_id}", headers=AUTH)
+    assert revoked.status_code == 200
+    assert any(t["id"] == task for t in hub.store.device(hub.node_id)["snapshot"]["tasks"])
+    devices = harness.call("hub.devices", {"connection": hub_id})["devices"]
+    assert all(device["id"] != hub.node_id for device in devices)
+    for method, params in (
+        ("workspace.list", {}),
+        ("task.list", {"workspace_id": workspace}),
+        ("task.get", {"task_id": task}),
+        ("task.get", {"task_id": task, "require_live": True}),
+    ):
+        assert harness.error(method, {**target, **params})["code"] == "unauthorized"
+    event = harness.wait_event(lambda e: e["event"] == "subscription.error" and e["data"]["sub"] == watch,
+                               start=mark)
+    assert event["data"]["final"] is True and event["data"]["error"]["code"] == "unauthorized"
+    assert len(hub.store.actions()) == action_count
 
 
 def test_hub_review_flow(hub, inproc, tmp_path):  # noqa: F811
