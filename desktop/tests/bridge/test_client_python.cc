@@ -6,7 +6,8 @@
  * The interpreter: $STK_BRIDGE_TEST_PYTHON, else the CMake setting STK_BRIDGE_TEST_PYTHON, else
  * python3 on PATH; the tests skip (with the reason) when it cannot import suan.desktop_bridge.
  * Runtime tests start a loopback Runtime (127.0.0.1, ephemeral port) in a helper process
- * (bridge_fixture.py runtime) and stop it afterwards.
+ * (bridge_fixture.py runtime) and stop it afterwards; the Hub test likewise starts a loopback Hub,
+ * node agent and Runtime (bridge_fixture.py hub) that it drives over the helper's stdin.
  */
 
 #include <gtest/gtest.h>
@@ -21,6 +22,14 @@
 #include "stk/io/blob_cache.hh"
 #include "stk/io/payload.hh"
 #include "support.hh"
+
+#if defined(__linux__)
+#  include <arpa/inet.h>
+#  include <fcntl.h>
+#  include <netinet/in.h>
+#  include <sys/socket.h>
+#  include <unistd.h>
+#endif
 
 namespace stk::bridge {
 namespace {
@@ -206,11 +215,14 @@ class PythonBridge : public ::testing::Test {
     return out;
   }
 
-  /** A loopback Runtime with a slowly logging task (bridge_fixture.py runtime). */
+  /** A loopback Runtime with a slowly logging task (bridge_fixture.py runtime), or the loopback
+   * Hub chain (bridge_fixture.py hub). */
   struct RuntimeFixture {
     std::unique_ptr<ChildProcess> process;
     std::thread drain;
     Json info;
+    std::shared_ptr<std::string> stderr_text = std::make_shared<std::string>();
+    std::shared_ptr<std::mutex> stderr_mutex = std::make_shared<std::mutex>();
     ~RuntimeFixture()
     {
       stop();
@@ -218,6 +230,70 @@ class PythonBridge : public ::testing::Test {
     void open_gate() const
     {
       std::ofstream(info["gate"].get<std::string>()) << "go\n";
+    }
+    /** The hub fixture: one stdin command, its one-line JSON reply (null when the helper ended). */
+    Json command(const std::string &name) const
+    {
+      if (!process->write_stdin(name + "\n")) {
+        return nullptr;
+      }
+      std::string line;
+      char c;
+      while (process->read(ChildProcess::Stream::Stdout, &c, 1) == 1 && c != '\n') {
+        line += c;
+      }
+      return line.empty() ? Json(nullptr) : io::parse_json(line);
+    }
+    std::string stderr_tail(size_t keep = 1500) const
+    {
+      std::lock_guard lock(*stderr_mutex);
+      return stderr_text->substr(stderr_text->size() - std::min(keep, stderr_text->size()));
+    }
+    /** The hub fixture's checked close (EOF on stdin): "" when it printed {"closed": true} with
+     * every part stopped and exited 0 within 60 s, else why. #stop stays the unchecked teardown. */
+    std::string close_checked()
+    {
+      if (!process) {
+        return "the helper was not running";
+      }
+      process->close_stdin();
+      std::optional<ExitStatus> status = process->wait(60);
+      std::string why;
+      if (!status) {
+        process->kill();
+        process->wait(-1);
+        why = "did not exit within 60 s (killed)";
+      }
+      else if (!status->success()) {
+        why = "exited " + status->describe();
+      }
+      std::string rest;
+      char buffer[4096];
+      std::ptrdiff_t n;
+      while ((n = process->read(ChildProcess::Stream::Stdout, buffer, sizeof(buffer))) > 0) {
+        rest.append(buffer, size_t(n));
+      }
+      process->abort_reads();
+      if (drain.joinable()) {
+        drain.join();
+      }
+      process.reset();
+      Json closed;
+      if (const size_t at = rest.rfind("{\"closed\""); at != std::string::npos) {
+        closed = io::parse_json(rest.substr(at, rest.find('\n', at) - at));
+      }
+      bool all_stopped = closed.is_object() && closed.value("closed", false) && closed["stopped"].is_object() &&
+                         !closed["stopped"].empty();
+      if (all_stopped) {
+        for (const auto &[part, stopped] : closed["stopped"].items()) {
+          all_stopped &= stopped.is_boolean() && stopped.get<bool>();
+        }
+      }
+      if (why.empty() && !all_stopped) {
+        why = "no complete {\"closed\": true} report";
+      }
+      return why.empty() ? why : why + "; stdout tail: " + rest.substr(rest.size() - std::min<size_t>(rest.size(), 500)) +
+                                     "; stderr tail: " + stderr_tail();
     }
     void stop()
     {
@@ -237,20 +313,29 @@ class PythonBridge : public ::testing::Test {
     }
   };
 
-  /** Starts the Runtime fixture; "" or why it could not start (the test then skips). */
-  std::string start_runtime(RuntimeFixture &fixture)
+  /** Starts the `mode` (runtime | hub) fixture; "" or why it could not start (the test then skips). */
+  std::string start_runtime(RuntimeFixture &fixture, const std::string &mode = "runtime",
+                            const std::map<std::string, std::optional<std::string>> &extra_env = {})
   {
     SpawnOptions spawn;
-    spawn.argv = {python_, fixture_script(), "runtime", dir_.str() + "/runtime"};
+    spawn.argv = {python_, fixture_script(), mode, dir_.str() + "/" + mode};
     spawn.env["PYTHONPATH"] = repo_root();
+    if (mode == "hub") { /* as tests/test_runtime_hub_cli.py: no shared profile or local Runtime */
+      spawn.env["STK_PROFILES_FILE"] = dir_.str() + "/hub-profiles.json";
+      spawn.env["STK_STATE_DIR"] = dir_.str() + "/hub-no-local-runtime";
+      spawn.env["MPLCONFIGDIR"] = dir_.str() + "/mpl";
+    }
+    for (const auto &[name, value] : extra_env) {
+      spawn.env[name] = value;
+    }
     std::string error;
     fixture.process = ChildProcess::spawn(spawn, error);
     if (!fixture.process) {
       return error;
     }
     ChildProcess *process = fixture.process.get();
-    auto stderr_text = std::make_shared<std::string>();
-    auto stderr_mutex = std::make_shared<std::mutex>();
+    auto stderr_text = fixture.stderr_text;
+    auto stderr_mutex = fixture.stderr_mutex;
     fixture.drain = std::thread([process, stderr_text, stderr_mutex] {
       char buffer[4096];
       std::ptrdiff_t n;
@@ -269,7 +354,7 @@ class PythonBridge : public ::testing::Test {
       fixture.stop();
       std::lock_guard lock(*stderr_mutex);
       const size_t keep = std::min<size_t>(stderr_text->size(), 1500);
-      return "the Runtime fixture did not start: " + stderr_text->substr(stderr_text->size() - keep);
+      return "the " + mode + " fixture did not start: " + stderr_text->substr(stderr_text->size() - keep);
     }
     fixture.info = io::parse_json(line);
     return {};
@@ -731,6 +816,222 @@ TEST_F(PythonBridge, Kill9MidSubscriptionResumesWithoutGapsOrDuplicates)
   watch.unsubscribe();
   client->close();
   runtime.stop();
+}
+
+/** A listening 127.0.0.1 socket (ephemeral port) that only counts connections: the hostile proxy
+ * of the hub tests. It never answers, so nothing reaches any other host through it. */
+class ProxySink {
+ public:
+  ProxySink()
+  {
+    fd_ = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t size = sizeof(address);
+    if (fd_ < 0 || bind(fd_, reinterpret_cast<sockaddr *>(&address), size) != 0 || listen(fd_, 64) != 0 ||
+        getsockname(fd_, reinterpret_cast<sockaddr *>(&address), &size) != 0)
+    {
+      return;
+    }
+    port_ = ntohs(address.sin_port);
+  }
+  ~ProxySink()
+  {
+    if (fd_ >= 0) {
+      close(fd_);
+    }
+  }
+  int port() const
+  {
+    return port_;
+  }
+  /** Connections made so far (accepted and closed here). */
+  int connections()
+  {
+    while (fd_ >= 0) {
+      const int client = accept4(fd_, nullptr, nullptr, SOCK_CLOEXEC);
+      if (client < 0) {
+        break;
+      }
+      close(client);
+      connections_++;
+    }
+    return connections_;
+  }
+
+ private:
+  int fd_ = -1;
+  int port_ = 0;
+  int connections_ = 0;
+};
+
+/* Synthetic, low-entropy proxy credentials: they must never appear in any output. */
+constexpr const char *kProxyUserinfo = "stk-proxy:abcdefghijklmnopqrstu";
+
+/** Every proxy variable pointed at `sink`, with no bypass list. */
+std::map<std::string, std::optional<std::string>> hostile_proxy_env(const ProxySink &sink)
+{
+  const std::string url = std::string("http://") + kProxyUserinfo + "@127.0.0.1:" + std::to_string(sink.port());
+  std::map<std::string, std::optional<std::string>> env;
+  for (const char *name : {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"}) {
+    env[name] = url;
+  }
+  env["NO_PROXY"] = env["no_proxy"] = std::string();
+  return env;
+}
+
+/* Client::task_get(target, id, require_live=true) through the strict Python bridge, a loopback Hub
+ * (uvicorn), a real NodeAgent.run (outbound WebSocket) and the loopback Runtime: the exact lookup
+ * finds a finished task after it left the node's bounded 200-task heartbeat snapshot, answers
+ * `unavailable` (from the bridge, retryable) while the node is offline, and after the reconnect finds
+ * the same task again, with no task or Hub action created on the way. The helper runs under hostile
+ * proxy variables (a counting loopback sink) and must keep its own traffic off them, then close in order. */
+TEST_F(PythonBridge, ExactLiveTaskGetThroughALoopbackHubAcrossTheWindowAndAnOutage)
+{
+  if (const std::string why = unavailable("hub"); !why.empty()) {
+    GTEST_SKIP() << why;
+  }
+  ProxySink sink;
+  ASSERT_NE(sink.port(), 0);
+  RuntimeFixture hub;
+  /* Its dependencies import (checked above): a helper that does not come up is a chain failure. */
+  if (const std::string why = start_runtime(hub, "hub", hostile_proxy_env(sink)); !why.empty()) {
+    FAIL() << why;
+  }
+  for (const auto &[name, value] : hostile_proxy_env(sink)) { /* names only, never values */
+    if (value && !value->empty()) {
+      EXPECT_NE(std::find(hub.info["proxy_env_cleared"].begin(), hub.info["proxy_env_cleared"].end(), name),
+                hub.info["proxy_env_cleared"].end())
+          << name;
+    }
+  }
+  const std::string task_id = hub.info["task_id"].get<std::string>();
+  const std::string node_id = hub.info["node_id"].get<std::string>();
+  const std::string missing = hub.info["missing_id"].get<std::string>();
+  auto client = started(options());
+  PairHubParams pairing;
+  pairing.name = "lab";
+  pairing.url = hub.info["url"].get<std::string>();
+  {
+    std::ifstream code_file(hub.info["code_file"].get<std::string>());
+    std::getline(code_file, pairing.code);
+  }
+  ASSERT_FALSE(pairing.code.empty());
+  pairing.device_name = "桌面";
+  const Result<ConnectionInfo> paired = client->connections_pair_hub(pairing).get();
+  ASSERT_TRUE(paired.ok()) << paired.error().describe();
+  ASSERT_EQ(paired.value().id, "hub:lab");
+  const Target target{paired.value().id, node_id};
+  auto listed = [&] {
+    std::set<std::string> ids;
+    const Result<Json> tasks = client->task_list(target).get();
+    EXPECT_TRUE(tasks.ok()) << tasks.error().describe();
+    if (tasks.ok()) {
+      for (const Json &task : tasks.value()["tasks"]) {
+        ids.insert(task["id"].get<std::string>());
+      }
+    }
+    return ids;
+  };
+  /* One observation of the Hub's device record, for this node. */
+  auto replied = [&](const Json &reply) {
+    return reply.is_object() && reply.value("ok", false) && reply.value("node_id", "") == node_id;
+  };
+  auto expect_found = [&](const char *phase) {
+    const Result<Json> found = client->task_get(target, task_id, true).get();
+    EXPECT_TRUE(found.ok()) << phase << ": " << found.error().describe();
+    return found.ok() ? found.value()["task"] : Json(nullptr);
+  };
+
+  const Json before = hub.command("state");
+  ASSERT_TRUE(replied(before)) << before.dump();
+  ASSERT_TRUE(before["task_in_snapshot"].get<bool>());
+  EXPECT_EQ(before["synthetic_rows"], 0);
+  EXPECT_EQ(before["runtime_tasks"], Json::array({task_id}));
+  EXPECT_EQ(before["task_state"], "succeeded");
+  EXPECT_TRUE(listed().count(task_id)) << "the finished task starts inside the heartbeat snapshot";
+
+  /* 1. The next real heartbeat lists only synthetic rows; the exact entry still finds the task. */
+  const Json windowed = hub.command("window");
+  ASSERT_TRUE(replied(windowed)) << windowed.dump();
+  ASSERT_GT(windowed["last_seen"].get<double>(), before["last_seen"].get<double>());
+  ASSERT_EQ(windowed["snapshot_tasks"], 200);
+  ASSERT_EQ(windowed["synthetic_rows"], 200);
+  ASSERT_EQ(windowed["other_rows"], Json::array());
+  ASSERT_FALSE(windowed["task_in_snapshot"].get<bool>());
+  ASSERT_TRUE(windowed["missing_in_snapshot"].get<bool>());
+  const std::set<std::string> window_ids = listed();
+  EXPECT_EQ(window_ids.size(), 200u);
+  EXPECT_FALSE(window_ids.count(task_id));
+  EXPECT_TRUE(window_ids.count(missing));
+  const Json original = expect_found("outside the window");
+  ASSERT_TRUE(original.is_object());
+  EXPECT_EQ(original["id"], task_id);
+  EXPECT_EQ(original["state"], "succeeded");
+  /* Control: listed in the snapshot but absent from the Runtime, so the live answer is the node's. */
+  const Result<Json> absent = client->task_get(target, missing, true).get();
+  ASSERT_FALSE(absent.ok());
+  EXPECT_EQ(absent.error().code, ErrorCode::RemoteError) << absent.error().describe();
+  EXPECT_NE(absent.error().message.find("Task not found"), std::string::npos) << absent.error().describe();
+  EXPECT_FALSE(absent.error().local);
+
+  /* 2. Offline: `unavailable` from the bridge, never a task result; the Runtime still says succeeded. */
+  const Json down = hub.command("offline");
+  ASSERT_TRUE(replied(down)) << down.dump();
+  ASSERT_FALSE(down["online"].get<bool>());
+  const Result<Json> offline = client->task_get(target, task_id, true).get();
+  ASSERT_FALSE(offline.ok()) << offline.value().dump();
+  EXPECT_EQ(offline.error().code, ErrorCode::Unavailable) << offline.error().describe();
+  EXPECT_TRUE(offline.error().retryable);
+  EXPECT_FALSE(offline.error().local) << "the bridge answered, not the client";
+  const Json during = hub.command("state");
+  ASSERT_TRUE(replied(during)) << during.dump();
+  EXPECT_EQ(during["task_state"], "succeeded");
+  EXPECT_EQ(during["runtime_tasks"], Json::array({task_id}));
+
+  /* 3. Reconnected: its first heartbeat (still the window) and the same identity, nothing new created. */
+  const Json up = hub.command("online");
+  ASSERT_TRUE(replied(up)) << up.dump();
+  ASSERT_TRUE(up["online"].get<bool>());
+  ASSERT_GT(up["last_seen"].get<double>(), windowed["last_seen"].get<double>());
+  ASSERT_EQ(up["synthetic_rows"], 200);
+  ASSERT_FALSE(up["task_in_snapshot"].get<bool>());
+  const Json recovered = expect_found("after the reconnect");
+  EXPECT_EQ(recovered, original);
+  const Json after = hub.command("state");
+  ASSERT_TRUE(replied(after)) << after.dump();
+  EXPECT_EQ(after["runtime_tasks"], Json::array({task_id}));
+  EXPECT_EQ(after["actions"], before["actions"]);
+  EXPECT_EQ(after["action_events"], before["action_events"]);
+  EXPECT_EQ(after["task_state"], "succeeded");
+  EXPECT_EQ(client->bridge_log().text().find(pairing.code), std::string::npos);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+  EXPECT_EQ(client->stats().restarts, 0u);
+  client->close();
+  EXPECT_EQ(hub.close_checked(), "");
+  EXPECT_EQ(sink.connections(), 0) << "the helper sent traffic to the proxy variables";
+  EXPECT_EQ(hub.stderr_tail(1 << 20).find(kProxyUserinfo), std::string::npos);
+}
+
+/* The helper stops while its node is offline (as when a check fails between `offline` and
+ * `online`): the stopped agent, the Hub and the Runtime still close in order, exit 0. */
+TEST_F(PythonBridge, LoopbackHubFixtureClosesInOrderWhileItsNodeIsOffline)
+{
+  if (const std::string why = unavailable("hub"); !why.empty()) {
+    GTEST_SKIP() << why;
+  }
+  ProxySink sink;
+  ASSERT_NE(sink.port(), 0);
+  RuntimeFixture hub;
+  if (const std::string why = start_runtime(hub, "hub", hostile_proxy_env(sink)); !why.empty()) {
+    FAIL() << why;
+  }
+  const Json down = hub.command("offline");
+  ASSERT_TRUE(down.is_object() && down.value("ok", false)) << down.dump();
+  ASSERT_FALSE(down["online"].get<bool>());
+  EXPECT_EQ(hub.close_checked(), "");
+  EXPECT_EQ(sink.connections(), 0);
 }
 
 #endif
