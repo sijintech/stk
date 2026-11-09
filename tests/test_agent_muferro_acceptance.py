@@ -12,14 +12,16 @@ from uuid import uuid4
 import pytest
 
 from suan.agent import tools, wire
+from suan.desktop_bridge import schema as bridge_schema
 from suan.project.drafts import Drafts
 from suan.project.labels import Labels
 from suan.project.runs import Runs
 from suan.project.store import ProjectStore
 from suan.project.workflow_runs import WorkflowRuns
+from suan.runtime.client import RuntimeClient
 from suan.workflows import muferro
 from test_bridge_workflow_muferro import scan, settled  # noqa: F401
-from test_desktop_bridge import bridge_env, inproc  # noqa: F401
+from test_desktop_bridge import _strict, bridge_env, inproc, second_opinion  # noqa: F401
 
 ADAPTER = "openai-compatible/1:laptop"
 TEMPERATURE = muferro.FIELD_IDS["temperature"]
@@ -87,13 +89,8 @@ def wait(h, handle, session_id, timeout=60):
     return view
 
 
-def test_agent_prepares_existing_case_then_human_first_start_runs_once(scan, monitor, inproc, monkeypatch):
-    """Real Runtime and manufactured MuFerro, with scripted planner replies and strict bridge messages.
-
-    The desktop bridge is closed in order and a fresh strict bridge reopens the same state, project and session
-    before approval: the persisted plan and hashes survive, but the earlier process's inspection does not.
-    """
-    s = scan
+def prepared_session(s, monitor):
+    """The scripted planner freezes a plan for the first saved row; the desktop selected its Runtime target."""
     h, store, handle = s["h"], s["store"], s["handle"]
     gateway = h.bridge.projects.models
     gateway.endpoints.add("laptop", "Laptop", "http://127.0.0.1:9/v1", ["qwen"])
@@ -115,6 +112,75 @@ def test_agent_prepares_existing_case_then_human_first_start_runs_once(scan, mon
     assert not store.agent_sessions.objects(sid)
     sources = next(e["sources"] for e in view["events"] if e["kind"] == "tool_result")
     assert sources[0]["kind"] == "workflow_run" and sources[0]["label"] == "private"
+    return sid, view, item
+
+
+def count_starts(h, monkeypatch):
+    """Every call to this bridge's workflow executor ``start``, forwarded unchanged."""
+    starts = []
+    start = h.bridge.workflow_executor.start
+
+    def record_start(store, run_id, **kwargs):
+        starts.append(run_id)
+        return start(store, run_id, **kwargs)
+
+    monkeypatch.setattr(h.bridge.workflow_executor, "start", record_start)
+    return starts
+
+
+def fresh_bridge(s, inproc, monkeypatch):
+    """Orderly close, then a fresh strict bridge on the same state directory reopens the same project."""
+    h, handle = s["h"], s["handle"]
+    assert h.call("project.close", {"handle": handle})["closed"] is True
+    h.close()
+    h = inproc()
+    h.bridge.analysis_executor.worker = s["worker"]
+    h.bridge.workflow_executor.poll_seconds = 0.02
+    starts = count_starts(h, monkeypatch)
+    reopened = h.call("project.open", {"directory": str(s["store"].directory)})["project"]["handle"]
+    assert reopened != handle
+    s["h"], s["handle"] = h, reopened  # settled() follows the fresh bridge
+    return h, reopened, starts
+
+
+def lose_first_run_decide_result(h):
+    """The bridge writes its first successful ``run_decide`` reply, still checked strictly; the desktop never
+    receives it. One controlled drop: later lines are delivered unchanged."""
+    lost, receive = {"done": threading.Event()}, h.receive
+
+    def deliver(raw):
+        message = _strict(raw)
+        method = None if "event" in message else h.methods.get(message.get("id"))
+        if method == "project.agent.run_decide" and "result" in message and not lost["done"].is_set():
+            issues = bridge_schema.validate_outgoing(message, method) + second_opinion(message, method)
+            if issues:
+                h.violations.append((method, issues))
+            lost["message"] = message
+            lost["done"].set()
+            return
+        receive(raw)
+
+    h.receive = deliver
+    return lost
+
+
+def started_events(store, run_id):
+    """The run-level ``started`` events of the workflow run, read from the project file."""
+    with store._connect() as db:
+        _, events = store.workflow_runs._read(db, run_id)
+    return [e for e in events if e["step"] == "" and e["status"] == "started"]
+
+
+def test_agent_prepares_existing_case_then_human_first_start_runs_once(scan, monitor, inproc, monkeypatch):
+    """Real Runtime and manufactured MuFerro, with scripted planner replies and strict bridge messages.
+
+    The desktop bridge is closed in order and a fresh strict bridge reopens the same state, project and session
+    before approval: the persisted plan and hashes survive, but the earlier process's inspection does not.
+    """
+    s = scan
+    h, store, handle = s["h"], s["store"], s["handle"]
+    sid, view, item = prepared_session(s, monitor)
+    params = {"handle": handle, "session_id": sid}
     args = {**params, "item_id": item["item_id"]}
     decision = {**args, "decision": "start", "plan_sha256": item["plan_sha256"],
                 "expected_revision": item["expected_revision"]}
@@ -126,22 +192,8 @@ def test_agent_prepares_existing_case_then_human_first_start_runs_once(scan, mon
     assert target is not None
 
     # Cold reopen before approval: orderly close, then a fresh strict bridge on the same state directory.
-    assert h.call("project.close", {"handle": handle})["closed"] is True
-    h.close()
-    h = inproc()
-    h.bridge.analysis_executor.worker = s["worker"]
-    h.bridge.workflow_executor.poll_seconds = 0.02
-    starts = []
-    start = h.bridge.workflow_executor.start
-
-    def record_start(store, run_id, **kwargs):
-        starts.append(run_id)
-        return start(store, run_id, **kwargs)
-
-    monkeypatch.setattr(h.bridge.workflow_executor, "start", record_start)
-    old_handle, handle = handle, h.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
-    assert handle != old_handle
-    s["h"], s["handle"] = h, handle  # settled() follows the fresh bridge
+    old_handle = handle
+    h, handle, starts = fresh_bridge(s, inproc, monkeypatch)
     params = {"handle": handle, "session_id": sid}
     args = {**params, "item_id": item["item_id"]}
     decision = {**args, "decision": "start", "plan_sha256": item["plan_sha256"],
@@ -186,6 +238,72 @@ def test_agent_prepares_existing_case_then_human_first_start_runs_once(scan, mon
     assert len(decided) == 1 and decided[0]["item_id"] == item["item_id"]
     assert h.call("project.agent.verify", params)["ok"]
     assert not h.violations
+
+
+def test_lost_first_start_reply_is_observed_from_a_fresh_bridge_without_another_start(scan, monitor, inproc,
+                                                                                      monkeypatch):
+    """The reply to a genuine first start is lost (spec "Review, consumption and dispatch"). The desktop never sends
+    the decision again: after an orderly close, a fresh strict bridge reopens the same project and session, and only
+    an explicit ``run_observe`` reads the original historical receipt. Nothing starts or reaches the Runtime again."""
+    s = scan
+    h, store = s["h"], s["store"]
+    sid, _, item = prepared_session(s, monitor)
+    run_id = item["run_id"]
+    args = {"handle": s["handle"], "session_id": sid, "item_id": item["item_id"]}
+    assert h.call("project.agent.run_plan", args)["run"]["plan_sha256"] == item["plan_sha256"]
+    starts = count_starts(h, monkeypatch)
+    submissions = []
+    submit = RuntimeClient.submit
+
+    def record_submit(client, spec, idempotency_key=None):
+        submissions.append(idempotency_key)
+        return submit(client, spec, idempotency_key)
+
+    monkeypatch.setattr(RuntimeClient, "submit", record_submit)
+    lost = lose_first_run_decide_result(h)
+    sent = h.request("project.agent.run_decide", {**args, "decision": "start", "plan_sha256": item["plan_sha256"],
+                                                  "expected_revision": item["expected_revision"]})
+    assert lost["done"].wait(60), "the bridge wrote no successful run_decide reply"
+    # The bridge started the run and wrote its reply; the desktop received nothing and does not send it again.
+    assert lost["message"]["id"] == sent and lost["message"]["result"]["receipt"]["outcome"] == "started"
+    with h.cond:
+        assert sent not in h.responses
+    assert starts == [run_id]
+    executor_id = h.bridge.workflow_executor.executor_id
+    completed = settled(s, run_id, timeout=90)  # settled before closing: closing the project stops following
+    assert all(t["status"] == "succeeded" for t in completed["tasks"])
+    runtime_tasks = sorted(t["id"] for t in s["client"].tasks())
+    assert len(runtime_tasks) == 1 and len(s["worker"].files) == 1
+    original = started_events(store, run_id)
+    assert len(original) == 1 and original[0]["executor_id"] == executor_id
+    assert original[0]["approval"] == {"approval_id": item["item_id"], "plan_sha256": item["plan_sha256"],
+                                       "request_sha256": item["request_sha256"],
+                                       "expected_revision": item["expected_revision"]}
+
+    h, handle, fresh_starts = fresh_bridge(s, inproc, monkeypatch)
+    assert h.bridge.workflow_executor.executor_id != executor_id
+    params = {"handle": handle, "session_id": sid}
+    args = {**params, "item_id": item["item_id"]}
+    reopened = h.call("project.agent.get", params)
+    assert [card["item"] for card in reopened["run_approvals"]] == [item] and reopened["awaiting"] == []
+    assert reopened["run_approvals"][0]["decision"]["decision"] == "start"
+    receipt = h.call("project.agent.run_observe", args)["receipt"]
+    assert receipt["outcome"] == "started" and receipt["ok"] is True
+    assert receipt["item_id"] == item["item_id"] and receipt["run_id"] == run_id
+    assert receipt["approval"] == original[0]["approval"] and receipt["executor_id"] == executor_id
+    assert receipt["run_status"] == "stopped"  # the current workflow state, separate from the historical start
+    # Observation started, recovered and submitted nothing.
+    assert fresh_starts == [] and not h.bridge.workflow_executor.active(h.bridge.projects._stores[handle], run_id)
+    assert len(submissions) == 1 and submissions[0]
+    assert sorted(t["id"] for t in s["client"].tasks()) == runtime_tasks and len(s["worker"].files) == 1
+    assert started_events(store, run_id) == original
+    assert h.call("project.workflow_runs.get", {"handle": handle, "run_id": run_id})["run"]["status"] == "stopped"
+    final_view = h.call("project.agent.get", params)
+    decided = [e for e in final_view["events"] if e["kind"] == "approval_decided"]
+    assert len(decided) == 1 and decided[0]["item_id"] == item["item_id"]
+    assert final_view["run_approvals"][0]["receipt"]["run_status"] == "stopped"  # the observation is saved
+    assert h.call("project.agent.verify", params)["ok"]
+    assert monitor == ["WorkflowRuns.prepare"] and not h.violations
 
 
 def test_the_agent_proposes_a_scan_a_person_runs_it_and_the_agent_analyses_the_results(scan, monitor):
