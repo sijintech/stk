@@ -117,6 +117,38 @@ Claude 以 `a656f879` 为基线核对执行器和读取器入口。下文比较�
 
 合成结果来自节点代理子进程和进程内 TestClient。定向 23 项通过，证据为 `root-delivery-20261109-88/claude47/evidence/graph_meta_receipt.json` 和 `pytest_targeted.txt`。实际旧部署、支持 VTK 的渲染节点、真实 MuPRO 节点以及新客户端兼容仍待核验。 [图测试](../../tests/test_control_graph.py)
 
+## 收集结果的 HDF5 场显式查看（核查，基线 `7ac983e8`）
+
+本节核对已收集运行的 `case/run.h5` 经 `mupro_hdf5@1` 显式查看的入口。完成核验和默认 View 沿用 DAT 契约。下文的选择器用于合成验证，真实求解器输出、许可和研究步号需要独立依据。
+
+### 观察事实
+
+- **入口。** 内置和派生预设都不含 `mupro_hdf5@1`。`iso`、`scalar-volume`、`slice`、`vectors`、`volume` 是 `data`+`path` 场预设，使用 `stk.source.file@1`，其格式枚举不含 MuPRO HDF5。`run.h5` 自动判为 `vtkhdf`，`scalar-volume` 在 `src` 报 `unsupported`（无 `/VTKHDF` 组）。
+  桌面 Viewer 直接打开文件只接受 `.dat/.npy/.vti/.vtk/.vtkhdf`。打开目录时，预设的第一个绑定指向该目录。脚本 `viewer.open` 只接收路径、预设 ID 和参数，不接收内联图。
+- **SHA。** 收集以任务发布 SHA 调用 `describe`，`view()` 打开前复核登记文件和清单。基线图源把执行绑定到本次规划读到的字节。独立合成对照在收集核验与图读取之间改写一个体素，未指定摘要的请求读到了改写后的内容。图源现支持 `expected_sha256`，调用方可提供收集行的摘要，规划会在缓存查找前拒绝不符的字节。Runtime 绑定也核对任务发布 SHA。 [HDF5 契约](../specs/mupro-hdf5-1.md)
+- **选择器与步。** 节点无输入端口，`selector` 是带模式的字符串。`string` 图参数经 `$param` 传入可通过校验，结果参数只回显该值，没有 choices。`step` 类型参数校验报 `param_ref_type`。
+  运行索引（`live: false`）在 `result.datasets` 给出 `hdf5:Polar` 两帧和 `hdf5:Strain` 一帧的原选择器、容器 SHA 和大小。`frames` 表只含 DAT。不存在的步报 `frame_not_found`，不回退。
+- **原字段。** `(4,3,2,3)` float32 读出 `(2,3,4,3)` float32，step 2，`grid_index`，场单位 `unspecified`，物理时间未知。六分量 int16 `Strain` 保留 dtype 和分量数，单位 `unspecified`。量名按已发布的 MuFerro 字段含义记为 `polarization` 和 `strain`。
+- **DAT 共存与缺 h5py。** 同一 case 中 DAT 数据集与 `hdf5:*` 并列，DAT `Polar` 的步 0、2 保持。新解释器阻断 h5py 后，运行索引仍列出 DAT 并记 `hdf5_error: unavailable`。显式节点在规划阶段报 `unavailable`，未启动，也未加载 h5py。
+
+[图源节点](../../suan/graph/nodes/sources.py) [Viewer 源分类与绑定](../../desktop/engine/lib/stk_app/src/viewer_state.cc) [脚本 Viewer](../../desktop/engine/lib/stk_app/src/scripting_viewer.cc) [收集与查看](../../suan/workflows/muferro.py) [图契约](../specs/stk-graph-v1.md)
+
+### 两条路径
+
+| 路径 | 合成核查 | 兼容性与限制 |
+|---|---|---|
+| 已保存分析的数据绑定 | 把 `scalar-volume` 的 `src` 换成 `mupro_hdf5@1`，并把 `selector` 声明为字符串参数，校验通过。快照冻结的 `run.h5` SHA 等于登记值。真实 GraphWorker 生成了与第 0 分量转置一致的载荷 | 可经现有分析编辑器打开载荷。选择器写在分析参数里，换步需要新的分析运行。分析输入上限 256 MiB，低于 HDF5 源的 1 GiB |
+| 专用显式预设 | 可用新增预设或从现有图派生。打开目录和 `ui.viewer.open(path, preset, parameters)` 沿用现有协议 | 由调用方从收集观测传入选择器和摘要。当前节点的字符串参数只回显选择，步滑块需要独立的步号选择逻辑 |
+
+已有的可用路径是已保存分析。此探针用 `prepared` 夹具登记一份同字节副本，然后经现有 `files.index` 和快照冻结。实际收集记录的摘要交接另由 Runtime 合成回环覆盖。 [分析运行](../../suan/project/analysis_runs.py) [分析执行](../../suan/desktop_bridge/analysis_runs.py)
+
+### 缺口与检查
+
+交互选择步或场需要显式的选择器选项，或新增从运行索引到 HDF5 选择器的节点。现有节点仅报告字符串值，运行索引的 `frames` 表和 `muferro_frame@1` 仍按 DAT 契约工作。 [图契约](../specs/stk-graph-v1.md)
+
+外部探针 `probe_collected_hdf5_view.py` 生成 `receipt.json` 和 `probe_stdout.txt`。定向测试包括 `test_mupro_hdf5_source`、`test_mupro_hdf5_results`、`test_mupro_hdf5_collection`、`test_muferro_collected_view`、`test_graph_presets` 及 `test_analysis_run_executor` 的真实载荷用例，结果 73 项通过，1 项跳过（需 `STK_PERF=1` 的性能基准）。
+证据位于 `root-delivery-20261109-91/claude50/evidence/`。原生桌面中分析载荷的点击验收、Hub/Runtime 绑定的分析运行、真实求解器 HDF5 输出和许可证据仍未核验。
+
 ## 电场扫描与剩余决定
 
 电场扫描是将外加电场按任务方案改变，获得 P–E 回线等响应。任务需明确场方向、幅度和单位、
