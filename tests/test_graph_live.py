@@ -7,13 +7,16 @@ lines, new frames) does not invalidate what was derived from an unchanged frame.
 """
 import copy
 import hashlib
+import io
 import os
 
 import pytest
 
 np = pytest.importorskip("numpy")
 
-from mupro_fake import _frame, write_case, write_outputs  # noqa: E402
+from mupro_fake import _e18, _frame, write_case, write_outputs  # noqa: E402
+from suan.connectors.files import LocalFiles, RuntimeFiles  # noqa: E402
+from suan.connectors.mupro import MuFerroConnector  # noqa: E402
 from suan.data.dat import read_dat_image  # noqa: E402
 from suan.graph.cache import GraphCache  # noqa: E402
 from suan.graph.catalog import default_registry  # noqa: E402
@@ -62,6 +65,195 @@ def _append_energy(run, step):
                      "  0.4000000000E+01 -0.1000000000+102\n")
     with open(run / "mupro_progress.jsonl", "a") as stream:
         stream.write(f'{{"step":{step},"completed_steps":{step},"total_steps":10}}\n')
+
+
+ENERGY_FILE = "energy_out.dat"
+PROGRESS_FILE = "mupro_progress.jsonl"
+
+
+def _run_index(folder, *, cache=None, on_event=None, source=None):
+    graph = {"schema": "stk.graph/1", "catalog": {"stk": 1}, "nodes": [GRAPH["nodes"][0]],
+             "outputs": {port: f"run.{port}" for port in ("energy", "progress", "result")}}
+    resolver = LocalDirResolver({"run": folder}) if source is None else {"run": source}
+    return evaluate(graph, registry=default_registry(), resolver=resolver, cache=cache, on_event=on_event)
+
+
+def _one_row_run(folder):
+    write_case(folder, steps=5)
+    write_outputs(folder, steps=5, mode="fail")
+
+
+def _changed_energy(raw):
+    changed = raw.replace(_e18(-1.125).encode(), _e18(-9.125).encode())
+    assert changed != raw and len(changed) == len(raw)
+    return changed
+
+
+def _assert_one_energy(outputs, total):
+    assert outputs["energy"].column("Total Energy").tolist() == [total]
+    assert next(q for q in outputs["result"]["qoi"] if q["name"] == "total_energy")["value"] == total
+
+
+@pytest.mark.parametrize("change", ["energy", "append", "appears", "disappears"])
+def test_run_index_refuses_table_drift_after_planning_and_restores_cleanly(tmp_path, change):
+    _one_row_run(tmp_path)
+    path = tmp_path / (ENERGY_FILE if change == "energy" else PROGRESS_FILE)
+    if change == "appears":
+        path.unlink()
+    original = path.read_bytes() if path.exists() else None
+    stamp = path.stat() if original is not None else None
+    cache = GraphCache()
+
+    def mutate(event):
+        if event["type"] != "node.started":
+            return
+        if change == "energy":
+            path.write_bytes(_changed_energy(original))
+        elif change == "disappears":
+            path.unlink()
+        else:
+            with path.open("ab") as stream:
+                stream.write(b'{"step":2,"completed_steps":2,"total_steps":5}\n')
+
+    with pytest.raises(EvaluationFailed) as error:
+        _run_index(tmp_path, cache=cache, on_event=mutate)
+    assert error.value.errors[0]["code"] == "invalid_data"
+
+    if original is None:
+        path.unlink()
+    else:
+        path.write_bytes(original)
+        os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    restored = _run_index(tmp_path, cache=cache)
+    assert restored.evaluated == ["run"]
+    _assert_one_energy(restored.outputs, -1.125)
+    assert restored.outputs["progress"].column("completed_steps").tolist() == ([] if change == "appears" else [1])
+    assert _run_index(tmp_path, cache=cache).evaluated == []
+
+
+def test_run_index_energy_qoi_and_port_share_one_verified_observation(tmp_path):
+    _one_row_run(tmp_path)
+    original = (tmp_path / ENERGY_FILE).read_bytes()
+    changed = _changed_energy(original)
+
+    class ChangedOnce(LocalFiles):
+        armed = False
+        execution_reads = 0
+
+        def open(self, path):
+            if self.armed and path == ENERGY_FILE:
+                self.execution_reads += 1
+                if self.execution_reads == 1:
+                    return io.BytesIO(changed)
+            return super().open(path)
+
+    source, cache = ChangedOnce(tmp_path), GraphCache()
+
+    def mutate(event):
+        if event["type"] == "node.started":
+            source.armed = True
+
+    with pytest.raises(EvaluationFailed) as error:
+        _run_index(tmp_path, cache=cache, source=source, on_event=mutate)
+    assert error.value.errors[0]["code"] == "invalid_data" and source.execution_reads == 1
+    source.armed = False
+    restored = _run_index(tmp_path, cache=cache, source=source, on_event=mutate)
+    assert restored.evaluated == ["run"] and source.execution_reads == 2
+    _assert_one_energy(restored.outputs, -1.125)
+    file = next(entry for entry in restored.outputs["result"]["files"] if entry["path"] == ENERGY_FILE)
+    assert file["sha256"] == hashlib.sha256(original).hexdigest() and file["size"] == len(original)
+
+
+def test_run_index_accepts_short_reads_from_a_file_source(tmp_path):
+    _one_row_run(tmp_path)
+
+    class ShortStream(io.BytesIO):
+        def read(self, size=-1):
+            return super().read(min(size, 7) if size >= 0 else 7)
+
+    class ShortSource(LocalFiles):
+        def open(self, path):
+            if path in (ENERGY_FILE, PROGRESS_FILE):
+                with super().open(path) as stream:
+                    return ShortStream(stream.read())
+            return super().open(path)
+
+    outputs = _run_index(tmp_path, source=ShortSource(tmp_path)).outputs
+    _assert_one_energy(outputs, -1.125)
+    assert outputs["progress"].column("completed_steps").tolist() == [1]
+
+
+def test_run_index_hashes_same_size_and_mtime_local_energy_rewrite(tmp_path):
+    _one_row_run(tmp_path)
+    cache = GraphCache()
+    first = _run_index(tmp_path, cache=cache)
+    path = tmp_path / ENERGY_FILE
+    stamp = path.stat()
+    path.write_bytes(_changed_energy(path.read_bytes()))
+    os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    new = _run_index(tmp_path, cache=cache)
+    assert new.evaluated == ["run"] and new.keys != first.keys
+    _assert_one_energy(new.outputs, -9.125)
+
+
+@pytest.mark.parametrize("filename", [ENERGY_FILE, PROGRESS_FILE])
+def test_run_index_refuses_runtime_table_cache_rewrite(tmp_path, filename):
+    from test_connectors_files import FakeClient
+    _one_row_run(tmp_path)
+    files = {name: (tmp_path / name).read_bytes() for name in (ENERGY_FILE, PROGRESS_FILE)}
+    client = FakeClient(files)
+    source = RuntimeFiles(client, "test-task", tmp_path / "runtime-cache")
+    correct_cache = GraphCache()
+    first = _run_index(tmp_path, source=source, cache=correct_cache)
+    _assert_one_energy(first.outputs, -1.125)
+    path = source.fetch(filename)
+    stamp = path.stat()
+    altered = _changed_energy(files[filename]) if filename == ENERGY_FILE else files[filename].replace(
+        b'"completed_steps":1', b'"completed_steps":2')
+    assert altered != files[filename] and len(altered) == len(files[filename])
+    path.write_bytes(altered)
+    os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    cached = _run_index(tmp_path, source=source, cache=correct_cache)
+    assert cached.evaluated == []
+    _assert_one_energy(cached.outputs, -1.125)
+    assert cached.outputs["progress"].column("completed_steps").tolist() == [1]
+    empty_cache = GraphCache()
+    with pytest.raises(EvaluationFailed) as error:
+        _run_index(tmp_path, source=source, cache=empty_cache)
+    assert error.value.errors[0]["code"] == "invalid_data"
+    path.write_bytes(files[filename])
+    os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    restored = _run_index(tmp_path, source=source, cache=empty_cache)
+    assert restored.evaluated == ["run"]
+    _assert_one_energy(restored.outputs, -1.125)
+    assert restored.outputs["progress"].column("completed_steps").tolist() == [1]
+    assert client.downloads == 2
+
+
+def test_run_index_preserves_direct_malformed_energy_diagnostic(tmp_path):
+    _one_row_run(tmp_path)
+    (tmp_path / ENERGY_FILE).write_text("malformed energy row\n")
+    result = MuFerroConnector().describe(LocalFiles(tmp_path), live=True)
+    energy = next(dataset for dataset in result["datasets"] if dataset["id"] == "energy")
+    assert energy["geometry"]["rows"] is None and not result["qoi"]
+    with pytest.raises(EvaluationFailed) as error:
+        _run_index(tmp_path)
+    assert error.value.errors[0]["code"] == "invalid_data"
+
+
+def test_run_index_preserves_a_replacement_connector_table_reader(tmp_path, monkeypatch):
+    from suan.graph.nodes import sources
+    _one_row_run(tmp_path)
+    opened = []
+
+    class CustomOpen(MuFerroConnector):
+        def open(self, run, dataset_id, **options):
+            opened.append(dataset_id)
+            return super().open(run, dataset_id, **options)
+
+    monkeypatch.setattr(sources, "_muferro", lambda: CustomOpen())
+    _assert_one_energy(_run_index(tmp_path).outputs, -1.125)
+    assert opened == ["energy", "progress"]
 
 
 def test_step_aliases_share_one_frame_entry(live):

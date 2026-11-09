@@ -1257,6 +1257,11 @@ It uses the same report bytes to resolve `case_dir: "auto"` and read launcher me
 Evaluation fails with `invalid_data` if the report appears, disappears, or its bounded content changes after planning.
 Absent, malformed, or oversized reports use the binding root for `"auto"`. The report read limit is 4 MiB,
 subject to any lower Runtime download limit. A listed report within the limit must be readable.
+The built-in energy and progress tables also bind presence and content to the plan. Local sources
+hash actual bytes and Runtime sources use the published artifact digest. Execution reads and checks
+up to 64 MiB per table before parsing. The energy table and its manifest QOI share one observation.
+An append between evaluations produces a new plan. A table that changes during evaluation must be
+retried against a new plan.
 
 #### `stk.source.mupro_hdf5@1` — MuPRO HDF5 field / MuPRO HDF5 场
 

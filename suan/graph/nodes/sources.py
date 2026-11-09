@@ -63,13 +63,20 @@ def _native_muferro_description(connector):
     return getattr(connector.describe, "__func__", None) is MuFerroConnector.describe
 
 
+def _native_muferro_tables(connector):
+    from suan.connectors.mupro import MuFerroConnector
+    return (_native_muferro_description(connector) and
+            getattr(connector.open, "__func__", None) is MuFerroConnector.open)
+
+
 # ---------------------------------------------------------------------------
 # stk.source.muferro_run
 
 
 def _muferro_run_fingerprint(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
-    from suan.connectors.mupro import _case_dir_from_record, _observe_launcher_report, run_files
+    from suan.connectors.mupro import (_RUN_TABLE_LIMIT, _RUN_TABLE_READERS, _case_dir_from_record,
+                                       _observe_launcher_report, run_files)
     from suan.mupro.run import FRAME, RESULT
     source = _source(ctx, params["binding"])
     connector = _muferro()
@@ -92,12 +99,20 @@ def _muferro_run_fingerprint(ctx, inputs, params):
         # A same-size DAT frame rewrite can change the run key through its mtime.
         frames = sorted([path, item.size, item.mtime] for path, item in names.items()
                         if path.startswith(prefix) and "/" not in path[len(prefix):] and FRAME.search(path))
-        small = [prefix + name for name in RUN_FILES]
+        bound_tables = _native_muferro_tables(connector)
+        small = [prefix + name for name in RUN_FILES if not bound_tables or name not in _RUN_TABLE_READERS]
         if not native:
             small.append(RESULT)
         # The frames table records the grid from input.toml and its includes.
         small += sorted(path for path in names if path.endswith(".toml"))[:MAX_TOML_FILES]
         hashed = {path: source.sha256(path) for path in dict.fromkeys(small) if path in names}
+        if bound_tables:
+            for filename in _RUN_TABLE_READERS:
+                path = prefix + filename
+                if path in names:
+                    if names[path].size > _RUN_TABLE_LIMIT:
+                        raise ConnectorError(f"{path} is larger than {_RUN_TABLE_LIMIT} bytes", "invalid_data")
+                    hashed[path] = _table_content_sha256(source, path, _RUN_TABLE_LIMIT, ctx.check)
         if launcher_report and launcher_report["sha256"] is not None:
             hashed[RESULT] = launcher_report["sha256"]
         from suan.connectors.mupro.source import ContentChanged, FILE_LIMIT, file_fingerprint
@@ -164,15 +179,16 @@ def _empty_table(table_id, columns, index="step"):
                                            "\"auto\" = the case_dir recorded by the STK launcher in stk-mupro.json "
                                            "(runs submitted with --input DIR), else the binding root."),
       },
-      time_dependent=True, impl_version=4, fingerprint=_muferro_run_fingerprint)
+      time_dependent=True, impl_version=5, fingerprint=_muferro_run_fingerprint)
 def muferro_run(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
     from suan.connectors.mupro.tables import ENERGY_COLUMNS
-    from suan.connectors.mupro import MuFerroConnector
+    from suan.connectors.mupro import MuFerroConnector, _ENERGY_FILE, _PROGRESS_FILE, _read_planned_run_tables
     source = _source(ctx, params["binding"])
     connector = _muferro()
     native = _native_muferro_description(connector)
     case_dir = ctx.source_fingerprint["case_dir"] if native else _case_dir(source, params["case_dir"])
+    prefix = _prefix(case_dir)
     # A replacement connector (e.g. the private stk-mupro package) implements the plain protocol.
     ours = isinstance(connector, MuFerroConnector)
     if case_dir != "." and not ours:
@@ -182,11 +198,17 @@ def muferro_run(ctx, inputs, params):
         extra["hdf5_sha256"] = ctx.source_fingerprint.get("hdf5", {})
         extra["launcher_report"] = ctx.source_fingerprint["launcher_report"]
     try:
-        result = connector.describe(source, live=True, **extra)
-        datasets = {d["id"] for d in result["datasets"]}
-        extra = {"case_dir": case_dir, "result": result} if ours else {}
-        energy = connector.open(source, "energy", **extra).read(frame=None) if "energy" in datasets else None
-        progress = connector.open(source, "progress", **extra).read(frame=None) if "progress" in datasets else None
+        if _native_muferro_tables(connector):
+            tables = _read_planned_run_tables(source, prefix, ctx.source_fingerprint["sha256"], ctx.check)
+            result = connector.describe(source, live=True, table_observations=tables, **extra)
+            energy = tables.get(prefix + _ENERGY_FILE, {}).get("table")
+            progress = tables.get(prefix + _PROGRESS_FILE, {}).get("table")
+        else:
+            result = connector.describe(source, live=True, **extra)
+            datasets = {d["id"] for d in result["datasets"]}
+            extra = {"case_dir": case_dir, "result": result} if ours else {}
+            energy = connector.open(source, "energy", **extra).read(frame=None) if "energy" in datasets else None
+            progress = connector.open(source, "progress", **extra).read(frame=None) if "progress" in datasets else None
     except ConnectorError as exc:
         raise _failure(exc) from None
     if energy is None:
@@ -196,7 +218,7 @@ def muferro_run(ctx, inputs, params):
         progress = _empty_table("progress", ("step", "completed_steps", "total_steps"))
     files = {f["path"] for f in result.get("files", ())}
     extension = (result.get("extensions") or {}).get("mupro") or {}
-    complete = _prefix(case_dir) + "mupro_completion.json" in files and not extension.get("missing_frames")
+    complete = prefix + "mupro_completion.json" in files and not extension.get("missing_frames")
     frames = _frames_table(result, {"binding": params["binding"], "case_dir": case_dir, "complete": bool(complete)})
     if not frames.n_rows:
         ctx.warn("The run has no field frames yet", code="empty_result")
@@ -454,29 +476,32 @@ def _table_format(path, text, wanted):
     return "columns"
 
 
+def _table_content_sha256(source, path, limit, check):
+    from suan.connectors.files import RuntimeFiles
+    if isinstance(source, RuntimeFiles):
+        return source.sha256(path).lower()
+    # A rewrite can preserve every field of the FileSource hash memo key.
+    digest = sha256()
+    remaining = limit
+    with source.open(path) as stream:
+        while True:
+            check()
+            chunk = stream.read(min(1 << 20, remaining + 1))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            if remaining < 0:
+                raise NodeExecutionError(f"{path} is larger than {limit} bytes", code="budget_exceeded")
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _table_fingerprint(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
-    from suan.connectors.files import RuntimeFiles
     source = _source(ctx, params["binding"])
     path = params["path"]
     try:
-        if isinstance(source, RuntimeFiles):
-            identity = source.sha256(path).lower()
-        else:
-            # A rewrite can preserve every field of the FileSource hash memo key.
-            digest = sha256()
-            remaining = TABLE_LIMIT
-            with source.open(path) as stream:
-                while True:
-                    ctx.check()
-                    chunk = stream.read(min(1 << 20, remaining + 1))
-                    if not chunk:
-                        break
-                    remaining -= len(chunk)
-                    if remaining < 0:
-                        raise NodeExecutionError(f"{path} is larger than {TABLE_LIMIT} bytes", code="budget_exceeded")
-                    digest.update(chunk)
-            identity = digest.hexdigest()
+        identity = _table_content_sha256(source, path, TABLE_LIMIT, ctx.check)
     except ConnectorError as exc:
         raise _failure(exc) from None
     return {"path": path, "sha256": identity, "format": params["format"]}

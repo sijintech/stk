@@ -34,7 +34,7 @@ import tempfile
 
 from suan.mupro.run import COMPONENTS, FRAME, RESULT, MuproError, missing_frames, read_case, verify_run
 
-from ..api import API_VERSION, ConnectorError, Match
+from ..api import API_VERSION, ConnectorError, FileInfo, Match
 from ..builtin import crop_sample, field_stats, select_frame
 from .tables import ENERGY_COLUMNS, read_energy, read_progress
 
@@ -45,7 +45,11 @@ CONNECTOR_ID = "mupro.muferro"
 VERSION = "0.2.0"
 READER = "mupro.dat@1"
 IDENTITY = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-OUTPUTS = ("energy_out.dat", "mupro_progress.jsonl", "mupro_completion.json")
+_ENERGY_FILE = "energy_out.dat"
+_PROGRESS_FILE = "mupro_progress.jsonl"
+_RUN_TABLE_READERS = {_ENERGY_FILE: read_energy, _PROGRESS_FILE: read_progress}
+OUTPUTS = (*_RUN_TABLE_READERS, "mupro_completion.json")
+_RUN_TABLE_LIMIT = 64 * 1024 * 1024
 _LAUNCHER_REPORT_LIMIT = 1 << 22
 _UNPLANNED_LAUNCHER = object()
 # Stem -> (quantity, vector?) for the stems STK knows; never an assumed unit or tensor order.
@@ -173,12 +177,43 @@ def run_files(run, prefix=""):
     return names
 
 
-def _read_text(run, path, limit=64 * 1024 * 1024):
+def _read_bytes(run, path, limit, check=None):
+    data = bytearray()
     with run.open(path) as stream:
-        data = stream.read(limit + 1)
-    if len(data) > limit:
-        raise ConnectorError(f"{path} is larger than {limit} bytes", "invalid_data")
-    return data.decode("utf-8", "replace")
+        while True:
+            if check is not None:
+                check()
+            remaining = limit - len(data)
+            chunk = stream.read(min(1 << 20, remaining + 1))
+            if not chunk:
+                return data
+            if len(chunk) > remaining:
+                raise ConnectorError(f"{path} is larger than {limit} bytes", "invalid_data")
+            data.extend(chunk)
+
+
+def _read_text(run, path, limit=_RUN_TABLE_LIMIT):
+    return _read_bytes(run, path, limit).decode("utf-8", "replace")
+
+
+def _read_planned_run_tables(run, prefix, planned, check):
+    """Read and parse exactly the energy/progress bytes used by a run-index evaluation."""
+    observed = {}
+    for filename, reader in _RUN_TABLE_READERS.items():
+        path = prefix + filename
+        if path not in planned:
+            continue
+        check()
+        try:
+            raw = _read_bytes(run, path, _RUN_TABLE_LIMIT, check)
+        except (ConnectorError, OSError):
+            raise ConnectorError(f"Cannot read planned MuFerro table {path}", "invalid_data") from None
+        check()
+        digest = sha256(raw).hexdigest()
+        if digest != planned[path]:
+            raise ConnectorError(f"MuFerro table {path} changed after discovery was planned", "invalid_data")
+        observed[path] = {"size": len(raw), "sha256": digest, "table": reader(raw.decode("utf-8", "replace"))}
+    return observed
 
 
 def _media_type(path):
@@ -317,7 +352,8 @@ class MuFerroConnector:
             return info["dimensions"], info
         return None, None
 
-    def describe(self, run, *, live=False, case_dir=None, hdf5_sha256=None, launcher_report=_UNPLANNED_LAUNCHER):
+    def describe(self, run, *, live=False, case_dir=None, hdf5_sha256=None,
+                 launcher_report=_UNPLANNED_LAUNCHER, table_observations=None):
         """stk.result/1 of a muFerro run directory (``live``: frames so far, ``complete: false``)."""
         from suan.data.manifest import file_entry, qoi_entry, result_manifest
         planned_launcher = launcher_report is not _UNPLANNED_LAUNCHER
@@ -325,6 +361,12 @@ class MuFerroConnector:
             case_dir = self._case_dir(run, case_dir)
         prefix = case_prefix(case_dir)
         names = run_files(run, prefix)
+        if table_observations is not None and set(table_observations) != {
+                prefix + name for name in _RUN_TABLE_READERS if prefix + name in names}:
+            raise ConnectorError("MuFerro tables changed after discovery was planned", "invalid_data")
+        tables = table_observations or {}
+        for path, observed in tables.items():
+            names[path] = FileInfo(path, observed["size"], names[path].mtime)
         if planned_launcher:
             actual_launcher, record = _observe_launcher_report(run, names.get(RESULT))
             if actual_launcher != launcher_report:
@@ -375,13 +417,15 @@ class MuFerroConnector:
                 # HDF5 profile errors remain visible without disabling existing DAT/tables.
                 hdf5_error = {"code": exc.code, "message": str(exc)}
         qoi = []
-        energy_path = prefix + "energy_out.dat"
+        energy_path = prefix + _ENERGY_FILE
         if energy_path in names:
-            table = None
-            try:
-                table = read_energy(_read_text(run, energy_path))
-            except ConnectorError:
-                pass
+            energy = tables.get(energy_path)
+            table = energy["table"] if energy is not None else None
+            if energy is None:
+                try:
+                    table = read_energy(_read_text(run, energy_path))
+                except ConnectorError:
+                    pass
             columns = table.columns[1:] if table is not None else list(ENERGY_COLUMNS)
             datasets.append(self._table("energy", energy_path, names[energy_path], "mupro.energy@1",
                                         ["step"] + list(columns), "normalized", table))
@@ -390,7 +434,7 @@ class MuFerroConnector:
                                      quantity="energy", step=int(table.column("step")[-1]),
                                      source={"dataset": "energy", "column": columns[-1], "path": energy_path},
                                      definition=f"Last native {columns[-1]} row"))
-        progress_path = prefix + "mupro_progress.jsonl"
+        progress_path = prefix + _PROGRESS_FILE
         if progress_path in names:
             datasets.append(self._table("progress", progress_path, names[progress_path], "mupro.progress@1",
                                         ["step", "completed_steps", "total_steps"], "1", None))
@@ -450,7 +494,7 @@ class MuFerroConnector:
             role = ("manifest" if path == RESULT else "input" if name.endswith(".toml")
                     else "log" if name.endswith(".log") else "output" if (FRAME.search(name) or name in OUTPUTS or name == "run.h5")
                     else "other")
-            observed = observation if path == hdf5_path else None
+            observed = observation if path == hdf5_path else tables.get(path)
             if path == RESULT and planned_launcher:
                 observed = launcher_report
             files.append(file_entry(path, size=observed["size"] if observed else item.size,
