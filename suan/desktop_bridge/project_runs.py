@@ -3,7 +3,7 @@
 No background submission or retry. A durable intent and immutable idempotency key allow the
 caller to recover a lost response by explicitly submitting the same run again.
 """
-from .backends import FINISHED_ACTIONS, summary
+from .backends import FINISHED_ACTIONS, HubBackend, summary
 from .protocol import BridgeError
 
 
@@ -58,7 +58,10 @@ class ProjectRuns:
                         if record["state"] == "succeeded":
                             result["task"] = record["result"]
                     if task and "task" not in result:
-                        result.update(backend.task(task["id"]))
+                        if isinstance(backend, HubBackend):
+                            result.update(backend.task(task["id"], require_live=True))
+                        else:
+                            result.update(backend.task(task["id"]))
                 patch = {"last_operation": action, "error": None}
                 if "task" in result:
                     observed = result["task"]

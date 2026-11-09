@@ -16,8 +16,9 @@ from suan.desktop_bridge.projects import ProjectSessions
 from suan.desktop_bridge.protocol import BridgeError
 from test_project_values import model, derived, command  # noqa: F401
 from test_desktop_scripts import scripts, execute  # noqa: F401
-from test_desktop_bridge import bridge_env  # noqa: F401
-from test_desktop_bridge_runtime import add_profile
+from test_desktop_bridge import BridgeCallError, ProcessBridge, bridge_env  # noqa: F401
+from test_desktop_bridge_runtime import add_profile, wait_for
+from test_hub_desktop_bridge import AUTH, live, pair  # noqa: F401
 
 
 def entry(ids, **extra):
@@ -296,6 +297,77 @@ def test_hub_refresh_retains_failed_cancel_when_the_runtime_task_is_unavailable(
     key = submitted["plan"]["idempotency_key"]
     assert calls == [("submit", key), ("cancel", key + ":cancel"), ("action", action_id),
                      ("task", task_id), ("task", task_id)]
+
+
+def test_hub_run_refresh_requires_exact_observation_for_an_accepted_task(live, bridge_env, monkeypatch):
+    release = bridge_env / "release"
+    program = (
+        "import time; from pathlib import Path; "
+        f"gate=Path({str(release)!r}); until=time.monotonic()+60\n"
+        "while not gate.exists() and time.monotonic() < until: time.sleep(0.03)\n"
+        "assert gate.exists()\n"
+    )
+    workspace = live.client.create_workspace("Exact project run")['id']
+    bridge = ProcessBridge(bridge_env / "exact-run-bridge")
+    try:
+        bridge.call("hello", {"protocol": 1})
+        _, target = pair(bridge, live, profile=None)
+        project = bridge.call("project.create", {"directory": str(bridge_env / "project"), "name": "Exact run"})["project"]
+        handle, table, row = project["handle"], str(uuid4()), str(uuid4())
+        bridge.call("project.apply", {"handle": handle, "expected_revision": 0, "commands": [
+            {"op": "create_table", "id": table, "name": "Cases"},
+            {"op": "add_record", "table_id": table, "id": row},
+        ]})
+        run_id = bridge.call("project.runs.prepare", {
+            **target, "handle": handle, "expected_revision": 1, "entries": [
+                {"table_id": table, "record_id": row, "spec": {
+                    "workspace_id": workspace, "argv": ["{python}", "-c", program],
+                }},
+            ],
+        })["run_ids"][0]
+        run = {"handle": handle, "run_id": run_id}
+        pending = bridge.call("project.runs.submit", run)["run"]["status"]
+        assert pending["submission"] == "review"
+        action_id = pending["action"]["id"]
+        response = live.http.post(f"/api/v1/actions/{action_id}/review", json={"approved": True}, headers=AUTH)
+        assert response.status_code == 200
+        wait_for(lambda: live.store.action(action_id)["state"] == "succeeded")
+        task_id = live.store.action(action_id)["result"]["id"]
+        assert bridge.call("project.runs.refresh", run)["run"]["status"]["task"]["id"] == task_id
+        wait_for(lambda: live.client.task(task_id)["state"] == "running")
+        exact = bridge.call("project.runs.refresh", run)["run"]["status"]["task"]
+        assert exact["id"] == task_id and exact["state"] == "running"
+
+        original = live.agent.snapshot
+        cached = [exact]
+
+        def legacy_snapshot():
+            snapshot = original()
+            return {**snapshot, "features": [f for f in snapshot["features"] if f != "task.get"], "tasks": cached}
+
+        monkeypatch.setattr(live.agent, "snapshot", legacy_snapshot)
+        live.store.heartbeat(live.node_id, legacy_snapshot())
+        actions = live.actions()
+        release.touch()
+        wait_for(lambda: live.client.task(task_id)["state"] == "succeeded")
+        assert bridge.call("task.get", {**target, "task_id": task_id})["task"]["state"] == "running"
+        for cached in ([exact], []):
+            live.store.heartbeat(live.node_id, legacy_snapshot())
+            with pytest.raises(BridgeCallError) as refused:
+                bridge.call("project.runs.refresh", run)
+            assert refused.value.code == "unsupported"
+            saved = bridge.call("project.runs.get", run)["run"]["status"]
+            assert saved["task"] == exact and saved["error"]["code"] == "unsupported"
+        monkeypatch.setattr(live.agent, "snapshot", original)
+        live.store.heartbeat(live.node_id, original())
+        final = bridge.call("project.runs.refresh", run)["run"]["status"]
+        assert final["task"]["id"] == task_id and final["task"]["state"] == "succeeded"
+        assert final["error"] is None and len(live.client.tasks()) == 1
+        assert live.actions() == actions and len(actions) == 1
+        assert not bridge.violations
+    finally:
+        release.touch()
+        assert bridge.close() == 0
 
 
 def test_console_frozen_input_run_persists_after_close_and_validates_history(scripts, runtime, tmp_path):
