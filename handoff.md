@@ -1,5 +1,17 @@
 # STK 当前交接
 
+## 2026-11-09 15:56 UTC · 历史分析归档核验与 MuFerro 运行中接续
+
+`36c5ab8d` 绑定选中历史运行的首次归档回执。相同运行的结果读取和状态读取若返回变化后的回执，保留已验证的结果和检查模型。`af8746ad` 按已验证的归档预算检查所选载荷，用同一普通文件句柄读取精确长度，再对 Viewer 实际持有的独占字节校验 SHA-256。旧代码的回归分别确认会接受替换回执、已解码映射会随源文件原位改写。新代码能拒绝改写和长度错配，已加载载荷仍保持原值。Windows/macOS 的新读取路径待目标 CI。
+
+回执变更 C++ 86/86，精确读取与归档相关 C++ 92/92，独立缓冲与载荷检查 11/11，均零跳过。隔离 core 90/90，另有 3/3 Linux UBSan 读故障注入。Linux X11/Xvfb、1440×1600、软件 OpenGL，起点是已选中成功历史运行且 Viewer 为空。一次点击、零滚动显示冻结 HDF5 第 4 步 `Polar_x`。只请求一次归档，项目修订 13、原 Runtime 任务、冻结文件和隐藏草稿一致。证据 `root-delivery-20261109-97/{archive-owned.xml,archive-unit.xml,native-replay/evidence/receipt.json,archive-exact-io/unit-final.xml}`。补充项目广跑 1473 通过、12 项 Peer 在缺依赖环境失败。重建 Peer 目标并改用含 cryptography 的 Python 3.12 和已安装 helper 后，Peer 20/20 零跳过。
+
+root 以 `6e638721` 集成 Claude55 `b61ecc9e`。旧 Bridge 强制退出时求解器仍被夹具门控。重新观察、非强制人工恢复及显式启动期间，原求解器 PID 与创建时点保持一致。第 2 次尝试在解除门控前记录接管原任务和运行状态，重复启动只读回当前执行。随后记录一次收集，绑定原产物、冻结快照和真实 GraphWorker 能量结果。总提交一次，取消零次，原审批保留。作者和 root 六个源码测试文件各 113/113，均零跳过。商业许可求解器仍待验。证据 `root-delivery-20261109-97/claude55-root.xml` 与 `claude55-root-scratch/`。
+
+`aa9a909d` 把 `transfer.cancel` 的文档与既有返回值对齐，已终态时保留原状态，等待结束时返回当前状态。传输生命周期与关停回归 44/44。复核 #53 `c9f13994`，旧并发问题已由主线修复，剩余立即入队实现会提前从线程表移除旧 worker。#54 `2dd3e4ee` 的大写交接名与现有文件冲突。两项保留待审。 [PR #53](https://github.com/sijintech/stk/pull/53) · [PR #54](https://github.com/sijintech/stk/pull/54)
+
+远端 `b4110f8c` Runtime `42646061798` 于 15:55:20Z 完成，13/13。Desktop `42646061897` 仍在运行，本批等待该轮终态后推送。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42646061897) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42646061798) [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 15:30 UTC · Cocoa 隐藏采样、MuFerro 人工接续与桌面终态
 
 `f6730c49` 增加 macOS 探针对照。先确认同一导航的可见原生暂停，真实切换标签时只跳过本次再次派发，隐藏保持后独立读一次 WebKit 播放状态。 Linux 媒体及证据 34/34，合成守卫 42/42，Apple 条件 C++ 语法及 CTest 注册通过。真实 Apple SDK 构建及 WKWebView 结果待新 CI。
