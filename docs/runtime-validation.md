@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 撤权观察与原生窗口
+
+`9f4a9f4d545ba84df1c1c3108cd970a0c06faad6` 在真实回环 Hub 和 Runtime 中复现节点撤权后仍能从桥读取工作区快照。修复后旧快照仍在 Hub 内部记录，桥的工作区列表、任务列表、普通及精确任务读取返回 `unauthorized`，原 watch 最终以相同错误结束，动作记录数保持一致。源码相关 109 项通过，隔离 wheel 定向两项通过。 [桥契约](specs/stk-desktop-bridge-v1.md)
+
+`322d408489bd68f1f7080d622b127639e5cbcc01` 集成 Jobs 选中任务的最近事实和实时观察。含掉出心跳窗口、晚到答复、原节点撤权及重获授权、旧取消确认、桥重启、节点已列出但离线等回归。旧 Hub 明确返回 `Unsupported` 时，原节点仍在线且原任务仍列于当前心跳并可取消，才沿用取消入口。主工作树 Jobs 46 项、报告相关 19 项通过，零跳过。原生点击采用英语 1100×980 Xvfb/OpenGL 窗口，Jobs 最大化，固定预选 `mesh/node1/hub-ws`、无选中任务。三次点击依次为任务行、离线刷新、恢复刷新。原任务从运行中和观察不可用变为成功和核验成功，共三次精确读取、零提交和取消。独立构建生成的两张截图摘要与候选一致。点击用例使用脚本化 Hub，真实 Hub 故障与原生点击的联合验收待执行。
+
+远端 `15531049` macOS 首轮可见暂停两项通过，原生基线 4/6，采样、静默和隔离隐藏对照各 0/2，均零跳过。可见窗口收到非 Playing 回执约 54 和 41 毫秒，约 1.25 秒保持期间无 DOM 采样，之后同一导航已暂停。两项首次 DOM 播放位置回退约 64 和 65 毫秒。隔离隐藏组脚本返回 paused，原生各 27 次 Playing，约一秒后结束会话。 `c634dca502ae5d78efeb51e5056c323b8cd05524` 增加两项第二次可见诊断，沿用静默隐藏组的首次播放、暂停和重播历史，分叉点在第二次暂停，保留原核验截止并单独记录播放位置差。Linux 构建、Apple 条件分支 C++ 语法及 CTest 注册检查通过，实际 WebKit 待目标 CI。 [macOS 作业](https://github.com/sijintech/stk/actions/runs/42601829902/job/129107929609) [官方工件](https://github.com/sijintech/stk/actions/runs/42601829902/artifacts/13668346276)
+
+同头 Linux 三项通过，Windows CPU 仍运行。整轮 Desktop 终态后推送本批。Claude41B 的真实 Hub 测试隔离和清理仍在验证。证据见本机 `root-delivery-20261109-84`。 [Desktop](https://github.com/sijintech/stk/actions/runs/42601829902)
+
 ## 2026-11-09 UTC · 图目录同步与 DAT 实际字节
 
 远端 `15531049c5c027153c232a2c4ac82c13deb6fe55` Runtime 于 10:54:41Z 终态 8 成功、5 失败。五个作业各只失败 `test_catalog_is_in_sync_with_declarations_and_spec`，JSON 声明比较通过，Markdown 生成器删除了生成区中的手写段落。root 在远端原提交的副本复现，单独移动段落后定向测试通过。 `9c1255a60064615927f111a44a6139c0d618f461` 将内置 MuFerro 说明放到节点语义区。本批完整目录回归通过。 [Runtime](https://github.com/sijintech/stk/actions/runs/42601829951)

@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · 设备撤权、Jobs 和 Cocoa
+
+root 以 `9f4a9f4d` 修复桥的旧快照读取，以 `322d4084` 集成 Jobs 任务观察和取消作用域，另以 `c634dca5` 加入第二次可见暂停对照。独立 Jobs 46 项、报告 19 项和 Hub/Python 109 项通过。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 目录同步回归与场帧快照
 
 root 用远端精确源复现生成区断言，以 `9c1255a6` 移动说明。 `ff5e615f` 修复 DAT 场帧旧缓存、执行期间更换和 Runtime 缓存改写。已通过源码和隔离安装，Linux 强制结束探针核对临时文件回收。 [验收记录](runtime-validation.md)
