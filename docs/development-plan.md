@@ -2,6 +2,8 @@
 
 ## 2026-11-09 22:32 UTC · Cocoa 帧号诊断与前一 Desktop 终态
 
+远端 `5cb7cdb9` 已推送，新 Desktop `42712877920` 与 Runtime `42712878022` 已启动。新查看来源校验、探针代次和帧编号诊断的目标平台结果随这两个精确头回执核对。 [当前 Desktop CI](https://github.com/sijintech/stk/actions/runs/42712877920) · [当前 Runtime CI](https://github.com/sijintech/stk/actions/runs/42712878022)
+
 `dbc0ebbb` 已接入两项独立 Cocoa 帧编号诊断，目标平台验证随下一头运行。 [运行验收](runtime-validation.md)
 
 前头 `75b20fc6` Desktop `42702711687` 于 22:24:01 UTC 终态 failure，6 个作业全部结束，5 个成功。Linux 主测 2159/2159，两个打包作业成功。Windows CPU 1478/1478，独立原生 6/6 且每项 20/20 轮，零跳过。macOS CPU 1537/1537、Metal 254/254、原生主测 4/6。当前 MP4 在首次显式暂停下界失败，HTML 在隐藏暂停下界失败。同头 Runtime `42702712232` 全部 13/13。整轮终态满足本批推送前提。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42702711687) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42702711687/artifacts/13715432852) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42702712232)

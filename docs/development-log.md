@@ -2,6 +2,8 @@
 
 ## 2026-11-09 22:32 UTC · Cocoa 帧号诊断与前一 Desktop 终态
 
+远端 `5cb7cdb9` 已推送，新 Desktop `42712877920` 与 Runtime `42712878022` 已启动。新查看来源校验、探针代次和帧编号诊断的目标平台结果随这两个精确头回执核对。 [当前 Desktop CI](https://github.com/sijintech/stk/actions/runs/42712877920) · [当前 Runtime CI](https://github.com/sijintech/stk/actions/runs/42712878022)
+
 `dbc0ebbb` 集成 Claude71 最终 `0d0de6a1` 的独立合成帧编号视频和可选 Cocoa 诊断。先取得两张递增的播放画面，再取得两张相同帧号的暂停画面，并记录已有 DOM 采样。root 补充了历史 DOM 时间回退判据，以及结论所用四张截图的持久化和摘要核对。缺少必要截图或时间证据时报告不确定。独立 MP4 与 HTML 嵌入视频两项诊断已接入 macOS CI，保存具名 JUnit 和裁剪截图。
 
 最终新视频 44,339 字节，SHA-256 `c2bbcb873b7628c22b512051443adde6ff2e6c8688c6d84f0307d6bab2a34eef`。60 帧、10 fps、六种缩放与关键帧 [0,30] 均验证。精确 C++ 逻辑通过 1080 次解码位置、16 项分类、12 项审计和 5 项记录失败检查。真实 PNG 编解码及最终路径冲突证明无法用较早截图替代丢失的必需截图。Linux 编译、普通及 Apple 宏分支的 GCC 语法检查通过。这些检查尚不能证明 Apple SDK 编译或 Cocoa 截图时延，实际目标执行待新头 CI。
