@@ -339,7 +339,7 @@ retrying (`final: true` when the subscription ended because of it, e.g. `not_fou
 | `upload.start` | `connection, node?, workspace_id, source` (absolute file or folder), `remote?` (relative path; default the source name; `"."` puts a folder's contents at the workspace root and keeps a file's name), `idempotency_key?` | `{transfer}` |
 | `download.start` | `connection, node?, task_id \| workspace_id, path, dest?` (absolute; default `<download_dir>/<server key>/<task or workspace id>/<path>`), `idempotency_key?, expected_connection_identity?` | `{transfer}` |
 | `transfer.list` / `transfer.get {id}` | – / `id` | `{transfers}` / `{transfer}` |
-| `transfer.resume` | `id` | `{transfer}` (continues an `interrupted` or `failed` transfer) |
+| `transfer.resume` | `id` | `{transfer}` (continues an `interrupted`, `failed`, or `cancelled` transfer) |
 | `transfer.cancel` | `id` | `{transfer}` in state `cancelled` |
 
 `transfer = {id, kind: upload|download, state: queued|running|interrupted|completed|failed|cancelled,
