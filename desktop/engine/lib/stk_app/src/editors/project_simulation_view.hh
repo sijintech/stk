@@ -1,9 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
+#include "stk/app/muferro_hdf5_view.hh"
 #include "stk/io/json.hh"
 #include "path_picker.hh"
 #include "simulation_target.hh"
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -20,12 +22,14 @@ class ProjectSimulationView {
   ~ProjectSimulationView() { alive_.reset(); }
   io::Json save_workspace_state() const;
   bool load_workspace_state(const io::Json &value);
-  void draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
+  void draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state, std::function<bool()> data_view_current);
   void draw_batches(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
   void draw_pet_studies(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
  private:
   void sync_project(ProjectState &state);
   void select_engine(int index);
+  void draw_muferro_hdf5(ui::Layout &layout, EditorContext &ctx, ProjectState &state, bool enabled,
+                         std::function<bool()> data_view_current);
   bool context_current(const ProjectState &state, const std::string &project, const std::string &handle, uint64_t generation) const;
   io::Json workspace_pending_;
   SimulationTarget target_;
@@ -45,5 +49,12 @@ class ProjectSimulationView {
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   std::string result_key_, result_record_, result_error_;
   bool result_loading_ = false;
+  struct Hdf5Panel {
+    std::string key, sha256, error;
+    std::vector<MuFerroHdf5Frame> frames;
+    int selected = 0;
+    bool busy = false;
+  } hdf5_;
+  uint64_t hdf5_sequence_ = 0;
 };
 }  // namespace stk::app

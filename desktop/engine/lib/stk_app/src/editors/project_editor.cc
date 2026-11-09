@@ -34,7 +34,7 @@ class ProjectEditor final : public Editor {
   bool show_view(const std::string_view view) override
   {
     if (view != "review" && view != "data" && view != "discussion" && view != "files" && view != "runs" && view != "location") { return false; }
-    project_view_ = view == "review" ? 1 : view == "discussion" ? 2 : view == "files" ? 3 : view == "runs" ? 4 : view == "location" ? 5 : 0;
+    select_project_view(view == "review" ? 1 : view == "discussion" ? 2 : view == "files" ? 3 : view == "runs" ? 4 : view == "location" ? 5 : 0);
     return true;
   }
   bool can_change_project_selection(const std::string_view project_id) const override
@@ -123,7 +123,7 @@ class ProjectEditor final : public Editor {
       file_controls(layout, ctx, state, editable, true);
       if (state.table() && state.table_id() == io::get_string(state.file_index(), "table_id")) {
         tables_.grid(layout, ctx, state);
-        if (tables_.selected_visible(state)) { tables_.cell(layout, ctx, state, editable, [this] { project_view_ = 1; }); }
+        if (tables_.selected_visible(state)) { tables_.cell(layout, ctx, state, editable, [this] { select_project_view(1); }); }
       }
       return;
     }
@@ -138,7 +138,7 @@ class ProjectEditor final : public Editor {
     }
     layout.tabs("project_view", {std::string(ctx.tr("project.review.data")), std::string(ctx.tr("project.review.title")),
                                std::string(ctx.tr("discussion.title"))},
-                ui::bind(project_view_));
+                {[this] { return project_view_; }, [this](int view) { select_project_view(view); }});
     if (project_view_ == 1) {
       review_view_.draw(layout, ctx, state);
       return;
@@ -151,7 +151,9 @@ class ProjectEditor final : public Editor {
       panel->paragraph(ctx.tr("project.backup_hint"));
       panel->button("backup", ctx.tr("project.backup"), [&state] { state.backup(); }).disable(!editable);
     }
-    simulation_view_.draw(layout, ctx, state);
+    simulation_view_.draw(layout, ctx, state, [this, generation = project_view_generation_] {
+      return project_view_ == 0 && project_view_generation_ == generation;
+    });
     simulation_view_.draw_pet_studies(layout, ctx, state);
     simulation_view_.draw_batches(layout, ctx, state);
     file_controls(layout, ctx, state, editable);
@@ -166,7 +168,7 @@ class ProjectEditor final : public Editor {
     tables_.fields(layout, ctx, state, editable);
     tables_.sweep(layout, ctx, state, editable);
     tables_.grid(layout, ctx, state);
-    if (tables_.selected_visible(state)) { tables_.cell(layout, ctx, state, editable, [this] { project_view_ = 1; }); }
+    if (tables_.selected_visible(state)) { tables_.cell(layout, ctx, state, editable, [this] { select_project_view(1); }); }
     else if (!state.record_id().empty()) { layout.paragraph(ctx.tr("project.filter.hidden_selection")); }
     tables_.management(layout, ctx, state, editable);
   }
@@ -238,7 +240,7 @@ class ProjectEditor final : public Editor {
     if (!tables.load_workspace_state(value.at("tables")) || !simulation.load_workspace_state(value.at("simulation")) ||
         !discussion.load_workspace_state(value.at("discussion")) || !review.load_workspace_state(value.at("review"))) { return false; }
     directory_ = value.value("directory", std::string()); name_ = value.value("name", std::string());
-    project_view_ = std::clamp(int(io::get_int(value, "view", 0)), 0, 5);
+    select_project_view(std::clamp(int(io::get_int(value, "view", 0)), 0, 5));
     file_project_ = value.value("file_project", std::string()); file_paths_ = value.value("file_paths", std::string());
     input_snapshot_ = value.value("input_snapshot", std::string()); file_preset_ = value.value("file_preset", std::string("volume"));
     csv_project_ = value.value("csv_project", std::string()); csv_source_ = value.value("csv_source", std::string());
@@ -569,11 +571,18 @@ class ProjectEditor final : public Editor {
     return paths.size() == 1 ? paths.front() : directory_;
   }
 
+  void select_project_view(int view)
+  {
+    if (view == project_view_) { return; }
+    project_view_ = view;
+    ++project_view_generation_;
+  }
 
   ProjectState *workspace_project_state_ = nullptr;
   std::string workspace_project_;
   std::optional<std::string> workspace_review_source_;
   int project_view_ = 0;
+  uint64_t project_view_generation_ = 0;
   ProjectTableEditor tables_;
   ProjectReviewView review_view_;
   ProjectDiscussionView discussion_view_;

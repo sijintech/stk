@@ -8,13 +8,17 @@
 #include "stk/app/app_store.hh"
 #include "stk/app/analysis_document.hh"
 #include "stk/app/editor.hh"
+#include "stk/app/editor_area.hh"
 #include "stk/app/jobs_state.hh"
 #include "stk/app/jobs_spec.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/script_state.hh"
+#include "stk/app/shell.hh"
+#include "stk/core/sha256.hh"
 #include "stk/platform/file_dialog.hh"
 #include "editor_text.hh"
 #include <algorithm>
+#include <atomic>
 #include <stdexcept>
 
 namespace stk::app {
@@ -29,6 +33,44 @@ constexpr Engine engines[] = {
     {"lammps/1", "LAMMPS", "a70a9da3-fb57-5d06-9ab3-5de529a82882", "3f63a5bf-fc98-5c23-b211-7dcb31a5b173",
      "77bc2593-3729-593c-8986-22a5aa3fdd7e", "ac8845ed-e05c-5f93-916a-dd0ba11b5e8d", "c7a88cd8-bfe3-54e4-85f1-80920e2dd04d"},
 };
+constexpr const char *kMuFerroResultTask = "9063aed6-8029-5bdd-8dc1-9cb7c1468ec4";
+constexpr const char *kMuFerroResultFiles = "776bb866-c079-58ab-a52e-86a1c92f1d47";
+
+std::string collected_hdf5_sha(const Json &page, int64_t revision, const std::string &run, const std::string &task)
+{
+  const auto &records = page.at("records");
+  const auto &ids = page.at("record_ids");
+  if (page.at("revision") != revision || page.at("table_id") != engines[0].results ||
+      !page.at("issues").is_array() || !page.at("issues").empty() || !records.is_array() || !ids.is_array() ||
+      records.size() > 1 || records.size() != ids.size() || page.at("total") != records.size()) {
+    throw std::invalid_argument("Expected a unique collected MuFerro result at the current project revision");
+  }
+  if (records.empty()) { return {}; }
+  const auto &row = records.front();
+  const auto id = io::get_string(row, "id");
+  const auto &values = row.at("values");
+  if (!canonical_uuid(id) || id[14] != '5' || row.at("id") != ids.front() ||
+      values.at(engines[0].result_run) != run || values.at(kMuFerroResultTask) != task) {
+    throw std::invalid_argument("The collected MuFerro result belongs to another task");
+  }
+  const auto path = muferro_hdf5_path(run);
+  const auto &files = values.at(kMuFerroResultFiles);
+  if (!files.is_array()) { throw std::invalid_argument("Invalid collected MuFerro files"); }
+  std::string digest;
+  for (const auto &file : files) {
+    if (io::get_string(file, "path") != path) { continue; }
+    const auto sha = io::get_string(file, "sha256");
+    if (!digest.empty() || !core::is_sha256_hex(sha)) { throw std::invalid_argument("Invalid collected HDF5 file identity"); }
+    digest = sha;
+  }
+  return digest;
+}
+
+std::string hdf5_eval_id()
+{
+  static std::atomic<uint64_t> sequence = 0;
+  return "muferro-hdf5-" + std::to_string(++sequence);
+}
 
 const Engine *run_engine(const Json &run)
 {
@@ -130,7 +172,8 @@ void ProjectSimulationView::sync_project(ProjectState &state)
   }
 }
 
-void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
+void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state,
+                                 std::function<bool()> data_view_current)
 {
   sync_project(state);
   auto *panel = layout.panel("project_simulation", ctx.tr("simulation.title"), false);
@@ -211,6 +254,13 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
     if (selected_engine) { execute(scripts, selected_engine->id, "view", {{"project_id", project}, {"expected_revision", revision}, {"run_id", run}}); }
   }).disable(!enabled || !selected_engine || !succeeded ||
               (selected_engine == &engines[0] && !scripts.desktop_ready()));
+  if (selected_engine == &engines[0] && succeeded) {
+    draw_muferro_hdf5(*panel, ctx, state, enabled, std::move(data_view_current));
+  }
+  else if (!hdf5_.key.empty()) {
+    ++hdf5_sequence_;
+    hdf5_ = {};
+  }
   if (selected_engine == &engines[1]) {
     actions.button("simulation_structure", ctx.tr("simulation.structure"), [this, &state, &scripts, project, handle, generation, revision, run] {
       if (!context_current(state, project, handle, generation) || state.run_id() != run) { return; }
@@ -292,6 +342,147 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
     panel->label(ctx.tr("script.run_state." + io::get_string(scripts.status()["run"], "state")));
   }
   panel->log_view("simulation_output", scripts.output(), 6);
+}
+
+void ProjectSimulationView::draw_muferro_hdf5(ui::Layout &layout, EditorContext &ctx, ProjectState &state, bool enabled,
+                                              std::function<bool()> data_view_current)
+{
+  auto *store = &ctx.store;
+  auto *client = store->bridge();
+  const auto hello = client ? client->hello_info() : std::nullopt;
+  if (!hello || !hello->has_method("project.table.query") || !hello->has_method("graph.evaluate")) { return; }
+  auto *area = &ctx.area;
+  auto *shell = &area->shell();
+  auto *screen = area->screen();
+  auto *origin = &area->editor();
+  if (!screen) { return; }
+  const auto &info = *state.project();
+  const auto run = state.run_id();
+  const auto task = io::get_string(state.run().at("status").at("task"), "id");
+  if (!canonical_uuid(run) || task.empty()) { return; }
+  const auto key = info.handle + "/" + std::to_string(info.revision) + "/" + std::to_string(generation_) + "/" + run + "/" + task;
+  const auto project_version = state.version();
+  const std::weak_ptr<bool> weak = alive_;
+  const auto scope = [this, weak, store, client, &state, project = info.id, handle = info.handle, generation = generation_,
+                      revision = info.revision, project_version, run, key] {
+    return !weak.expired() && store->bridge() == client && hdf5_.key == key &&
+           context_current(state, project, handle, generation) && state.project()->revision == revision &&
+           state.version() == project_version && state.run_id() == run;
+  };
+  const auto visible = [scope, shell, area, screen, origin, data_view_current = std::move(data_view_current)] {
+    return scope() && shell->has_area(area) && area->screen() == screen && &area->editor() == origin &&
+           (!screen->maximized() || screen->maximized() == area) && data_view_current();
+  };
+  bridge::CallOptions read;
+  read.retry = bridge::CallOptions::Retry::Never;
+  if (hdf5_.key != key && !state.busy()) {
+    ++hdf5_sequence_;
+    hdf5_ = {};
+    hdf5_.key = key;
+    const auto &tables = state.tables();
+    if (std::any_of(tables.begin(), tables.end(), [](const auto &table) { return table.id == engines[0].results; })) {
+      hdf5_.busy = true;
+      client->call("project.table.query", {{"handle", info.handle}, {"expected_revision", info.revision},
+          {"table_id", engines[0].results}, {"limit", 1}, {"definition", {{"version", 1}, {"kind", "grid"},
+          {"filters", {{"field_id", engines[0].result_run}, {"op", "eq"}, {"value", run}}}}}}, read).then(
+          [this, weak, key, sequence = hdf5_sequence_, scope, store, run, task, revision = info.revision]
+          (const bridge::Result<Json> &reply) {
+        if (weak.expired() || key != hdf5_.key || sequence != hdf5_sequence_) { return; }
+        hdf5_.busy = false;
+        if (!scope()) { hdf5_.key.clear(); store->changed(); return; }
+        if (!reply) { hdf5_.error = reply.error().describe(); }
+        else {
+          try { hdf5_.sha256 = collected_hdf5_sha(reply.value(), revision, run, task); }
+          catch (const std::exception &error) { hdf5_.error = error.what(); }
+        }
+        store->changed();
+      });
+    }
+  }
+  if (hdf5_.key != key) { return; }
+  if (!hdf5_.error.empty()) { layout.paragraph(hdf5_.error); }
+  if (hdf5_.sha256.empty()) { return; }
+
+  read.timeout_s = 330;
+  layout.button("simulation_hdf5_list", ctx.tr("simulation.hdf5_list"),
+      [this, weak, key, visible, store, client, directory = info.directory, run, sha = hdf5_.sha256, read,
+       empty = std::string(ctx.tr("simulation.hdf5_empty"))] {
+    if (!visible() || hdf5_.busy || hdf5_.sha256 != sha) { return; }
+    const auto sequence = ++hdf5_sequence_;
+    hdf5_.error.clear(); hdf5_.frames.clear(); hdf5_.selected = 0;
+    try {
+      const auto request = muferro_hdf5_fields_request(hdf5_eval_id(), directory, run, sha);
+      hdf5_.busy = true;
+      client->graph_evaluate(request, {}, read).then(
+          [this, weak, key, sequence, visible, store, request, empty](const bridge::Result<bridge::EvaluateResult> &reply) {
+        if (weak.expired() || key != hdf5_.key || sequence != hdf5_sequence_) { return; }
+        hdf5_.busy = false;
+        if (visible()) {
+          if (!reply) { hdf5_.error = reply.error().describe(); }
+          else {
+            try {
+              hdf5_.frames = decode_muferro_hdf5_fields(request, reply.value());
+              if (hdf5_.frames.empty()) { hdf5_.error = empty; }
+            }
+            catch (const std::exception &error) { hdf5_.error = error.what(); }
+          }
+        }
+        store->changed();
+      });
+    }
+    catch (const std::exception &error) { hdf5_.busy = false; hdf5_.error = error.what(); }
+    store->changed();
+  }).disable(!enabled || hdf5_.busy);
+  if (hdf5_.busy) { layout.label(ctx.tr("simulation.hdf5_busy")); }
+  if (hdf5_.frames.empty()) { return; }
+  std::vector<std::string> labels{std::string(ctx.tr("simulation.hdf5_choose"))};
+  for (const auto &frame : hdf5_.frames) {
+    labels.push_back(store->catalog().format("simulation.hdf5_choice", {{"field", frame.field}, {"step", std::to_string(frame.step)}}));
+  }
+  layout.prop(ctx.tr("simulation.hdf5_frame")).dropdown("simulation_hdf5_frame", std::move(labels), {
+    [this] { return hdf5_.selected; }, [this, visible](int index) {
+      if (visible() && !hdf5_.busy && index >= 0 && size_t(index) <= hdf5_.frames.size()) { hdf5_.selected = index; }
+    }
+  }).disable(!enabled || hdf5_.busy);
+  layout.button("simulation_hdf5_open", ctx.tr("simulation.hdf5_open"),
+      [this, weak, key, visible, store, client, shell, screen, handle = info.handle, directory = info.directory,
+       run, sha = hdf5_.sha256, blob_dir = hello->paths.blob_dir, read] {
+    if (!visible() || hdf5_.busy || hdf5_.sha256 != sha || hdf5_.selected <= 0 ||
+        size_t(hdf5_.selected) > hdf5_.frames.size()) { return; }
+    const auto target = shell->viewer_payload_target(screen, true);
+    if (!target) { hdf5_.error = target.error().describe(); store->changed(); return; }
+    const auto sequence = ++hdf5_sequence_;
+    const auto selected = hdf5_.selected;
+    const auto current = [this, visible, sequence, selected] {
+      return visible() && sequence == hdf5_sequence_ && selected == hdf5_.selected;
+    };
+    const auto frame = hdf5_.frames[size_t(selected - 1)];
+    hdf5_.error.clear();
+    try {
+      const auto request = muferro_hdf5_frame_request(hdf5_eval_id(), directory, run, frame.selector, frame.field, sha);
+      hdf5_.busy = true;
+      client->graph_evaluate(request, {}, read).then(
+          [this, weak, key, sequence, current, store, shell, screen, handle, version = target.value(), blob_dir, request, frame, sha]
+          (const bridge::Result<bridge::EvaluateResult> &reply) {
+        if (weak.expired() || key != hdf5_.key || sequence != hdf5_sequence_) { return; }
+        hdf5_.busy = false;
+        store->changed();
+        if (!current()) { return; }
+        if (!reply) { hdf5_.error = reply.error().describe(); store->changed(); return; }
+        try {
+          auto payload = decode_muferro_hdf5_frame(request, reply.value(), blob_dir);
+          const auto label = "MuFerro · " + frame.selector + " · " + sha.substr(0, 12);
+          shell->open_viewer_payload(screen, handle, version, std::move(payload), label, current,
+              [this, current, store](const bridge::Result<Json> &result) {
+            if (current() && !result) { hdf5_.error = result.error().describe(); store->changed(); }
+          }, true);
+        }
+        catch (const std::exception &error) { hdf5_.error = error.what(); store->changed(); }
+      });
+    }
+    catch (const std::exception &error) { hdf5_.busy = false; hdf5_.error = error.what(); }
+    store->changed();
+  }).disable(!enabled || hdf5_.busy || hdf5_.selected <= 0);
 }
 
 void ProjectSimulationView::draw_pet_studies(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
