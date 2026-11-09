@@ -14,6 +14,8 @@ from suan.project import edit_operations, workspace_bundle
 from suan.project.edit_operations import OperationNotFound
 from suan.project.store import UnsupportedProjectFormat
 from suan.peer.projects import PeerProjects
+from suan.peer.protocol import FORMAT, decode_message, encode_message
+from test_desktop_bridge import bridge_env, inproc  # noqa: F401
 
 
 def authenticated(authority, private, peer_id, binding="b" * 64):
@@ -116,6 +118,65 @@ def test_authenticated_structure_and_record_pages_reuse_shared_revision_bounds(a
                  lambda: service.read_table(access.context, access.project_id, table, expected_revision=1, **target)):
         with pytest.raises(RevisionConflict):
             call()
+
+
+def test_bridge_and_peer_project_pages_and_scoped_receipts(access, inproc):
+    table, _, _ = schema(access)
+    bridge = inproc()
+    handle = bridge.call("project.open", {"directory": str(access.store.directory)})["project"]["handle"]
+    peer = access.projects
+    target = access.target
+
+    def peer_result(method, result):
+        response = {"format": FORMAT, "id": str(uuid4()), "result": result}
+        return decode_message(encode_message(response, method=method), method=method)["result"]
+
+    before = unchanged(access.store)
+    catalog = "project.catalog"
+    read_table = "project.table.read"
+    for offset, following in ((0, 1), (1, None)):
+        page = {"offset": offset, "limit": 1, "expected_revision": 1}
+        local_catalog = bridge.call(catalog, {"handle": handle, **page})
+        remote_catalog = peer.catalog(access.context, access.project_id, **target, **page)
+        assert local_catalog == peer_result(catalog, remote_catalog)
+        assert local_catalog["next_offset"] == following
+    for offset, following in ((0, 1), (1, 2), (2, None)):
+        page = {"offset": offset, "limit": 1, "expected_revision": 1}
+        local_table = bridge.call(read_table, {"handle": handle, "table_id": table, **page})
+        remote_table = peer.read_table(access.context, access.project_id, table, **target, **page)
+        assert local_table == peer_result(read_table, remote_table)
+        assert local_table["next_offset"] == following
+    assert unchanged(access.store) == before
+
+    apply = "project.edit_operations.apply_once"
+    get = "project.edit_operations.get"
+    identity = str(uuid4())
+    request = {"operation_id": identity, "expected_revision": 1,
+               "commands": [{"op": "create_table", "name": "Local edit"}]}
+    local = bridge.call(apply, {"handle": handle, **request})
+    assert local["replayed"] is False and local["receipt"]["scope"] == "local"
+    with pytest.raises(OperationNotFound):
+        access.get(identity)
+    peer_request = {"operation_id": identity, "expected_revision": 2,
+                    "commands": [{"op": "create_table", "name": "Peer edit"}]}
+    remote = peer_result(apply, access.apply(**peer_request))
+    assert remote["replayed"] is False and remote["receipt"]["scope"] != local["receipt"]["scope"]
+    assert peer_result(get, {"receipt": access.get(identity)}) == {"receipt": remote["receipt"]}
+    assert bridge.call(get, {"handle": handle, "operation_id": identity}) == {"receipt": local["receipt"]}
+    assert bridge.call(apply, {"handle": handle, **request}) == {"receipt": local["receipt"], "replayed": True}
+    assert peer_result(apply, access.apply(**peer_request)) == {"receipt": remote["receipt"], "replayed": True}
+    assert access.store.info()["revision"] == 3
+
+    after = unchanged(access.store)
+    stale = {"offset": 1, "limit": 1, "expected_revision": 1}
+    assert bridge.error(catalog, {"handle": handle, **stale})["code"] == "conflict"
+    with pytest.raises(RevisionConflict):
+        peer.catalog(access.context, access.project_id, **target, **stale)
+    assert bridge.error(read_table, {"handle": handle, "table_id": table, **stale})["code"] == "conflict"
+    with pytest.raises(RevisionConflict):
+        peer.read_table(access.context, access.project_id, table, **target, **stale)
+    assert unchanged(access.store) == after
+    bridge.assert_clean()
 
 
 def test_lost_reply_reconnect_and_authority_restart_keep_original_receipt_and_scope(access):
