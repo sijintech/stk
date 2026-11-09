@@ -80,6 +80,12 @@ struct NativeHidePauseTrace {
   std::size_t event_count = 0;
 };
 
+/** UI-thread only. Read the cached production watchdog receipt for the exact hidden target.
+ * This issues neither a WebKit playback-state request nor a DOM probe. */
+std::optional<NativePauseSnapshot> hidden_pause_target(wm::NativeWindowHandle parent,
+                                                       std::string_view session_id,
+                                                       const NativeHidePauseTrace &observation);
+
 struct NativeCloseObservation {
   std::string_view reason; // Empty until the exact observed view enters shutdown.
   std::chrono::steady_clock::time_point when;

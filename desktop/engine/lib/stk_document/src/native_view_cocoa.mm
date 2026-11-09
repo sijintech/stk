@@ -1132,6 +1132,24 @@ std::shared_ptr<const NativeCloseObservation> observe_native_close(wm::NativeWin
   return state->test_close_observation;
 }
 
+std::optional<NativePauseSnapshot> hidden_pause_target(wm::NativeWindowHandle parent,
+                                                       std::string_view session_id,
+                                                       const NativeHidePauseTrace &observation)
+{
+  std::string error;
+  const auto state = find_view(parent, session_id, error);
+  if (!state || !state->view || state->result.status != NativeViewStatus::Ready ||
+      !state->test_close_observation || !state->test_close_observation->hide_pause ||
+      &*state->test_close_observation->hide_pause != &observation ||
+      state->visible || !state->view.hidden || cocoa::visible_for_pause_control(state) ||
+      cocoa::owns_focus(state) || state->media_generation != observation.media_generation ||
+      state->result.navigation_generation != observation.navigation_generation) {
+    return std::nullopt;
+  }
+  const auto pause = cocoa::test_pause_snapshot(state);
+  return pause.available ? std::optional(pause) : std::nullopt;
+}
+
 bool arm_isolated_pause(wm::NativeWindowHandle parent, std::string_view session_id,
                         uint64_t navigation_generation)
 {

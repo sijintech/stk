@@ -107,7 +107,7 @@ if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW AND (APPLE OR WIN32))
           TIMEOUT 180 RESOURCE_LOCK native_window
           FAIL_REGULAR_EXPRESSION "FAIL:|Error: Not freed memory|leaked")
       endforeach()
-      foreach(_arm IN ITEMS visible_native_pause second_visible_native_pause)
+      foreach(_arm IN ITEMS visible_native_pause second_visible_native_pause hide_after_verified_native_pause)
         set(_control reports_${_arm}_${_source}_metal)
         string(REPLACE "_" "-" _scenario "${_arm}")
         string(REPLACE "_" " " _description "${_arm}")
