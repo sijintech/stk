@@ -477,6 +477,15 @@ jobs:
           ctest --test-dir build --output-on-failure -R '^(document_preview_native_metal|reports_native_(markdown|html|pdf|video|html-video)_metal)$' --timeout 600 --output-junit "$PWD/build/ctest-native-preview.xml"
           python3 desktop/tests/check_required_tests.py build/ctest-native-preview.xml 'document_preview_native_metal' 'reports_native_markdown_metal' 'reports_native_html_metal' 'reports_native_pdf_metal' 'reports_native_video_metal' 'reports_native_html-video_metal'
 
+      - name: Native WKWebView hide control before seeking
+        if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
+        run: |
+          if test -f build/Testing/Temporary/LastTest.log; then
+            cp build/Testing/Temporary/LastTest.log build/ctest-native-preview.log
+          fi
+          ctest --test-dir build --output-on-failure -R '^reports_pre_seek_hide_(video|html-video)_metal$' --timeout 180 --output-junit "$PWD/build/ctest-native-pre-seek.xml"
+          python3 desktop/tests/check_required_tests.py build/ctest-native-pre-seek.xml 'reports_pre_seek_hide_video_metal' 'reports_pre_seek_hide_html-video_metal'
+
       - name: Upload rendered frames
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -492,12 +501,16 @@ jobs:
             build/ctest-cpu.xml
             build/ctest-metal.xml
             build/ctest-native-preview.xml
+            build/ctest-native-preview.log
+            build/ctest-native-pre-seek.xml
             build/spike/document_preview/native-evidence/**
             build/tests/app/reports-native-markdown/**
             build/tests/app/reports-native-html/**
             build/tests/app/reports-native-pdf/**
             build/tests/app/reports-native-video/**
             build/tests/app/reports-native-html-video/**
+            build/tests/app/reports-pre-seek-hide-video/**
+            build/tests/app/reports-pre-seek-hide-html-video/**
             build/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
           retention-days: 14

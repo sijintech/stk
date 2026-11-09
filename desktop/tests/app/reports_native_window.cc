@@ -56,7 +56,12 @@ void write(const fs::path &path, const std::string &text)
   out.write(text.data(), std::streamsize(text.size()));
   require(out.good(), "Cannot write public fixture/evidence: " + core::path_to_utf8(path));
 }
-struct Options { std::string python, backend, source = "markdown"; fs::path output, media_fixture; };
+struct Options {
+  std::string python, backend, source = "markdown";
+  fs::path output, media_fixture;
+  bool pre_seek_hide_control = false;
+  int reading_cycles() const { return pre_seek_hide_control ? 1 : 20; }
+};
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
 using Media = document_preview::test::MediaSnapshot;
 using NativePause = document_preview::test::NativePauseSnapshot;
@@ -1352,7 +1357,9 @@ raise SystemExit(main())
   result["source_sha256"] = report.at("source_sha256"); result["source_kind"] = options.source;
   result["body_text_pixel_criterion"] = pdf ? "not applied: PDF page identities use independent page-embedded RGB stripes" :
       "Three aligned 20-column U+2588/space rows, independently required beside the frozen PNG";
-  result["required_images"] = pdf ? 160 : 140;
+  const int cycles = options.reading_cycles();
+  const size_t required_images = video ? (options.pre_seek_hide_control ? 6 : 161) : (pdf ? 160 : 140);
+  result["required_images"] = required_images;
   result["starting_layout"] = "Actual client size recorded; default a3 Reports/Python with one recorded upper-row splitter drag; Viewer stays beside report; Reports selected by one mouse click";
   auto ready = [&] {
     const auto *v = ui.widget("reports_document_viewport"), *f = ui.widget("reports_document_focus");
@@ -1372,7 +1379,6 @@ raise SystemExit(main())
     result["media_fixture"] = {{"size", media_bytes.size()}, {"sha256", kMediaSha256},
         {"container", "MP4"}, {"video_codec", "H264 Baseline"}, {"audio_codec", "AAC"},
         {"duration_seconds", 6}, {"live_source_deleted_before_prepare", true}};
-    result["required_images"] = 161;
     result["body_text_pixel_criterion"] = "Pinned MP4 decoded red/blue picture region in independent OS client captures; HTML contains no poster/image/script";
     result["not_proven_here"] = "Physical hardware input, audio output, arbitrary codec support, IME, physical scanout and browser memory stability; final guarded memory remains the separate after-static spike gate";
     result["native_media_inputs"] = Json::array(); result["media_holds"] = Json::array();
@@ -1442,7 +1448,7 @@ raise SystemExit(main())
       result["media_transitions"].push_back({{"cycle", cycle}, {"phase", phase},
           {"before", media_json(original)}, {"after", media_json(observed)}}); ui.save(); return observed;
     };
-    for (int cycle = 1; cycle <= 20; ++cycle) {
+    for (int cycle = 1; cycle <= cycles; ++cycle) {
       ui.wait(ready, "Video report visible");
       const auto session = latest_session();
       require(sessions.insert(session).second, "Each explicit video preparation must use a fresh session");
@@ -1493,25 +1499,26 @@ raise SystemExit(main())
       bounds = ui.widget("reports_document_viewport")->rect;
       auto rectangle = ui.media_rectangle(bounds, red);
       ui.media_capture(cycle, "played-red-paused", 1, rectangle, red, session);
-      // Observe a natural red-to-blue transition after explicit Play, before any seek.
-      // Pausing only after >3.3s gives OS capture ample time without allowing ended
-      // or capture latency to masquerade as a successful pause.
-      play(cycle, "explicit-play-color-transition", session, bounds);
-      const auto progressing = ui.media_until(session, [](const Media &m) {
-        return !m.paused && !m.ended && !m.seeking && m.current_time >= 3.30;
-      }, "Explicit native Play crosses the actual MP4 color boundary", 8);
-      require(progressing.current_time < 4.50, "Natural frame transition must be observed well before ending");
-      ui.click("reports_document_pause", *area);
-      auto natural_blue = paused(session, "Explicit Pause after natural color transition");
-      require(natural_blue.current_time >= 3.30 && natural_blue.current_time < 4.80 && !natural_blue.ended,
-          "Pause after actual natural playback must not be a natural ended state");
-      ui.media_capture(cycle, "natural-play-blue-paused", 2, ui.media_rectangle(bounds, natural_blue), natural_blue, session);
-      const auto sought_red = seek(cycle, false, session, bounds);
-      ui.media_capture(cycle, "seek-early-red-paused", 1, ui.media_rectangle(bounds, sought_red), sought_red, session);
-      auto blue = seek(cycle, true, session, bounds);
-      ui.media_capture(cycle, "seek-blue-paused", 2, ui.media_rectangle(bounds, blue), blue, session);
-      auto early = seek(cycle, false, session, bounds);
-      ui.held_media(cycle, "seek-early-paused", session, early, 0.25);
+      if (!options.pre_seek_hide_control) {
+        // Observe a natural red-to-blue transition after explicit Play, before any seek.
+        // Pausing after >3.3s leaves time for an OS capture before the clip ends.
+        play(cycle, "explicit-play-color-transition", session, bounds);
+        const auto progressing = ui.media_until(session, [](const Media &m) {
+          return !m.paused && !m.ended && !m.seeking && m.current_time >= 3.30;
+        }, "Explicit native Play crosses the actual MP4 color boundary", 8);
+        require(progressing.current_time < 4.50, "Natural frame transition must be observed well before ending");
+        ui.click("reports_document_pause", *area);
+        auto natural_blue = paused(session, "Explicit Pause after natural color transition");
+        require(natural_blue.current_time >= 3.30 && natural_blue.current_time < 4.80 && !natural_blue.ended,
+            "Pause after actual natural playback must not be a natural ended state");
+        ui.media_capture(cycle, "natural-play-blue-paused", 2, ui.media_rectangle(bounds, natural_blue), natural_blue, session);
+        const auto sought_red = seek(cycle, false, session, bounds);
+        ui.media_capture(cycle, "seek-early-red-paused", 1, ui.media_rectangle(bounds, sought_red), sought_red, session);
+        auto blue = seek(cycle, true, session, bounds);
+        ui.media_capture(cycle, "seek-blue-paused", 2, ui.media_rectangle(bounds, blue), blue, session);
+        auto early = seek(cycle, false, session, bounds);
+        ui.held_media(cycle, "seek-early-paused", session, early, 0.25);
+      }
       const auto playing = play(cycle, "play-before-hide", session, bounds);
       const auto playing_returned = Clock::now();
       require(!playing.paused && playing.current_time < 2.5, "Hide must interrupt a playing early clip");
@@ -1539,7 +1546,7 @@ raise SystemExit(main())
       ui.media_capture(cycle, "reshown-red-paused", 1, ui.media_rectangle(bounds, reshown), reshown, session);
       // Return to the earliest segment before a second explicit Play. Rewinding is
       // itself local input; showing the tab must never provide that playback action.
-      if (reshown.current_time > 0.90) {
+      if (!options.pre_seek_hide_control && reshown.current_time > 0.90) {
         const auto navigation = reshown.navigation_generation;
 #ifdef __APPLE__
         ui.native_media_seek(cycle, "rewind-after-show", session, bounds, reshown, 0.07);
@@ -1671,9 +1678,10 @@ raise SystemExit(main())
       ++image_reads; awaiting_image = false;
     }
   }
-  require(prepares == 21 && (video ? trace_prepares == 21 : true) &&
-      image_reads == (pdf ? 0 : 21) && !awaiting_image,
-      "Exactly 21 explicit preparations; PDF has no extra assets and text/video has one frozen resource read each");
+  const int expected_preparations = cycles + 1;
+  require(prepares == expected_preparations && (!video || trace_prepares == expected_preparations) &&
+      image_reads == (pdf ? 0 : expected_preparations) && !awaiting_image,
+      "Explicit preparations and frozen asset reads must match the required cycle count");
   require(area->tab(1).save_workspace_state() == draft_state && area->tab(1).has_unsaved_changes() &&
       shell.store().scripts().history().empty(), "Reading must preserve hidden unexecuted Python draft");
   require(viewer.save_workspace_state() == viewer_state && viewer.camera_serial() == camera &&
@@ -1684,8 +1692,8 @@ raise SystemExit(main())
     require(call(method, {{"handle", handle}}).at("runs").empty(), "No simulation, workflow or analysis may run");
   }
   require(client->stats().schema_violations == 0, "Bridge schema violations");
-  require(result.at("images").size() == (video ? 160 : pdf ? 160 : 140) && result.at("completed_cycles") == 20,
-      "All 20 production reading cycles and the source-specific OS observation count must complete");
+  require(result.at("images").size() == required_images - (video ? 1 : 0) && result.at("completed_cycles") == cycles,
+      "Every required reading cycle and source-specific OS observation must complete");
   require(pdf ? result.at("native_scroll_requests").size() >= 20 : result.at("native_scroll_requests").empty(),
       "Each PDF cycle requires native wheel input; text acceptance must not claim native scrolling");
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
@@ -1699,14 +1707,15 @@ raise SystemExit(main())
         final_media_resources->read(final_media_url, "GET", "bytes=0-1").status == 410 &&
         final_media_resources->read(final_media_url, "HEAD").status == 410,
         "Actual project close intent must revoke old media URLs before its bridge ACK");
-    result["media_scope_revocations"].push_back({{"cycle", 21}, {"scope", "project-close-before-ACK"},
+    result["media_scope_revocations"].push_back({{"cycle", expected_preparations}, {"scope", "project-close-before-ACK"},
         {"session_id", final_media_resources->identity().session_id},
         {"old_url_get_range_status", 410}, {"old_url_head_status", 410}});
     ui.wait([&] { return completion->has_value(); }, "Project close ACK");
     require(completion->value().ok() && completion->value().value(), "Actual project close must complete successfully");
-    ui.media_capture(21, "project-scope-closed", 0, final_media_rectangle, final_media_observed);
-    require(result.at("images").size() == 161 && result.at("media_scope_revocations").size() == 21,
-        "All twenty playback cycles and the final actual project-scope revocation must complete");
+    ui.media_capture(expected_preparations, "project-scope-closed", 0, final_media_rectangle, final_media_observed);
+    require(result.at("images").size() == required_images &&
+        result.at("media_scope_revocations").size() == size_t(expected_preparations),
+        "Every playback cycle and the final actual project-scope revocation must complete");
     // This trace observes explicit bridge asset RPCs. prepare also reads and
     // validates the frozen MP4 internally before returning its descriptors.
     result["explicit_frozen_media_asset_rpc_reads"] = image_reads;
@@ -1725,6 +1734,9 @@ int main(int argc, char **argv)
   Options options;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
+#if defined(__APPLE__) && defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES)
+    if (arg == "--pre-seek-hide-control") { options.pre_seek_hide_control = true; continue; }
+#endif
     if (i + 1 >= argc) { return 2; }
     if (arg == "--python") { options.python = argv[++i]; }
     else if (arg == "--gpu-backend") { options.backend = argv[++i]; }
@@ -1734,17 +1746,19 @@ int main(int argc, char **argv)
     else { return 2; }
   }
   if (options.python.empty() || options.output.empty() ||
+      (options.pre_seek_hide_control && options.source != "video" && options.source != "html-video") ||
       (options.source != "markdown" && options.source != "html" && options.source != "pdf"
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
        && options.source != "video" && options.source != "html-video"
 #endif
       )) {
-    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4]\n"); return 2;
+    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control]\n"); return 2;
   }
-  Json result = {{"format", "stk.reports-native-evidence/1"}, {"status", "running"}, {"required_cycles", 20},
+  Json result = {{"format", "stk.reports-native-evidence/1"}, {"status", "running"}, {"required_cycles", options.reading_cycles()},
       {"completed_cycles", 0}, {"images", Json::array()}, {"native_scroll_requests", Json::array()},
       {"claim", "Production ReportsEditor app actions, frozen bridge resources and OS-composited STK client pixels; opt-in media also records bounded local native child input and fixed read-only media observations"},
       {"not_proven_here", "OS hardware input, IME, arbitrary PDF fidelity/search/selection, modal same-OS-batch ordering, physical scanout and browser memory stability; URL410/parent-close are separate Host CPU and spike native tests; final guarded memory is the separate after-static spike gate"}};
+  if (options.pre_seek_hide_control) { result["scenario"] = "pre-seek-hide-control"; }
   fs::path directory;
   try {
     fs::create_directories(options.output);
@@ -1760,8 +1774,9 @@ int main(int argc, char **argv)
     // Engine static destructors and the final guarded leak gate belong to the separate spike.
     result["status"] = "passed";
     write(directory / "result.json", result.dump(2));
-    std::fprintf(stdout, "PASS: production ReportsEditor native evidence; cycles=20; OS images=%zu; %s\n",
-        result.at("images").size(), core::path_to_utf8(directory).c_str());
+    const char *scenario = options.pre_seek_hide_control ? "pre-seek hide control" : "native evidence";
+    std::fprintf(stdout, "PASS: production ReportsEditor %s; cycles=%d; OS images=%zu; %s\n",
+        scenario, options.reading_cycles(), result.at("images").size(), core::path_to_utf8(directory).c_str());
     return 0;
   }
   catch (const std::exception &error) {

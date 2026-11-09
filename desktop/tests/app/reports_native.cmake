@@ -87,4 +87,20 @@ if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW AND (APPLE OR WIN32))
     file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/reports-native-${_source}-$<CONFIG>.txt"
       CONTENT "\"${STK_BRIDGE_TEST_PYTHON}\" \"${CMAKE_SOURCE_DIR}/tests/check_native_evidence.py\" --success-marker \"PASS: production ReportsEditor native evidence\" --timeout 570 -- \"$<TARGET_FILE:stk-reports-native-window>\" --python \"${STK_BRIDGE_TEST_PYTHON}\" --gpu-backend ${_reports_native_backend} --source ${_source} --media-fixture \"${_reports_spike}/fixtures/frozen-preview.mp4\" --evidence-dir \"${CMAKE_CURRENT_BINARY_DIR}/reports-native-${_source}\"\n")
   endforeach()
+  if(APPLE AND STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_TEST_PROBES)
+    foreach(_source IN ITEMS video html-video)
+      set(_control reports_pre_seek_hide_${_source}_metal)
+      add_test(NAME ${_control} COMMAND "${STK_BRIDGE_TEST_PYTHON}"
+        "${CMAKE_SOURCE_DIR}/tests/check_native_evidence.py"
+        --success-marker "PASS: production ReportsEditor pre-seek hide control" --timeout 150 --
+        $<TARGET_FILE:stk-reports-native-window>
+        --python "${STK_BRIDGE_TEST_PYTHON}" --gpu-backend metal --source ${_source}
+        --media-fixture "${_reports_spike}/fixtures/frozen-preview.mp4"
+        --pre-seek-hide-control
+        --evidence-dir "${CMAKE_CURRENT_BINARY_DIR}/reports-pre-seek-hide-${_source}")
+      set_tests_properties(${_control} PROPERTIES LABELS "project;gpu;window;document_preview"
+        TIMEOUT 180 RESOURCE_LOCK native_window
+        FAIL_REGULAR_EXPRESSION "FAIL:|Error: Not freed memory|leaked")
+    endforeach()
+  endif()
 endif()
