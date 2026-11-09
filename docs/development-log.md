@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 14:06 UTC · HDF5 实际摘要、图目录复验与隐藏对照
+
+root 提交 `395e78fd`，复验 HDF5 摘要和 Python 全量发现的两处目录遗漏。`40608ca1` 集成 Claude50 的 `5f954d84`。Claude51 接手实际收集记录的冻结分析回归。`090fe8f2` 集成独立 Cocoa 诊断，Windows 原生仍是前一轮 Desktop 唯一未完成作业。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 13:49 UTC · 丢失批准回复和收集目录消歧
 
 root 以 `7ac983e8` 集成 Claude49 的 `2846d935`，加入提交调用计数。`3f486870` 统一原生入口与 Viewer 的收集预设消歧，Linux C++ 红绿和实际面板点击已验。Claude50 接手已收集 HDF5 显式查看核对。前一轮 Windows CPU 通过，原生正在运行，macOS 可见与隐藏对照已有回执。 [验收记录](runtime-validation.md)

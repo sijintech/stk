@@ -1,5 +1,17 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 14:06 UTC · 已收集 HDF5 摘要与 Cocoa 暂停顺序
+
+`395e78fd8f8895aac9b43e7ff849da4865cac624` 让 `stk.source.mupro_hdf5@1` 接受可选的预期容器 SHA-256。规划在缓存查找前核对实际字节，匹配时复用同一内容键。合成测试在相同大小及 mtime 改写后拒绝旧摘要，省略约束的旧调用能读到当前值。独立真实本机 Runtime 收集对照在 View 核验后替换一个体素，旧图读到替换值，加入收集摘要后在冷缓存与已有替换文件缓存两种情况下均拒绝，恢复原字节可读，任务数和项目修订一致。源码 260 过、2 条件跳过，隔离 wheel 25/25。证据 `root-delivery-20261109-92/hdf5-pin-{red,source-final}.xml`、`hdf5-pin-wheel/installed.xml` 与 `root-delivery-20261109-91/hdf5-binding-pinned-independent/`。 [HDF5 契约](specs/mupro-hdf5-1.md)
+
+本地 `2eb64f04` Python 3.11 全量 6442 过、2 败、180 跳过、4 排除，1192.98 秒。失败分别为节点参考页落后于图目录，以及原生分发测试还期望实时预设。`395e78fd` 重新生成参考并更新断言，两项在最终联跑通过。含修正的独立 Python 3.11 全量已启动。旧、新证据分别在 `root-delivery-20261109-90/runtime-full311/` 和 `root-delivery-20261109-92/runtime-full311/`。
+
+`40608ca1` 集成 Claude50 `5f954d84`。合成探针证明快照绑定的 HDF5 场经现有 GraphWorker 生成载荷，选择器是显式字符串。作者定向 73 过、1 性能例跳过，9 个本地链接通过检查。已有 DAT 默认 View 继续按其契约工作。HDF5 专用预设、时间轴和原生分析载荷点击仍需各自验收。Claude51 验证实际收集记录至冻结分析的路径。证据 `root-delivery-20261109-91/claude50/evidence/`。 [试点设计](design/mupro-executor-pilot.md)
+
+`090fe8f2ce52389731d63b23be89a3a2ca8db05f` 新增 Cocoa 诊断。匹配的恢复播放后，同一导航先收到可见原生非 Playing 回执，再切换标签，让生产监听器派发第二次暂停。回执分别记录两个媒体代次、隐藏、原生确认和回复，两个阶段都避免 DOM 取样。实际隐藏和第二次暂停共同发生，诊断只区分该生产顺序的结果。新增 CI 步骤独立记录诊断结果，原验收门保留。Linux 原生测试构建通过，证据检查 12 项及 7 子测通过。独立强制 Apple 分支 C++ 语法、合成观察器、CTest 注册和回执解析通过。实际 Apple SDK 与 WKWebView 待目标 CI。证据 `root-delivery-20261109-92/mac-hide-after-pause/validation.json` 和 `mac-hide-root-evidence.xml`。
+
+远端 `249698d05dc13d9c08a2aebd9e906ebc38873a9d` 的 macOS 作业于 13:51:26Z 失败。CPU 1518/1518、Metal 254/254，零跳过。原生 4/6，失败为视频与 HTML 视频，两个可见对照通过。三个 Linux 与 Windows CPU 作业已通过，14:05Z 时 Windows 原生仍在运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42621953590) [macOS 证据](https://github.com/sijintech/stk/actions/runs/42621953590/artifacts/13680007342)
+
 ## 2026-11-09 13:49 UTC · 面板点击、导出共存与原批准观察
 
 `7ac983e8bd69505652b0bc692ee483ad4ce6c09e` 集成 Claude49 的 `2846d935`。只丢弃一次成功 `run_decide` 的已序列化回执，合成 MuFerro 在真实本机 Runtime 完成后普通关闭桥。新严格 Bridge 以新句柄和执行器打开同一项目，通过 `run_observe` 读到原审批和执行器，历史 `started` 与当前 `stopped` 分别匹配。原批准、启动日志、任务 ID 和一次真实提交均可追踪。源码联跑 64 项，隔离 wheel 2 项通过。独立在原候选记录真实 HTTP 服务的一次 submit、零 cancel 和工作流零 recover/cancel。范围为同一进程中重建 Bridge，实际进程中断及执行中重开仍待验。证据 `root-delivery-20261109-91/claude49-source.xml`、`claude49-wheel/installed.xml` 与 `claude49-lost-approval-review/`。
