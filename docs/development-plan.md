@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-09 21:03 UTC · MuPRO Bridge 发布结果校验
+
+`f69edbe4` 把 MuPRO 文件校验移入 Bridge 结果发布，封住已复现的客户端提交边界。真实许可与 Windows 重解析点仍待验证。 [运行验收](runtime-validation.md)
+
+远端 `a7fce899` Desktop `42692999966` 仍在运行，3 个作业通过。本地提交等待整轮终态。同头 Runtime `42692999627` 已终态 13/13。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42692999966) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42692999627)
+
 ## 2026-11-09 20:45 UTC · MuPRO 收集文件登记一致性
 
 `537b774b` 拒绝 MuPRO 收集验证后登记阶段的内容替换和路径重定向，保留同一任务恢复。真实许可与目标平台回归继续验收。 [运行验收](runtime-validation.md)
