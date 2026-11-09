@@ -1,5 +1,19 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 22:12 UTC · 探针代次与原生 MuPRO 查看回归
+
+`3f36d736` 让探针请求编号跨清除选点和关闭来源继续递增。已完成但排在主循环队列中的旧回调，即使无法取消，也无法覆盖新选点或新来源的探针结果。新请求仍按原路径完成。
+
+集成 `8f84451c` 的两个确定性反例。测试先确认旧请求 Future 已成功完成，暂扣其回调，再清除重选或关闭重开，暂扣新回调后只释放旧回调。旧头两个反例各重复 5 次，10/10 在探针状态被覆盖处失败。修复后工作区 11/11、既有 Viewer 状态及表单 31/31，零跳过。
+
+新增 C++ ViewerState 接真实严格 Python Bridge、图 worker 和 llvmpipe 离屏渲染的来源回归。Vulkan、OpenGL 两后端各 5/5，通过已缓存帧改写拒绝、保留上一份已验证画面、工作区恢复后显式求值与探针再次拒绝、恢复原文件后的画面和采样核对。每个后端均实际执行新增用例。该测试使用合成目录，实际目标 OS 窗口交互与许可算例继续验收。
+
+远端 `75b20fc6` Runtime `42702712232` 已终态 13/13。Desktop `42702711687` 仍运行，3 个 Linux 作业与 Windows CPU 已成功，macOS 和独立 Windows 原生仍运行。本地新提交等待整轮终态再推送。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42702712232) · [Desktop CI](https://github.com/sijintech/stk/actions/runs/42702711687)
+
+Claude71 已在独立 worktree 提交可选可见帧编号诊断候选 `1525f17b`，仍在完成交付。root 正审阅诊断分类和截图证据落盘，候选尚未集成，实际 Cocoa 执行待下一头。
+
+本机证据 `root-delivery-20261109-118/` 的 `probe-race-build/receipt.json`、`probe-race-build/red-{1..5}.xml`、`probe-workspace-final.xml`、`viewer-cpu-final.xml`、`native-real-graph-final.xml` 和 `native-real-cases/` 两份具名 XML。
+
 ## 2026-11-09 21:54 UTC · MuPRO 查看源校验与 Windows 回归
 
 `89ffacbd` 把收集结果中算例文件的路径与 SHA-256 清单带入 Viewer 来源。来源与可编辑预设参数分开保存，打开、步进、预取、探针和工作区恢复后显式求值沿用该清单。图节点缓存命中前仍检查当前内容，读入经过项目目录约束和摘要校验的私有快照。本机缓存显示和探针网格缓存均不能绕过这次读取。

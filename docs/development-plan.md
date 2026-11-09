@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-09 22:12 UTC · 探针代次与原生 MuPRO 查看回归
+
+`3f36d736` 修复已完成探针回调跨选点/来源覆盖。MuPRO 查看链路增加真实原生 Bridge 与双后端离屏渲染验证。 [运行验收](runtime-validation.md)
+
+远端 `75b20fc6` Runtime `42702712232` 已终态 13/13。Desktop `42702711687` 仍运行，3 个 Linux 作业与 Windows CPU 已成功，macOS 和独立 Windows 原生仍运行。本地新提交等待整轮终态再推送。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42702712232) · [Desktop CI](https://github.com/sijintech/stk/actions/runs/42702711687)
+
+Claude71 已在独立 worktree 提交可选可见帧编号诊断候选 `1525f17b`，仍在完成交付。root 正审阅诊断分类和截图证据落盘，候选尚未集成，实际 Cocoa 执行待下一头。
+
 ## 2026-11-09 21:54 UTC · MuPRO 查看源校验与 Windows 回归
 
 `89ffacbd` 完成 MuPRO 收集来源到 Viewer、图缓存、探针与工作区恢复的文件摘要绑定。真实许可和目标平台界面继续验收。 [运行验收](runtime-validation.md)
