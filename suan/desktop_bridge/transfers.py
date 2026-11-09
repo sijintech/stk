@@ -331,8 +331,8 @@ class TransferManager:
 
     @_writer
     def cancel(self, transfer_id):
-        record = self.load(transfer_id)
         with self.lock:
+            record = self.load(transfer_id)
             thread = self.threads.get(transfer_id)
             if record["state"] in FINAL:
                 return self.public(record)

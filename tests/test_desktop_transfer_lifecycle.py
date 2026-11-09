@@ -1,6 +1,7 @@
 """Deterministic transfer handoff between a published terminal state and worker cleanup."""
 
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import os
 import threading
@@ -296,4 +297,69 @@ def test_resume_after_failure_event_waits_for_old_worker_and_restarts(tmp_path, 
         assert len(attempts) == 2
     finally:
         release.set()
+        manager.stop()
+
+
+def test_cancel_after_transfer_worker_retires_preserves_completed_download(tmp_path, monkeypatch):
+    downloading, finish_download, cancel_at_lock, allow_cancel = (threading.Event() for _ in range(4))
+    body = b"synthetic download"
+    states = []
+
+    def read_chunk(owner, owner_id, path, offset):
+        assert (owner, owner_id, path, offset) == ("workspace", "workspace", "file.dat", 0)
+        downloading.set()
+        assert finish_download.wait(10), "test did not release the download"
+        return body
+
+    backend = SimpleNamespace(kind="runtime", server_key="runtime:test", read_chunk=read_chunk,
+                              describe=lambda *args: {"path": "file.dat", "size": len(body),
+                                                      "sha256": hashlib.sha256(body).hexdigest()})
+
+    def emit(event, data):
+        states.append(data["transfer"]["state"])
+
+    manager = TransferManager(tmp_path / "state", emit, lambda *args: backend)
+    lock = manager.lock
+
+    class GateCancelLock:
+        def __enter__(self):
+            if threading.current_thread().name.startswith("test-cancel"):
+                cancel_at_lock.set()
+                assert allow_cancel.wait(10), "test did not release the cancellation"
+            return lock.__enter__()
+
+        def __exit__(self, *args):
+            return lock.__exit__(*args)
+
+    monkeypatch.setattr(manager, "lock", GateCancelLock())
+    destination = tmp_path / "download.dat"
+    try:
+        transfer = manager.start_download("local", "workspace", "workspace", "file.dat", destination)
+        transfer_id = transfer["id"]
+        assert downloading.wait(5)
+        worker = manager.threads[transfer_id]
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="test-cancel") as pool:
+            cancellation = pool.submit(manager.cancel, transfer_id)
+            try:
+                assert cancel_at_lock.wait(5)
+                finish_download.set()
+                worker.join(timeout=5)
+                assert not worker.is_alive()
+                assert destination.read_bytes() == body
+                assert manager.load(transfer_id)["state"] == "completed"
+                journal = manager.root / (transfer_id + ".json")
+                completed_bytes = journal.read_bytes()
+                completed_events = list(states)
+                assert completed_events[-1] == "completed"
+            finally:
+                finish_download.set()
+                allow_cancel.set()
+            result = cancellation.result(timeout=5)
+        assert result["state"] == "completed"
+        assert journal.read_bytes() == completed_bytes
+        assert destination.read_bytes() == body
+        assert states == completed_events
+    finally:
+        finish_download.set()
+        allow_cancel.set()
         manager.stop()
