@@ -78,11 +78,15 @@ def send(self, message, method=None):
         if setting == 'malformed':
             message = copy.deepcopy(message)
             message['result']['run']['id'] = '00000000-0000-4000-8000-000000000000'
-    if method == 'project.analysis_runs.get' and 'result' in message and setting == 'hold':
+    if 'result' in message and (method, setting) in {
+            ('project.analysis_runs.get', 'hold'), ('project.analysis_runs.result', 'hold-result')}:
         (control / 'held').write_text('ready', encoding='utf-8')
         while not (control / 'release').exists():
             if self.closing.wait(0.01):
                 return
+        sent = original_send(self, message, method)
+        (control / 'delivered').write_text('sent', encoding='utf-8')
+        return sent
     return original_send(self, message, method)
 
 Bridge._run, Bridge.send = run, send
@@ -253,6 +257,16 @@ class ProjectAnalysisRunsPython : public ::testing::Test {
     ASSERT_NE(widget("analysis_saved_section"), nullptr);
     widget("analysis_saved_section")->index.assign(1); f.drv->frame();
     ASSERT_NE(widget("analysis_run_snapshots"), nullptr);
+  }
+  void select_completed_run_ui()
+  {
+    ASSERT_NO_FATAL_FAILURE(open_runs_ui());
+    ASSERT_NE(widget("analysis_run_list"), nullptr); widget("analysis_run_list")->on_click();
+    ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget("analysis_run_rows") != nullptr; }, 30));
+    widget("analysis_run_rows")->table->selected.assign(0);
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.drv->frame(); return widget("analysis_run_read_result") && widget("analysis_run_read_result")->enabled;
+    }, 30));
   }
   void map_file_ui()
   {
@@ -689,13 +703,7 @@ TEST_F(ProjectAnalysisRunsPython, ExplicitPayloadSelectionAndShowAreRequiredAfte
   ASSERT_NO_FATAL_FAILURE(prepare());
   ASSERT_NO_FATAL_FAILURE(execute());
   ASSERT_EQ(runs->run().at("status"), "succeeded");
-  ASSERT_NO_FATAL_FAILURE(open_runs_ui());
-  ASSERT_NE(widget("analysis_run_list"), nullptr); widget("analysis_run_list")->on_click();
-  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget("analysis_run_rows") != nullptr; }, 30));
-  widget("analysis_run_rows")->table->selected.assign(0);
-  ASSERT_TRUE(loop.pump_until([&] {
-    f.drv->frame(); return widget("analysis_run_read_result") && widget("analysis_run_read_result")->enabled;
-  }, 30));
+  ASSERT_NO_FATAL_FAILURE(select_completed_run_ui());
   EXPECT_FALSE(viewer().payload()); EXPECT_EQ(calls("project.analysis_runs.start").size(), 1u);
   widget("analysis_run_read_result")->on_click();
   ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget("analysis_run_output") != nullptr; }, 30));
@@ -725,6 +733,77 @@ TEST_F(ProjectAnalysisRunsPython, ExplicitPayloadSelectionAndShowAreRequiredAfte
   });
   ASSERT_NE(block, blocks.end());
   EXPECT_EQ(context.draw_list().cmds.at((*block)->draw_begin()).type, ui::CmdType::ClipPush);
+}
+
+TEST_F(ProjectAnalysisRunsPython, ReadAndShowOpensTheSoleVerifiedOutputWithoutStartingWork)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare());
+  ASSERT_NO_FATAL_FAILURE(execute());
+  ASSERT_NO_FATAL_FAILURE(select_completed_run_ui());
+  const auto *button = widget("analysis_run_read_show");
+  ASSERT_NE(button, nullptr); ASSERT_TRUE(button->enabled);
+  EXPECT_FALSE(viewer().payload());
+  button->on_click();
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return viewer().payload() != nullptr; }, 30));
+  EXPECT_EQ(viewer().source().kind, SourceKind::Payload);
+  EXPECT_FALSE(viewer().graph_inspection()->shown_configuration);
+  EXPECT_EQ(calls("project.analysis_runs.result").size(), 1u);
+  EXPECT_EQ(calls("project.analysis_runs.prepare").size(), 1u);
+  EXPECT_EQ(calls("project.analysis_runs.start").size(), 1u);
+  EXPECT_TRUE(calls("graph.evaluate").empty());
+}
+
+TEST_F(ProjectAnalysisRunsPython, ReadAndShowLeavesMultiplePayloadsForExplicitSelection)
+{
+  document["graph"]["outputs"]["second_view"] = "scene.scene";
+  document["outputs"] = Json::array({"view", "second_view"});
+  ASSERT_NO_FATAL_FAILURE(update_document());
+  ASSERT_NO_FATAL_FAILURE(prepare());
+  ASSERT_NO_FATAL_FAILURE(execute());
+  ASSERT_NO_FATAL_FAILURE(select_completed_run_ui());
+  const auto *button = widget("analysis_run_read_show");
+  ASSERT_NE(button, nullptr); ASSERT_TRUE(button->enabled);
+  button->on_click();
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget("analysis_run_output") != nullptr; }, 30));
+  EXPECT_EQ(widget("analysis_run_output")->items.size(), 3u);
+  EXPECT_EQ(widget("analysis_run_output")->index.value(), 0);
+  EXPECT_FALSE(viewer().payload());
+  EXPECT_EQ(calls("project.analysis_runs.result").size(), 1u);
+  EXPECT_EQ(calls("project.analysis_runs.start").size(), 1u);
+}
+
+TEST_F(ProjectAnalysisRunsPython, ReadAndShowRejectsChangedViewerAndHiddenOriginWhileWaiting)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare());
+  ASSERT_NO_FATAL_FAILURE(execute());
+  const auto payload = result_payload(); ASSERT_TRUE(payload);
+  ASSERT_NO_FATAL_FAILURE(select_completed_run_ui());
+  auto &area = f.area("a2");
+  const int origin = area.active_tab();
+  ASSERT_TRUE(area.add_tab(kEditorPython, false));
+  const int other = area.tab_count() - 1;
+  for (const bool hide_origin : {false, true}) {
+    SCOPED_TRACE(hide_origin ? "hidden origin" : "Viewer opened then closed");
+    for (const auto *name : {"held", "release", "delivered"}) { fs::remove(directory.path() / name); }
+    mode("hold-result");
+    f.drv->frame();
+    const auto *button = widget("analysis_run_read_show");
+    ASSERT_NE(button, nullptr); ASSERT_TRUE(button->enabled);
+    button->on_click();
+    ASSERT_TRUE(loop.pump_until([&] { return fs::exists(directory.path() / "held"); }, 5));
+    if (hide_origin) { area.set_active_tab(other); }
+    else { viewer().open_payload(payload, "Separate user result"); viewer().close(); }
+    ASSERT_NO_FATAL_FAILURE(write(directory.path() / "release", "ok"));
+    ASSERT_TRUE(loop.pump_until([&] { return fs::exists(directory.path() / "delivered"); }, 5));
+    Json hello;
+    ASSERT_NO_FATAL_FAILURE(call("hello", {{"protocol", 1}}, hello));  // Drain the earlier response.
+    f.drv->frame();
+    EXPECT_FALSE(viewer().payload());
+    if (hide_origin) { EXPECT_EQ(area.active_tab(), other); area.set_active_tab(origin); f.drv->frame(); }
+    EXPECT_FALSE(viewer().payload());
+  }
+  EXPECT_EQ(calls("project.analysis_runs.result").size(), 3u);
+  EXPECT_EQ(calls("project.analysis_runs.start").size(), 1u);
 }
 
 TEST_F(ProjectAnalysisRunsPython, OccupiedUnrenderedViewerIntentAndClosedTargetNeverGetReplaced)

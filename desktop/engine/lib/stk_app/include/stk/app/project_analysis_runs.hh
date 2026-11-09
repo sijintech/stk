@@ -54,7 +54,7 @@ class ProjectAnalysisRuns {
   bool cancel();
   bool recover();
   bool check_pending();
-  bool read_result();
+  bool read_result(std::function<void()> verified = {});
   /** Read exact snapshot metadata for the selected frozen run. Never copies file bytes or
    * prepares/starts a run. Published staging is independent of the editor's local input form. */
   bool read_reusable_inputs();

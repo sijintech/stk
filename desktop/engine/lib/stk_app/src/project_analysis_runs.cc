@@ -340,13 +340,13 @@ bool ProjectAnalysisRuns::read_reusable_inputs()
   });
 }
 
-bool ProjectAnalysisRuns::read_result()
+bool ProjectAnalysisRuns::read_result(std::function<void()> verified)
 {
   sync();
   if (run_.is_null() || run_.at("result").is_null()) { return false; }
   const auto id = run_.at("id").get<std::string>();
   const auto selection = selection_generation_;
-  return call("project.analysis_runs.result", {{"run_id", id}}, [this, id, selection](const Json &response) {
+  return call("project.analysis_runs.result", {{"run_id", id}}, [this, id, selection, verified = std::move(verified)](const Json &response) {
     if (selection != selection_generation_) { return; }
     const auto &run = response.at("run"), &document = response.at("result");
     if (!project_.project() || !valid_run(run, project_.project()->id, true) ||
@@ -397,6 +397,7 @@ bool ProjectAnalysisRuns::read_result()
     // previously verified run/result/blob/model bundle; no stale JSON can acquire a new receipt.
     accept_run(run, id);
     result_inspection_ = std::move(inspector); blob_dir_ = std::move(blob_dir); ++result_generation_;
+    if (verified) { verified(); }
   });
 }
 std::vector<std::string> ProjectAnalysisRuns::payload_outputs() const

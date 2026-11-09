@@ -1796,6 +1796,26 @@ class AnalysisGraphEditor final : public Editor {
     });
   }
 
+  void read_and_show_result(AppShell *shell, wm::Screen *screen, std::function<bool()> current)
+  {
+    const auto warn = [this](std::string_view message) {
+      if (store_->toast) { store_->toast(std::string(message), ui::ToastKind::Warning); }
+    };
+    const auto target = shell->analysis_payload_target(screen);
+    if (!target) { warn(target.error().message); return; }
+    runs_->read_result([this, shell, screen, current = std::move(current), warn, version = target.value()] {
+      if (!current()) { return; }
+      output_index_ = -1;
+      const auto outputs = runs_->payload_outputs();
+      if (outputs.size() != 1) { warn(store_->tr("analysis_runs.select_archive_output")); return; }
+      if (store_->viewer().version() != version) { warn(store_->tr("analysis_runs.target_changed")); return; }
+      const auto archive = runs_->result_generation();
+      show_output(shell, screen, outputs.front(), [this, current, archive] {
+        return current() && !runs_->busy() && runs_->result_generation() == archive;
+      }, [warn](const bridge::Error &error) { warn(error.message); });
+    });
+  }
+
   void advance_run_and_show(EditorContext &ctx)
   {
     if (!run_and_show_) { return; }
@@ -2275,6 +2295,21 @@ class AnalysisGraphEditor final : public Editor {
     box.button("analysis_run_read_result", ctx.tr("analysis_runs.read_result"), [this, same_run] {
       if (same_run() && runs_->read_result()) { output_index_ = -1; }
     }).disable(blocked || run.at("result").is_null());
+    auto *screen = ctx.area.screen();
+    if (status == "succeeded" && !run.at("result").is_null() && run.at("result").at("has_payload").get<bool>()) {
+      auto *area = &ctx.area;
+      const auto manifest = io::get_string(run.at("result"), "manifest_sha256");
+      const auto current = [this, same_run, shell, screen, area, navigation, plan, manifest] {
+        return same_run() && screen && shell->has_area(area) && area->screen() == screen &&
+            &area->editor() == this && area->sidebar_open() && (!screen->maximized() || screen->maximized() == area) &&
+            state_->saved() && saved_section_ == 1 && navigation_generation_ == navigation &&
+            io::get_string(runs_->run(), "plan_sha256") == plan &&
+            io::get_string(runs_->run().at("result"), "manifest_sha256") == manifest;
+      };
+      box.button("analysis_run_read_show", ctx.tr("analysis_runs.read_show"), [this, shell, screen, current] {
+        if (current() && !runs_->uncertain() && !run_and_show_) { read_and_show_result(shell, screen, current); }
+      }).disable(blocked || runs_->uncertain() || run_and_show_.has_value()).tip(ctx.tr("analysis_runs.read_show_hint"));
+    }
     if (runs_->result().is_null()) { return; }
     result_panel(box, ctx, same_run, blocked);
     const auto outputs = runs_->payload_outputs();
@@ -2289,7 +2324,6 @@ class AnalysisGraphEditor final : public Editor {
         [this, same_archive, outputs](const int index) {
       if (same_archive() && index >= 0 && size_t(index) <= outputs.size()) { output_index_ = index - 1; }
     }}).disable(blocked);
-    auto *screen = ctx.area.screen();
     box.paragraph(ctx.tr("analysis_runs.viewer_hint"));
     box.button("analysis_run_show", ctx.tr("analysis_runs.show"), [this, same_archive, shell, screen, outputs] {
       if (!same_archive() || output_index_ < 0 || size_t(output_index_) >= outputs.size()) { return; }
