@@ -1,5 +1,9 @@
 # STK 当前交接
 
+## 2026-11-09 11:45 UTC · 上一轮 Desktop 终态与 HDF5 依赖
+
+远端 `15531049` Desktop 于 11:45:32Z 结束，Windows 原生 5/6，PDF 重准备后等待第一页像素超时。Windows CPU 1460/1460，Linux 三项通过，macOS 原生失败。整轮已满足推送等待条件。Claude42 的 F-5 文档已集成为 `d2fcfc72`，root 补 NumPy-only 对照。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · 真实 Jobs 回环与 MuFerro case 绑定
 
 本地 `1980660f` 集成 Claude41 的 C++ 桥接回归，root 重跑 71 项通过。Jobs 的独立 Linux/Xvfb 试验从预选 Hub 作用域点击原任务、离线刷新和恢复刷新。同一任务在真实 NodeAgent 停止期间完成，重连后仍在心跳窗口外，三次读取依次为运行中、可重试不可用和成功。没有提交或取消请求。

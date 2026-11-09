@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 11:45 UTC · 原生验收终态与 MuPRO 读取依赖
+
+Windows 原生余下 PDF 重准备后的像素超时，macOS 下一轮验证第二次可见暂停对照。MuPRO HDF5 已区分可选依赖诊断与只装 `server` 时的 NumPy 缺失。按执行节点声明能力、提前报告缺失依赖和真实许可输出验证仍待处理。 [验收记录](runtime-validation.md) [D1 兼容门](planning/d1-compatibility-gates.md)
+
 ## 2026-11-09 UTC · D2 真实 Jobs 回环与 case 依赖
 
 D2 已取得 Linux 本机原生点击加真实 Hub 的联合证据。固定作用域保留原任务，断线期间只更新观察，重连后由精确读取更新原任务终态。跨主机网络及其他目标系统仍待验证。MuFerro 图索引按实际 case 依赖的字节绑定布局和清单。Claude42 核验缺少 HDF5 依赖时各入口的实际行为。通用图文件源的内容绑定反例已在隔离数据上复现，留作下一批处理。 [验收记录](runtime-validation.md)

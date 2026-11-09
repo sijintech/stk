@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 11:45 UTC · Desktop 终态和 F-5 安装对照
+
+`15531049` Desktop 整轮结束。Windows 原生 5/6，CPU 和 Linux 三项通过，macOS 原生失败。root 以 `d2fcfc72` 集成 Claude42 的 `59dee90e`，补单装 NumPy 的隔离对照，记录 HDF5 及 DAT 各入口行为。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 桥接真实回环和图索引输入
 
 root 将 Claude41 的 `4eaf211c` 和 `5fa320ca` 集成为 `1980660f`，独立桥标签 71 项通过。真实原生 Jobs 的独立适配试验两轮通过，回执和截图留在本地证据目录。`ea035adf` 绑定 MuFerro 实际 case 字节，源码和隔离安装各 270 项通过、4 项条件跳过。Claude42 接最小安装 HDF5 证据。 [验收记录](runtime-validation.md)

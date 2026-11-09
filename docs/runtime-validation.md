@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 11:45 UTC · Desktop 推送门和 HDF5 最小安装
+
+`15531049c5c027153c232a2c4ac82c13deb6fe55` 的 Desktop 整轮于 11:45:32Z 终态失败。Linux 三项及 Windows CPU 通过，macOS 原生失败。Windows 原生六项执行五项通过，唯一失败 `reports_native_pdf_opengl` 耗时 134.26 秒，PDF 重新准备后等待第一页像素超时。视频和 HTML 视频通过。JUnit 记录零跳过，后续必需用例检查因 CTest 失败未运行。第一轮重准备阶段启动捕获一次即耗时 120070 毫秒，零轮询、采样和宿主帧。可见及关闭前已有七张有效截图，原重试条件尚未触发。工件已上传，本地新批可以推送。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42601829902) [Windows 原生](https://github.com/sijintech/stk/actions/runs/42601829902/job/129130779464) [Windows 工件](https://github.com/sijintech/stk/actions/runs/42601829902/artifacts/13669449664)
+
+`d2fcfc72` 收录 Claude42 在 `1980660f` 干净 wheel 的 `[server]` 与 `[science]` 合成读取验证。root 另用单装 NumPy 的隔离 wheel 确认 DAT 和运行索引可用，HDF5 发现和显式图读取报 `unavailable`。`[server]` 缺 NumPy 时，DAT 帧、含能量表的连接器描述及图运行索引失败。证据 `root-delivery-20261109-85/claude42/evidence/` 与 `hdf5-optional-numpy-only/probe.json`。 [D1 兼容门](planning/d1-compatibility-gates.md)
+
 ## 2026-11-09 UTC · 真实 Hub 原生任务与 MuFerro case
 
 `1980660fb92c758ffe872fdff5ce7178761bde17` 集成 Claude41 的真实单机 Hub、NodeAgent、Runtime 和 C++ 桥。根构建的 bridge 标签 71/71，零跳过。两个新用例验证窗口外精确读取、对窗口内合成且 Runtime 不存在的任务明确报错、离线可重试和同一节点重连、代理探针零连接及关闭。作者负对照让快照代替实时读取、让离线生成虚构终态以及让夹具异常退出，测试均拒绝。证据 `root-delivery-20261109-85/claude41-root.xml`。
