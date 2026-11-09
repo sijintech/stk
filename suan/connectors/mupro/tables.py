@@ -25,8 +25,12 @@ ENERGY_COLUMNS = ("Elastic Energy", "Electric Energy", "Landau Energy", "Gradien
 PROGRESS_COLUMNS = ("step", "completed_steps", "total_steps")
 
 
-def _np():
-    import numpy
+def _require_numpy():
+    """Return NumPy, or report why MuFerro frames and tables cannot be read."""
+    try:
+        import numpy
+    except ImportError:
+        raise ConnectorError("Reading MuFerro DAT frames and tables needs NumPy", "unavailable") from None
     return numpy
 
 
@@ -50,7 +54,7 @@ def _complete_lines(text):
 
 def read_energy(text, *, id="energy", keep=None):
     """``energy_out.dat`` text -> Table ``step`` (int64, index) + five float64 energy columns."""
-    np = _np()
+    np = _require_numpy()
     lines = _complete_lines(text)
     names = ENERGY_COLUMNS
     steps, values = [], []
@@ -85,7 +89,7 @@ def read_energy(text, *, id="energy", keep=None):
 
 def read_progress(text, *, id="progress", keep=None):
     """``mupro_progress.jsonl`` text -> Table ``step``, ``completed_steps``, ``total_steps`` (int64)."""
-    np = _np()
+    np = _require_numpy()
     table = read_jsonl(text, id=id)
     columns = {}
     for name in PROGRESS_COLUMNS:

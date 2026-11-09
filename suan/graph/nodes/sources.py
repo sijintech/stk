@@ -77,8 +77,14 @@ def _muferro_run_fingerprint(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
     from suan.connectors.mupro import (MuFerroConnector, _RUN_TABLE_LIMIT, _RUN_TABLE_READERS, _case_dir_from_record,
                                        _observe_case, _observe_launcher_report, run_files)
+    from suan.connectors.mupro.tables import _require_numpy
     from suan.mupro.run import FRAME, RESULT
     source = _source(ctx, params["binding"])
+    try:
+        # The frames/energy/progress tables need NumPy with any connector: fail before planning reads.
+        _require_numpy()
+    except ConnectorError as exc:
+        raise _failure(exc) from None
     connector = _muferro()
     native = _native_muferro_description(connector)
     launcher_report = None

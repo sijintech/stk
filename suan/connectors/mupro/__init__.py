@@ -38,7 +38,7 @@ from suan.mupro.run import COMPONENTS, FRAME, RESULT, MuproError, missing_frames
 
 from ..api import API_VERSION, ConnectorError, FileInfo, Match
 from ..builtin import crop_sample, field_stats, select_frame
-from .tables import ENERGY_COLUMNS, read_energy, read_progress
+from .tables import ENERGY_COLUMNS, _require_numpy, read_energy, read_progress
 
 __all__ = ["CONNECTOR_ID", "MuFerroConnector", "VERSION", "case_prefix", "field_descriptor", "frame_rows",
            "recorded_case_dir", "run_files", "stem_field"]
@@ -512,6 +512,8 @@ class MuFerroConnector:
             table = energy["table"] if energy is not None else None
             if energy is None:
                 try:
+                    # Without NumPy the trace stays an unparsed descriptor (rows unknown) and is not read.
+                    _require_numpy()
                     table = read_energy(_read_text(run, energy_path))
                 except ConnectorError:
                     pass
@@ -712,6 +714,7 @@ class FrameHandle:
         if fields is not None and entry["name"] not in fields:
             raise ConnectorError(f"Dataset {self.descriptor['id']!r} has only the field {entry['name']!r}",
                                  "invalid_param")
+        _require_numpy()
         sha = self.run.sha256(chosen["path"])
         provenance = Provenance(activity={"kind": "run", "id": None},
                                 agent={"connector": f"{CONNECTOR_ID}@{VERSION}", "reader": READER},
@@ -738,6 +741,7 @@ class FrameHandle:
 
     def stats(self, *, frame=None, field=None):
         chosen = self.frame(frame)
+        _require_numpy()
         key = (chosen["path"], self.run.sha256(chosen["path"]))
         if key not in self._stats:
             self._stats[key] = field_stats(self.read(frame={"step": chosen["step"], "policy": "exact"}),
@@ -754,6 +758,7 @@ class _TableHandle:
 
     def read(self, *, frame=None, fields=None, region=None, stride=None):
         source = self.descriptor["frames"][0]["sources"]["*"]
+        _require_numpy()
         text = _read_text(self.run, source["path"])
         reader = read_energy if self.descriptor["id"] == "energy" else read_progress
         return reader(text, keep=list(fields) if fields else None)
