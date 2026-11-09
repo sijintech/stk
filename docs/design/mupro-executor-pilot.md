@@ -101,6 +101,22 @@ Claude 以 `a656f879` 为基线核对执行器和读取器入口。下文比较�
 
 先补可重复的节点本地验证，核对合成预检、依赖缺失、旧投影、连接断开和心跳老化。对照应分别记录未报告、过期、断开和明确不可用，检验活动连接上的精确读取。随后可以验证节点本地的固定状态投影。发布入口、Hub 列表和放置策略仍需按各自契约审阅。
 
+#### 现有 `graph.meta` 路径核对（基线 `c8618a4f`）
+
+| 路径 | 回答的进程与来源 |
+|---|---|
+| 直连、SSH | 桌面桥的 `graph.catalog` 和 `graph.presets` 来自桥接进程。`graph.evaluate` 使用桥以同一解释器启动的子进程，探针取样在桥接进程内。SSH 转发 Runtime 请求，这条路径的图读取仍在桌面侧。桌面桥方法表没有 `graph.meta` |
+| 配对 Hub | `graph.meta`、`graph.evaluate` 和 `view.*` 由活动连接对应的 NodeAgent 执行。动作记录含 `node_id`、`created` 和 `updated`，结果缺少 agent 版本、进程身份和观测时间 |
+
+[桥接方法](../../suan/desktop_bridge/server.py) [桥接图求值](../../suan/desktop_bridge/graphs.py) [节点代理](../../suan/control/agent.py) [Hub 路由](../../suan/control/app.py) [动作策略](../../suan/control/policy.py)
+
+- **观察内容。** `features` 返回静态 `agent` 列表、`graph_workers` 配置和最近的 Hub health 能力。首次 health 失败时 Hub 能力为空，后续失败会保留上次结果。可选的 `render` 使用子进程探测离屏渲染，解释器可由 `STK_RENDER_PYTHON` 指定。现有 `reason` 可含解释器路径。
+- **传递形状。** 当前 Hub 在动作结果中原样保留额外键，超过 64 KiB 的结果转入 blob。心跳投影会丢弃合成的同类额外键。`f8785319` 引入 `graph.meta` 动作。进程内对照验证了未知 kind 的拒绝与模拟旧 agent 拒绝时的失败回执。
+- **权限与时效。** 拥有者和已配对客户端可提交该动作，各复核策略均直接放行。专用读取入口拒绝 `graph.meta`。四次合成提交中一次复用了相同 ID，最终得到 3 条动作记录、5 条变更事件。离线提交进入 `queued`，节点随后接手。重复 ID 只取原回执。动作时间缺少采样和进程绑定，无法区分排队期间的断开和执行缓慢。
+- **读取依赖。** 装齐依赖、阻断 h5py、同时阻断 NumPy 和 h5py 的三个子进程得到相同 `features`、目录和预设摘要。`load_errors` 均为空，三者调用后都未导入两库。设置为不可达的 Runtime 没有收到调用。现有字段只能表示读取能力未报告。
+
+合成结果来自节点代理子进程和进程内 TestClient。定向 23 项通过，证据为 `root-delivery-20261109-88/claude47/evidence/graph_meta_receipt.json` 和 `pytest_targeted.txt`。实际旧部署、支持 VTK 的渲染节点、真实 MuPRO 节点以及新客户端兼容仍待核验。 [图测试](../../tests/test_control_graph.py)
+
 ## 电场扫描与剩余决定
 
 电场扫描是将外加电场按任务方案改变，获得 P–E 回线等响应。任务需明确场方向、幅度和单位、
