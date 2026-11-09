@@ -398,6 +398,64 @@ def test_real_peer_and_bridge_share_receipt_byte_limit_on_the_same_project(conne
     bridge.assert_clean()
 
 
+def test_real_authorized_file_index_content_crosses_the_native_wire_until_grant_revocation(
+        connected, sides, inproc, tmp_path):
+    """CP-0 F23 over the real UDP WebRTC PeerEndpoint: CURRENT published stk.peer/1 behaviour.
+
+    An authorized exact table read returns the ordinary file-index cell values unchanged, including the
+    absolute external path; only protocol metadata is closed. Grant revocation on the existing connection
+    makes the same read forbidden while the local Bridge still reads the row. No file is transferred or
+    read; this neither chooses a cloud content policy nor grants a file right.
+    """
+    from suan.project import files
+    store, target = sides[1].store, sides[1].target
+    outside = tmp_path / "outside-project"
+    outside.mkdir()
+    source = (outside / "synthetic-input.csv").resolve()
+    source.write_text("synthetic,1\n", encoding="utf-8")
+    assert not source.is_relative_to(store.directory)
+    location = "external:windows" if os.name == "nt" else "external:posix"
+    indexed = store.files.index([str(source)], expected_revision=0)
+    assert indexed["revision"] == 1 and indexed["table_id"] == files.TABLE_ID
+    record = indexed["record_ids"][0]
+
+    client, _ = connected()
+    bridge = inproc()
+    handle = bridge.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    method = "project.table.read"
+    page = {"table_id": files.TABLE_ID, "expected_revision": 1, "record_id": record}
+    local = bridge.call(method, {"handle": handle, **page})
+    remote = client.request(method, {**target, **page})
+    assert remote == local
+    row = next(item for item in remote["table"]["records"] if item["id"] == record)
+    assert row["values"][files.FIELD_IDS["path"]] == str(source)
+    assert row["values"][files.FIELD_IDS["location"]] == location
+    assert row["values"][files.FIELD_IDS["name"]] == "synthetic-input.csv"
+    def leaks(path, value):
+        """Compare the JSON-escaped path, so escaped Windows backslashes or non-ASCII cannot hide a leak."""
+        return json.dumps(str(path))[1:-1] in json.dumps(value)
+
+    # The path is authorized cell content only: response and catalog metadata stay closed.
+    metadata = {**remote, "table": {key: value for key, value in remote["table"].items() if key != "records"}}
+    assert remote["project_id"] == target["project_id"] and remote["revision"] == 1
+    assert not {"directory", "path", "handle"} & remote.keys()
+    assert set(remote["table"]) == {"id", "name", "fields", "records"}
+    assert leaks(source, remote)  # control: the escaped comparison does see the authorized cell value
+    assert not leaks(source, metadata) and not leaks(store.directory, remote)
+    catalog = client.request("project.catalog", target)
+    assert set(catalog["project"]) == {"id", "name", "revision"} and catalog["project"]["revision"] == 1
+    assert not leaks(source, catalog) and not leaks(store.directory, catalog)
+
+    before = store.snapshot(), store.history()
+    sides[1].authority.revoke_grant(target["grant_id"])
+    with pytest.raises(PeerProtocolError) as denied:
+        client.request(method, {**target, **page})
+    assert denied.value.code == "forbidden" and str(source) not in str(denied.value)
+    assert bridge.call(method, {"handle": handle, **page}) == local  # the local owner path is unaffected
+    assert (store.snapshot(), store.history()) == before and store.info()["revision"] == 1
+    bridge.assert_clean()
+
+
 def test_real_native_endpoint_retains_existing_large_shared_read_page_budget(connected, sides):
     store = sides[1].store
     table, field = uuid(), uuid()
