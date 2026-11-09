@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 13:36 UTC · 审批冷重开和 MuFerro 本地验收
+
+root 以 `5e3eba2b` 集成 Claude48 的 `49d3742a`，加入实际启动调用计数。`173d0534` 修复输入快照路径重新打开与旧准备目录 FIFO，`2eb64f04` 集成独立末帧复现、补旧节点预设回退，并取得 Linux 原生脚本入口证据。Claude49 接手丢失批准响应后的冷重开。远端前批 Runtime 13/13，本批在整个 Desktop 终态后推送。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 13:17 UTC · 主线修复与开放 PR 核对
 
 root 提交 `95c2c464`、`3924f39e`、`8da56052`，分别处理审批响应、同一传输尝试的重试、MuFerro 收集与查看。`00831075` 集成 Claude47 的 `fcbcdc08`，Claude48 接手 S2c 冷重开验证。PR #53 旧分支与主线冲突，其原重试丢失已修，另复现的尝试竞态由本地独立补丁处理。PR #54 的历史交接与现有文件名大小写冲突。两个 PR 维持待审状态。`d49f6685` 的干净 Python 3.11 全量已结束，6437 项通过。 [PR #53](https://github.com/sijintech/stk/pull/53) [PR #54](https://github.com/sijintech/stk/pull/54) [验收记录](runtime-validation.md)

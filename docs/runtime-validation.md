@@ -1,5 +1,17 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 13:36 UTC · 冷重开、输入字节和收集后的 DAT 末帧
+
+`5e3eba2b5ec1130b95763c644e4bdbe99cc450de` 集成 Claude48 的 `49d3742a`。同一进程中关闭并重建严格 Bridge，重新打开同一项目，句柄更新，卡片、完整计划与摘要保留。显式观察后仍无法批准。重新审阅后原计划批准成功，观察和重放仍绑定原执行器，真实本机 Runtime 仅有一个合成任务。root 的转发计数确认只有一次启动调用，故意在重放时调用一次启动的变异例按预期失败。独立作者候选联跑 14 项，root 源码联跑 63 项通过。证据 `root-delivery-20261109-90/claude48-source.xml` 和 `cold-replay-negative/result.xml`。实际 OS 进程重启和许可软件待验。
+
+`173d0534eba36922d3a93fce73b2ea6ed10ce9f3` 从重新打开的普通文件流校验并复制冻结输入，复制总量沿用 256 MiB 限额。旧版在快照解析后换入同长度、同 mtime 的合成材料文件会创建计划，重试准备目录里的 FIFO 会进入阻塞打开。新版两项均在产生工作区或任务前拒绝。源码 123 过、3 条件跳过，准备、收集和审批隔离 wheel 联跑 12/12。证据 `root-delivery-20261109-90/muferro-prepare-{baseline,source}.xml` 和 `prepare-approval-wheel/installed.xml`。
+
+`2eb64f04079b37b1996b413b2a79d968cc6f7d04` 修复合成 Runtime 收集后查看合法 DAT 的末帧。旧预设对一个只去掉尾部填充的有效第 2 步 Polar 只列第 0 步，即使任务清单和收集行的摘要匹配。独立收集预设仍共用原图，显式关闭实时大小过滤，选第 2 步且保留 `[0,2]`。默认预设保持实时筛选，旧节点缺参数时仍返回原预设。root 源码 100 过、2 条件跳过，隔离 wheel 8/8。独立合成测量中约 9756 个文件时额外普通文件核验中位数约 463 毫秒。此组范围为真实本机 Runtime、合成求解器和无窗图求值。证据 `root-delivery-20261109-90/collected-view-source.xml`、`collected-view-wheel/installed.xml` 和 `muferro-collected-dat-view/`。 [图契约](specs/stk-graph-v1.md)
+
+Linux 原生脚本入口用桌面二进制 `757383af77` 和 Python 后端 `2eb64f04`。固定起点为英语 X11/Xvfb 1440×1000、缩放 1、软件 OpenGL、默认四区布局及空 Viewer。XTest 实际点击三次，依次打开 Python、聚焦代码区、运行缓冲区。其间用键盘选择与粘贴。脚本通过真实桥打开合成项目并调用 `stk.muferro.view`。原生 Viewer 显示 `muferro-collected-domains`、第 2 步、步选 `[0,2]`，图形负载有 140 个三角面。收集的 DAT 摘要和项目修订 8 保持一致。同样三次验收点击的复跑通过。验收后另点一次 Discard edits 清除合成脚本草稿，退出码 0，显示服务和子进程均回收。首轮留有未保存的合成草稿，退出超时后由脚本终止其进程。证据 `root-delivery-20261109-88/collected-native-review/evidence/clean-repeat/{native-receipt.json,ui-2.png,display.log}`。模拟面板 View 按钮仍待单独验收。
+
+远端 `249698d05dc13d9c08a2aebd9e906ebc38873a9d` 的 Runtime 于 13:23:15Z 终态成功，13/13。Desktop 三个 Linux 作业通过。主作业于 13:37:07Z 完成，2134/2134，543.75 秒。macOS 到 Metal 后的必跑检查，Windows CPU 仍运行。`2eb64f04` 的新本地 Python 3.11 全量已启动，证据 `root-delivery-20261109-90/runtime-full311/`。本批仍在本地。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42621953348) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42621953590)
+
 ## 2026-11-09 13:17 UTC · S2c 响应字节、传输尝试与 MuFerro 报告
 
 `95c2c4647ff3cf7220b8f3d8a64f8e50e419f2cd` 移除占位请求 ID 的大小估算。严格桥使用实际 NDJSON 响应，经正常校验、完整写出和刷新后才登记审阅。旧版在 128 个可转义字符的合法 ID 下返回 `result_too_large`，却登记了审阅。新例相差一字节的两侧分别拒绝和完整返回，超限后试批返回冲突且原决定未消耗。源码 111 项及隔离 wheel 45 项通过，安装态含子进程 stdout 和 shutdown。证据 `root-delivery-20261109-89/s2c-plan-wire-{red,source-final}.xml` 和 `s2c-wheel/installed-final.xml`。
