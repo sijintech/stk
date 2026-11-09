@@ -6,6 +6,7 @@ rather than skip, if that configured helper is unusable.
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import dataclass
+import hashlib
 import json
 import importlib
 import os
@@ -484,6 +485,67 @@ def test_real_peer_and_bridge_share_receipt_byte_limit_on_the_same_project(conne
     assert bridge.call(apply, local) == {"receipt": local_receipt, "replayed": True}
     assert client.request(apply, remote) == {"receipt": remote_receipt, "replayed": True}
     assert (store.snapshot(), store.history()) == before
+    bridge.assert_clean()
+
+
+def test_real_bridge_then_peer_reuse_one_operation_uuid_in_isolated_receipt_scopes(connected, sides, inproc):
+    """CP-0 F11a/F11b live: one UUID through the strict local bridge, then an authenticated UDP peer."""
+    client, _ = connected()
+    caller, owner = sides
+    store, target = owner.store, owner.target
+    bridge = inproc()
+    handle = bridge.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    apply, get = "project.edit_operations.apply_once", "project.edit_operations.get"
+    # The adapter binds the stable owner, authenticated caller and database generation, never request fields.
+    scope_body = json.dumps([owner.authority.owner_id, caller.peer_id, target["database_generation"]],
+                            separators=(",", ":")).encode("ascii")
+    expected_scope = {"local": "local", "peer": "peer/1/" + hashlib.sha256(scope_body).hexdigest()}
+
+    def stored_receipts():
+        with closing(sqlite3.connect(store.path.as_uri() + "?mode=ro", uri=True)) as db:
+            return db.execute("SELECT scope, operation_id, request, receipt FROM project_edit_operations "
+                              "ORDER BY scope").fetchall()
+
+    assert store.info()["revision"] == 0 and stored_receipts() == []
+    operation = uuid()
+    names = {"local": "Bridge scoped table", "peer": "Peer scoped table"}
+    local = {"handle": handle, "operation_id": operation, "expected_revision": 0,
+             "commands": [{"op": "create_table", "name": names["local"]}]}
+    remote = {**target, "operation_id": operation, "expected_revision": 1,
+              "commands": [{"op": "create_table", "name": names["peer"]}]}
+
+    local_result = bridge.call(apply, local)
+    assert local_result["replayed"] is False
+    local_receipt = local_result["receipt"]
+    with pytest.raises(PeerProtocolError) as missing:
+        client.request(get, {**target, "operation_id": operation})
+    assert missing.value.code == "not_found"
+    assert store.info()["revision"] == 1 and [row[:2] for row in stored_receipts()] == [("local", operation)]
+
+    remote_result = client.request(apply, remote)
+    assert remote_result["replayed"] is False
+    remote_receipt = remote_result["receipt"]
+    receipts = {"local": local_receipt, "peer": remote_receipt}
+    for entry, revisions in (("local", (0, 1)), ("peer", (1, 2))):
+        receipt = receipts[entry]
+        assert (receipt["operation_id"], receipt["scope"]) == (operation, expected_scope[entry])
+        assert (receipt["base_revision"], receipt["applied_revision"]) == revisions
+    assert local_receipt["request_sha256"] != remote_receipt["request_sha256"]
+    assert local_receipt["commands"][0]["id"] != remote_receipt["commands"][0]["id"]
+
+    snapshot, history, rows = store.snapshot(), store.history(), stored_receipts()
+    assert snapshot["project"]["revision"] == 2 and len(history) == 2
+    assert sorted((table["id"], table["name"]) for table in snapshot["tables"]) == sorted(
+        (receipts[entry]["commands"][0]["id"], names[entry]) for entry in receipts)
+    assert sorted((scope, identity, json.loads(receipt)) for scope, identity, _, receipt in rows) == sorted(
+        (expected_scope[entry], operation, receipts[entry]) for entry in receipts)
+
+    assert bridge.call(get, {"handle": handle, "operation_id": operation}) == {"receipt": local_receipt}
+    assert client.request(get, {**target, "operation_id": operation}) == {"receipt": remote_receipt}
+    assert bridge.call(apply, local) == {"receipt": local_receipt, "replayed": True}
+    assert client.request(apply, remote) == {"receipt": remote_receipt, "replayed": True}
+    assert (store.snapshot(), store.history(), stored_receipts()) == (snapshot, history, rows)
+    assert store.info()["revision"] == 2
     bridge.assert_clean()
 
 
