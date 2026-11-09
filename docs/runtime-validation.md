@@ -1,5 +1,20 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC：315 的 Desktop 整轮终态
+
+[Desktop 42536615591](https://github.com/sijintech/stk/actions/runs/42536615591) 绑定 `315620f9`，attempt 1 于 00:55:35Z 完成，整轮 failure。六项结果如下，时间为 UTC。
+
+| 任务 | 结果 | 结束 |
+|---|---|---|
+| Linux 包 128902206042 | success | 11-08 23:53:49 |
+| Linux GL/Vulkan 128902206269 | success | 00:07:08 |
+| Windows CPU 128902206328 | success | 00:32:12 |
+| macOS 128902206365 | failure | 00:27:09 |
+| Linux 包 smoke 128904496231 | success | 11-08 23:55:11 |
+| Windows 原生 128914767592 | success | 00:55:34 |
+
+[Windows 原生](https://github.com/sijintech/stk/actions/runs/42536615591/job/128914767592) 的 20 轮验收步骤于 00:55:20Z 成功。macOS 两项媒体失败见下节，同头 Runtime 13 项成功。下一代码头含测试诊断 `749076d9`，Cocoa 诊断的编译和执行由新一轮 CI 验证。
+
 ## 2026-11-09 UTC：315 的隐藏保持失败和 D1 项目服务基线
 
 - [Desktop 42536615591](https://github.com/sijintech/stk/actions/runs/42536615591)，代码头 `315620f9`。00:39Z 整轮仍运行。Linux 包、包 smoke、Linux GL/Vulkan、Windows CPU 完成且成功，Windows 原生 128914767592 正运行。[Runtime 42536615619](https://github.com/sijintech/stk/actions/runs/42536615619) 00:03:47Z 完成，13 项逐项成功。同头 Docs 和 Secret 成功。

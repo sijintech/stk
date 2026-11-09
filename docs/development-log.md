@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC：核对 315 的完整 Desktop 终态
+
+[Desktop 42536615591](https://github.com/sijintech/stk/actions/runs/42536615591) 于 00:55:35Z 为 failure。Windows 原生最后成功完成，唯一失败任务为 macOS。终态逐项记录于验收文档。CP-0 源码、隔离安装和 Claude 候选 3 的证据已收拢到 `root-delivery-20261109-43/closure.json`。
+
 ## 2026-11-09 UTC：复核云端项目边界和原生媒体现象
 
 - root 恢复 AOCI 完整交付并校验 1,220 条，Challenge 10/10。核对 Claude19 两版冻结候选及源码后，将元数据与授权内容、scope、已发布操作集、CP-0 覆盖和云端独立验收五点发回原会话。已观察到 Claude 接续修订。

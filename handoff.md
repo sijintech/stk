@@ -1,5 +1,9 @@
 # STK 当前交接
 
+## 2026-11-09 UTC：315 的 Desktop 已终态
+
+[Desktop 42536615591](https://github.com/sijintech/stk/actions/runs/42536615591) 于 00:55:35Z 结束。六个任务中五个成功，含 00:55:34Z 结束的 Windows 原生 20 轮。macOS 的两项隐藏保持仍失败。Runtime 13 项成功。前轮终态已登记，`749076d9` 的暂停阶段诊断可推送到下一代码头。Claude 的 D1 云项目候选 3 已冻结，等待 root 核对。
+
 ## 2026-11-09 UTC：D1 项目服务候选修订中，315 已进入 Windows 原生验收
 
 root 核对同头 `315620f9`：Runtime 13 项成功，Desktop 仍运行，Windows CPU、Linux GPU 和两个 Linux 包任务成功，Windows 原生 128914767592 正运行。Mac CPU 1516、Metal 254 通过，原生 4/6。两个视频都在隐藏后的保持阶段回到先前的 0.234 和 0.102 秒。新暂停阶段诊断 `749076d9` 仍在本地，前整轮 Desktop 终态并登记后才推。
