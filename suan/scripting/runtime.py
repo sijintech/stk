@@ -134,8 +134,10 @@ class Tasks:
                 params[name] = value
         return self._runtime._request("task.submit", **params)
 
-    def get(self, task_id):
-        return self._runtime._request("task.get", task_id=task_id)["task"]
+    def get(self, task_id, *, require_live=False):
+        """Read one task; `require_live=True` rules out Hub heartbeat fallback."""
+        params = {} if require_live is False else {"require_live": require_live}
+        return self._runtime._request("task.get", task_id=task_id, **params)["task"]
 
     def cancel(self, task_id, *, idempotency_key):
         return self._runtime._request("task.cancel", task_id=task_id, idempotency_key=idempotency_key)

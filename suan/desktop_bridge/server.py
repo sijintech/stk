@@ -242,7 +242,7 @@ class Bridge:
             "task.submit": lambda p, c: self._backend(p).submit(p.get("spec"), p["idempotency_key"],
                                                                 p.get("template"), p.get("workspace_id")),
             "task.list": lambda p, c: self._backend(p).tasks(p.get("workspace_id")),
-            "task.get": lambda p, c: self._backend(p).task(p["task_id"]),
+            "task.get": self.task_get,
             "task.cancel": lambda p, c: self._backend(p).cancel(p["task_id"], p.get("idempotency_key")),
             "task.artifacts": lambda p, c: self._backend(p).artifacts(p["task_id"]),
             "task.logs": self.task_logs,
@@ -1003,6 +1003,12 @@ class Bridge:
             return {"skill": self._skill_catalog().get(params["id"], params.get("version"))}
         except SkillCatalogError as exc:
             raise _skill_error(exc) from None
+
+    def task_get(self, params, context):
+        backend = self._backend(params)
+        if params.get("require_live") and backend.kind == "hub":
+            return backend.task(params["task_id"], require_live=True)
+        return backend.task(params["task_id"])
 
     def task_logs(self, params, context):
         import base64

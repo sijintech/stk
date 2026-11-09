@@ -2079,6 +2079,10 @@
             },
             "task_id": {
               "$ref": "#/$defs/taskId"
+            },
+            "require_live": {
+              "type": "boolean",
+              "description": "Require exact task lookup on a Hub connection without heartbeat fallback."
             }
           },
           "required": [

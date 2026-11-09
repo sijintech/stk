@@ -197,7 +197,7 @@ Connection ids are opaque to the app; the bridge resolves them:
 | `workspace.files` | `connection, node?, workspace_id` | `{files: [{path, size, sha256, media_type?}]}` |
 | `task.submit` | `connection, node?, idempotency_key, spec \| (template, workspace_id)` | `{task?, action?}` |
 | `task.list` | `connection, node?, workspace_id?` | `{tasks}` newest first |
-| `task.get` | `connection, node?, task_id` | `{task}` (with `monitor` once events exist) |
+| `task.get` | `connection, node?, task_id, require_live?` | `{task}` (with `monitor` once events exist) |
 | `task.cancel` | `connection, node?, task_id, idempotency_key?` | `{task?, action?}` |
 | `task.artifacts` | `connection, node?, task_id, expected_connection_identity?` | `{artifacts: [{path, size, sha256, media_type}]}` (empty while running) |
 | `hub.devices` | `connection` | `{devices: [{id, name, role, online, snapshot}]}` |
@@ -230,10 +230,19 @@ Connection ids are opaque to the app; the bridge resolves them:
   approves). Rejections need no inspection. The inspection is remembered by the bridge process only:
   **after a bridge restart the app must run `hub.action` again before `hub.review`** (and should
   show the request again, since it may have changed).
-- Through a hub, `workspace.list`, `task.list` and `task.get` read the node's latest heartbeat
-  snapshot (tasks without their spec); `task.artifacts`, `workspace.files`, logs, events and
-  download chunks use the hub's read path (§7.2), never reviewed; uploads go through the hub's blob
-  store and a reviewed `workspace.import` (§9).
+- Through a hub, `workspace.list` and `task.list` read the node's latest heartbeat snapshot
+  (tasks without their spec). `task.get` uses the exact, read-only node lookup when the Hub
+  policy and the node both advertise it. Otherwise it falls back to the bounded heartbeat snapshot
+  when `require_live` is omitted or false. With `require_live: true` it returns `unsupported`
+  if exact lookup is unavailable on the installed Hub or node, even when the snapshot contains
+  the task. If exact lookup is supported and the node is offline, it returns `unavailable`.
+  Node errors on the live Hub read path, including a missing Runtime task, use the existing
+  `remote_error` mapping. Direct and SSH connections always use the exact Runtime read and
+  report a missing task as `not_found`. Clients requiring a live lookup propagate validation
+  failure if an older bridge rejects the optional field.
+- `task.artifacts`, `workspace.files`, logs, events and download chunks use the hub's read path
+  (§7.2), never reviewed; uploads go through the hub's blob store and a reviewed
+  `workspace.import` (§9).
 
 ### 7.1 Desktop devices and automatic execution (WP11)
 

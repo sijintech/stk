@@ -14,7 +14,9 @@ from suan.runtime.cli import connect, jobs, workspaces
 from suan.desktop_bridge.backends import HubBackend, action_id
 from suan.desktop_bridge.hub import HubClient, HubResponseError
 from suan.desktop_bridge.protocol import BridgeError
-from test_hub_desktop_bridge import AUTH, live  # noqa: F401
+from suan.scripting import API
+from test_desktop_bridge_runtime import add_profile
+from test_hub_desktop_bridge import AUTH, bridge_env, inproc, live, pair  # noqa: F401
 
 
 def invoke(command, arguments, **kwargs):
@@ -172,33 +174,62 @@ def test_cli_cancel_and_revoked_client(live, paired):  # noqa: F811
     assert denied.exit_code != 0 and "refused this device" in denied.output
 
 
-def test_cli_exact_task_survives_more_than_200_heartbeat_tasks(live, paired, monkeypatch):  # noqa: F811
+def test_cli_exact_task_survives_more_than_200_heartbeat_tasks(live, paired, monkeypatch, inproc, runtime):  # noqa: F811
     target, _ = paired
     workspace = live.client.create_workspace("history")["id"]
-    task = live.client.submit({"workspace_id": workspace, "argv": ["@python", "-c", "print('old')"]}, "old")["id"]
+    task = live.client.submit({"workspace_id": workspace, "argv": ["{python}", "-c", "print('old')"]}, "old")["id"]
+    invoke(jobs, target + ["watch", task, "--interval", "0.1", "--timeout", "15"])
+    bridge = inproc()
+    connection, desktop_target = pair(bridge, live, profile=None)
+    direct = add_profile(bridge, runtime)
+    api = API(bridge.call)
+    actions, tasks = live.actions(), live.client.tasks()
+    action_events = [event for event in live.store.events() if event["kind"] == "actions.changed"]
     original = live.agent.runtime.tasks
     # The fixture retains a real persisted task, then presents 201 newer task DTOs
     # to the real heartbeat code. Lookup still goes through HTTP/WSS to Runtime.
     historic = original()[0]
+    missing = "e" * 32  # Also a stale heartbeat entry, but absent from Runtime.
+    newer = [missing] + [f"{index:032x}" for index in range(200)]
+
     def many_tasks():
-        return [{**historic, "id": f"{index:032x}"} for index in range(201)] + original()
+        return [{**historic, "id": identity} for identity in newer] + original()
     with monkeypatch.context() as patch:
         patch.setattr(live.agent.runtime, "tasks", many_tasks)
         snapshot = live.agent.snapshot()
         assert len(snapshot["tasks"]) == 200 and task not in {item["id"] for item in snapshot["tasks"]}
+        assert missing in {item["id"] for item in snapshot["tasks"]}
         live.store.heartbeat(live.node_id, snapshot)
         listing = value(invoke(jobs, target + ["list"]))
         assert listing["observation"] == "heartbeat_snapshot" and len(listing["tasks"]) == 200
         assert task not in {item["id"] for item in listing["tasks"]}
-        assert value(invoke(jobs, target + ["show", task]))["id"] == task
+        shown = value(invoke(jobs, target + ["show", task]))
+        assert shown["id"] == task and shown["state"] == "succeeded"
+        assert bridge.call("task.get", {**desktop_target, "task_id": task, "require_live": True}) == {"task": shown}
+        assert api.runtime(connection, node=live.node_id).tasks.get(task, require_live=True) == shown
+        direct_task = api.runtime(direct).tasks.get(task)
+        assert api.runtime(direct).tasks.get(task, require_live=True) == direct_task
+        assert direct_task["id"] == shown["id"] and direct_task["state"] == shown["state"]
+        assert bridge.error("task.get", {"connection": direct, "task_id": missing, "require_live": True})["code"] == "not_found"
+        hub_error = bridge.error("task.get", {**desktop_target, "task_id": missing, "require_live": True})
+        assert hub_error["code"] == "remote_error" and "Task not found" in hub_error["message"]
+        cli_error = CliRunner().invoke(jobs, target + ["show", missing])
+        assert cli_error.exit_code != 0 and "Task not found" in cli_error.output
+    assert live.actions() == actions and live.client.tasks() == tasks
+    assert [event for event in live.store.events() if event["kind"] == "actions.changed"] == action_events
+    assert not bridge.violations
 
 
-def test_cli_observes_real_outbound_node_disconnect_and_reconnect(live, paired):  # noqa: F811
+def test_cli_observes_real_outbound_node_disconnect_and_reconnect(live, paired, inproc):  # noqa: F811
     target, _ = paired
     workspace = live.client.create_workspace("offline")["id"]
     submitted = value(invoke(jobs, target + ["submit", "--workspace", workspace, "--template", "echo", "--key", "offline"]))
     task = resolve(target, submitted["action"]["id"])["task"]["id"]
     invoke(jobs, target + ["watch", task, "--interval", "0.1", "--timeout", "15"])
+    bridge = inproc()
+    _, desktop_target = pair(bridge, live, profile=None)
+    strict_read = {**desktop_target, "task_id": task, "require_live": True}
+    actions = live.actions()
     live.agent_loop.call_soon_threadsafe(live.agent_task.cancel)
     live.agent_thread.join(timeout=10)
     assert not live.agent_thread.is_alive()
@@ -208,6 +239,8 @@ def test_cli_observes_real_outbound_node_disconnect_and_reconnect(live, paired):
         observations = [json.loads(line) for line in result.stdout.splitlines()]
         assert observations[0]["observation"] == "unavailable" and observations[0]["last_state"] is None
         assert live.client.task(task)["state"] == "succeeded"
+        error = bridge.error("task.get", strict_read)
+        assert error["code"] == "unavailable" and error["retryable"] is True
     finally:
         live.agent_thread = threading.Thread(target=live._run_agent, daemon=True)
         live.agent_thread.start()
@@ -219,11 +252,13 @@ def test_cli_observes_real_outbound_node_disconnect_and_reconnect(live, paired):
             assert time.monotonic() < deadline, result.output
             time.sleep(0.05)
     assert value(result)["state"] == "succeeded"
+    assert bridge.call("task.get", strict_read) == {"task": value(result)}
+    assert live.actions() == actions and not bridge.violations
 
 
 @pytest.mark.parametrize("node_features,read_kinds", [([], ["task.get"]), (["task.get"], ["task.get"]),
     (["read", "task.get"], []), (["read", "task.get"], None)])
-def test_old_hub_or_node_never_claims_exact_task_lookup(node_features, read_kinds):
+def test_old_hub_or_node_never_claims_exact_task_lookup(node_features, read_kinds, inproc, monkeypatch):
     class Hub:
         url = "http://127.0.0.1:1"
         def devices(self):
@@ -239,6 +274,14 @@ def test_old_hub_or_node_never_claims_exact_task_lookup(node_features, read_kind
     assert backend.task("b" * 32)["task"]["state"] == "queued"  # Existing desktop fallback.
     with pytest.raises(BridgeError, match="requires task.get"):
         backend.task("b" * 32, require_live=True)
+    bridge = inproc()
+    monkeypatch.setattr(bridge.bridge, "_backend", lambda params: backend)
+    params = {"connection": "hub:old", "node": "a" * 32, "task_id": "b" * 32}
+    assert bridge.call("task.get", params)["task"]["state"] == "queued"
+    assert bridge.error("task.get", {**params, "require_live": True})["code"] == "unsupported"
+    assert bridge.call("task.get", {**params, "require_live": False}) == bridge.call("task.get", params)
+    assert bridge.error("task.get", {**params, "require_live": "true"})["code"] == "invalid_params"
+    assert not bridge.violations
 
 
 def test_watch_distinguishes_offline_from_task_state_and_reconnects(monkeypatch):
