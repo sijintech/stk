@@ -3,14 +3,18 @@
 Every row's task is submitted before any finishes; results are collected and the final state reaches
 the row's analysis; a changed row is refused; a run STK stopped following adopts its Runtime task on
 the next start; a failed task is retried as a new task; cancelling the run cancels the Runtime task."""
+import threading
 import time
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
 from mupro_fake import make_fake_sdk
+from suan.desktop_bridge import workflow_runs
 from suan.project import ProjectStore
-from suan.scripting import API
+from suan.runtime.server import Handler
+from suan.scripting import API, ProjectRuns
 from suan.workflows import muferro
 from test_analysis_run_executor import value_result
 from test_desktop_bridge import bridge_env, inproc  # noqa: F401
@@ -252,6 +256,130 @@ def test_cancelling_the_run_cancels_its_runtime_task(scan):
     assert simulate["status"] == "cancelled"
     until(lambda: all(task["state"] == "cancelled" for task in s["client"].tasks()), s)
     assert len(s["client"].tasks()) == 1
+
+
+def test_lost_runtime_cancel_reply_is_confirmed_without_sending_another_cancel(scan, runtime, monkeypatch):
+    s = scan
+    _, _, server, _ = runtime
+    run = prepare(s, rows=[s["rows"][0]])
+    params = {"handle": s["handle"], "run_id": run["id"]}
+    s["h"].call("project.workflow_runs.start", params)
+    until(lambda: submitted(s, run["id"]), s, tick=False)
+    progress = tasks(get(s, run["id"]))[("simulate", s["rows"][0])]["progress"]
+    task_id = progress["task_id"]
+    assert s["client"].task(task_id)["state"] == "queued"
+    cancel_replies = []
+    respond = Handler.respond
+
+    def drop_cancel_reply(handler, data, code=200):
+        if handler.server is server and handler.command == "POST" and handler.path == f"/v1/tasks/{task_id}/cancel":
+            cancel_replies.append(data)
+            handler.close_connection = True
+            return
+        return respond(handler, data, code)
+
+    monkeypatch.setattr(Handler, "respond", drop_cancel_reply)
+    s["h"].call("project.workflow_runs.cancel", params)
+    done = settled(s, run["id"], tick=False)
+    simulation = tasks(done)[("simulate", s["rows"][0])]
+    assert len(cancel_replies) == 1 and cancel_replies[0]["state"] == "cancelled"
+    assert simulation["status"] == "cancelled" and simulation["progress"]["task_id"] == task_id
+    child = s["store"].runs.get(progress["simulation_run_id"])["status"]
+    assert child["last_operation"] == "refresh" and child["task"]["state"] == "cancelled"
+    assert [task["id"] for task in s["client"].tasks()] == [task_id] and not s["worker"].files
+
+
+def test_malformed_cancel_reply_does_not_stop_cancellation_of_other_rows(scan, runtime, monkeypatch):
+    s = scan
+    _, _, server, _ = runtime
+    run = prepare(s)
+    params = {"handle": s["handle"], "run_id": run["id"]}
+    s["h"].call("project.workflow_runs.start", params)
+    until(lambda: all((task["progress"] or {}).get("task_id") for task in get(s, run["id"])["tasks"]
+                      if task["step"] == "simulate"), s, tick=False)
+    task_ids = {task["id"] for task in s["client"].tasks()}
+    assert len(task_ids) == 2 and all(task["state"] == "queued" for task in s["client"].tasks())
+    sent = []
+    respond = Handler.respond
+
+    def corrupt_first_cancel_reply(handler, data, code=200):
+        if handler.server is server and handler.command == "POST" and handler.path.endswith("/cancel"):
+            sent.append(handler.path.split("/")[-2])
+            if len(sent) == 1:
+                data = {"state": "cancelled"}  # the Runtime applied it, but the reply lost its task identity
+        return respond(handler, data, code)
+
+    monkeypatch.setattr(Handler, "respond", corrupt_first_cancel_reply)
+    s["h"].call("project.workflow_runs.cancel", params)
+    done = settled(s, run["id"], tick=False)
+    assert len(sent) == 2 and set(sent) == task_ids
+    assert done["counts"] == {"cancelled": 2, "pending": 2} and not done["stop_error"]
+    assert {task["id"] for task in s["client"].tasks() if task["state"] == "cancelled"} == task_ids
+    assert not s["worker"].files
+
+
+def test_workflow_cancel_does_not_use_confirmation_after_the_observation_window(monkeypatch):
+    clock = [0]
+    reads = []
+
+    def refresh(run_id):
+        reads.append(run_id)
+        clock[0] = workflow_runs._CANCEL_CONFIRM_SECONDS + 1
+        return {"status": {"task": {"state": "cancelled"}}}
+
+    def cancel(run_id):
+        return {"status": {"task": {"state": "running", "cancel_requested": True}}}
+
+    runs = SimpleNamespace(cancel=cancel, refresh=refresh)
+    api = SimpleNamespace(project=SimpleNamespace(runs=runs))
+    job = SimpleNamespace(remote={("simulate", "row"): {"simulation_run_id": "original"}})
+    executor = workflow_runs.WorkflowRunExecutor(None)
+    monkeypatch.setattr(executor, "_api", lambda *args, **kwargs: api)
+    monkeypatch.setattr(workflow_runs, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    assert executor._cancel_remote_tasks(job) == {} and reads == ["original"]
+
+
+def test_cancel_recorded_before_collection_leaves_completed_original_task_for_explicit_start(scan, monkeypatch):
+    s = scan
+    run = prepare(s, rows=[s["rows"][0]])
+    params = {"handle": s["handle"], "run_id": run["id"]}
+    ready, resume = threading.Event(), threading.Event()
+    refresh = ProjectRuns.refresh
+
+    def hold_completed_reply(project_runs, run_id):
+        record = refresh(project_runs, run_id)
+        if not ready.is_set() and (record["status"].get("task") or {}).get("state") == "succeeded":
+            ready.set()
+            assert resume.wait(10), "test did not release the completed Runtime reply"
+        return record
+
+    monkeypatch.setattr(ProjectRuns, "refresh", hold_completed_reply)
+    s["h"].call("project.workflow_runs.start", params)
+    try:
+        until(ready.is_set, s)
+        # An independently opened store can record cancellation while the executor handles the prior read.
+        cancelled = ProjectStore(s["store"].directory).workflow_runs.request_cancel(run["id"])
+        assert cancelled["status"] == "cancel_requested"
+    finally:
+        resume.set()
+
+    stopped = settled(s, run["id"])
+    simulation = tasks(stopped)[("simulate", s["rows"][0])]
+    assert simulation["status"] == "interrupted" and simulation["error"]["code"] == "runtime_finished_before_cancel"
+    assert stopped["stop_error"] == simulation["error"] and not simulation["produced"]
+    original = simulation["progress"]["simulation_run_id"]
+    task_id = simulation["progress"]["task_id"]
+    assert simulation["progress"]["stage"] != "collecting"
+    assert s["client"].task(task_id)["state"] == "succeeded"
+    assert not (s["store"].directory / "results" / "muferro" / original).exists()
+    assert s["worker"].files == []
+
+    s["h"].call("project.workflow_runs.start", params)
+    resumed = settled(s, run["id"])
+    simulation = tasks(resumed)[("simulate", s["rows"][0])]
+    assert resumed["complete"] and simulation["attempt"] == 2
+    assert simulation["produced"]["simulation_run_id"] == original and simulation["produced"]["task_id"] == task_id
+    assert [task["id"] for task in s["client"].tasks()] == [task_id] and len(s["worker"].files) == 1
 
 
 def test_preparing_needs_a_runtime_connection_and_valid_rows(scan):

@@ -664,7 +664,8 @@ class WorkflowRuns:
 
     def progress_attempt(self, run_id, step, row, attempt, *, executor_id, progress):
         """Record remote work of the latest running attempt (W5): its simulation run, Runtime task and stage.
-        Not a result: the task stays running, and a later attempt may adopt the same remote work."""
+        Not a result: the task stays running, and a later attempt may adopt the same remote work.
+        Return None when a durable cancel already prevents starting collection."""
         if (type(progress) is not dict or progress.get("stage") not in PROGRESS_STAGES
                 or set(progress) - {"stage", "simulation_run_id", "task_id", "state", "adopted_from"}):
             raise ProjectError("Workflow run progress is {stage, simulation_run_id?, task_id?, state?, adopted_from?}")
@@ -681,6 +682,8 @@ class WorkflowRuns:
                 raise RevisionConflict("Only the running attempt of a task can record progress")
             if state["executor_id"] != executor_id:
                 raise RevisionConflict("This executor does not own the workflow run")
+            if progress["stage"] == "collecting" and state["status"] == "cancel_requested":
+                return None
             self._append(db, run_id, step, row, attempt, "running", {"at": _now(), "executor_id": executor_id, "progress": progress})
         return self.get(run_id)
 

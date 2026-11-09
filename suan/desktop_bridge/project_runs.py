@@ -61,7 +61,11 @@ class ProjectRuns:
                         result.update(backend.task(task["id"]))
                 patch = {"last_operation": action, "error": None}
                 if "task" in result:
-                    patch.update(task=result["task"], submission="accepted")
+                    observed = result["task"]
+                    if (not isinstance(observed, dict) or not isinstance(observed.get("id"), str)
+                            or not observed["id"] or not isinstance(observed.get("state"), str) or not observed["state"]):
+                        raise BridgeError("remote_error", "The Runtime returned an invalid task observation")
+                    patch.update(task=observed, submission="accepted")
                 if "action" in result:
                     patch["action"] = result["action"]
                     if not task and "task" not in result:

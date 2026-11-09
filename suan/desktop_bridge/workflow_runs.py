@@ -17,7 +17,8 @@ is on the Runtime at once. Later passes follow the submitted tasks and, as each 
 results and run that row's downstream steps; the final state (inputs, energy and completion records,
 the last frame of every dataset) becomes the row's input snapshot. Each attempt records its simulation
 run as progress, so after STK stops following it (closing, restart) starting the run again adopts the
-task still running on the Runtime instead of submitting another. Cancelling the run cancels them.
+task still running on the Runtime instead of submitting another. Cancelling the run requests cancellation
+of those tasks and records their outcome only when it can be confirmed.
 """
 import json
 from contextlib import contextmanager
@@ -31,6 +32,7 @@ from uuid import uuid4
 
 from suan.project.analysis_runs import AnalysisChanged
 from suan.project.store import ProjectError, RevisionConflict
+from suan.runtime.models import TERMINAL
 from suan.workflows.common import _revision
 
 from .protocol import BridgeError
@@ -39,6 +41,9 @@ MAX_ACTIVE_RUNS = 4
 _ANALYSIS_WAIT_SECONDS = 330  # the analysis budget (300 s) plus archiving
 _EDIT_RETRIES = 8
 _REMOTE_ERRORS = 10  # consecutive failed reads of a remote task before its attempt fails
+_CANCEL_CONFIRM_SECONDS = 5.0  # observation window after dispatch; I/O uses the connection's existing timeout
+_CANCEL_CONFIRM_INTERVAL = 0.2
+_REMOTE_FAILURES = (BridgeError, ProjectError, ValueError)
 
 
 
@@ -274,7 +279,8 @@ class WorkflowRunExecutor:
             failure = {"code": "executor_failed", "message": f"{type(error).__name__}: {error}"[:2000]}
         finally:
             try:
-                self._release(job)
+                release_error = self._release(job)
+                failure = failure or release_error
             except Exception:  # noqa: BLE001 - stopping the run below matters more
                 logging.getLogger(__name__).exception("Workflow run %s: releasing remote tasks failed", job.run_id)
             try:
@@ -367,8 +373,8 @@ class WorkflowRunExecutor:
         raise RevisionConflict("The project kept changing; try this task again")
 
     def _progress(self, job, step, row, attempt, **progress):
-        job.store.workflow_runs.progress_attempt(job.run_id, step, row["id"], attempt, executor_id=self.executor_id,
-                                                 progress=progress)
+        return job.store.workflow_runs.progress_attempt(job.run_id, step, row["id"], attempt,
+                                                        executor_id=self.executor_id, progress=progress)
 
     def _submit(self, job, plan, step, row, attempt, task):
         """Prepare and submit (or adopt) this attempt's Runtime task, then return: later passes follow it."""
@@ -467,7 +473,8 @@ class WorkflowRunExecutor:
         """Download and verify the results (the engine's results table), then freeze the final state as the row's snapshot."""
         template = _engine(plan, step)
         api = self._api(job)
-        self._progress(job, step, row, attempt, stage="collecting", simulation_run_id=run["id"])
+        if self._progress(job, step, row, attempt, stage="collecting", simulation_run_id=run["id"]) is None:
+            raise _Cancelled()
         collected = self._console(job, lambda revision: template.collect(api, api.project, run["id"]))
         prefix = template.results_prefix(run["id"])
         names = {item["path"][len(prefix):]: item for item in collected["files"] if item["path"].startswith(prefix)}
@@ -488,27 +495,80 @@ class WorkflowRunExecutor:
                 "result_record_id": collected["record_id"], "directory": prefix.rstrip("/"),
                 "snapshot_id": captured["snapshot"]["id"], "files": dict(zip(chosen, record_ids))}
 
-    def _release(self, job):
-        """When the executor stops: a cancelled run cancels its Runtime tasks; otherwise (closing, restart)
-        the tasks keep running there and their attempts become interrupted, to be adopted on the next start."""
-        if not job.remote:
-            return
-        cancelled = self._user_cancelled(job)
-        runs = job.store.workflow_runs
-        for (step, row), remote in list(job.remote.items()):
-            if cancelled and remote["simulation_run_id"]:
+    def _cancel_remote_tasks(self, job):
+        """Send one cancel per tracked run, then reconcile pending or lost replies by exact reads."""
+        states, pending = {}, set()
+        try:
+            project_runs = self._api(job, cancellable=False).project.runs
+        except _REMOTE_FAILURES:
+            return states
+
+        def observe(identity, run):
+            task = run["status"].get("task") or {}
+            state = task.get("state")
+            if state in TERMINAL:
+                states[identity] = state
+            elif task.get("cancel_requested") is True:
+                pending.add(identity)
+
+        # Dispatch each intent before waiting for the first task to exit.
+        for remote in job.remote.values():
+            identity = remote["simulation_run_id"]
+            if identity is not None:
                 try:
-                    self._api(job, cancellable=False).project.runs.cancel(remote["simulation_run_id"])
-                except (BridgeError, ProjectError, ValueError) as error:
-                    logging.getLogger(__name__).warning("Cancelling Runtime task of %s failed: %s", remote["simulation_run_id"], error)
-            status, error = (("cancelled", {"code": "cancelled", "message": "The run was cancelled"}) if cancelled else
-                             ("interrupted", {"code": "detached", "message": "STK stopped following this task; it may still be "
-                                              "running on the Runtime. Start the run again to follow it."}))
+                    observe(identity, project_runs.cancel(identity))
+                except _REMOTE_FAILURES:
+                    pending.add(identity)  # the Runtime may have accepted the cancel before the reply was lost
+
+        deadline = time.monotonic() + _CANCEL_CONFIRM_SECONDS
+        while pending and not self._closing.is_set():
+            to_read, pending = pending, set()
+            for identity in to_read:
+                if self._closing.is_set() or time.monotonic() >= deadline:
+                    return states
+                try:
+                    record = project_runs.refresh(identity)
+                except _REMOTE_FAILURES:
+                    continue  # this task's outcome is unconfirmed; do not send another cancel
+                if time.monotonic() >= deadline:
+                    return states
+                observe(identity, record)
+            if pending:
+                self._closing.wait(min(_CANCEL_CONFIRM_INTERVAL, max(0.0, deadline - time.monotonic())))
+        return states
+
+    def _release(self, job):
+        """Settle the stopped executor's attempts while preserving the identity of any remote work."""
+        if not job.remote:
+            return None
+        requested = self._user_cancelled(job)
+        states = self._cancel_remote_tasks(job) if requested else {}
+        runs = job.store.workflow_runs
+        stop_error = None
+        for (step, row), remote in list(job.remote.items()):
+            identity = remote["simulation_run_id"]
+            state = states.get(identity)
+            status = "interrupted"
+            if not requested:
+                error = {"code": "detached", "message": "STK stopped following this task; it may still be running on the Runtime. "
+                         "Start the run again to follow it."}
+            elif identity is None or state == "cancelled":
+                status = "cancelled"
+                error = {"code": "cancelled", "message": "The run was cancelled"}
+            elif state in TERMINAL:
+                error = {"code": "runtime_finished_before_cancel", "message": f"The Runtime task finished as {state}. "
+                         "Inspect the original task before starting the workflow again."}
+                stop_error = stop_error or error
+            else:
+                error = {"code": "runtime_cancel_unconfirmed", "message": "Cancellation was not confirmed while STK was observing. "
+                         "The original task may still be running. Inspect it before starting the workflow again."}
+                stop_error = error
             try:
                 runs.finish_attempt(job.run_id, step, row, remote["attempt"], status, executor_id=self.executor_id, error=error)
             except (ProjectError, BridgeError):
                 pass
         job.remote.clear()
+        return stop_error
 
     def _edit(self, job, apply):
         """An ordinary project edit at the current revision, retried when another edit got there first."""

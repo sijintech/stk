@@ -1323,6 +1323,121 @@ def test_running_task_followed_after_recovery_is_cancelled_by_hand_without_colle
         encoding="utf-8")
 
 
+def test_unconfirmed_runtime_cancel_of_a_followed_task_is_not_reported_cancelled(
+        scan, runtime, monkeypatch, request):
+    """The cancel control above, but the real loopback Runtime's cancel endpoint fails (HTTP 500) before its mutation:
+    the Runtime never accepts the cancel, so its task keeps running the same held solver. Exactly one cancel request
+    names the original task and nothing retries it. Attempt 2 must stop as interrupted with ``runtime_cancel_unconfirmed``
+    (not cancelled), keeping its progress and the original approval, with nothing collected, frozen, analysed or
+    submitted. A later explicit start while the solver is still held follows the same task as attempt 3."""
+    s = scan
+    store, client, supervisor, server = s["store"], s["client"], s["supervisor"], runtime[2]
+    use_energy_trace(s)
+    k = held_solver_killed(s, runtime, monkeypatch, request)
+    run_id, task_id, held, envelope = k["run_id"], k["task_id"], k["held"], k["envelope"]
+    original_run = k["simulate"]["progress"]["simulation_run_id"]
+    f, m, r, w = followed_live(request, s, k)
+    manual, calls, manual_identity, started = m["bridge"], m["calls"], w["manual_identity"], w["started"]
+    progress = next(t for t in w["running"]["tasks"] if t["step"] == "simulate")["progress"]
+    snapshots = store.snapshots.list()["snapshots"]
+    with store._connect() as db:
+        _, before = store.workflow_runs._read(db, run_id)
+
+    # The Runtime's cancel endpoint refuses every request before mutating anything (the server answers 500).
+    refused, refusing, accept = [], threading.Event(), server.service.cancel
+    refusing.set()
+    request.addfinalizer(refusing.clear)  # teardown cancels go to the real endpoint again
+
+    def refuse_cancel(task_id):
+        if not refusing.is_set():
+            return accept(task_id)
+        refused.append(task_id)
+        raise RuntimeError("injected: the Runtime failed before accepting this cancel")
+    monkeypatch.setattr(server.service, "cancel", refuse_cancel)
+
+    requested = manual.call("project.workflow_runs.cancel", m["run_args"])["run"]
+
+    def stopped():
+        supervisor.tick()
+        run = manual.call("project.workflow_runs.get", m["run_args"])["run"]
+        return run if run["status"] == "stopped" else None
+
+    stopped_run = until_true(stopped, 60, "the workflow run to stop after its refused cancel")
+    simulate = next(t for t in stopped_run["tasks"] if t["step"] == "simulate")
+    energy = next(t for t in stopped_run["tasks"] if t["step"] == "energy")
+    with store._connect() as db:
+        _, after = store.workflow_runs._read(db, run_id)
+    added = after[len(before):]
+    runtime_task = client.task(task_id)
+    evidence = s["tmp"] / "unconfirmed-cancel-summary.json"
+    evidence.write_text(json.dumps({  # written before the expected-outcome checks, so a red run keeps it
+        "run_id": run_id, "runtime_task": task_id, "simulation_run_id": original_run, "held_solver": held,
+        "manual_pid": m["pid"], "cancel_reply_status": requested["status"], "refused_cancels": refused,
+        "recorded_cancels": k["cancels"], "runtime_state": runtime_task["state"],
+        "runtime_cancel_requested": runtime_task.get("cancel_requested"), "solver_alive": solver_alive(held),
+        "run_status": stopped_run["status"], "simulate": {key: simulate.get(key) for key in (
+            "status", "attempt", "error", "progress", "produced")},
+        "events_added": [{key: e.get(key) for key in ("step", "attempt", "status", "error")} for e in added],
+        "simulation_run_status": store.runs.get(original_run)["status"], "manual_calls": calls()},
+        indent=2, default=str), encoding="utf-8")
+
+    # One cancel request named the original task and was refused; the Runtime still runs the same held solver.
+    assert refused == [task_id] and requested["status"] in ("cancel_requested", "stopped")
+    still_held(s, k)  # same PID and birth, task running, one submission, nothing collected
+    assert not runtime_task.get("cancel_requested")
+    assert store.runs.get(original_run)["status"]["task"]["id"] == task_id
+    assert calls() == ["WorkflowRunExecutor.recover", "WorkflowRuns.interrupt", "WorkflowRunExecutor.start",
+                       "WorkflowRuns.start", "WorkflowRunExecutor.start", "WorkflowRunExecutor.cancel",
+                       "WorkflowRuns.request_cancel"]
+    # The attempt is not cancelled: the Runtime never confirmed it. Its progress and the approval are kept.
+    assert (simulate["status"], simulate["attempt"]) == ("interrupted", 2), simulate
+    assert simulate["error"]["code"] == "runtime_cancel_unconfirmed", simulate
+    assert simulate["progress"] == progress and not simulate.get("produced")
+    assert energy["status"] == "pending" and energy["attempt"] == 0 and not energy.get("produced")
+    assert stopped_run["executor_id"] is None and stopped_run["complete"] is False
+    assert after[:len(before)] == before
+    assert [(e["step"], e["attempt"], e["status"]) for e in added] == [
+        ("", 0, "cancel_requested"), ("simulate", 2, "interrupted"), ("", 0, "stopped")]
+    assert not any(e.get("progress", {}).get("stage") == "collecting" for e in after)
+    assert store.snapshots.list()["snapshots"] == snapshots
+    assert started_events(store, run_id) == started and started[0]["approval"] == envelope
+    receipt = manual.call("project.agent.run_observe", m["args"])["receipt"]
+    assert receipt["outcome"] == "started" and receipt["approval"] == envelope and receipt["run_status"] == "stopped"
+    assert receipt["executor_id"] == k["identity"]["executor_id"]
+    # Nothing retries the cancel on its own.
+    for _ in range(5):
+        supervisor.tick()
+        time.sleep(0.1)
+    assert refused == [task_id]
+    still_held(s, k)
+
+    # A later explicit start while the solver is still held follows the same task as attempt 3.
+    manual.call("project.workflow_runs.start", m["run_args"])
+
+    def following():
+        run = manual.call("project.workflow_runs.get", m["run_args"])["run"]
+        current = next(t for t in run["tasks"] if t["step"] == "simulate")["progress"] or {}
+        return run if (current.get("attempt"), current.get("stage")) == (3, "running") else None
+
+    resumed = until_true(following, 60, "attempt 3 to follow the original Runtime task")
+    simulate = next(t for t in resumed["tasks"] if t["step"] == "simulate")
+    assert simulate["status"] == "running" and simulate["attempt"] == 3
+    assert simulate["progress"] == {**progress, "attempt": 3}
+    with store._connect() as db:
+        _, events = store.workflow_runs._read(db, run_id)
+    assert [e["progress"] for e in events if e["step"] == "simulate" and e["attempt"] == 3 and "progress" in e] == [
+        {"stage": "adopted", "simulation_run_id": original_run, "adopted_from": 2},
+        {"stage": "running", "simulation_run_id": original_run, "state": "running", "task_id": task_id}]
+    restarted = started_events(store, run_id)
+    assert len(restarted) == 3 and restarted[:2] == started and "approval" not in restarted[2]
+    assert refused == [task_id]
+    still_held(s, k)
+    assert manual.close() == 0  # closing detaches attempt 3; it cancels nothing
+    assert not manual.violations, manual.violations
+    assert refused == [task_id]
+    still_held(s, k)
+
+
 def test_the_agent_proposes_a_scan_a_person_runs_it_and_the_agent_analyses_the_results(scan, monitor):
     s = scan
     h, store, handle = s["h"], s["store"], s["handle"]
