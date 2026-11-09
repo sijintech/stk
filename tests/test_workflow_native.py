@@ -333,5 +333,10 @@ def test_muferro_fixed_dispatch_preserves_collector_and_domain_view(native_runti
     opened = []
     monkeypatch.setattr(s["api"].viewer, "open", lambda path, **options: opened.append((path, options)) or "domain view")
     assert invoke(s, "view", engine="muferro/1", run_id=run["id"]) == "domain view"
-    assert opened == [(Path(collected["directory"]), {"preset": "muferro-collected-domains"})]
+    directory = Path(collected["directory"])
+    root = s["tmp"] / "project"
+    case_path = f"results/muferro/{run['id']}/case"
+    proof = {"project_root": str(root), "case_path": case_path,
+             "files": [file for file in collected["files"] if file["path"].startswith(case_path + "/")]}
+    assert opened == [(directory, {"preset": "muferro-collected-domains", "source_proof": proof})]
     assert len(s["client"].tasks()) == 1
