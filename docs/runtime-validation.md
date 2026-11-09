@@ -1,5 +1,17 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 20:04 UTC · Runtime 日志末段与 Cocoa 对照
+
+`0458516a` 先读取 Runtime 任务状态再读日志，避免把末段写入前的空读取标成终态。CLI `logs --follow` 在连续两次收到空的终态响应后退出，兼容旧 Runtime。字节偏移与增量 UTF-8 解码保持原义，调度器更晚写入的日志仍可从最后游标续读。
+
+用实际 worker 在 HTTP 读完空块后才放行写出末段并终止。旧服务把该读标成终态。另经真实直连和配对 Hub 注入旧版首次空终态答复，两组旧 CLI 都提前退出。修复后三项回归通过，跨块中文完整输出、游标按字节推进，当前 Hub 读取路径没有新增动作。最终 Python 3.11 Runtime、CLI、事件及桥接联测 118/118，Python 3.14 三项回归 3/3。
+
+远端 `fa2ff5e2` 的 macOS CPU 1537/1537、Metal 254/254，主原生验收 4/6。新鲜隐藏诊断两项采样均完成。MP4 和 HTML 首次原生回复分别约 193、181 ms，均为 Playing。两次 DOM 采样均暂停并分别稳定在末次 seek 的 0.234、0.102 秒，比播放样本回退约 115、121 ms。两组均由一秒看门狗关闭。已在本地提交 `ded55b8a` 的同 seek 保持可见组等待下一轮目标平台对照。 [macOS 工件](https://github.com/sijintech/stk/actions/runs/42679509572/artifacts/13706450140)
+
+同一 Desktop 轮次的 Windows CPU 1478/1478，零跳过，3 个 Linux 作业通过。独立 Windows 原生作业 `129402349100` 仍在运行，本地提交等待整轮终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42679509572)
+
+本机日志回归证据见 `root-delivery-20261109-111/` 的 `log-tail-red.xml`、`log-tail-final.xml`、`log-tail-314.xml`。平台工件成员与摘要见 `root-delivery-20261109-107/cifa2/`。
+
 ## 2026-11-09 19:54 UTC · Runtime 单实例与 X7 链路切断
 
 `a5239e05` 为 D1 C-11 增加 Linux 真实 API 双进程回归。两个进程均请求临时端口，目录别名启动的第二实例被拒绝，首个 PID 记录与工作区仍可读取。SIGKILL 后在同一锁 inode 上恢复原工作区。部署与 Hub 单实例联测 17/17，外部副本禁用 flock 后第二实例持续运行，回归按预期失败。

@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-09 20:04 UTC · Runtime 日志末段与 Cocoa 对照
+
+D1 日志末段读取竞态已在 `0458516a` 修复，直连与 Hub 旧 Runtime 兼容纳入回归。P4 macOS 原生媒体保持 4/6，当前证据等待同 seek 保持可见对照。 [运行验收](runtime-validation.md)
+
+同一 Desktop 轮次的 Windows CPU 1478/1478，零跳过，3 个 Linux 作业通过。独立 Windows 原生作业 `129402349100` 仍在运行，本地提交等待整轮终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42679509572)
+
+Claude64 仍在独立 worktree 开发单机链路切断场景。root 已独立审阅本轮日志改动。
+
 ## 2026-11-09 19:54 UTC · Runtime 单实例与 X7 链路切断
 
 D1 C-11 的 Runtime 单实例、目录别名和崩溃重启已有持久回归 `a5239e05`，部署联测 17/17。X7 已获得单机纯链路切断的严格 Bridge 证据。跨主机分区、产品观察界面与完整 D1 退出继续。 [D1 矩阵](planning/d1-compatibility-gates.md) [运行验收](runtime-validation.md)
