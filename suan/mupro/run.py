@@ -87,15 +87,18 @@ def _merge_under(destination, included):
             _merge_under(destination[key], value)
 
 
-def _toml_document(path, root, active=(), label="input.toml"):
+def _toml_document(path, root, active=(), label="input.toml", *, open_toml=None):
     """Read a TOML file and merge its `include` files as MuPRO's reader does (muprosdk
     library/L0_Base/toml.f90:125-238, tools/mupro/mupro/contract.py:90-125): a path or a
     list of paths relative to the naming file, earlier includes winning, at most 16 deep.
     Included files must resolve inside root. Include strings are POSIX paths on every
-    platform, as the Linux node and muFerro read them."""
+    platform, as the Linux node and muFerro read them. The optional opener supplies
+    the file bytes for a bound graph read."""
     try:
-        with open(path, "rb") as stream:
+        with (open(path, "rb") if open_toml is None else open_toml(path)) as stream:
             data = tomllib.load(stream)
+    except MuproError:
+        raise
     except (OSError, ValueError, RecursionError) as exc:
         raise MuproError(f"Cannot read {label}: {exc}") from exc
     chain = (*active, path.resolve())
@@ -115,19 +118,22 @@ def _toml_document(path, root, active=(), label="input.toml"):
         target = path.parent.joinpath(*parts)
         resolved = target.resolve()
         if resolved != root and root not in resolved.parents:
-            raise MuproError(f"TOML include {include} must stay inside {root}")
+            location = root if open_toml is None else "the binding directory"
+            raise MuproError(f"TOML include {include} must stay inside {location}")
         if resolved in chain:
             raise MuproError(f"Cyclic TOML include: {include}")
-        _merge_under(data, _toml_document(target, root, chain, resolved.relative_to(root).as_posix()))
+        _merge_under(data, _toml_document(target, root, chain, resolved.relative_to(root).as_posix(),
+                                          open_toml=open_toml))
     return data
 
 
-def read_case(case_dir, root=None):
+def read_case(case_dir, root=None, *, _open_toml=None):
     """Read the run layout from input.toml and its includes, with muFerro's own defaults
     (apps/muFerro/src/input.f90:57, 85-86 and 113; interval has no default). Includes may
     name files anywhere inside root, the task work dir (default: the case dir)."""
     try:
-        data = _toml_document(Path(case_dir) / "input.toml", Path(root or case_dir).resolve())
+        data = _toml_document(Path(case_dir) / "input.toml", Path(root or case_dir).resolve(),
+                              open_toml=_open_toml)
     except MuproError:
         raise
     except (ValueError, RecursionError) as exc:  # e.g. tables nested too deep to merge

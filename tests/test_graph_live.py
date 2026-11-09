@@ -94,6 +94,162 @@ def _assert_one_energy(outputs, total):
     assert next(q for q in outputs["result"]["qoi"] if q["name"] == "total_energy")["value"] == total
 
 
+def _case_grid_source(root, include=None):
+    case = root / "case"
+    write_case(case, steps=4, interval=2)
+    write_outputs(case, steps=4, interval=2)
+    (root / "stk-mupro.json").write_text('{"case_dir": "case"}', encoding="utf-8")
+    entry = case / "input.toml"
+    if include is None:
+        return entry
+    contents = entry.read_text(encoding="utf-8").replace("simulation_grid = [4, 3, 2]\n", "")
+    entry.write_text(f'include = "../{include}"\n' + contents, encoding="utf-8")
+    dependency = root / include
+    dependency.parent.mkdir(parents=True, exist_ok=True)
+    dependency.write_text("[system]\nsimulation_grid = [4, 3, 2]\n", encoding="utf-8")
+    return dependency
+
+
+def _assert_case_grid(result, grid):
+    assert result["extensions"]["mupro"]["case"]["grid"] == grid
+    polar = next(dataset for dataset in result["datasets"] if dataset["id"] == "Polar")
+    assert polar["geometry"]["dimensions"] == grid
+
+
+@pytest.mark.parametrize("include", [None, "shared/grid.toml"])
+def test_run_index_refuses_case_input_drift_after_planning(tmp_path, include):
+    path = _case_grid_source(tmp_path, include)
+    original, stamp = path.read_bytes(), path.stat()
+    changed = original.replace(b"[4, 3, 2]", b"[9, 3, 2]")
+    assert changed != original and len(changed) == len(original)
+    cache = GraphCache()
+
+    def rewrite(event):
+        if event["type"] == "node.started":
+            path.write_bytes(changed)
+            os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+
+    with pytest.raises(EvaluationFailed) as error:
+        _run_index(tmp_path, cache=cache, on_event=rewrite)
+    assert error.value.errors[0]["code"] == "invalid_data"
+    path.write_bytes(original)
+    os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    restored = _run_index(tmp_path, cache=cache)
+    assert restored.evaluated == ["run"]
+    _assert_case_grid(restored.outputs["result"], [4, 3, 2])
+    assert _run_index(tmp_path, cache=cache).evaluated == []
+
+
+@pytest.mark.parametrize("include, decoy_count", [("shared/grid.inc", 0), ("shared/grid.toml", 65)])
+def test_run_index_tracks_case_dependencies_with_unchanged_metadata(tmp_path, include, decoy_count):
+    path = _case_grid_source(tmp_path, include)
+    for i in range(decoy_count):
+        (tmp_path / f"00-decoy-{i:02}.toml").write_text("unused = true\n", encoding="utf-8")
+    cache = GraphCache()
+    first = _run_index(tmp_path, cache=cache)
+    _assert_case_grid(first.outputs["result"], [4, 3, 2])
+    stamp = path.stat()
+    changed = path.read_bytes().replace(b"[4, 3, 2]", b"[9, 3, 2]")
+    path.write_bytes(changed)
+    os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert path.stat().st_size == stamp.st_size
+
+    second = _run_index(tmp_path, cache=cache)
+    assert second.evaluated == ["run"] and second.keys != first.keys
+    result = second.outputs["result"]
+    _assert_case_grid(result, [9, 3, 2])
+    observed = next(item for item in result["files"] if item["path"] == include)
+    assert observed["sha256"] == hashlib.sha256(changed).hexdigest() and observed["size"] == len(changed)
+
+
+def test_run_index_binds_a_missing_case_include_without_losing_dat_fallback(tmp_path):
+    path = _case_grid_source(tmp_path, "shared/grid.toml")
+    contents = path.read_bytes()
+    path.unlink()
+    before = _run_index(tmp_path).outputs["result"]
+    assert before["extensions"]["mupro"]["case"] is None
+    assert before["extensions"]["mupro"]["case_error"]
+    polar = next(dataset for dataset in before["datasets"] if dataset["id"] == "Polar")
+    assert polar["geometry"]["dimensions"] == [4, 3, 2]
+
+    def publish(event):
+        if event["type"] == "node.started":
+            path.write_bytes(contents)
+
+    cache = GraphCache()
+    with pytest.raises(EvaluationFailed) as error:
+        _run_index(tmp_path, cache=cache, on_event=publish)
+    assert error.value.errors[0]["code"] == "invalid_data"
+    current = _run_index(tmp_path, cache=cache)
+    assert current.evaluated == ["run"]
+    _assert_case_grid(current.outputs["result"], [4, 3, 2])
+
+
+def test_run_index_refuses_case_include_from_tampered_runtime_cache(tmp_path):
+    from test_connectors_files import FakeClient
+
+    run = tmp_path / "run"
+    include = "shared/grid.toml"
+    dependency = _case_grid_source(run, include)
+    files = {path.relative_to(run).as_posix(): path.read_bytes() for path in run.rglob("*") if path.is_file()}
+    original = dependency.read_bytes()
+    client = FakeClient(files)
+    source = RuntimeFiles(client, "test-task", tmp_path / "runtime-cache")
+    artifact = source.fetch(include)
+    stamp = artifact.stat()
+    cache = GraphCache()
+
+    def rewrite(event):
+        if event["type"] == "node.started":
+            artifact.write_bytes(original.replace(b"[4, 3, 2]", b"[9, 3, 2]"))
+            os.utime(artifact, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+
+    with pytest.raises(EvaluationFailed) as error:
+        _run_index(run, cache=cache, source=source, on_event=rewrite)
+    assert error.value.errors[0]["code"] == "invalid_data"
+    artifact.write_bytes(original)
+    os.utime(artifact, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    restored = _run_index(run, cache=cache, source=source)
+    assert restored.evaluated == ["run"]
+    _assert_case_grid(restored.outputs["result"], [4, 3, 2])
+    observed = next(item for item in restored.outputs["result"]["files"] if item["path"] == include)
+    assert observed["sha256"] == hashlib.sha256(original).hexdigest()
+
+
+@pytest.mark.parametrize("failure, code", [("unavailable", "unavailable"), ("vanished", "invalid_data"),
+                                          ("oversized", "budget_exceeded")])
+def test_run_index_rejects_unreadable_published_case_dependency(tmp_path, failure, code):
+    from test_connectors_files import FakeClient
+    from suan.connectors.api import ConnectorError
+
+    run = tmp_path / "run"
+    include = "shared/grid.toml"
+    _case_grid_source(run, include)
+    files = {path.relative_to(run).as_posix(): path.read_bytes() for path in run.rglob("*") if path.is_file()}
+
+    class Client(FakeClient):
+        def artifacts(self, task_id):
+            entries = super().artifacts(task_id)
+            if failure == "oversized":
+                next(item for item in entries if item["path"] == include)["size"] = (1 << 22) + 1
+            return entries
+
+        def download(self, task_id, path, destination):
+            if path == include:
+                if failure == "unavailable":
+                    raise ConnectorError("Fixture artifact unavailable", "unavailable")
+                if failure == "vanished":
+                    raise ValueError("Artifact not found; wait for the task to finish")
+                pytest.fail("The oversized dependency should be rejected before downloading")
+            return super().download(task_id, path, destination)
+
+    source = RuntimeFiles(Client(files), "test-task", tmp_path / "runtime-cache")
+    with pytest.raises(EvaluationFailed) as error:
+        _run_index(run, source=source)
+    assert error.value.errors[0]["code"] == code
+    assert not error.value.partial.outputs
+
+
 @pytest.mark.parametrize("change", ["energy", "append", "appears", "disappears"])
 def test_run_index_refuses_table_drift_after_planning_and_restores_cleanly(tmp_path, change):
     _one_row_run(tmp_path)

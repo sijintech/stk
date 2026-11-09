@@ -21,7 +21,7 @@ from suan.graph.registry import (NodeExecutionError, Port, array, binding, enum,
                                  rel_path, step, string, string_list, vector3)
 
 RUN_FILES = ("energy_out.dat", "mupro_progress.jsonl", "mupro_completion.json")
-MAX_TOML_FILES = 64  # case files hashed into the muferro_run fingerprint
+MAX_TOML_FILES = 64  # informational TOML listing cap, separate from the case dependency closure
 TABLE_LIMIT = 256 * 1024 * 1024
 
 
@@ -75,13 +75,14 @@ def _native_muferro_tables(connector):
 
 def _muferro_run_fingerprint(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
-    from suan.connectors.mupro import (_RUN_TABLE_LIMIT, _RUN_TABLE_READERS, _case_dir_from_record,
-                                       _observe_launcher_report, run_files)
+    from suan.connectors.mupro import (MuFerroConnector, _RUN_TABLE_LIMIT, _RUN_TABLE_READERS, _case_dir_from_record,
+                                       _observe_case, _observe_launcher_report, run_files)
     from suan.mupro.run import FRAME, RESULT
     source = _source(ctx, params["binding"])
     connector = _muferro()
     native = _native_muferro_description(connector)
     launcher_report = None
+    case_observation = None
     try:
         if native:
             names = run_files(source)
@@ -92,6 +93,8 @@ def _muferro_run_fingerprint(ctx, inputs, params):
             prefix = _prefix(case_dir)
             if prefix:
                 names.update({item.path: item for item in source.list(prefix)})
+            if getattr(connector._case, "__func__", None) is MuFerroConnector._case:
+                case_observation = _observe_case(source, prefix, record, names, ctx.check)
         else:
             case_dir = _case_dir(source, params["case_dir"])
             prefix = _prefix(case_dir)
@@ -103,9 +106,13 @@ def _muferro_run_fingerprint(ctx, inputs, params):
         small = [prefix + name for name in RUN_FILES if not bound_tables or name not in _RUN_TABLE_READERS]
         if not native:
             small.append(RESULT)
-        # The frames table records the grid from input.toml and its includes.
+        # Keep existing informational hashes for other TOML files. The native
+        # layout's dependency observation is independent of this listing cap.
         small += sorted(path for path in names if path.endswith(".toml"))[:MAX_TOML_FILES]
-        hashed = {path: source.sha256(path) for path in dict.fromkeys(small) if path in names}
+        case_files = case_observation["files"] if case_observation is not None else {}
+        hashed = {path: source.sha256(path) for path in dict.fromkeys(small)
+                  if path in names and path not in case_files}
+        hashed.update({path: item["sha256"] for path, item in case_files.items() if item is not None})
         if bound_tables:
             for filename in _RUN_TABLE_READERS:
                 path = prefix + filename
@@ -132,7 +139,8 @@ def _muferro_run_fingerprint(ctx, inputs, params):
     except ConnectorError as exc:
         raise _failure(exc) from None
     return {"connector": f"{connector.id}@{connector.version}", "case_dir": case_dir, "frames": frames,
-            "sha256": hashed, "hdf5": hdf5, "hdf5_files": hdf5_files, "launcher_report": launcher_report}
+            "sha256": hashed, "hdf5": hdf5, "hdf5_files": hdf5_files, "launcher_report": launcher_report,
+            "case_observation": case_observation}
 
 
 def _frames_table(result, attrs):
@@ -179,7 +187,7 @@ def _empty_table(table_id, columns, index="step"):
                                            "\"auto\" = the case_dir recorded by the STK launcher in stk-mupro.json "
                                            "(runs submitted with --input DIR), else the binding root."),
       },
-      time_dependent=True, impl_version=6, fingerprint=_muferro_run_fingerprint)
+      time_dependent=True, impl_version=7, fingerprint=_muferro_run_fingerprint)
 def muferro_run(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
     from suan.connectors.mupro.tables import ENERGY_COLUMNS
@@ -187,7 +195,8 @@ def muferro_run(ctx, inputs, params):
     source = _source(ctx, params["binding"])
     connector = _muferro()
     native = _native_muferro_description(connector)
-    case_dir = ctx.source_fingerprint["case_dir"] if native else _case_dir(source, params["case_dir"])
+    planned = ctx.source_fingerprint if native else None
+    case_dir = planned["case_dir"] if native else _case_dir(source, params["case_dir"])
     prefix = _prefix(case_dir)
     # A replacement connector (e.g. the private stk-mupro package) implements the plain protocol.
     ours = isinstance(connector, MuFerroConnector)
@@ -195,11 +204,14 @@ def muferro_run(ctx, inputs, params):
         raise NodeExecutionError(f"Connector {connector.id} does not take a case directory", code="unsupported")
     extra = {"case_dir": case_dir} if ours else {}
     if native:
-        extra["hdf5_sha256"] = ctx.source_fingerprint.get("hdf5", {})
-        extra["launcher_report"] = ctx.source_fingerprint["launcher_report"]
+        extra["hdf5_sha256"] = planned.get("hdf5", {})
+        extra["launcher_report"] = planned["launcher_report"]
+        if planned["case_observation"] is not None:
+            extra["_case_observation"] = planned["case_observation"]
+            extra["_case_check"] = ctx.check
     try:
         if _native_muferro_tables(connector):
-            tables = _read_planned_run_tables(source, prefix, ctx.source_fingerprint["sha256"], ctx.check)
+            tables = _read_planned_run_tables(source, prefix, planned["sha256"], ctx.check)
             result = connector.describe(source, live=True, table_observations=tables, **extra)
             energy = tables.get(prefix + _ENERGY_FILE, {}).get("table")
             progress = tables.get(prefix + _PROGRESS_FILE, {}).get("table")
@@ -214,7 +226,7 @@ def muferro_run(ctx, inputs, params):
     files = {f["path"] for f in result.get("files", ())}
     marker = prefix + "mupro_completion.json"
     completion_present = marker in files
-    if native and completion_present != (marker in ctx.source_fingerprint["sha256"]):
+    if native and completion_present != (marker in planned["sha256"]):
         raise NodeExecutionError("MuFerro completion marker changed after discovery was planned", code="invalid_data")
     if energy is None:
         energy = _empty_table("energy", ("step",) + ENERGY_COLUMNS)

@@ -91,7 +91,7 @@ def _plot_common():
 # Sources
 
 
-@node("stk.source.muferro_run", impl_version=6, title={"en": "muFerro run", "zh": "muFerro 计算"},
+@node("stk.source.muferro_run", impl_version=7, title={"en": "muFerro run", "zh": "muFerro 计算"},
       description={"en": "Index of a muFerro run directory: published field frames, the energy trace, "
                          "the progress log and the derived stk.result/1 manifest."},
       outputs=[Port("frames", "table", kind="frames"), Port("energy", "table"), Port("progress", "table"),

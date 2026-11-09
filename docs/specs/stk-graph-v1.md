@@ -1352,6 +1352,13 @@ Unless stated otherwise: input fields are kept (zero-copy), coordinates are phys
   The report read limit is 4 MiB, subject to any lower Runtime download limit. A listed report within
   the limit must be readable. Evaluation fails with `invalid_data` if the report appears, disappears,
   or its bounded content changes after planning.
+  The built-in layout also binds the selected `input.toml` and the files it actually reaches through
+  includes. The graph reads and hashes the same bytes used to derive the grid and run layout, checks
+  Runtime bytes against the published digest, and uses the observed sizes and digests in the result
+  manifest. The existing include rules and missing or malformed case diagnostics still apply. A
+  dependency that changes between planning and evaluation returns `invalid_data`.
+  For Runtime bindings the layout reads only published TOML dependencies, up to 4 MiB per file and
+  any lower download limit. A published dependency must be readable and match its published digest.
   The built-in energy and progress tables bind presence and content to the plan. Local sources hash
   actual bytes and Runtime sources use the published artifact digest. Execution reads and checks up
   to 64 MiB per table before parsing. The energy table and its manifest QOI share one observation.

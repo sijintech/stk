@@ -26,10 +26,12 @@ The full muFerro input schema, exact thresholds and label maps belong to the
 private ``stk-mupro`` package (priority 10); the light half here
 (:mod:`.inputs`) ships a minimal schema.
 """
+from contextlib import nullcontext
 from hashlib import sha256
 from importlib.metadata import PackageNotFoundError, version as _package_version
+from io import BytesIO
 import json
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import tempfile
 
 from suan.mupro.run import COMPONENTS, FRAME, RESULT, MuproError, missing_frames, read_case, verify_run
@@ -51,6 +53,7 @@ _RUN_TABLE_READERS = {_ENERGY_FILE: read_energy, _PROGRESS_FILE: read_progress}
 OUTPUTS = (*_RUN_TABLE_READERS, "mupro_completion.json")
 _RUN_TABLE_LIMIT = 64 * 1024 * 1024
 _LAUNCHER_REPORT_LIMIT = 1 << 22
+_CASE_REMOTE_LIMIT = 1 << 22
 _UNPLANNED_LAUNCHER = object()
 # Stem -> (quantity, vector?) for the stems STK knows; never an assumed unit or tensor order.
 _QUANTITIES = {
@@ -183,17 +186,96 @@ def _read_bytes(run, path, limit, check=None):
         while True:
             if check is not None:
                 check()
-            remaining = limit - len(data)
-            chunk = stream.read(min(1 << 20, remaining + 1))
+            chunk = stream.read(1 << 20 if limit is None else min(1 << 20, limit - len(data) + 1))
             if not chunk:
                 return data
-            if len(chunk) > remaining:
+            if limit is not None and len(data) + len(chunk) > limit:
                 raise ConnectorError(f"{path} is larger than {limit} bytes", "invalid_data")
             data.extend(chunk)
 
 
 def _read_text(run, path, limit=_RUN_TABLE_LIMIT):
     return _read_bytes(run, path, limit).decode("utf-8", "replace")
+
+
+def _recorded_case(record):
+    case = (record or {}).get("case")
+    if isinstance(case, dict) and isinstance(case.get("grid"), list) and len(case["grid"]) == 3:
+        return case
+    return None
+
+
+class _CaseObservationError(MuproError):
+    """A bound case observation cannot be used."""
+
+    def __init__(self, message, code="invalid_data"):
+        super().__init__(message)
+        self.code = code
+
+
+def _observe_case(run, prefix, record, names, check):
+    """Observe the files the solver's layout parser actually attempts to read."""
+    from ..files import RuntimeFiles
+
+    entry = prefix + "input.toml"
+    files = {}
+    if entry not in names:
+        return {"present": False, "files": files, "case": _recorded_case(record), "error": None}
+    local = run.local_path(".")
+    runtime = isinstance(run, RuntimeFiles)
+
+    def remember(path, observation):
+        if files.setdefault(path, observation) != observation:
+            raise _CaseObservationError(f"MuFerro case file {path} changed while reading includes")
+
+    # The empty temporary root gives remote artifacts the same relative path
+    # semantics as the old mirror without downloading unrelated TOML files.
+    location = nullcontext(local) if local is not None else tempfile.TemporaryDirectory(prefix="stk-muferro-case-")
+    with location as folder:
+        root = Path(folder).resolve()
+
+        def open_toml(path):
+            check()
+            relative = path.relative_to(root)
+            try:
+                resolved = path.resolve().relative_to(root).as_posix()
+            except ValueError:
+                raise MuproError(f"MuFerro case file {relative} must stay inside the binding directory") from None
+            name = resolved if ".." in relative.parts else relative.as_posix()
+            if local is None and (not name.endswith(".toml") or name not in names):
+                remember(name, None)
+                raise FileNotFoundError(name)
+            if runtime and local is None and names[name].size > _CASE_REMOTE_LIMIT:
+                raise _CaseObservationError(
+                    f"Published MuFerro case file {name} exceeds {_CASE_REMOTE_LIMIT} bytes", "budget_exceeded")
+            try:
+                published = run.sha256(name) if runtime else None
+                raw = _read_bytes(run, resolved, _CASE_REMOTE_LIMIT if local is None else None, check)
+            except (OSError, RuntimeError, ValueError, KeyError) as exc:
+                if runtime:
+                    code = getattr(exc, "code", None) or "invalid_data"
+                    if code in {"missing_file", "not_found"}:
+                        code = "invalid_data"
+                    raise _CaseObservationError(f"Cannot read published MuFerro case file {name}", code) from None
+                remember(name, None)
+                raise
+            check()
+            digest = sha256(raw).hexdigest()
+            if runtime and published != digest:
+                raise _CaseObservationError(f"MuFerro case file {name} does not match its published digest")
+            observation = {"size": len(raw), "sha256": digest}
+            remember(name, observation)
+            if resolved != name:
+                remember(resolved, observation)
+            return BytesIO(raw)
+
+        try:
+            case, error = read_case(root / prefix, root, _open_toml=open_toml), None
+        except _CaseObservationError as exc:
+            raise ConnectorError(str(exc), exc.code) from None
+        except MuproError as exc:
+            case, error = None, str(exc)
+    return {"present": True, "files": files, "case": case, "error": error}
 
 
 def _read_planned_run_tables(run, prefix, planned, check):
@@ -227,13 +309,12 @@ class _Mirror:
 
     def __init__(self, run, names):
         self._tmp = tempfile.TemporaryDirectory(prefix="stk-muferro-")
-        from pathlib import Path
         self.root = Path(self._tmp.name)
         for name in names:
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             with run.open(name) as stream:
-                target.write_bytes(stream.read(1 << 22))
+                target.write_bytes(stream.read(_CASE_REMOTE_LIMIT))
 
     def close(self):
         self._tmp.cleanup()
@@ -308,10 +389,7 @@ class MuFerroConnector:
             finally:
                 if mirror is not None:
                     mirror.close()
-        recorded = (record or {}).get("case")
-        if isinstance(recorded, dict) and isinstance(recorded.get("grid"), list) and len(recorded["grid"]) == 3:
-            return recorded, None
-        return None, None
+        return _recorded_case(record), None
 
     def _frames(self, run, prefix):
         found = {}
@@ -353,7 +431,8 @@ class MuFerroConnector:
         return None, None
 
     def describe(self, run, *, live=False, case_dir=None, hdf5_sha256=None,
-                 launcher_report=_UNPLANNED_LAUNCHER, table_observations=None):
+                 launcher_report=_UNPLANNED_LAUNCHER, table_observations=None,
+                 _case_observation=None, _case_check=None):
         """stk.result/1 of a muFerro run directory (``live``: frames so far, ``complete: false``)."""
         from suan.data.manifest import file_entry, qoi_entry, result_manifest
         planned_launcher = launcher_report is not _UNPLANNED_LAUNCHER
@@ -373,7 +452,15 @@ class MuFerroConnector:
                 raise ConnectorError("MuFerro launcher report changed after discovery was planned", "invalid_data")
         else:
             record = self._record(run, names)
-        case, case_error = self._case(run, case_dir, record, names)
+        case_files = {}
+        if _case_observation is None:
+            case, case_error = self._case(run, case_dir, record, names)
+        else:
+            actual_case = _observe_case(run, prefix, record, names, _case_check)
+            if actual_case != _case_observation:
+                raise ConnectorError("MuFerro case inputs changed after discovery was planned", "invalid_data")
+            case, case_error = actual_case["case"], actual_case["error"]
+            case_files = actual_case["files"]
         frames = self._frames(run, prefix)
         if live:
             # A live view may race the solver (also after a restart that keeps an earlier completion file):
@@ -494,7 +581,7 @@ class MuFerroConnector:
             role = ("manifest" if path == RESULT else "input" if name.endswith(".toml")
                     else "log" if name.endswith(".log") else "output" if (FRAME.search(name) or name in OUTPUTS or name == "run.h5")
                     else "other")
-            observed = observation if path == hdf5_path else tables.get(path)
+            observed = observation if path == hdf5_path else tables.get(path) or case_files.get(path)
             if path == RESULT and planned_launcher:
                 observed = launcher_report
             files.append(file_entry(path, size=observed["size"] if observed else item.size,
