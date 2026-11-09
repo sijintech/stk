@@ -144,7 +144,7 @@ def _empty_table(table_id, columns, index="step"):
                                            "\"auto\" = the case_dir recorded by the STK launcher in stk-mupro.json "
                                            "(runs submitted with --input DIR), else the binding root."),
       },
-      time_dependent=True, impl_version=2, fingerprint=_muferro_run_fingerprint)
+      time_dependent=True, impl_version=3, fingerprint=_muferro_run_fingerprint)
 def muferro_run(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
     from suan.connectors.mupro.tables import ENERGY_COLUMNS

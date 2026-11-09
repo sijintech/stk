@@ -321,6 +321,8 @@ class MuFerroConnector:
                 if isinstance(expected, dict):
                     raise ConnectorError(expected["message"], expected["error"])
                 if names[hdf5_path].size > FILE_LIMIT:
+                    if expected is not None:
+                        raise ContentChanged()
                     raise ConnectorError("MuPRO HDF5 source exceeds the 1 GiB file limit", "budget_exceeded")
                 observation = describe_hdf5(run, hdf5_path, expected_sha256=expected)
                 datasets.extend(descriptors(observation))

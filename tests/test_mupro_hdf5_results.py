@@ -9,7 +9,7 @@ np = pytest.importorskip("numpy")
 
 from mupro_fake import write_case, write_outputs  # noqa: E402
 from suan.connectors.api import ConnectorError, DatasetHandle  # noqa: E402
-from suan.connectors.files import LocalFiles, RuntimeFiles  # noqa: E402
+from suan.connectors.files import LocalFiles, MissingFile, RuntimeFiles  # noqa: E402
 from suan.connectors.mupro import MuFerroConnector, frame_rows  # noqa: E402
 from suan.connectors.mupro import source as adapter  # noqa: E402
 from suan.data.manifest import check, validate_result  # noqa: E402
@@ -170,6 +170,72 @@ def test_graph_cannot_cache_a_different_discovery_than_it_planned(tmp_path, chan
     assert error.value.errors[0]["code"] == "invalid_data"
 
 
+@pytest.mark.parametrize("change", ["listing_over_limit", "stream_over_limit", "stream_missing", "stream_unavailable"])
+def test_graph_rejects_unverified_planned_container_without_poisoning_cache(tmp_path, monkeypatch, change):
+    write_case(tmp_path)
+    write_outputs(tmp_path)
+    path = tmp_path / "run.h5"
+    write_hdf5(path)
+    original_bytes = path.read_bytes()
+    original_stat = path.stat()
+    monkeypatch.setattr(adapter, "FILE_LIMIT", original_stat.st_size)
+    node_started = False
+    open_source = LocalFiles.open
+
+    def grow_container():
+        with path.open("ab") as stream:
+            stream.write(b"x")
+
+    def open_with_change(source, name):
+        if node_started and name == "run.h5":
+            if change == "stream_over_limit":
+                grow_container()
+            elif change == "stream_missing":
+                path.unlink()
+                raise MissingFile("Synthetic HDF5 source was removed after listing")
+            elif change == "stream_unavailable":
+                raise ConnectorError("Synthetic HDF5 stream is unavailable", "unavailable")
+        return open_source(source, name)
+
+    def mutate(event):
+        nonlocal node_started
+        if event["type"] == "node.started":
+            node_started = True
+            if change == "listing_over_limit":
+                grow_container()
+
+    monkeypatch.setattr(LocalFiles, "open", open_with_change)
+    cache = GraphCache()
+    with pytest.raises(EvaluationFailed) as error:
+        evaluate_result(tmp_path, cache=cache, on_event=mutate)
+    assert error.value.errors[0]["code"] == "invalid_data"
+
+    node_started = False
+    path.write_bytes(original_bytes)
+    os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    restored = evaluate_result(tmp_path, cache=cache)
+    assert restored.evaluated == ["run"]
+    assert {"Polar", "hdf5:Polar", "hdf5:Strain"} <= {d["id"] for d in restored.outputs["result"]["datasets"]}
+    assert evaluate_result(tmp_path, cache=cache).evaluated == []
+
+
+def test_hdf5_unavailable_at_planning_keeps_dat_run_index(tmp_path, monkeypatch):
+    write_case(tmp_path)
+    write_outputs(tmp_path)
+    write_hdf5(tmp_path / "run.h5")
+    open_source = LocalFiles.open
+
+    def open_optional_unavailable(source, path):
+        if path == "run.h5":
+            raise ConnectorError("Synthetic HDF5 stream is unavailable", "unavailable")
+        return open_source(source, path)
+
+    monkeypatch.setattr(LocalFiles, "open", open_optional_unavailable)
+    result = evaluate_result(tmp_path)
+    assert result.outputs["frames"].n_rows > 0
+    assert result.outputs["result"]["extensions"]["mupro"]["hdf5_error"]["code"] == "unavailable"
+
+
 def test_describe_budget_is_checked_before_streaming(tmp_path):
     class NoRead:
         def open(self, path):
@@ -187,6 +253,9 @@ def test_invalid_hdf5_keeps_dat_and_energy_readable_with_a_diagnostic(tmp_path):
     result = connector.describe(source)
     assert validate_result(result) == [] and result["complete"]
     assert result["extensions"]["mupro"]["hdf5_error"]["code"] == "invalid_data"
+    graph_result = evaluate_result(tmp_path).outputs["result"]
+    assert graph_result["extensions"]["mupro"]["hdf5_error"]["code"] == "invalid_data"
+    assert "Polar" in {d["id"] for d in graph_result["datasets"]}
     assert connector.open(source, "energy").read().n_rows == 3
     assert connector.open(source, "Polar").read(frame={"first": True}).time.step == 0
     with pytest.raises(ConnectorError) as error:
