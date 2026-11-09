@@ -90,6 +90,18 @@ def test_describe_incomplete_and_recorded_runs(tmp_path):
     assert connector.describe(source)["datasets"] == []  # nothing directly in the binding root
 
 
+@pytest.mark.parametrize(("name", "check"), [
+    ("energy_out.dat", "energy"), ("mupro_progress.jsonl", "progress"),
+])
+def test_describe_reports_a_missing_native_trace_as_incomplete(tmp_path, name, check):
+    root = run_dir(tmp_path, case_dir="case16")
+    (root / "case16" / name).rename(root / name)
+    result = MuFerroConnector(case_dir="case16").describe(LocalFiles(root))
+    assert validate_result(result) == [] and result["state"] == "failed"
+    assert any(item["id"] == check and item["status"] == "fail" for item in result["verification"]["checks"])
+    assert not result["complete"]
+
+
 def test_open_frames_and_tables(tmp_path):
     connector = MuFerroConnector()
     source = LocalFiles(run_dir(tmp_path))
@@ -259,6 +271,31 @@ def test_describe_and_read_through_the_runtime(tmp_path):
     assert result["verification"] is None and not any(p.endswith(".dat") and "Polar" in p for p in client.downloads)
     image = connector.open(source, "Polar").read(frame={"step": 4})
     assert image.time.step == 4 and client.downloads.count("case16/Polar.00000004.dat") == 1
+
+
+@pytest.mark.parametrize("name", ["Polar.00000000.dat", "energy_out.dat"])
+def test_describe_legacy_runtime_outputs_with_only_a_recorded_grid(tmp_path, name):
+    root = run_dir(tmp_path / "work", case_dir="case16")
+    case = root / "case16"
+    # Older task listings can omit unchanged inputs and retain only the recorded grid.
+    (case / "input.toml").unlink()
+    (case / "material.toml").unlink()
+    (root / "stk-mupro.json").write_text(json.dumps({
+        "case_dir": "case16", "case": {"grid": [4, 3, 2]}, "state": "succeeded",
+        "verification": {"verifier": "stk-mupro-1", "status": "passed", "checks": []},
+    }), encoding="utf-8")
+    connector = MuFerroConnector(case_dir="auto")
+    client = FakeClient(root)
+
+    def describe():
+        return connector.describe(RuntimeFiles(client, "t" * 32, tmp_path / "cache"))
+
+    result = describe()
+    assert validate_result(result) == [] and result["complete"]
+    (case / name).unlink()
+    incomplete = describe()
+    assert validate_result(incomplete) == [] and not incomplete["complete"]
+    assert incomplete["state"] == "succeeded" and incomplete["verification"] == result["verification"]
 
 
 def test_frame_handle_checks_warm_runtime_bytes_before_read_or_stats(tmp_path):

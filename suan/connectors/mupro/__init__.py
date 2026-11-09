@@ -34,7 +34,7 @@ import json
 from pathlib import Path, PurePosixPath
 import tempfile
 
-from suan.mupro.run import COMPONENTS, FRAME, RESULT, MuproError, missing_frames, read_case, verify_run
+from suan.mupro.run import COMPONENTS, FRAME, RESULT, RUN_OUTPUTS, MuproError, missing_frames, read_case, verify_run
 
 from ..api import API_VERSION, ConnectorError, FileInfo, Match
 from ..builtin import crop_sample, field_stats, select_frame
@@ -534,7 +534,9 @@ class MuFerroConnector:
         if case and {"start_step", "steps", "output_interval"} <= set(case):
             present = {f"{stem}.{step:08d}.dat" for stem, items in frames.items() for step, _ in items}
             missing = missing_frames(case, present, 50)
-        complete = not live and completion and not missing
+        # Even without the case layout, these outputs are required by every DAT run.
+        required = (*RUN_OUTPUTS, "Polar.00000000.dat")
+        complete = not live and not missing and all(prefix + name in names for name in required)
         verification = None
         state = "unknown"
         outcome = {"classification": None, "retryable": False, "reason": ""}
