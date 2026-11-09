@@ -1,4 +1,5 @@
 """Explicit local import/index/revocation, durable evidence and literal retrieval."""
+from contextlib import closing
 import copy
 import hashlib
 import json
@@ -72,11 +73,31 @@ def _paused_import_process(root, source, operation, document, published, release
 
 
 def _leave_foreign_hot_journal(path):
-    db = sqlite3.connect(path)
-    db.execute("PRAGMA synchronous=FULL"); db.execute("PRAGMA cache_size=2")
-    db.execute("BEGIN IMMEDIATE")
-    db.execute("UPDATE unrelated SET value=?", ("uncommitted fixture" + "z" * 2048,))
-    os._exit(0)
+    # Keep this crash fixture independent of pytest and the literature package imports.
+    script = """
+print("Python started", flush=True)
+import os
+import sqlite3
+import sys
+
+print("Opening SQLite", flush=True)
+db = sqlite3.connect(sys.argv[1], timeout=5)
+db.execute("PRAGMA synchronous=FULL")
+db.execute("PRAGMA cache_size=2")
+db.execute("PRAGMA cache_spill=ON")
+print("Beginning transaction", flush=True)
+db.execute("BEGIN IMMEDIATE")
+print("Writing uncommitted rows", flush=True)
+db.execute("UPDATE unrelated SET value=?", ("uncommitted fixture" + "z" * 2048,))
+print("Write returned", flush=True)
+os._exit(73)
+"""
+    try:
+        result = subprocess.run([sys.executable, "-I", "-S", "-c", script, str(path)],
+                                capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(f"Foreign journal fixture timed out. stdout={exc.stdout!r}, stderr={exc.stderr!r}")
+    assert result.returncode == 73, (result.returncode, result.stdout, result.stderr)
 
 
 def _crash_actual_import(root, source, operation, preimage):
@@ -105,13 +126,15 @@ def _run_child(target, *args):
 
 def test_foreign_hot_journal_is_refused_without_mutating_originals(tmp_path):
     root = tmp_path / "foreign"; root.mkdir(); path = root / "literature.sqlite3"
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db, db:
         db.execute("CREATE TABLE unrelated(value TEXT)")
         db.executemany("INSERT INTO unrelated VALUES(?)", [("original" + "x" * 2048,) for _ in range(512)])
         db.execute("PRAGMA application_id=1398033481"); db.execute("PRAGMA user_version=1")
-    _run_child(_leave_foreign_hot_journal, path)
-    journal = path.with_name(path.name + "-journal"); assert journal.stat().st_size > 512
+    _leave_foreign_hot_journal(path)
+    journal = path.with_name(path.name + "-journal")
     before = [(p.read_bytes(), p.stat().st_mode) for p in (path, journal)]
+    assert len(before[1][0]) > 512 and before[1][0].startswith(bytes.fromhex("d9d505f920a163d7"))
+    assert b"uncommitted fixture" in before[0][0]
     source = tmp_path / "source.pdf"; source.write_bytes(make_pdf([["Owned import"]]))
     for action in (lambda: Library(root).info(), lambda: _import(Library(root), source)):
         with pytest.raises(LiteratureError): action()
