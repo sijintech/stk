@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import hashlib
 import inspect
+import os
 import sqlite3
 import threading
 from uuid import uuid4
@@ -178,6 +179,58 @@ def test_bridge_and_peer_project_pages_and_scoped_receipts(access, inproc):
     with pytest.raises(RevisionConflict):
         peer.read_table(access.context, access.project_id, table, **target, **stale)
     assert unchanged(access.store) == after
+    bridge.assert_clean()
+
+
+def test_current_authorized_file_index_content_is_identical_on_bridge_and_peer_until_revoked(access, inproc,
+                                                                                             tmp_path):
+    """CURRENT behavior (CP-0 F23, docs/design/cloud-project-service.md).
+
+    An authorized table read returns ordinary file-index cell values unchanged, including an absolute
+    external path; only protocol metadata is closed. This is the present adapter baseline. It neither
+    chooses a future cloud content policy nor grants any file transfer right (the file is never read).
+    """
+    from suan.peer.authority import PeerDenied
+    from suan.project import files
+    outside = tmp_path / "outside-project"
+    outside.mkdir()
+    source = (outside / "synthetic-input.csv").resolve()
+    source.write_text("synthetic,1\n", encoding="utf-8")
+    assert not source.is_relative_to(access.store.directory)
+    location = "external:windows" if os.name == "nt" else "external:posix"
+    indexed = access.store.files.index([str(source)], expected_revision=0)
+    assert indexed["revision"] == 1 and indexed["table_id"] == files.TABLE_ID
+    record = indexed["record_ids"][0]
+
+    bridge = inproc()
+    handle = bridge.call("project.open", {"directory": str(access.store.directory)})["project"]["handle"]
+    method = "project.table.read"
+    page = {"table_id": files.TABLE_ID, "expected_revision": 1, "record_id": record}
+    local = bridge.call(method, {"handle": handle, **page})
+    remote = access.projects.read_table(access.context, access.project_id, **page, **access.target)
+    response = {"format": FORMAT, "id": str(uuid4()), "result": remote}
+    decoded = decode_message(encode_message(response, method=method), method=method)["result"]
+    assert local == decoded == remote
+    row = next(item for item in decoded["table"]["records"] if item["id"] == record)
+    values = row["values"]
+    assert values[files.FIELD_IDS["path"]] == str(source)
+    assert values[files.FIELD_IDS["location"]] == location
+    assert values[files.FIELD_IDS["name"]] == "synthetic-input.csv"
+    # Protocol metadata stays closed; the path is only cell content of an authorized row.
+    assert decoded["project_id"] == access.project_id and decoded["revision"] == 1
+    assert not {"directory", "path", "handle"} & decoded.keys()
+    assert set(decoded["table"]) == {"id", "name", "fields", "records"}
+    catalog = access.projects.catalog(access.context, access.project_id, **access.target)
+    assert set(catalog["project"]) == {"id", "name", "revision"}
+    assert str(source) not in repr(catalog)
+
+    before = unchanged(access.store)
+    access.authority.revoke_grant(access.target["grant_id"])
+    with pytest.raises(PeerDenied):
+        access.projects.read_table(access.context, access.project_id, **page, **access.target)
+    with pytest.raises(PeerDenied):
+        access.projects.catalog(access.context, access.project_id, **access.target)
+    assert unchanged(access.store) == before
     bridge.assert_clean()
 
 
