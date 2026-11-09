@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 快照发布摘要与 Cocoa 暂停动作对照
+
+`7eb7782206f425bdeb99e0cda25b3cfb42be2aa6` 把工作流收集回执的逐文件 SHA-256 传到快照的实际复制路径。合成 HDF5 在项目文件登记后将 Polar 从 1 改为 9，旧执行器接受并发布改写字节。候选在对象入库前拒绝，快照、改写对象和临时文件均无记录，已完成的文件登记保留。恢复原字节后同一路径捕获成功。共享入口也覆盖 LAMMPS。精确源码联合 129 项通过，1 项为真实许可条件跳过。root 另验源码 36 项与隔离 wheel 23 项。 [桥接契约](specs/stk-desktop-bridge-v1.md)
+
+`41ac8fdf50d08ae48ef1f9b060ad6e019d1d50f6` 为独立和 HTML 视频各注册一项 Cocoa 隔离暂停对照。仅对匹配的可见测试会话和导航启用一次固定暂停动作。原生状态查询、一秒截止、无隐藏期 DOM 采样、重显无自动播放和画面验收继续作为门槛。工件区分脚本回执与原生验证。Linux 构建验收程序并联跑 45 项，三组各两项的 CTest 入口、CI 名称与工件目录一致。提取脚本的六种模拟结果通过。实际 WKWebView 编译及行为待目标 CI。 [CI 定义](../.github/workflows/desktop.yml)
+
+完整 `bc25f579` macOS 工件已下载，五份 JUnit 与六份视频结果的摘要已绑定，官方日志的十六个媒体观测与工件逐项一致。Windows CPU 1460/1460，原生在本记录时仍运行。证据在本机 `root-delivery-20261109-76` 和 `root-delivery-20261109-77`。 [macOS 工件](https://github.com/sijintech/stk/actions/runs/42584441296/artifacts/13661187057) [Desktop](https://github.com/sijintech/stk/actions/runs/42584441296)
+
+Claude38 `e31d1f29` 作者源码 335 项，隔离安装原取消 10/10、离线完成 12/12。实际原任务在离线期间结束，重连前两次精确读取均不可用，恢复同节点后读取原任务成功和固定产物。审阅复现重连助手跳过已答复的排队状态，且发现候选在校验清单前使用远端描述下载。收口任务已派发，待集成和主线复验。 [D1 矩阵](planning/d1-compatibility-gates.md)
+
 ## 2026-11-09 UTC · 日志端点绑定、冷恢复和 Cocoa 静默对照
 
 `0d414c8a90efb2ad13183b3d9c910bfd3f01d20b` 为 `task.logs` 增加可选 `expected_connection_identity`，沿用严格桥在实际后端对象上的检查。MuFerro 桌面与历史入口各验证稳定连接、刷新后切换及 stdout 之后切换。旧代码四个切换用例读取替换端点，修复后返回 `conflict` 且替换后端无日志调用。原 stdout 在第二条读取被拒绝前已输出。桌面共享入口同样应用于 LAMMPS。原有通用日志脚本仍可省略该字段。 [桥接契约](specs/stk-desktop-bridge-v1.md) [MuFerro 工作流](simulation-muferro.md)

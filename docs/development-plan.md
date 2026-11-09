@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · 结果冻结和原生暂停对照
+
+工作流结果快照绑定验证过的收集摘要，异常替换在对象入库前拒绝。macOS 下一轮用固定隔离暂停动作与既有静默隐藏路径比较，沿用相同的核验、截止、保留草稿及重显判据。D1 X7 已有作者单机证据，待 Claude38 收口首个实时答复和下载清单后由 root 验收。 [验收记录](runtime-validation.md) [D1 矩阵](planning/d1-compatibility-gates.md)
+
 ## 2026-11-09 UTC · 日志绑定、冷恢复和节点离线完成
 
 MuFerro 桌面日志逐次检查冻结端点，已验两处切换和原连接双流。已补冷重启恢复原连接后按同一 ID 完成传输的验收。Claude38 接手 D1 X7 的节点离线期间任务自然完成，既有断连后显式取消作为回归。macOS 静默对照确认关闭发生在隐藏期 DOM 采样前，后续核对宿主暂停及原生关闭路径。 [验收记录](runtime-validation.md) [D1 故障矩阵](planning/d1-compatibility-gates.md)
