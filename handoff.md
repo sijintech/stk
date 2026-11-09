@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 15:10 UTC · 一次点击查看已验证的历史分析
+
+`e345038f` 给成功的历史分析增加“读取并显示结果”。归档校验后只有一个可显示载荷时直接打开，多个时保留手动选择。 Linux 实窗从选中成功运行且 Viewer 为空的起点四次降到一次，显示冻结 HDF5 第 4 步 `Polar_x`。
+
+分析、Viewer 与工作台定向 70/70，项目 CPU 标签 1044/1044，均无失败或跳过。 root 以 `a8ac9db2` 集成 Claude53 `5a3d8033`。SIGKILL 前核对原批准与已运行的求解器，桥离线时同一任务成功。重开读取历史启动和项目中持久的 running 状态，实际 Runtime 已成功，真实提交共一次。下载三份产物核对摘要，根源码 103/103。证据 `root-delivery-20261109-95/claude53-root-final.xml` 和 `claude53-root-focused/`。 远端 `971c0cbf` 三个 Linux 作业、Windows CPU 1460/1460 与 Runtime 13/13 通过。macOS 原生基线 4/6，新暂停顺序对照 0/2。两个可见暂停先确认成功，隐藏后的新暂停收到 ACK，但 26 次与 23 次原生回复均为 Playing，最终 watchdog 关闭。第二次可见对照 1/2，HTML 用例止于初次暂停的时间下限。Windows 原生仍在运行，本批等待整轮结束。 [macOS 工件](https://github.com/sijintech/stk/actions/runs/42633409122/artifacts/13684539547) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42633409122) [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 14:40 UTC · 冻结 HDF5 归档的原生首帧
 
 `71f878df` 修正 Viewer 在采纳归档后首帧被旧灰色背景盖住的问题。旧代码回归失败，修正后相关 C++ 67/67。 Linux 实窗从已选中的成功运行四次点击，立即看到冻结归档的第 4 步 `Polar_x`。原收集 HDF5 已移开，归档只读一次，项目修订、一个 Runtime 任务及隐藏 Python 草稿一致。

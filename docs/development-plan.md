@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-09 15:10 UTC · 一次点击查看已验证的历史分析
+
+MuFerro 合成试点的历史分析已有一次点击查看路径。只采用已核验的唯一三维输出，多个输出仍明确选择。真实许可主机、HDF5-only 完成、科学参数及 macOS/Windows 交付仍待验。 [验收记录](runtime-validation.md)
+
+root 以 `a8ac9db2` 集成 Claude53 `5a3d8033`。SIGKILL 前核对原批准与已运行的求解器，桥离线时同一任务成功。重开读取历史启动和项目中持久的 running 状态，实际 Runtime 已成功，真实提交共一次。下载三份产物核对摘要，根源码 103/103。证据 `root-delivery-20261109-95/claude53-root-final.xml` 和 `claude53-root-focused/`。
+
 ## 2026-11-09 14:40 UTC · 冻结 HDF5 归档的原生首帧
 
 合成 MuFerro 的收集记录、冻结分析和原生归档查看已连通。原始收集文件移开后，桌面仍显示经过验证的指定 HDF5 步骤和分量。其他目标平台、真实许可求解器、HDF5-only 完成和科学口径分别待验。 [验收记录](runtime-validation.md)
