@@ -58,6 +58,7 @@ void write(const fs::path &path, const std::string &text)
   require(out.good(), "Cannot write public fixture/evidence: " + core::path_to_utf8(path));
 }
 struct Options {
+  enum class FreshPause { None, Hidden, Visible };
   std::string python, backend, source = "markdown";
   fs::path output, media_fixture;
   bool pre_seek_hide_control = false;
@@ -69,11 +70,12 @@ struct Options {
   bool hide_after_verified_pause_control = false;
   bool retain_visible_pause_control = false;
   bool hidden_dom_tail_control = false;
-  bool fresh_native_hide_dom_control = false;
+  FreshPause fresh_pause = FreshPause::None;
+  bool fresh_pause_diagnostic() const { return fresh_pause != FreshPause::None; }
   bool pause_order_diagnostic() const { return visible_pause_diagnostic() || hide_after_verified_pause_control; }
   int reading_cycles() const
   {
-    return (pre_seek_hide_control || pause_order_diagnostic() || fresh_native_hide_dom_control) ? 1 : 20;
+    return (pre_seek_hide_control || pause_order_diagnostic() || fresh_pause_diagnostic()) ? 1 : 20;
   }
 };
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
@@ -826,7 +828,7 @@ class Exercise {
       if (retain_visible_pause) {
         result_[key]["passive_hidden_playback_state"] = passive_playback ? Json(*passive_playback) : Json(nullptr);
       }
-      record_hidden_native_trace(close.get(), session);
+      record_native_pause_trace(close.get(), session);
       record_hidden_native_close(close.get(), session, started);
     };
     try {
@@ -962,77 +964,104 @@ class Exercise {
     else { evidence["outcome"] = "inconclusive"; }
     save();
   }
-  void fresh_native_hide_dom_diagnostic(app::EditorArea &area, const std::string &session,
-                                        const Media &playing, const Media &last_seek, const NativePause &previous,
-                                        const std::shared_ptr<document_preview::ResourceSession> &resources)
+  void fresh_native_pause_dom_diagnostic(app::EditorArea &area, const std::string &session,
+                                         const Media &playing, const Media &last_seek, const NativePause &previous,
+                                         const std::shared_ptr<document_preview::ResourceSession> &resources,
+                                         bool keep_visible)
   {
     using namespace document_preview;
     constexpr auto budget = detail::MediaPauseVerification::timeout;
+    constexpr auto first_sample_offset = std::chrono::milliseconds(200);
     constexpr auto interval = std::chrono::milliseconds(400);
     const auto parent = window_.native_window_handle();
     const auto close = observe_native_close(session, playing.navigation_generation);
     require(previous.available && previous.navigation_generation == playing.navigation_generation &&
-        close && close->hide_pause, "Fresh hide needs the previous pause and exact next native trace");
+        close && close->hide_pause, "Fresh pause needs the previous pause and exact next native trace");
     const auto &trace = *close->hide_pause;
-    require(trace.media_generation == previous.media_generation + 1, "Fresh hide must observe the next pause");
-    auto &evidence = result_["fresh_native_hide_dom"];
+    require(trace.media_generation == previous.media_generation + 1, "Fresh control must observe the next pause");
+    const char *reply_key = keep_visible ? "first_visible_native_reply" : "first_hidden_native_reply";
+    auto &evidence = result_[keep_visible ? "fresh_native_visible_dom" : "fresh_native_hide_dom"];
     evidence = {{"session_sha256", core::Sha256::hex(session)}, {"media_generation", trace.media_generation},
-        {"navigation_generation", trace.navigation_generation}, {"playing_before_hide", media_json(playing)},
+        {"navigation_generation", trace.navigation_generation},
+        {keep_visible ? "playing_before_pause" : "playing_before_hide", media_json(playing)},
         {"last_seek", media_json(last_seek)}, {"previous_native_pause", native_pause_json(previous)},
-        {"first_hidden_native_reply", nullptr}, {"samples", Json::array()}, {"stage", "tab"},
-        {"deadline_origin", "before actual tab click"},
+        {reply_key, nullptr}, {"samples", Json::array()}, {"stage", keep_visible ? "pause" : "tab"},
+        {"deadline_origin", keep_visible ? "before visible native pause request" : "before actual tab click"},
         {"budget_seconds", std::chrono::duration<double>(budget).count()},
+        {"first_sample_min_seconds_from_dispatch", std::chrono::duration<double>(first_sample_offset).count()},
         {"sample_interval_seconds", std::chrono::duration<double>(interval).count()}};
-    const auto hide_requested = Clock::now();
-    // The click precedes the native dispatch, so this deadline also precedes the native watchdog.
-    const auto deadline = hide_requested + budget;
+    std::shared_ptr<const test::VisiblePauseObservation> visible_pause;
+    const auto requested = Clock::now();
+    // Both observation arms start their budget before the native actuator is dispatched.
+    const auto deadline = requested + budget;
     const auto poll = [&](const auto &predicate) {
       return reports_native_test::poll_before<Clock>(deadline, predicate,
           [this](bool wait_for_event) { process(wait_for_event); }, [] {});
     };
-    const auto same_hidden = [&] {
+    const auto same_target = [&] {
+      if (!resources->active() || !close->reason.empty() || trace.overflow ||
+          std::any_of(trace.events.begin(), trace.events.begin() + trace.event_count, [&](const auto &event) {
+            return event.phase == "show" || event.phase == "superseded" || event.phase == "repeat-pause-suppressed" ||
+                   (keep_visible && (!event.visible || event.webview_hidden));
+          })) { return false; }
+      if (keep_visible) {
+        return area.active_tab() == 0 && visible_pause && !visible_pause->overflow &&
+            visible_pause->media_generation == trace.media_generation &&
+            test::visible_pause_target(parent, session, *visible_pause);
+      }
       const auto pause = test::hidden_pause_target(parent, session, trace);
-      return area.active_tab() == 1 && resources->active() && close->reason.empty() && !trace.overflow &&
-          pause && pause->acknowledged && !pause->isolated_actuator &&
-          std::none_of(trace.events.begin(), trace.events.begin() + trace.event_count, [](const auto &event) {
-            return event.phase == "show" || event.phase == "superseded" || event.phase == "repeat-pause-suppressed";
-          });
+      return area.active_tab() == 1 && pause && pause->acknowledged && !pause->isolated_actuator;
     };
     const auto record = [&] {
-      record_hidden_native_trace(close.get(), session);
-      record_hidden_native_close(close.get(), session, hide_requested);
+      if (keep_visible) {
+        record_native_pause_trace(close.get(), session, "visible_media_native_pause_trace");
+        evidence["native_non_playing_verified"] = visible_pause && visible_pause->verified;
+        evidence["close_reason"] = close->reason.empty() ? Json(nullptr) : Json(close->reason);
+        evidence["close_elapsed_seconds"] = close->reason.empty() ? Json(nullptr) :
+            Json(media_seconds(requested, close->when));
+      }
+      else {
+        record_native_pause_trace(close.get(), session);
+        record_hidden_native_close(close.get(), session, requested);
+      }
       save();
     };
     try {
       const auto prior_dom = last_media_probe_;
-      tab(area, 1);
-      evidence["stage"] = "first-hidden-native-reply";
+      if (keep_visible) {
+        // A toolbar mouse-down hides the native child. Use the same pause actuator without that hide.
+        visible_pause = test::begin_visible_pause_control(parent, session, playing.navigation_generation);
+        require(bool(visible_pause), "Could not pause the exact visible navigation");
+      }
+      else { tab(area, 1); }
+      evidence["stage"] = keep_visible ? "first-visible-native-reply" : "first-hidden-native-reply";
       std::optional<test::NativeHidePauseEvent> first_reply;
       const auto received = poll([&] {
         const auto end = trace.events.begin() + trace.event_count;
-        const auto hidden = std::find_if(trace.events.begin(), end, [](const auto &event) {
+        const auto start = keep_visible ? trace.events.begin() : std::find_if(trace.events.begin(), end, [](const auto &event) {
           return event.phase == "hide" && event.webview_hidden && !event.visible && !event.owns_focus;
         });
-        const auto reply = std::find_if(hidden, end, [](const auto &event) {
-          return event.phase == "reply" && event.playback_state && event.webview_hidden &&
-              !event.visible && !event.owns_focus;
+        const auto reply = std::find_if(start, end, [&](const auto &event) {
+          return event.phase == "reply" && event.playback_state &&
+              (keep_visible ? event.visible && !event.webview_hidden :
+                              event.webview_hidden && !event.visible && !event.owns_focus);
         });
         if (reply != end) { first_reply = *reply; }
         return first_reply.has_value() || !resources->active();
       });
-      require(received && first_reply && same_hidden() && trace.dispatched >= hide_requested &&
+      require(received && first_reply && same_target() && trace.dispatched >= requested &&
           trace.events.front().phase == "dispatch" && trace.events.front().visible &&
-          last_media_probe_ == prior_dom, "Fresh hide needs a native reply before any hidden DOM probe");
-      evidence["first_hidden_native_reply"] = {
+          last_media_probe_ == prior_dom, "Fresh pause needs an exact native reply before any DOM probe");
+      evidence[reply_key] = {
           {"raw_playback_state", *first_reply->playback_state}, {"seconds_from_dispatch", first_reply->elapsed_seconds}};
       const auto sample = [&] {
         const auto now = Clock::now();
-        require(now < deadline && same_hidden(), "Fresh hide DOM probe needs the exact hidden view within budget");
+        require(now < deadline && same_target(), "Fresh pause DOM probe needs the exact target within budget");
         const auto observed = media(session, std::chrono::duration<double>(deadline - now).count());
         const auto &probe = *last_media_probe_;
-        require(probe.callback && *probe.callback < deadline && same_hidden() &&
+        require(probe.callback && *probe.callback < deadline && same_target() &&
             observed.navigation_generation == trace.navigation_generation,
-            "Fresh hide DOM reply must match the hidden view within budget");
+            "Fresh pause DOM reply must match the exact target within budget");
         evidence["samples"].push_back({{"media", media_json(observed)},
             {"dispatch_seconds_from_pause", media_time(trace.dispatched, probe.dispatched)},
             {"reply_seconds_from_pause", media_time(trace.dispatched, probe.callback)},
@@ -1041,13 +1070,17 @@ class Exercise {
             {"below_baseline_playback_floor", observed.current_time < playing.current_time - 0.05}});
         return observed;
       };
+      evidence["stage"] = "first-dom-window";
+      const auto first_sample = trace.dispatched + first_sample_offset;
+      require(poll([&] { return !same_target() || Clock::now() >= first_sample; }) && same_target(),
+          "First DOM sampling window did not fit the exact target's budget");
       evidence["stage"] = "first-dom";
       const auto before = sample();
       evidence["stage"] = "sample-interval";
       const auto next_sample = *last_media_probe_->callback + interval;
       require(next_sample < deadline &&
-          poll([&] { return !same_hidden() || Clock::now() >= next_sample; }) && same_hidden(),
-          "Fresh hide DOM interval did not fit the exact hidden target's budget");
+          poll([&] { return !same_target() || Clock::now() >= next_sample; }) && same_target(),
+          "Fresh pause DOM interval did not fit the exact target's budget");
       evidence["stage"] = "second-dom";
       const auto after = sample();
       const double delta = after.current_time - before.current_time;
@@ -1062,11 +1095,14 @@ class Exercise {
       // Let the unchanged native watchdog finish after the DOM observations.
       const auto settle = trace.dispatched + budget + std::chrono::milliseconds(125);
       reports_native_test::poll_before<Clock>(settle, [&] {
+        if (keep_visible) { return visible_pause->verified || !resources->active(); }
         const auto pause = test::hidden_pause_target(parent, session, trace);
         return (pause && pause->verified) || !resources->active();
       }, [this](bool wait_for_event) { process(wait_for_event); }, [] {});
-      const auto final_pause = test::hidden_pause_target(parent, session, trace);
-      evidence["native_pause_after_sampling"] = final_pause ? native_pause_json(*final_pause) : Json(nullptr);
+      if (!keep_visible) {
+        const auto final_pause = test::hidden_pause_target(parent, session, trace);
+        evidence["native_pause_after_sampling"] = final_pause ? native_pause_json(*final_pause) : Json(nullptr);
+      }
       evidence["session_active_after_sampling"] = resources->active();
     }
     catch (...) {
@@ -1075,8 +1111,9 @@ class Exercise {
     }
     record();
   }
-  void record_hidden_native_trace(const document_preview::test::NativeCloseObservation *close,
-                                  const std::string &session) noexcept
+  void record_native_pause_trace(const document_preview::test::NativeCloseObservation *close,
+                                 const std::string &session,
+                                 const char *key = "hidden_media_native_pause_trace") noexcept
   {
     try {
       if (!close || !close->hide_pause) { return; }
@@ -1089,7 +1126,7 @@ class Exercise {
             {"owns_focus", event.owns_focus},
             {"raw_playback_state", event.playback_state ? Json(*event.playback_state) : Json(nullptr)}});
       }
-      result_["hidden_media_native_pause_trace"] = {{"session_sha256", core::Sha256::hex(session)},
+      result_[key] = {{"session_sha256", core::Sha256::hex(session)},
           {"media_generation", pause.media_generation},
           {"navigation_generation", pause.navigation_generation}, {"overflow", pause.overflow},
           {"events", std::move(events)}};
@@ -1847,7 +1884,7 @@ raise SystemExit(main())
         "Three aligned 20-column U+2588/space rows, independently required beside the frozen PNG";
   }
   const int cycles = options.reading_cycles();
-  const size_t required_images = options.visible_pause_control ? 0 : options.fresh_native_hide_dom_control ? 4 :
+  const size_t required_images = options.visible_pause_control ? 0 : options.fresh_pause_diagnostic() ? 4 :
       options.pause_order_diagnostic() ? 1 :
       (video ? (options.pre_seek_hide_control ? 6 : 161) : (pdf ? 160 : 140));
   result["required_images"] = required_images;
@@ -2027,7 +2064,7 @@ raise SystemExit(main())
         auto early = seek(cycle, false, session, bounds);
         ui.held_media(cycle, "seek-early-paused", session, early, 0.25);
 #ifdef __APPLE__
-        if (options.fresh_native_hide_dom_control) { last_seek = early; }
+        if (options.fresh_pause_diagnostic()) { last_seek = early; }
 #endif
       }
       const auto playing = play(cycle, "play-before-hide", session, bounds);
@@ -2035,11 +2072,20 @@ raise SystemExit(main())
       require(!playing.paused && playing.current_time < 2.5, "Hide must interrupt a playing early clip");
       const auto before_hide_pause = ui.last_native_pause();
 #ifdef __APPLE__
-      if (options.fresh_native_hide_dom_control) {
+      if (options.fresh_pause_diagnostic()) {
         require(last_seek && before_hide_pause && last_seek->navigation_generation == playing.navigation_generation &&
-            result.at("images").size() == required_images, "Fresh hide needs the full baseline seek history");
-        ui.fresh_native_hide_dom_diagnostic(*area, session, playing, *last_seek, (*before_hide_pause)[1], resources);
-        require(area->tab(1).save_workspace_state() == draft_state, "Diagnostic tab hide preserves the Python draft");
+            result.at("images").size() == required_images, "Fresh pause needs the full baseline seek history");
+        ui.fresh_native_pause_dom_diagnostic(*area, session, playing, *last_seek, (*before_hide_pause)[1], resources,
+                                             options.fresh_pause == Options::FreshPause::Visible);
+        require(area->tab(1).save_workspace_state() == draft_state && area->tab(1).has_unsaved_changes() &&
+            shell.store().scripts().history().empty(), "Fresh pause preserves the unexecuted Python draft");
+        require(viewer.save_workspace_state() == viewer_state && viewer.camera_serial() == camera &&
+            viewer.payload_serial() == payload && viewer.evaluations_started() == 0 &&
+            viewer_area->editor().save_workspace_state() == viewer_editor_state, "Fresh pause preserves the Viewer");
+        result["actual_mouse_clicks"] = ui.clicks;
+        result["wheel_steps"] = ui.wheels;
+        result["viewer_preserved"] = true;
+        result["python_draft_preserved"] = true;
         result["completed_cycles"] = cycle;
         ui.save();
         return;
@@ -2126,7 +2172,7 @@ raise SystemExit(main())
           ui.media_capture(cycle, "hidden-video-tab", 0, rectangle, hidden,
               options.quiet_hidden_hold ? std::string{} : session);
 #ifdef __APPLE__
-          ui.record_hidden_native_trace(close.get(), session);
+          ui.record_native_pause_trace(close.get(), session);
 #endif
           return hidden;
         }
@@ -2134,7 +2180,7 @@ raise SystemExit(main())
           ui.finish_hidden_media(false);
 #ifdef __APPLE__
           ui.record_hidden_native_close(close.get(), session, playing_returned);
-          ui.record_hidden_native_trace(close.get(), session);
+          ui.record_native_pause_trace(close.get(), session);
 #endif
           throw;
         }
@@ -2334,7 +2380,12 @@ int main(int argc, char **argv)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
 #if defined(__APPLE__) && defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES)
-    if (arg == "--fresh-native-hide-dom-control") { options.fresh_native_hide_dom_control = true; continue; }
+    if (arg == "--fresh-native-hide-dom-control" || arg == "--fresh-native-visible-dom-control") {
+      if (options.fresh_pause_diagnostic()) { return 2; }
+      options.fresh_pause = arg == "--fresh-native-visible-dom-control" ? Options::FreshPause::Visible :
+                                                                         Options::FreshPause::Hidden;
+      continue;
+    }
     if (arg == "--visible-native-pause-control") { options.visible_pause_control = true; continue; }
     if (arg == "--second-visible-native-pause-control") { options.second_visible_pause_control = true; continue; }
     if (arg == "--hide-after-verified-native-pause-control" || arg == "--hide-without-repeat-native-pause-control" ||
@@ -2365,15 +2416,15 @@ int main(int argc, char **argv)
       (options.visible_pause_control && options.second_visible_pause_control) ||
       (options.hide_after_verified_pause_control && options.visible_pause_diagnostic()) ||
       (options.pause_order_diagnostic() && options.pre_seek_hide_control) ||
-      (options.fresh_native_hide_dom_control && (options.pause_order_diagnostic() || options.pre_seek_hide_control)) ||
-      ((options.pause_order_diagnostic() || options.pre_seek_hide_control || options.fresh_native_hide_dom_control) &&
+      (options.fresh_pause_diagnostic() && (options.pause_order_diagnostic() || options.pre_seek_hide_control)) ||
+      ((options.pause_order_diagnostic() || options.pre_seek_hide_control || options.fresh_pause_diagnostic()) &&
           options.source != "video" && options.source != "html-video") ||
       (options.source != "markdown" && options.source != "html" && options.source != "pdf"
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
        && options.source != "video" && options.source != "html-video"
 #endif
       )) {
-    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control|--visible-native-pause-control|--second-visible-native-pause-control|--hide-after-verified-native-pause-control|--hide-without-repeat-native-pause-control|--hide-without-repeat-native-pause-dom-control|--fresh-native-hide-dom-control]\n"); return 2;
+    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control|--visible-native-pause-control|--second-visible-native-pause-control|--hide-after-verified-native-pause-control|--hide-without-repeat-native-pause-control|--hide-without-repeat-native-pause-dom-control|--fresh-native-hide-dom-control|--fresh-native-visible-dom-control]\n"); return 2;
   }
   Json result = {{"format", "stk.reports-native-evidence/1"}, {"status", "running"}, {"required_cycles", options.reading_cycles()},
       {"completed_cycles", 0}, {"images", Json::array()}, {"native_scroll_requests", Json::array()},
@@ -2405,10 +2456,14 @@ int main(int argc, char **argv)
     result["claim"] = "After one hidden native reply without a repeated pause, two fixed DOM samples report playback and media-time progression";
     result["matched_control"] = "hide-without-repeat-native-pause-control";
   }
-  if (options.fresh_native_hide_dom_control) {
-    result["scenario"] = "fresh-native-hide-dom-control";
-    result["claim"] = "After the ordinary fresh pause on real tab hide, capture the first hidden native reply and two bounded DOM samples";
-    result["matched_control"] = "reports_native_" + options.source + "_metal";
+  if (options.fresh_pause_diagnostic()) {
+    const bool keep_visible = options.fresh_pause == Options::FreshPause::Visible;
+    result["scenario"] = keep_visible ? "fresh-native-visible-dom-control" : "fresh-native-hide-dom-control";
+    result["claim"] = keep_visible ?
+        "Keep the report visible through one native pause after the full seek history and two bounded DOM samples" :
+        "After the ordinary fresh pause on real tab hide, capture the first hidden native reply and two bounded DOM samples";
+    result["matched_control"] = keep_visible ? "reports_fresh_native_hide_dom_" + options.source + "_metal" :
+                                               "reports_native_" + options.source + "_metal";
     result["production_ui_acceptance"] = false;
   }
   if (options.pre_seek_hide_control) {
@@ -2433,8 +2488,9 @@ int main(int argc, char **argv)
     // Engine static destructors and the final guarded leak gate belong to the separate spike.
     result["status"] = "passed";
     write(directory / "result.json", result.dump(2));
-    if (options.fresh_native_hide_dom_control) {
-      std::fprintf(stdout, "PASS: Cocoa fresh native hide dom diagnostic; cycles=%d; %s\n",
+    if (options.fresh_pause_diagnostic()) {
+      std::fprintf(stdout, "PASS: Cocoa fresh native %s dom diagnostic; cycles=%d; %s\n",
+          options.fresh_pause == Options::FreshPause::Visible ? "visible" : "hide",
           options.reading_cycles(), core::path_to_utf8(directory).c_str());
       return 0;
     }

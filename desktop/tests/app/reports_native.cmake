@@ -108,7 +108,8 @@ if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW AND (APPLE OR WIN32))
           FAIL_REGULAR_EXPRESSION "FAIL:|Error: Not freed memory|leaked")
       endforeach()
       foreach(_arm IN ITEMS visible_native_pause second_visible_native_pause hide_after_verified_native_pause
-                            hide_without_repeat_native_pause hide_without_repeat_native_pause_dom fresh_native_hide_dom)
+                            hide_without_repeat_native_pause hide_without_repeat_native_pause_dom
+                            fresh_native_hide_dom fresh_native_visible_dom)
         set(_control reports_${_arm}_${_source}_metal)
         string(REPLACE "_" "-" _scenario "${_arm}")
         string(REPLACE "_" " " _description "${_arm}")
