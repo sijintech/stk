@@ -1,5 +1,17 @@
 # 开发交接记录
 
+## 2026-11-09 21:19 UTC · Project Runs 精确刷新与 MuPRO 文件身份
+
+`0e5112ed` 通过 Hub 精确查询刷新已接受的 Project Runs 任务。旧节点缺精确读取能力时返回 unsupported 并保留最后观察，恢复现代节点能力后读回同一任务。底层 task.get 的旧节点兼容读取继续可用。真实严格 Bridge、Hub、NodeAgent 与 Runtime 复现了旧版缓存回退和错误的 not_found。持久回归在旧头失败，修复后 Python 3.11 联测 63/63。
+
+`3ae33035` 让受约束的 MuPRO 文件登记、发布及 HDF5 读取复用描述符原生变化时间。Windows 取 ChangeTime，POSIX 取同一描述符的 ctime。覆盖同 inode、同大小且恢复 mtime 后的改写。集成 Claude68 `7241d850` 的严格 Bridge 回归，分别验证登记和发布拒绝链接目录，显式外部文件登记可用，换回真实目录后两条受约束入口可用。
+
+Linux Python 3.11 联测 190 过、1 项 Windows 专属跳过。客户端矩阵定向 38/38，Python 3.14 定向 6 过、1 项 Windows 专属跳过，无 NumPy 回归 3/3。Linux 使用真实目录符号链接。Windows 的 NTFS 联接和原生 ChangeTime 仍待新头目标 CI。文件在末次服务端观察后仍可变更，真实 MuPRO 许可场景待验。
+
+Claude69 已从 0e5112ed 在独立 worktree 开始 DAT Viewer 持久反例。已在合成运行中复现 Viewer 调用后用同大小、同 mtime 的改写改变图求值。待核对源证明在打开、后续步进和工作区恢复中的传递。
+
+远端 `a7fce899` Desktop `42692999966` 仍在运行，4/6 作业通过。Windows CPU 1478/1478，macOS 原生对照及独立 Windows 原生仍运行。本地提交等待整轮终态。同头 Runtime `42692999627` 已终态 13/13。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42692999966) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42692999627)
+
 ## 2026-11-09 21:03 UTC · MuPRO Bridge 发布结果校验
 
 `f69edbe4` 把 MuPRO 结果行的最后复核移到 Bridge 发布请求。沿用结果单元格已有的路径和摘要，额外传原任务文件大小。服务端核对该运行、原生目录清单和内容，扫描目录后再次核对已读文件身份，最后按原句柄和修订提交。

@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-09 21:19 UTC · Project Runs 精确刷新与 MuPRO 文件身份
+
+D1 `0e5112ed` 修复 Project Runs 精确刷新。MuPRO `3ae33035` 补齐文件变化时间和目录重解析点回归。Windows 目标平台与真实许可待验。 [运行验收](runtime-validation.md)
+
+Claude69 已从 0e5112ed 在独立 worktree 开始 DAT Viewer 持久反例。已在合成运行中复现 Viewer 调用后用同大小、同 mtime 的改写改变图求值。待核对源证明在打开、后续步进和工作区恢复中的传递。
+
+远端 `a7fce899` Desktop `42692999966` 仍在运行，4/6 作业通过。Windows CPU 1478/1478，macOS 原生对照及独立 Windows 原生仍运行。本地提交等待整轮终态。同头 Runtime `42692999627` 已终态 13/13。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42692999966) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42692999627)
+
 ## 2026-11-09 21:03 UTC · MuPRO Bridge 发布结果校验
 
 `f69edbe4` 把 MuPRO 文件校验移入 Bridge 结果发布，封住已复现的客户端提交边界。真实许可与 Windows 重解析点仍待验证。 [运行验收](runtime-validation.md)
