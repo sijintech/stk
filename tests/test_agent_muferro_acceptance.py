@@ -4,12 +4,14 @@ solver, a scripted planner and scripted answers to the session's own requests; n
 The agent proposes a sweep as a draft and stops; a person applies it on the session's card and runs the new rows; the
 agent then analyses the results. The agent's thread never applies, prepares, starts, submits or labels anything.
 """
+import hashlib
 import json
 import signal
 import sys
 import textwrap
 import threading
 import time
+from pathlib import Path
 from uuid import uuid4
 
 import psutil
@@ -23,7 +25,9 @@ from suan.project.runs import Runs
 from suan.project.store import ProjectStore
 from suan.project.workflow_runs import WorkflowRuns
 from suan.runtime.client import RuntimeClient
+from suan.runtime.models import TERMINAL
 from suan.workflows import muferro
+from mupro_fake import _script, read_toml, write_outputs
 from test_bridge_workflow_muferro import scan, settled  # noqa: F401
 from test_desktop_bridge import ProcessBridge, _strict, bridge_env, inproc, second_opinion  # noqa: F401
 
@@ -463,15 +467,11 @@ def until_true(condition, timeout, what):
         time.sleep(0.05)
 
 
-def test_killed_bridge_process_after_first_dispatch_is_only_observed_by_a_fresh_process(
-        scan, runtime, monkeypatch, request):
-    """A genuine first human start in a strict bridge process, which is killed (SIGKILL) once its single Runtime task
-    is queued and the start's approval is durable, before the desktop receives the decision reply (spec "Review,
-    consumption and dispatch"). The Runtime scheduler is held and no worker starts, so at the interruption the task
-    is queued in the Runtime and the workflow run is running. A fresh bridge process on the same state directory
-    reopens the project; an explicit ``run_observe`` reads the original approval, run and executor and the current
-    workflow status, and nothing decides, starts, recovers, cancels or submits again."""
-    s = scan
+def first_dispatch_killed(s, runtime, monkeypatch, request, held):
+    """A genuine first human start in a strict probe bridge process, killed (SIGKILL) once its single Runtime task is
+    recorded on the run, the start's approval is durable, its reply was withheld from the desktop and ``held(task)``
+    returns evidence for the current Runtime task (it is polled until then and may advance the Runtime). Returns what
+    the test observed at the interruption, including Runtime ``submissions`` and ``cancels`` recorded from here on."""
     monkeypatch.setenv("STK_TOKEN_PLAN_API_KEY", "")
     monkeypatch.delenv("STK_TOKEN_PLAN_MODEL", raising=False)
     store, client, server = s["store"], s["client"], runtime[2]
@@ -516,17 +516,23 @@ def test_killed_bridge_process_after_first_dispatch_is_only_observed_by_a_fresh_
                                                       "expected_revision": item["expected_revision"]})
 
     def boundary():
-        """Exactly one queued Runtime task, recorded on the run, and one durable started event; the reply withheld."""
+        """Exactly one held Runtime task, recorded on the run, and one durable started event; the reply withheld."""
         withheld = [r["value"] for r in probe_records(s, first_pid) if r["name"] == "withheld"]
         current = client.tasks()
         run = store.workflow_runs.get(run_id)
         progress = next(t for t in run["tasks"] if t["step"] == "simulate")["progress"]
-        if not (withheld and len(current) == 1 and current[0]["state"] == "queued" and progress
-                and progress.get("task_id") == current[0]["id"]):
+        if not (withheld and len(current) == 1 and progress and progress.get("task_id") == current[0]["id"]):
             return None
-        return withheld, current, run, started_events(store, run_id)
+        evidence = held(current[0])
+        if not evidence:
+            return None
+        return withheld, client.tasks(), store.workflow_runs.get(run_id), started_events(store, run_id), evidence
 
-    withheld, interrupted_tasks, run, started = until_true(boundary, 60, "the first dispatch and its Runtime task")
+    withheld, interrupted_tasks, run, started, evidence = until_true(boundary, 60,
+                                                                     "the first dispatch and its held Runtime task")
+    assert len(interrupted_tasks) == 1 and held(interrupted_tasks[0]) == evidence
+    assert len(started) == 1 and started[0]["approval"] == envelope
+    assert run["owner"]["pid"] == first_pid and run["status"] == "running"
     with first.cond:
         assert sent not in first.responses  # the desktop never received the decision reply
     first.kill()  # SIGKILL: no orderly close, shutdown or flush
@@ -544,13 +550,35 @@ def test_killed_bridge_process_after_first_dispatch_is_only_observed_by_a_fresh_
     assert reply["result"]["receipt"]["outcome"] == "started" and reply["result"]["receipt"]["run_id"] == run_id
     assert reply["result"]["receipt"]["executor_id"] == identity["executor_id"]
     # The durable identity at the interruption: one start by the killed process, with the person's exact approval.
-    assert len(started) == 1 and started[0]["approval"] == envelope
     assert started[0]["executor_id"] == identity["executor_id"] == run["executor_id"]
-    assert run["owner"]["pid"] == first_pid and run["status"] == "running"
     assert len(submissions) == 1 and submissions[0] and cancels == []
     with store._connect() as db:
         _, run_events = store.workflow_runs._read(db, run_id)
     at_interruption = store.workflow_runs.get(run_id)["status"]
+    return {"state": state, "first": first, "first_pid": first_pid, "sid": sid, "item": item, "run_id": run_id,
+            "envelope": envelope, "identity": identity, "first_calls": first_calls, "reply": reply,
+            "interrupted_tasks": interrupted_tasks, "run": run, "started": started, "evidence": evidence,
+            "run_events": run_events, "at_interruption": at_interruption, "submissions": submissions,
+            "cancels": cancels}
+
+
+def test_killed_bridge_process_after_first_dispatch_is_only_observed_by_a_fresh_process(
+        scan, runtime, monkeypatch, request):
+    """A genuine first human start in a strict bridge process, which is killed (SIGKILL) once its single Runtime task
+    is queued and the start's approval is durable, before the desktop receives the decision reply (spec "Review,
+    consumption and dispatch"). The Runtime scheduler is held and no worker starts, so at the interruption the task
+    is queued in the Runtime and the workflow run is running. A fresh bridge process on the same state directory
+    reopens the project; an explicit ``run_observe`` reads the original approval, run and executor and the current
+    workflow status, and nothing decides, starts, recovers, cancels or submits again."""
+    s = scan
+    store, client = s["store"], s["client"]
+    k = first_dispatch_killed(s, runtime, monkeypatch, request, lambda task: task["state"] == "queued")
+    state, first, first_pid, sid, item, run_id = (k[key] for key in ("state", "first", "first_pid", "sid", "item",
+                                                                      "run_id"))
+    envelope, identity, first_calls, reply = k["envelope"], k["identity"], k["first_calls"], k["reply"]
+    interrupted_tasks, started, run_events, at_interruption = (k[key] for key in (
+        "interrupted_tasks", "started", "run_events", "at_interruption"))
+    submissions, cancels = k["submissions"], k["cancels"]
 
     fresh = probe_bridge(request, s, state, "fresh")
     fresh_pid = fresh.process.pid
@@ -592,6 +620,169 @@ def test_killed_bridge_process_after_first_dispatch_is_only_observed_by_a_fresh_
         "runtime_state_at_interruption": interrupted_tasks[0]["state"], "run_status_at_interruption": at_interruption,
         "withheld_reply_outcome": reply["result"]["receipt"]["outcome"], "observe": receipt,
         "runtime_submissions": len(submissions), "runtime_cancels": len(cancels), "first_calls": first_calls,
+        "fresh_calls": [r["value"] for r in fresh_records if r["name"] == "call"]}, indent=2), encoding="utf-8")
+
+
+# The synthetic solver behind a test-owned gate: it announces itself, waits for the release file (bounded, so a failed
+# test cannot hang the Runtime fixture's teardown), then writes the usual manufactured MuFerro outputs.
+GATED_SOLVER = textwrap.dedent('''
+    import json, os, sys, time
+    from pathlib import Path
+    import psutil
+
+    held, release = Path({held!r}), Path({release!r})
+    process = psutil.Process()
+    pending = held.with_suffix(".tmp")
+    with pending.open("x", encoding="utf-8") as stream:
+        json.dump({{"pid": process.pid, "created_at": process.create_time(), "cwd": os.getcwd()}}, stream)
+    os.link(pending, held)  # Publish a complete identity that another solver cannot replace.
+    deadline = time.monotonic() + 120
+    while not release.exists():
+        if time.monotonic() > deadline:
+            print("gated fake muFerro: never released", file=sys.stderr, flush=True)
+            sys.exit(3)
+        time.sleep(0.02)
+    sys.path.insert(0, {tests!r})
+    from mupro_fake import fake_muferro
+    sys.exit(fake_muferro("ok"))
+''')
+
+
+def test_killed_bridge_process_while_its_solver_runs_then_the_task_finishes_without_a_bridge(
+        scan, runtime, monkeypatch, request):
+    """As the queued case above, but the Runtime has already started the synthetic solver, held at a test-owned gate,
+    when the strict bridge process is killed before its first successful start reply reaches the desktop. The solver
+    is released with no bridge alive and its Runtime task succeeds with fixed outputs. A fresh strict bridge's explicit
+    ``run_observe`` then reports the historical start and the stored workflow state, which is not the actual Runtime
+    state: nothing adopted, collected, decided, started, recovered, cancelled or submitted the task again."""
+    s = scan
+    store, client, supervisor, server = s["store"], s["client"], s["supervisor"], runtime[2]
+    gate = s["tmp"] / "solver-gate"
+    gate.mkdir()
+    marker, release = gate / "held.json", gate / "release"
+    _script(s["tmp"] / "fake-sdk" / "bin" / "muFerro", GATED_SOLVER.format(
+        held=str(marker), release=str(release), tests=str(Path(__file__).parent)))
+    request.addfinalizer(release.touch)  # never leave the solver held, whatever fails
+
+    def solver_alive(identity):
+        try:
+            process = psutil.Process(identity["pid"])
+            return process.create_time() == identity["created_at"] and process.status() != psutil.STATUS_ZOMBIE
+        except psutil.NoSuchProcess:
+            return False
+
+    def solver_running(task):
+        """The Runtime runs the task and the held solver process is alive (the scheduler advances only here)."""
+        supervisor.tick()
+        task = client.task(task["id"])
+        if task["state"] != "running" or not marker.exists() or release.exists():
+            return None
+        held = json.loads(marker.read_text(encoding="utf-8"))
+        return held if solver_alive(held) else None
+
+    k = first_dispatch_killed(s, runtime, monkeypatch, request, solver_running)
+    first_pid, sid, item, run_id, identity = (k[key] for key in ("first_pid", "sid", "item", "run_id", "identity"))
+    envelope, started, run_events, held = k["envelope"], k["started"], k["run_events"], k["evidence"]
+    submissions, cancels = k["submissions"], k["cancels"]
+    task_id = k["interrupted_tasks"][0]["id"]
+    assert [(t["id"], t["state"]) for t in k["interrupted_tasks"]] == [(task_id, "running")]
+    work = (server.service.task_dir(task_id) / "work").resolve()
+    assert work in Path(held["cwd"]).resolve().parents  # the held solver is this task's, in its work directory
+    # The bridge died; the Runtime task and its solver did not. The stored run is the killed process's.
+    assert solver_alive(held) and client.task(task_id)["state"] == "running"
+    stored = store.workflow_runs.get(run_id)
+    assert k["at_interruption"] == stored["status"] == "running" and stored["owner"]["pid"] == first_pid
+    assert stored["executor_id"] == identity["executor_id"] and started[0]["approval"] == envelope
+    simulate = next(t for t in stored["tasks"] if t["step"] == "simulate")
+    assert simulate["progress"]["task_id"] == task_id
+
+    # Release the solver with no bridge process alive; the Runtime finishes the task on its own.
+    release.touch()
+
+    def terminal_task():
+        supervisor.tick()
+        task = client.task(task_id)
+        return task if task["state"] in TERMINAL else None
+
+    finished = until_true(terminal_task, 60, "the released solver's Runtime task")
+    assert finished["state"] == "succeeded" and finished["exit_code"] == 0, finished
+    assert not solver_alive(held)
+    artifacts = {a["path"]: a for a in client.artifacts(task_id)}
+    case = Path(held["cwd"]).resolve().relative_to(work).as_posix()
+    prefix = "" if case == "." else case + "/"
+    inputs = gate / "inputs"
+    client.download(task_id, prefix + "input.toml", inputs / "input.toml")
+    frozen = read_toml(inputs / "input.toml")
+    system = frozen["system"]
+    assert system["simulation_grid"] == [4, 3, 2] and system["temperature"] == 300
+    assert (system["timestep_start"], system["timestep_total"], frozen["output"]["interval"]) == (0, 3, 2)
+    reference = gate / "reference"
+    reference.mkdir()
+    write_outputs(reference)
+    expected = {prefix + p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(reference.iterdir())}
+    assert len(expected) > 3 and {prefix + "energy_out.dat", prefix + "mupro_completion.json"} <= set(expected)
+    assert set(expected) <= set(artifacts)
+    assert {p: artifacts[p]["sha256"] for p in expected} == expected  # fixed manufactured outputs, byte for byte
+    downloaded = {}
+    for name in ("energy_out.dat", "mupro_completion.json", "Polar.00000002.dat"):
+        path = gate / "downloaded" / name
+        client.download(task_id, prefix + name, path)
+        downloaded[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        assert downloaded[name] == expected[prefix + name]
+    assert "stk-mupro.json" in artifacts
+    # Exactly one submission and no cancel; no other task; the stored run did not follow the task's completion.
+    assert len(submissions) == 1 and cancels == [] and [t["id"] for t in client.tasks()] == [task_id]
+    with store._connect() as db:
+        _, events = store.workflow_runs._read(db, run_id)
+    assert events == run_events and store.workflow_runs.get(run_id) == stored
+
+    fresh = probe_bridge(request, s, k["state"], "fresh")
+    fresh_pid = fresh.process.pid
+    handle = fresh.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    params = {"handle": handle, "session_id": sid}
+    args = {**params, "item_id": item["item_id"]}
+    reopened = fresh.call("project.agent.get", params)
+    assert [card["item"] for card in reopened["run_approvals"]] == [item] and reopened["awaiting"] == []
+    receipt = fresh.call("project.agent.run_observe", args)["receipt"]
+    current = fresh.call("project.workflow_runs.get", {"handle": handle, "run_id": run_id})["run"]
+    runtime_task = client.task(task_id)
+    # Historical start: the person's exact approval, executed by the killed process.
+    assert receipt["outcome"] == "started" and receipt["ok"] is True and receipt["run_id"] == run_id
+    assert receipt["item_id"] == item["item_id"] and receipt["approval"] == envelope
+    assert receipt["executor_id"] == identity["executor_id"]
+    # Stored workflow state: still the killed process's running run, never refreshed by observation or reopening.
+    assert receipt["run_status"] == current["status"] == "running" and current["owner"]["pid"] == first_pid
+    assert next(t for t in current["tasks"] if t["step"] == "simulate")["progress"] == simulate["progress"]
+    # Actual Runtime state: the task already succeeded. Only an explicit, separate person's action may follow it.
+    assert runtime_task["state"] == "succeeded" and runtime_task["id"] == task_id
+    assert fresh.call("project.agent.verify", params)["ok"]
+    final_view = fresh.call("project.agent.get", params)
+    assert [e["item_id"] for e in final_view["events"] if e["kind"] == "approval_decided"] == [item["item_id"]]
+    saved = final_view["run_approvals"][0]["receipt"]
+    assert saved["outcome"] == "started" and saved["run_status"] == "running"
+    assert fresh.close() == 0
+
+    fresh_records = probe_records(s, fresh_pid)
+    fresh_identity = next(r["value"] for r in fresh_records if r["name"] == "identity")
+    assert fresh_identity["executor_id"] != identity["executor_id"]
+    assert [r for r in fresh_records if r["name"] != "identity"] == []  # no decide/start/recover/cancel/analysis
+    assert len(submissions) == 1 and cancels == []
+    assert [(t["id"], t["state"]) for t in client.tasks()] == [(task_id, "succeeded")]
+    assert {a["path"]: a for a in client.artifacts(task_id)} == artifacts
+    with store._connect() as db:
+        _, after = store.workflow_runs._read(db, run_id)
+    assert after == run_events and started_events(store, run_id) == started
+    (s["tmp"] / "probe-summary.json").write_text(json.dumps({
+        "first_pid": k["first_pid"], "first_returncode": k["first"].process.returncode, "fresh_pid": fresh_pid,
+        "first_executor_id": identity["executor_id"], "fresh_executor_id": fresh_identity["executor_id"],
+        "run_id": run_id, "item_id": item["item_id"], "runtime_task": task_id, "held_solver": held,
+        "runtime_state_at_interruption": k["interrupted_tasks"][0]["state"],
+        "run_status_at_interruption": k["at_interruption"], "runtime_terminal": {
+            key: finished.get(key) for key in ("state", "exit_code", "reason", "finished_at")},
+        "fixed_outputs_sha256": expected, "downloaded_outputs_sha256": downloaded,
+        "withheld_reply_outcome": k["reply"]["result"]["receipt"]["outcome"],
+        "observe": receipt, "stored_run_status": current["status"], "runtime_state_at_observe": runtime_task["state"],
+        "runtime_submissions": len(submissions), "runtime_cancels": len(cancels), "first_calls": k["first_calls"],
         "fresh_calls": [r["value"] for r in fresh_records if r["name"] == "call"]}, indent=2), encoding="utf-8")
 
 
