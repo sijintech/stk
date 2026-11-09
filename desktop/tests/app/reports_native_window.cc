@@ -124,7 +124,8 @@ Json media_time(Clock::time_point start, const std::optional<Clock::time_point> 
 void log_last_media_observation(const Json &result) noexcept
 {
   try {
-    for (const auto *key : {"last_hidden_media_observation", "last_explicit_pause_observation"}) {
+    for (const auto *key : {"last_hidden_media_observation", "last_explicit_pause_observation",
+                            "hidden_media_native_close"}) {
       const auto item = result.find(key);
       if (item == result.end() || !item->is_object()) continue;
       // These objects contain only fixed phase names, hashes and numerical probe facts.
@@ -641,7 +642,8 @@ class Exercise {
     try {
       const bool recorded = close && !close->reason.empty();
       result_["hidden_media_native_close"] = {
-          {"session_sha256", core::Sha256::hex(session)}, {"observer_attached", close != nullptr},
+          {"phase", "hidden-native-close"}, {"session_sha256", core::Sha256::hex(session)},
+          {"observer_attached", close != nullptr},
           {"shutdown", recorded ? Json{{"reason", std::string(close->reason)},
               {"elapsed_seconds", media_seconds(playing_returned, close->when)},
               {"media_generation", close->media_generation},
@@ -1503,6 +1505,7 @@ raise SystemExit(main())
       catch (...) {}
       const auto explicitly_playing = play(cycle, "explicit-play", session, bounds);
       const auto explicit_play_returned = Clock::now();
+      const auto explicit_play_native_pause = ui.last_native_pause();
       ui.click("reports_document_pause", *area);
       const auto explicit_click_returned = Clock::now();
       auto red = paused(session, "Explicit Pause button");
@@ -1511,6 +1514,8 @@ raise SystemExit(main())
         result["last_explicit_pause_observation"] = {{"cycle", cycle}, {"phase", "explicit-pause"},
             {"session_sha256", core::Sha256::hex(session)}, {"playing", media_json(explicitly_playing)},
             {"paused", media_json(red)},
+            {"playing_native_pause", native_pause_pair_json(explicit_play_native_pause)},
+            {"first_paused_native_pause", native_pause_pair_json(ui.last_native_pause())},
             {"click_return_seconds", media_seconds(explicit_play_returned, explicit_click_returned)},
             {"paused_return_seconds", media_seconds(explicit_play_returned, explicit_paused_returned)},
             {"checks", {{"lower_time_gt_0_05", red.current_time > 0.05},
