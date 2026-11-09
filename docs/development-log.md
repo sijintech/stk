@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 13:17 UTC · 主线修复与开放 PR 核对
+
+root 提交 `95c2c464`、`3924f39e`、`8da56052`，分别处理审批响应、同一传输尝试的重试、MuFerro 收集与查看。`00831075` 集成 Claude47 的 `fcbcdc08`，Claude48 接手 S2c 冷重开验证。PR #53 旧分支与主线冲突，其原重试丢失已修，另复现的尝试竞态由本地独立补丁处理。PR #54 的历史交接与现有文件名大小写冲突。两个 PR 维持待审状态。`d49f6685` 的干净 Python 3.11 全量已结束，6437 项通过。 [PR #53](https://github.com/sijintech/stk/pull/53) [PR #54](https://github.com/sijintech/stk/pull/54) [验收记录](runtime-validation.md)
+
 ## 2026-11-09 13:01 UTC · DAT、Cocoa、监控导入及 Hub 回环
 
 root 提交 `8a50e343`、`e1cf1d47`、`d49f6685`。三个提交分别绑定直读实际字节、补 Cocoa 隐藏暂停探针、恢复独立监控导入。root 以 `7132755f` 集成 Claude45 的 `2563468d`，以 `c8618a4f` 将 Claude46 的 `b64da145` 改为扩充现有回环测试。Claude47 接手现有 `graph.meta` 观察证据。前一轮 Desktop 已终态且结果入档，本批满足推送等待条件。 [验收记录](runtime-validation.md)

@@ -1,5 +1,17 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 13:17 UTC · S2c 响应字节、传输尝试与 MuFerro 报告
+
+`95c2c4647ff3cf7220b8f3d8a64f8e50e419f2cd` 移除占位请求 ID 的大小估算。严格桥使用实际 NDJSON 响应，经正常校验、完整写出和刷新后才登记审阅。旧版在 128 个可转义字符的合法 ID 下返回 `result_too_large`，却登记了审阅。新例相差一字节的两侧分别拒绝和完整返回，超限后试批返回冲突且原决定未消耗。源码 111 项及隔离 wheel 45 项通过，安装态含子进程 stdout 和 shutdown。证据 `root-delivery-20261109-89/s2c-plan-wire-{red,source-final}.xml` 和 `s2c-wheel/installed-final.xml`。
+
+`3924f39e3900b2761c1a29cbd3536d3e32c83c4f` 让已在等待同一终态 worker 的并发重试共享其后继尝试。旧版 Runtime/Hub 合成用例均会在后继迅速失败时额外启动第三次。新例保持单次后继，另一次明确重试仍可启动。独立候选两项连跑 15 轮均通过，root 源码联跑 150 项。PR #53 原问题已由更早主线处理，新反例使用独立当前主线补丁。证据 `root-pr-review-20261109-resume-generation/checks/` 与 `root-delivery-20261109-89/transfers-root.xml`。
+
+`8da56052798f6d38c9dd9c917fbd9bc444346023` 在 MuFerro 收集和查看用普通文件读取。启动器报告维持 2 MiB 上限，解析复用摘要校验时捕获的字节。旧版的 FIFO 查看会阻塞，报告复开可换入另一条程序摘要。新例保留正常原生查看入口，拒绝 FIFO、链接与缺失产物，收集结果绑定原摘要。验证范围为单个文件，整个目录仍可在核验后变化。root 源码 157 过、3 条件跳过，收集和传输隔离 wheel 联跑 67/67。独立 Python 3.14 子集 99 过、1 条件跳过。目标 macOS、Windows 和真实许可未验证。证据 `root-delivery-20261109-89/muferro-collect-root.xml`、`result-transfer-wheel/installed.xml` 与 `hdf-collection-review/`。
+
+`00831075` 集成 Claude47 的 `fcbcdc08`，六处相对链接可解析。作者 23 项定向通过，合成代理子进程和进程内 Hub 观察显示 `graph.meta` 走持久动作，现有响应不能区分 NumPy 或 h5py 是否可用。旧部署和真实执行节点待验。Claude48 已在独立 worktree 接手同一审批卡的冷重开。证据 `root-delivery-20261109-88/claude47/evidence/`。 [试点设计](design/mupro-executor-pilot.md)
+
+远端 `249698d05dc13d9c08a2aebd9e906ebc38873a9d` Desktop 在 13:16Z 检查时仍运行，Linux 可重定位包与干净机冒烟已通过，Linux 主作业、macOS 和 Windows CPU 仍在构建。Runtime 8 项已过、5 项运行，文档部署和凭据扫描通过。修复监控导入后的 `d49f668535c9e8008bf9bd3f218ed445db100927` 在包含 Peer 依赖的干净 Python 3.11 环境全量 6437 过、180 跳过、4 排除，零失败，1186.45 秒。该轮对应此前监控修复头。证据 `root-delivery-20261109-88/runtime-full311/result.xml`。本批等待整轮 Desktop 终态后推送。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42621953590) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42621953348)
+
 ## 2026-11-09 13:01 UTC · 直读、监控、Hub 回环及 Desktop 终态
 
 `8a50e343240edd8fa07780a9286b0620ff323f67` 把 MuFerro DAT 帧和统计绑定到同一份私有快照。旧版本本机同时间戳和长度改写、Runtime 暖缓存改写、统计旧键污染三个反例均复现。新版本来源摘要跟随实际解析字节，自定义远程摘要不符和无效路径继续为 `invalid_data`。源码 256 过 2 条件跳过，隔离 wheel 242 过 1 条件跳过。证据 `root-delivery-20261109-88/dat-source-final.xml` 与 `dat-wheel/installed-final.xml`。
