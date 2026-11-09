@@ -9,9 +9,10 @@ This is the next D1 fault slice after [the two-deployment parity run](README.md)
 It is not a failover test: no other node, Runtime or authority is used. It adds no product command,
 contract, endpoint or state.
 
-`disconnect.py` loads the helpers of `offline.py` by file path; it does not change them at run time. The only
-addition to `offline.py` is the optional `extra_templates` of `start_hub`, used by the offline-completion
-scenario below. In installed mode nothing is put on `sys.path`.
+`disconnect.py` loads the helpers of `offline.py` (and, for the socket partition, `socket_partition.py`) by file
+path; it does not change them at run time. The only additions to `offline.py` are the optional `extra_templates`
+and `node_route` of `start_hub`, used by the offline-completion and socket-partition scenarios below. In installed
+mode nothing is put on `sys.path`.
 
 ## Deployment
 
@@ -182,6 +183,79 @@ changes that text, the strict refusal is no longer recognised and C3/C7 fail. Th
 a false pass. The tests drive the real `HubBackend` with a stub Hub to keep the labels in step with the
 product.
 
+## Socket partition (`--scenario socket-partition`, X7/F03)
+
+The offline-completion scenario with a different fault: no process is signalled or restarted. The NodeAgent loses
+its control link because a loopback relay closes it, then gets it back on the same address. The default `cancel`
+scenario and `offline-completion` are unchanged.
+
+`socket_partition.py` (standard library only, loaded by file path like `offline.py`) is the fault injector: a
+TCP relay listening on `127.0.0.1` on one port for its whole life, forwarding to the Hub's loopback port.
+`offline.start_hub` takes an optional `node_route`. It is called with the Hub's port once the Hub listens and
+returns the relay's URL, which is the URL `suan-node pair` is given. So from the initial pairing onward the
+NodeAgent's HTTP calls and its WebSocket control link go through the relay. The harness's `HubClient` and
+`RuntimeClient` stay direct; the NodeAgent reaches its own Runtime directly, as always. Without `node_route`,
+`start_hub` pairs the node with the Hub's own URL, as before.
+
+Steps (the same fixture, `parity-release`, and the same reads as offline completion):
+1. **Submit once**, wait for the ready line and for the heartbeat snapshot to list the task `running`. The
+   NodeAgent, Hub, Runtime API and supervisor identities (PID plus create time) are frozen once the node is
+   online.
+2. **Cut.** The relay stops forwarding, closes active tunnels and waits for active and pending connection handlers
+   within a fixed grace period. It reports how many tunnels it closed, and whether one opened before submission and still
+   carried bytes from the node after it, plus bytes to the node: the task's live control link. While the cut
+   holds, every new connection is accepted and closed at once, before anything is forwarded (counted as
+   rejected). The NodeAgent keeps running and retries by itself. The first post-cut read is refused or unknown.
+   After the offline report the scenario requires two strict
+   node-offline refusals with the Hub's explicit `online: false` before and after each.
+3. **Release and complete** only after the offline report, with the relay still cut and the original NodeAgent
+   still running. The owned Runtime reports the task `succeeded`. The original program and worker exit before
+   the relay is reopened, two more exact reads are still the strict refusal, and the snapshot still caches
+   `running`.
+4. **Reopen** the same relay object: same listening socket, same port. Wait up to 45 s for the node to be online
+   with exact reads; the NodeAgent's own retry delay doubles up to 30 s while it is rejected. The node profile
+   (`node.json`) must be byte-for-byte unchanged, the same device the only node, and no second `suan-node run`
+   started. The first answered exact read is the original task `succeeded`. The stdout and the downloaded
+   `out.txt` are the fixed bytes (listing checked first), equal to the owned Runtime's.
+5. **Count**: one workspace, one submission, one task, one run directory, one start, no cancel, an unchanged
+   action listing. The four frozen identities are alive at the cut, while offline, after the completion, after
+   the reopen and at the end.
+
+| Check | |
+|---|---|
+| P1 | as C1: one submission, ready line, one start marker, unreleased, the snapshot lists it running |
+| P2 | the node profile points at the loopback relay, at least two tunnels (pairing and link) before the submission; the harness's Hub and Runtime clients are direct |
+| P3 | the relay closed the task's live control link and its tunnels ended; the NodeAgent was not signalled; all four identities alive |
+| P4 | as C3: strict node-offline refusals after the offline report. The first post-cut read yields no task state |
+| P5 | as C4, and the four identities alive |
+| P6 | while cut: no tunnel accepted or active, at least one rejected |
+| P7 | released after the offline report with the cut holding and the original NodeAgent running; `succeeded`, not cancelled |
+| P8 | as C6: the original program and worker exited before the reopen |
+| P9 | as C7: still the strict refusal after the completion, the cache still `running` |
+| P10 | the same relay port reopened; the same NodeAgent reconnected through a new tunnel; profile unchanged; no restart; identities alive |
+| P11 | as C8: the same device; the first answered exact read is the original task, `succeeded` |
+| P12–P13 | as C9–C10: fixed stdout and `out.txt` |
+| P14 | as C11, and the same four processes at the end |
+| P15 | as C12: one workspace creation, one submission, no further action, no cancel |
+
+P1, P4, P5, P8, P9 and P11–P15 reuse the C predicates of offline completion by ID (`completion_checks`); the C
+texts and verdicts themselves are unchanged. A timeout or unknown read while cut, a stale (`running`) or completed
+state served while cut, a stale first answer and the wrong task all fail. So do a relay that closed no live link,
+a tunnel let through during the cut, a changed port or profile, a restarted or signalled NodeAgent and any extra
+submission or cancel. The tests also drive the relay itself with real loopback sockets, and check that a run
+failing before or during the cut still closes the relay. The real scenario run in the tests is opt-in
+(`STK_SOCKET_PARTITION=1`); the scenario itself is only run on request (`--scenario socket-partition`).
+
+**Client boundary.** The exact reads use the in-process `HubBackend` of `suan.desktop_bridge` over a direct
+`HubClient`, as in the other scenarios. The strict stdio bridge subprocess is not exercised here; it is left to
+root's separate probe. The manifest records this as `client_boundary`.
+
+The normal run takes about 35–40 s: about 20 s until the Hub reports the node offline, then up to one retry
+delay (typically under 16 s) until the NodeAgent's next attempt after the reopen. Cleanup closes the relay first
+(recorded as `B socket relay`), then the usual sweep. `phases.json` adds `route`, `partition` and `reopen`, and has
+no `node_stop`. The manifest records `socket_partition_sha256` and the relay port; no address beyond the
+loopback ports, header or payload is kept.
+
 ## Running it
 
 ```sh
@@ -197,8 +271,14 @@ STK_TOKEN_PLAN_API_KEY= timeout 300 python examples/backend_parity/disconnect.py
 STK_TOKEN_PLAN_API_KEY= timeout 300 python examples/backend_parity/disconnect.py --mode source \
     --scenario offline-completion --evidence-dir NEW_EVIDENCE_DIR
 
-# The focused tests, including one real source-mode run of each scenario:
+# The X7 socket-partition scenario (either mode):
+STK_TOKEN_PLAN_API_KEY= timeout 300 python examples/backend_parity/disconnect.py --mode source \
+    --scenario socket-partition --evidence-dir NEW_EVIDENCE_DIR
+
+# The focused tests, including one real source-mode run of the cancel and offline-completion scenarios;
+# the real socket-partition run is opt-in (STK_SOCKET_PARTITION=1), its verdict and relay tests always run:
 STK_TOKEN_PLAN_API_KEY= python -m pytest -q tests/test_backend_parity_disconnect.py
+STK_SOCKET_PARTITION=1 STK_TOKEN_PLAN_API_KEY= python -m pytest -q tests/test_backend_parity_disconnect.py
 ```
 
 Leave `STK_TOKEN_PLAN_MODEL`, `DISPLAY` and `WAYLAND_DISPLAY` unset. `--evidence-dir` must be new or empty;
@@ -213,7 +293,7 @@ The rest of the run's environment and handling comes from the `offline.py` helpe
 - the cleanup.
 
 Exit codes:
-- `0`: D1–D10 (or C1–C12) passed, the scenario ended within the budget and cleanup was clean;
+- `0`: D1–D10 (or C1–C12, or P1–P15) passed, the scenario ended within the budget and cleanup was clean;
 - `1`: a check failed, a wait ended `unknown`, an error occurred, the budget ran out or cleanup was unclean;
 - `2`: not Linux, an invalid `--deadline`, or an evidence directory that is not new.
 
@@ -248,7 +328,7 @@ of this run's own processes, not recovery, and such a run never passes.
 
 | File | Contents |
 |---|---|
-| `run-manifest.json` | Module origins (base kind; relative paths and SHA-256 of key modules), `disconnect_sha256`, `offline_helper_sha256`, the checkout HEAD (reference only), versions, ports, deadline, scenario and total seconds, verified and not-verified scope. It is informal trial evidence, not a published format. |
+| `run-manifest.json` | Module origins (base kind; relative paths and SHA-256 of key modules), `disconnect_sha256`, `offline_helper_sha256`, the checkout HEAD (reference only), versions, ports, deadline, scenario and total seconds, verified and not-verified scope. A failed socket-partition run has an empty `verified` list. This is informal trial evidence. |
 | `requests.jsonl` | The operations the scenario recorded: workspace creation, the one submission (key, template, task ID) and the cancel. Reads are not listed. |
 | `phases.json` | Per phase: states, program and worker identities, liveness, marker counts. The node stop records the identity check, liveness right before the kill, the signal and the exit status. Also listed: each offline read's outcome and whether the Hub reported the node online then, and the action kinds at each point |
 | `assertions.json` | D1–D10, the exported error, `cleanup_ok`, `within_deadline`, `ok` |
@@ -268,8 +348,16 @@ exception text are written. Action IDs are compared in memory; only their kinds 
   snapshot is not served. After the reconnect the first answered exact read is the same task `succeeded`; its
   fixed log and its artifact bytes (listing checked first) follow. There is no cancel and no second start.
 
+- with `--scenario socket-partition`, the same completion while a loopback relay closes the NodeAgent's live
+  control link and rejects new tunnels, with no process signalled; the same NodeAgent process reconnects by itself
+  once the same relay reopens.
+
 **Not verified:**
-- A Hub restart, a Runtime restart, a network partition without a process exit, or long outages.
+- A Hub restart, a Runtime restart, or long outages. A network partition without a process exit only as the
+  socket-partition scenario's loopback relay: closed and rejected connections, not silently dropped packets,
+  half-open sockets, or asymmetric or intermittent links.
+- Cross-host networks, or the native desktop client and the strict stdio bridge subprocess (the scenarios use the
+  in-process `HubBackend`).
 - Completion at any other moment than one release after the Hub reported the node offline (for example
   exactly at the kill, or while the Hub has not yet noticed).
 - That a Hub timeout (504) or an unreachable Hub is told apart in a real run. None was provoked: the real

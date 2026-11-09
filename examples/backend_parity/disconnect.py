@@ -52,6 +52,14 @@ template in this run's Hub only. The task completes while the NodeAgent is down:
 5. Throughout: one workspace, one submission, no cancel, one task, one run directory, one start; the action
    listing never changes after the submission.
 
+``--scenario socket-partition`` (CL-D1-X7-SOCKET-PARTITION-64) is the offline-completion scenario with another fault:
+nothing is signalled. The NodeAgent is paired with, and so connects through, a small loopback relay of this run
+(``socket_partition.py``, loaded by file path); the harness's Hub and Runtime clients stay direct. The relay closes
+the task's live control link and rejects every new tunnel; the Hub reports the node offline; the task is released
+and completes; then the same relay, on the same address, forwards again and the same NodeAgent process reconnects by
+itself with its unchanged profile. The NodeAgent, Hub, Runtime API and supervisor keep their PID and create time
+throughout. The client is the in-process ``HubBackend`` (no strict stdio bridge subprocess). Checks P1-P15.
+
 Evidence (``--evidence-dir``, which must be new or empty): run-manifest.json, requests.jsonl, phases.json,
 assertions.json, resources.json -- no tokens, pairing codes, environment values, absolute paths or raw
 exception text. This is a software-behaviour check on one Linux host with a synthetic program. It does not
@@ -90,7 +98,7 @@ WORKSPACE_KEY, SUBMIT_KEY, CANCEL_KEY = "disc-ws", "disc-wait", "disc-cancel"  #
 OFFLINE_WAIT = 40  # the Hub reports a node offline 20 s after its last heartbeat (sent every 3 s)
 OFFLINE_READS = 3  # exact live reads attempted while the node is down
 REFUSED_OFFLINE = ("unavailable", "timeout")  # the only acceptable answers to a live read of an offline node
-SCENARIOS = ("cancel", "offline-completion")
+SCENARIOS = ("cancel", "offline-completion", "socket-partition")
 
 # The offline-completion scenario's own public synthetic program. Like parity-wait it appends its start marker
 # and prints the ready line; it then waits (up to 120 s) for a private release flag that the harness writes in the
@@ -700,14 +708,24 @@ def scenario_completion(owned, env, facts, log, clients):
                                       "final": ledger_final == ledger_before}}
 
 
-def completion_assertions(facts, requests):
-    """C1-C12 of the offline-completion scenario; any missing or malformed fact fails its check."""
+def judged(checks):
+    """Each ``(id, predicate)`` as pass/fail; a missing or malformed fact fails its check."""
     def check(predicate):
         try:
             return bool(predicate())
         except (KeyError, TypeError, AttributeError, IndexError):
             return False
 
+    return [{"id": name, "status": "pass" if check(predicate) else "fail"} for name, predicate in checks]
+
+
+def completion_assertions(facts, requests):
+    """C1-C12 of the offline-completion scenario; any missing or malformed fact fails its check."""
+    return judged(completion_checks(facts, requests))
+
+
+def completion_checks(facts, requests):
+    """The named C1-C12 predicates (also reused, under their own names, by the socket-partition scenario)."""
     frozen = (facts.get("baseline") or {}).get("execution") or {}
     program, worker = frozen.get("program"), frozen.get("worker")
 
@@ -791,7 +809,259 @@ def completion_assertions(facts, requests):
          and actions["before"] == ["task.submit", "workspace.create"] == actions["final"]
          and actions["unchanged"] == {"offline": True, "completed_offline": True, "reconnect": True, "final": True}),
     ]
-    return [{"id": name, "status": "pass" if check(predicate) else "fail"} for name, predicate in checks]
+    return checks
+
+
+# ----------------------------------------------------------------------------------------------------
+# The socket-partition scenario
+
+
+PARTITION_FILE = HERE / "socket_partition.py"
+PARTITION_KEYS = ("x7p-ws", "x7p-release")  # workspace and submission idempotency keys, not secrets
+RECONNECT_WAIT = 45  # the NodeAgent's own retry delay doubles up to 30 s while the relay rejects its tunnels
+IDENTITIES = ("B node run", "B hub serve", "B runtime api", "B runtime supervisor")
+
+
+def load_partition():
+    """The relay of socket_partition.py, loaded from this directory by file path (stdlib only)."""
+    spec = importlib.util.spec_from_file_location("backend_parity_socket_partition", PARTITION_FILE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def port_of(url):
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    return parts.port if parts.hostname == "127.0.0.1" else None
+
+
+def all_alive(identities):
+    """The four frozen identities (PID plus create time) are all still the live processes."""
+    return set(identities) == set(IDENTITIES) and all(value is True for value in identities.values())
+
+
+def scenario_partition(owned, env, facts, log, clients):
+    relay_module, relays = load_partition(), []
+
+    def route(hub_port):
+        relay = relay_module.Relay(hub_port)
+        relays.append(relay)
+        return relay.url
+
+    try:
+        play_partition(owned, env, facts, log, clients, route, relays)
+    finally:
+        for relay in relays:
+            entry = {"label": "B socket relay"}
+            try:
+                entry["stopped"] = relay.close()
+            except Exception as exc:  # noqa: BLE001 - recorded by type; cleanup is then unclean
+                entry.update(stopped=False, error=type(exc).__name__)
+            owned.resources["cleanup"].append(entry)
+
+
+def play_partition(owned, env, facts, log, clients, route, relays):
+    from suan.desktop_bridge.backends import RuntimeBackend
+    work = owned.work
+    client, port_runtime, workspace_root = off.start_runtime(owned, work / "B" / "runtime", env, "B")
+    clients.append(("B", client))
+    hub, node_id, port_hub = off.start_hub(owned, work / "B", env, work / "B" / "runtime",
+                                           extra_templates=RELEASE_TEMPLATES, node_route=route)
+    relay, = relays
+    facts["ports"] = {"runtime": port_runtime, "hub": port_hub, "relay": relay.port}
+    backend = budgeted_hub_backend()("hub:x7-partition", hub, node_id, wait=60)
+    direct = RuntimeBackend("runtime:x7-partition-direct", client)  # this run's own Runtime, read-only here
+    side = off.Side("B", backend, client, workspace_root, log)
+    authority = off.Side("B-direct", direct, client, workspace_root, [])  # reads only; never logged as requests
+    off.wait_node_live(backend, time.monotonic() + off.budget(30))
+    node_state = work / "B" / "node"
+    profile_bytes = (node_state / "node.json").read_bytes()
+    profile = json.loads(profile_bytes)
+    device_before = profile["device_id"]
+    pids = {item["label"]: item["pid"] for item in owned.resources["processes"]}
+    identities = {label: identity_of(pids[label]) for label in IDENTITIES}  # frozen once the node is online
+    node_process = next(process for label, process in owned.processes if label == "B node run")
+
+    def node_runs():
+        return [label for label, _ in owned.processes if label.startswith("B node run")]
+
+    def continuity():
+        return {label: alive(identity) for label, identity in identities.items()}
+
+    before_cut = relay.stats()
+    facts["route"] = {"relay_loopback": relay.server_address[0] == "127.0.0.1",
+                      "node_profile_via_relay": port_of(profile.get("control_url", "")) == relay.port,
+                      "hub_client_direct": port_of(hub.url) == port_hub != relay.port,
+                      "runtime_client_direct": port_of(client.url) == port_runtime != relay.port,
+                      "node_identity_valid": (off.process_identity(identities["B node run"]) is not None
+                                              and identities["B node run"]["pid"] == node_process.pid),
+                      "tunnels_before_submission": before_cut["accepted"]}
+
+    # 1. One workspace, one submission, the program really running and waiting for its release.
+    workspace_key, submit_key = PARTITION_KEYS
+    created = backend.create_workspace("x7-partition", key=workspace_key)
+    workspace = (created.get("workspace") or {}).get("id")
+    if not workspace:
+        raise off.Unknown("workspace creation did not finish")
+    side.record("workspace.create", key=workspace_key, outcome="created", workspace_id=workspace)
+    submitted_at = time.monotonic()
+    task_id = side.submit(RELEASE_TEMPLATE, submit_key, workspace)["id"]
+    state = off.wait_terminal(side, task_id, 60, until=("running", *off.TERMINAL))["state"]
+    ready = off.wait_output(side, task_id, READY, 60)
+    baseline = running_execution(workspace_root, workspace, task_id)
+    program, worker = baseline["program"], baseline["worker"]  # the original identities, frozen here
+    ledger_before = action_ledger(backend)
+    cached = wait_snapshot(backend, task_id, "running", 15)  # heartbeats every 3 s, through the relay
+    facts["baseline"] = {"state": state, "ready": ready, "execution": baseline, "snapshot_running": cached,
+                         "files": result_files(workspace_root, workspace, task_id)}
+
+    # 2. The partition: the relay closes the live control link and rejects new tunnels. Nothing is signalled.
+    cut = relay.cut(submitted_at)
+    facts["partition"] = {**cut, "active_before_cut": cut["closed"],
+                          "node_process_running": node_process.poll() is None, "identities_alive": continuity()}
+    before_offline_report = offline_read(side, task_id)
+    seconds_to_offline = wait_offline(backend, OFFLINE_WAIT)
+    reads = [offline_read(side, task_id) for _ in range(OFFLINE_READS - 1)]
+    before_release = direct.task(task_id)["task"]
+    facts["offline"] = {"observed": True, "seconds_to_offline": round(seconds_to_offline, 1),
+                        "read_before_offline_report": before_offline_report, "reads": reads,
+                        "identities_alive": continuity(),
+                        "direct_task": {"same_task": before_release.get("id") == task_id,
+                                        "state": before_release.get("state")},
+                        "execution": running_execution(workspace_root, workspace, task_id),
+                        "files": result_files(workspace_root, workspace, task_id)}
+    ledger_offline = action_ledger(backend)
+
+    # 3. Release only now; the task completes on the owned Runtime while the partition holds. The original
+    #    program and worker must exit before the relay is reopened.
+    offline_confirmed = (backend.device().get("online") is False and node_runs() == ["B node run"]
+                         and node_process.poll() is None and relay.stats()["forwarding"] is False)
+    released = offline_confirmed and release(workspace_root, workspace, task_id)
+    if not released:
+        raise off.HarnessError("the node was not confirmed offline behind the partition; the program was not released")
+    done = off.wait_terminal(authority, task_id, COMPLETION_WAIT)
+    program_exited, worker_exited = exited(program, 15), exited(worker, 15)
+    after_reads = [offline_read(side, task_id) for _ in range(2)]
+    held = relay.stats()
+    facts["completed_offline"] = {
+        "released_after_offline_observed": released is True and offline_confirmed,
+        "direct_task": {"same_task": done.get("id") == task_id, "state": done.get("state"),
+                        "cancel_requested": done.get("cancel_requested")},
+        "original_program_exited": program_exited, "original_worker_exited": worker_exited,
+        "execution": running_execution(workspace_root, workspace, task_id),
+        "files": result_files(workspace_root, workspace, task_id),
+        "reads": after_reads, "snapshot_state": snapshot_state(backend, task_id),
+        "node_runs": node_runs(), "node_exit_code": node_process.poll(), "identities_alive": continuity(),
+        "relay": {"forwarding": held["forwarding"], "active": held["active"],
+                  "accepted_during_partition": held["accepted"] - cut["accepted_before_cut"],
+                  "rejected_during_partition": held["rejected"] - cut["rejected_before_cut"]}}
+    ledger_completed = action_ledger(backend)
+
+    # 4. Reopen the same relay; the same NodeAgent process reconnects by itself with the same profile.
+    reopened, reopened_at = relay.reopen(), time.monotonic()
+    off.wait_node_live(backend, time.monotonic() + off.budget(RECONNECT_WAIT))
+    seconds_to_online = time.monotonic() - reopened_at
+    nodes = [d for d in backend.call(backend.hub.devices) if d.get("role") == "node" and not d.get("revoked")]
+    live, unavailable_before_answer = first_live_read(side, task_id, 30)
+    confirm = classify_read(side, task_id)
+    after = relay.stats()
+    facts["reopen"] = {**reopened, "seconds_to_online": round(seconds_to_online, 1),
+                       "accepted_after_reopen": after["accepted"] - held["accepted"], "active": after["active"],
+                       "profile_unchanged": (node_state / "node.json").read_bytes() == profile_bytes,
+                       "node_runs": node_runs(), "node_exit_code": node_process.poll(),
+                       "identities_alive": continuity()}
+    facts["reconnect"] = {"same_node_device": [d["id"] for d in nodes] == [device_before],
+                          "node_devices": len(nodes),
+                          "first_live": {"same_task": live.get("id") == task_id, "state": live.get("state"),
+                                         "cancel_requested": live.get("cancel_requested")},
+                          "unavailable_before_answer": unavailable_before_answer, "confirm": confirm}
+    stdout = off.read_logs(side, task_id)
+    listed, downloaded = download_fixture(side, task_id, backend.artifacts(task_id)["artifacts"])
+    direct_stdout = off.read_logs(authority, task_id)
+    direct_listed = off.artifact_facts(direct.artifacts(task_id)["artifacts"])
+    facts["outputs"] = {
+        "stdout_sha256": hashlib.sha256(stdout).hexdigest(), "stdout_bytes": len(stdout),
+        "stdout_is_fixed": stdout == RELEASED_STDOUT, "stdout_same_as_runtime": stdout == direct_stdout,
+        "artifacts": listed, "artifacts_same_as_runtime": listed == direct_listed,
+        "downloads": {path: hashlib.sha256(data).hexdigest() for path, data in downloaded.items()},
+        "downloads_are_fixed": {path: data == off.EXPECTED_OUT for path, data in downloaded.items()}}
+    ledger_reconnect = action_ledger(backend)
+
+    # 5. One task, one run, one start; no cancel; the same four processes; the action listing never changed.
+    final_direct = direct.task(task_id)["task"]
+    final_execution = running_execution(workspace_root, workspace, task_id)
+    facts["final"] = {"direct_state": final_direct.get("state"),
+                      "cancel_requested": final_direct.get("cancel_requested"),
+                      "same_program": final_execution["program"] == program,
+                      "same_worker": final_execution["worker"] == worker,
+                      "runs": off.executions(side, workspace),
+                      "tasks_in_workspace": len(direct.tasks(workspace)["tasks"]),
+                      "node_runs": node_runs(), "identities_alive": continuity()}
+    ledger_final = action_ledger(backend)
+    facts["actions"] = {"before": kinds(ledger_before), "final": kinds(ledger_final),
+                        "unchanged": {"offline": ledger_offline == ledger_before,
+                                      "completed_offline": ledger_completed == ledger_before,
+                                      "reconnect": ledger_reconnect == ledger_before,
+                                      "final": ledger_final == ledger_before}}
+
+
+def partition_assertions(facts, requests):
+    """P1-P15 of the socket-partition scenario: the offline-completion predicates that do not depend on how the
+    node was cut off, under their own names, plus the partition's own route, cut, rejection, release and reopen
+    checks. Any missing or malformed fact fails its check."""
+    shared = {name.split()[0]: predicate for name, predicate in completion_checks(facts, requests)}
+    route, cut, offline, done, reopen, final = (facts.get(name) or {} for name in (
+        "route", "partition", "offline", "completed_offline", "reopen", "final"))
+    return judged([
+        ("P1 one submission; the program printed its ready line and runs unreleased with one start marker; the "
+         "heartbeat snapshot lists it running", shared["C1"]),
+        ("P2 only the NodeAgent's control link runs through this run's loopback relay, from its pairing onward; the "
+         "harness's Hub and Runtime clients are direct",
+         lambda: route["relay_loopback"] is True and route["node_profile_via_relay"] is True
+         and route["hub_client_direct"] is True and route["runtime_client_direct"] is True
+         and route["node_identity_valid"] is True and route["tunnels_before_submission"] >= 2),
+        ("P3 the relay forcibly closed the task's live control link (opened before the submission, carrying node "
+         "traffic after it); the NodeAgent was never signalled, and it, the Hub, the Runtime API and the supervisor "
+         "kept their original PID and create time",
+         lambda: cut["closed"] >= 1 and cut["active_before_cut"] >= 1 and cut["closed_opened_before_submission"] >= 1
+         and cut["live_link_closed"] is True and cut["drained"] is True and cut["node_process_running"] is True
+         and all_alive(cut["identities_alive"])),
+        ("P4 the Hub reported the node offline, and exact live reads while it did were refused unavailable because "
+         "the node is offline, the Hub answering offline right before and after each (never a timeout or unknown); "
+         "the first post-cut read did not return a state", shared["C3"]),
+        ("P5 while partitioned and before the release, the owned Runtime still ran the task with the original "
+         "program and worker, no result and no output; the four original processes were alive",
+         lambda: shared["C4"]() and all_alive(offline["identities_alive"])),
+        ("P6 while the partition held, every new tunnel was rejected and none was forwarded",
+         lambda: done["relay"]["forwarding"] is False and done["relay"]["active"] == 0
+         and done["relay"]["accepted_during_partition"] == 0 and done["relay"]["rejected_during_partition"] >= 1),
+        ("P7 released only after the offline report, with the partition holding and the original NodeAgent still "
+         "running; the owned Runtime reports the original task succeeded, not cancelled",
+         lambda: done["released_after_offline_observed"] is True and done["node_runs"] == ["B node run"]
+         and done["node_exit_code"] is None and all_alive(done["identities_alive"])
+         and done["direct_task"] == {"same_task": True, "state": "succeeded", "cancel_requested": False}
+         and done["files"] == {"release_flag": True, "finished_record": True, "output_file": True}),
+        ("P8 the original program and worker exited before the relay was reopened; still one start", shared["C6"]),
+        ("P9 after the offline completion, exact Hub reads were still the strict node-offline refusal while the "
+         "heartbeat snapshot still cached the task as running: neither the completed state nor the cache was served",
+         shared["C7"]),
+        ("P10 the same relay reopened on the same address; the same NodeAgent process, never restarted, reconnected "
+         "by itself through a new tunnel with its unchanged node profile; the four original processes alive",
+         lambda: reopen["same_port"] is True and reopen["listening"] is True and reopen["accepted_after_reopen"] >= 1
+         and reopen["active"] >= 1 and reopen["profile_unchanged"] is True and reopen["node_runs"] == ["B node run"]
+         and reopen["node_exit_code"] is None and all_alive(reopen["identities_alive"])),
+        ("P11 the same node device and the first answered exact live read, whatever its state, is the original "
+         "task, succeeded", shared["C8"]),
+        ("P12 the fixed stdout bytes, read through the Hub by byte cursor, equal the owned Runtime's", shared["C9"]),
+        ("P13 exactly out.txt with the fixed bytes, listed and downloaded through the Hub and hash-checked",
+         shared["C10"]),
+        ("P14 one task, one run directory with one start whose program and worker exited; never cancelled; the same "
+         "four processes at the end",
+         lambda: shared["C11"]() and final["node_runs"] == ["B node run"] and all_alive(final["identities_alive"])),
+        ("P15 one workspace creation and one submission; no Hub action after the submission and no cancel",
+         shared["C12"]),
+    ])
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -837,11 +1107,43 @@ def completion_manifest(origins, ports):
     return record
 
 
+def partition_manifest(origins, ports):
+    record = completion_manifest(origins, ports)
+    record.update({
+        "record": "D1 X7 socket-partition trial evidence (informal)",
+        "scenario": "socket-partition",
+        "deployments": {"B": ["B/runtime (api, supervisor)", "B/control (hub serve)",
+                              "B/node (node run; paired and connected through this run's loopback relay; its control "
+                              "link closed and new tunnels rejected, then the same relay reopened; never signalled "
+                              "or restarted)"]},
+        "client_boundary": ("in-process suan.desktop_bridge HubBackend over a direct HubClient, and a direct "
+                            "RuntimeClient; the strict stdio bridge subprocess is not exercised by this harness"),
+        "verified": ["on one Linux host: while a loopback relay closes the outbound NodeAgent's live control link and "
+                     "rejects new tunnels, with no process signalled, the task completes normally on its original "
+                     "Runtime; exact Hub reads stay unavailable until the same relay reopens and the same NodeAgent "
+                     "process reconnects with its unchanged profile, then read the same task succeeded with its fixed "
+                     "log and artifact bytes, without a second submission, start or cancel"],
+        "not_verified": ["partitions that silently drop packets or leave half-open sockets (the relay closes and "
+                         "rejects), asymmetric or intermittent links, or long outages",
+                         "the strict desktop stdio bridge subprocess (covered separately, not by this harness)",
+                         "native desktop clients, cross-host networks, sites or clusters, Windows/macOS",
+                         "Hub restart, Runtime restart, or NodeAgent restart",
+                         "completion timing other than one release after the Hub reported the node offline",
+                         "failover to another node or Runtime (none is attempted)",
+                         "that no Hub action exists outside the client-visible listing (newest 200, plus reviews)",
+                         "real solvers, licensed software or scientific validity"]})
+    return record
+
+
+PLAYS = {"cancel": (scenario, assertions, manifest),
+         "offline-completion": (scenario_completion, completion_assertions, completion_manifest),
+         "socket-partition": (scenario_partition, partition_assertions, partition_manifest)}
+
+
 def run(evidence, work_root=None, keep=False, mode="installed", deadline_seconds=170, scenario_name="cancel"):
     if scenario_name not in SCENARIOS:
         raise ValueError("unknown scenario")
-    play, judge, describe = ((scenario, assertions, manifest) if scenario_name == "cancel"
-                             else (scenario_completion, completion_assertions, completion_manifest))
+    play, judge, describe = PLAYS[scenario_name]
     deadline_seconds = off.check_deadline(deadline_seconds)
     started = time.monotonic()
     off.DEADLINE = started + deadline_seconds
@@ -856,6 +1158,8 @@ def run(evidence, work_root=None, keep=False, mode="installed", deadline_seconds
         origins = off.module_origins(env, mode)
         origins["offline_helper_sha256"] = origins.pop("harness_sha256", None)
         origins["disconnect_sha256"] = sha256_file(__file__)
+        if scenario_name == "socket-partition":
+            origins["socket_partition_sha256"] = sha256_file(PARTITION_FILE)
         if not origins["consistent"]:
             raise off.HarnessError(f"--mode {mode} does not match where STK is imported from")
         play(owned, env, facts, log, clients)
@@ -876,8 +1180,11 @@ def run(evidence, work_root=None, keep=False, mode="installed", deadline_seconds
     evidence.mkdir(parents=True, exist_ok=True)
     ports = {f"B_{name}": port for name, port in (facts.get("ports") or {}).items()}
     phases = {key: value for key, value in facts.items() if key != "ports"}
+    details = describe(origins, ports)
+    if scenario_name == "socket-partition" and not ok:
+        details["verified"] = []
     (evidence / "run-manifest.json").write_text(json.dumps({
-        **describe(origins, ports), "deadline_seconds": deadline_seconds, "scenario_seconds": scenario_seconds,
+        **details, "deadline_seconds": deadline_seconds, "scenario_seconds": scenario_seconds,
         "within_deadline": within_deadline, "elapsed_seconds_including_cleanup": elapsed,
         "cleanup_grace_seconds_per_step": off.CLEANUP_GRACE, "error": error, "cleanup_ok": cleanup_ok, "ok": ok},
         indent=1, ensure_ascii=False), encoding="utf-8")
@@ -907,7 +1214,8 @@ def main(argv=None):
     parser.add_argument("--scenario", choices=SCENARIOS, default="cancel",
                         help="cancel (default): the task still runs after the reconnect and is cancelled explicitly; "
                              "offline-completion: the task completes while the node is offline and is read back "
-                             "after the reconnect, with no cancel.")
+                             "after the reconnect, with no cancel; socket-partition: the same, but the node is cut "
+                             "off by closing its control link in a loopback relay instead of being killed.")
     args = parser.parse_args(argv)
     if platform.system() != "Linux":
         print("The STK Runtime and control service run on Linux only.", file=sys.stderr)

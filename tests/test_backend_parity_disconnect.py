@@ -1037,3 +1037,382 @@ def test_an_unknown_scenario_is_refused(tmp_path, capsys):
     with pytest.raises(ValueError):
         module.run(tmp_path / "e", tmp_path, scenario_name="failover")
     assert not any(tmp_path.glob("stk-disconnect-*"))
+
+
+# --- X7 socket partition (--scenario socket-partition) ---------------------------------------------------------
+
+
+@pytest.mark.skipif(platform.system() != "Linux", reason="the Runtime and control service are Linux-only")
+@pytest.mark.skipif(os.environ.get("STK_SOCKET_PARTITION") != "1",
+                    reason="opt-in real socket-partition run (about 40 s): set STK_SOCKET_PARTITION=1")
+def test_task_completes_behind_a_socket_partition_and_is_read_after_the_same_relay_reopens(tmp_path):
+    for name in ("fastapi", "uvicorn", "httpx", "psutil"):
+        pytest.importorskip(name)
+    module = harness()
+    evidence = tmp_path / "evidence"
+    started = time.monotonic()
+    result = subprocess.run([sys.executable, str(SCRIPT), "--mode", "source", "--deadline", "170",
+                             "--scenario", "socket-partition", "--evidence-dir", str(evidence),
+                             "--work-root", str(tmp_path)],
+                            capture_output=True, text=True, env=child_env(), cwd=tmp_path, timeout=200)
+    assert time.monotonic() - started < 180
+    summary = json.loads(result.stdout.strip().splitlines()[-1])
+    checks = load(evidence, "assertions.json")
+    assert result.returncode == 0, (summary, checks)
+    assert summary["ok"] and checks["ok"] and checks["cleanup_ok"] and checks["within_deadline"]
+    assert [c["id"].split()[0] for c in checks["assertions"]] == [f"P{i}" for i in range(1, 16)]
+    assert {c["status"] for c in checks["assertions"]} == {"pass"}
+
+    phases = load(evidence, "phases.json")
+    assert "node_stop" not in phases  # nothing was signalled for the fault
+    assert phases["route"]["node_profile_via_relay"] and phases["route"]["hub_client_direct"]
+    cut = phases["partition"]
+    assert cut["closed"] >= 1 and cut["live_link_closed"] and cut["node_process_running"]
+    assert phases["offline"]["reads"] == [NODE_OFFLINE] * 2
+    done = phases["completed_offline"]
+    assert done["reads"] == [NODE_OFFLINE] * 2 and done["snapshot_state"] == "running"
+    assert done["relay"]["accepted_during_partition"] == 0 and done["relay"]["rejected_during_partition"] >= 1
+    assert done["node_runs"] == ["B node run"] and done["node_exit_code"] is None
+    assert phases["reopen"]["same_port"] and phases["reopen"]["profile_unchanged"]
+    assert phases["reconnect"]["first_live"] == {"same_task": True, "state": "succeeded", "cancel_requested": False}
+    assert phases["outputs"]["downloads"] == {"out.txt": hashlib.sha256(module.off.EXPECTED_OUT).hexdigest()}
+    assert phases["final"]["runs"] == [module.off.EXPECTED_RUN] and phases["final"]["tasks_in_workspace"] == 1
+
+    requests = [json.loads(line) for line in (evidence / "requests.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [r["operation"] for r in requests] == ["workspace.create", "task.submit"]
+
+    manifest = load(evidence, "run-manifest.json")
+    origins = manifest["module_origins"]
+    assert origins["consistent"] and origins["services_base"] == "this source tree"
+    assert origins["socket_partition_sha256"] == hashlib.sha256(PARTITION.read_bytes()).hexdigest()
+    assert origins["disconnect_sha256"] == hashlib.sha256(SCRIPT.read_bytes()).hexdigest()
+    assert manifest["scenario"] == "socket-partition" and "HubBackend" in manifest["client_boundary"]
+
+    resources = load(evidence, "resources.json")
+    assert [p["label"] for p in resources["processes"]] == ["B runtime api", "B runtime supervisor", "B hub serve",
+                                                           "B node run"]  # the NodeAgent was never restarted
+    assert {"label": "B socket relay", "stopped": True} in resources["cleanup"]
+    assert resources["leftover_pids_after_cleanup"] == [] and resources["removed_work_dir"] is True
+    text = "".join((evidence / name).read_text(encoding="utf-8") for name in EVIDENCE_FILES) + result.stdout
+    for forbidden in ("token", "Bearer", str(Path.home()), str(tmp_path), module.RELEASE_FLAG):
+        assert forbidden not in text
+    assert not any(tmp_path.glob("stk-disconnect-*"))
+
+
+PARTITION = ROOT / "examples" / "backend_parity" / "socket_partition.py"
+ALIVE = {"B node run": True, "B hub serve": True, "B runtime api": True, "B runtime supervisor": True}
+
+
+def passing_partition_facts(module):
+    facts = passing_completion_facts(module)
+    del facts["node_stop"]
+    facts["route"] = {"relay_loopback": True, "node_profile_via_relay": True, "hub_client_direct": True,
+                      "runtime_client_direct": True, "node_identity_valid": True, "tunnels_before_submission": 3}
+    facts["partition"] = {"closed": 1, "closed_opened_before_submission": 1, "oldest_closed_age_seconds": 3.0,
+                          "live_link_closed": True, "drained": True, "active_before_cut": 1,
+                          "node_process_running": True, "identities_alive": dict(ALIVE)}
+    facts["offline"]["identities_alive"] = dict(ALIVE)
+    facts["completed_offline"].update(node_exit_code=None, identities_alive=dict(ALIVE),
+                                      relay={"forwarding": False, "active": 0, "accepted_during_partition": 0,
+                                             "rejected_during_partition": 4})
+    facts["reopen"] = {"same_port": True, "listening": True, "seconds_to_online": 8.0, "accepted_after_reopen": 2,
+                       "active": 1, "profile_unchanged": True, "node_runs": ["B node run"], "node_exit_code": None,
+                       "identities_alive": dict(ALIVE)}
+    facts["final"].update(node_runs=["B node run"], identities_alive=dict(ALIVE))
+    return facts
+
+
+def partition_failing(module, facts, requests=COMPLETION_REQUESTS):
+    return {item["id"].split()[0] for item in module.partition_assertions(facts, requests) if item["status"] == "fail"}
+
+
+def test_partition_baseline_facts_pass_and_missing_facts_never_pass():
+    module = harness()
+    assert partition_failing(module, passing_partition_facts(module)) == set()
+    assert partition_failing(module, {}, []) == {f"P{i}" for i in range(1, 16)}
+
+
+ANSWERED_RUNNING = {"outcome": "answered", "same_task": True, "state": "running", "hub_reported_online": False,
+                    "hub_reported_online_after": False}
+
+
+@pytest.mark.parametrize("change, broken", [
+    # An offline timeout (or an unanswered read) is never the node-offline refusal.
+    (lambda f, r: f["offline"]["reads"][1].update(cause="timeout"), {"P4"}),
+    (lambda f, r: f["offline"]["reads"].__setitem__(0, {"outcome": "unknown", "hub_reported_online": False,
+                                                         "hub_reported_online_after": False}), {"P4"}),
+    (lambda f, r: f["completed_offline"]["reads"][0].update(cause="timeout"), {"P9"}),
+    (lambda f, r: f["completed_offline"]["reads"][1].update(code="timeout"), {"P9"}),
+    # Stale data: the cached running state, or the completed state, served while partitioned; a stale first answer.
+    (lambda f, r: f["offline"]["reads"].__setitem__(1, dict(ANSWERED_RUNNING)), {"P4"}),
+    (lambda f, r: f["completed_offline"]["reads"].__setitem__(0, dict(ANSWERED_RUNNING)), {"P9"}),
+    (lambda f, r: f["completed_offline"]["reads"].__setitem__(1, dict(ANSWERED_RUNNING, state="succeeded")),
+     {"P9"}),
+    (lambda f, r: f["offline"].update(read_before_offline_report=dict(ANSWERED_RUNNING, hub_reported_online=True)),
+     {"P4"}),
+    (lambda f, r: f["completed_offline"].update(snapshot_state=None), {"P9"}),
+    (lambda f, r: f["reconnect"]["first_live"].update(state="running"), {"P11"}),
+    (lambda f, r: f["reconnect"]["first_live"].update(state="queued"), {"P11"}),
+    # The wrong task: after the reopen, or as the confirmation read.
+    (lambda f, r: f["reconnect"]["first_live"].update(same_task=False), {"P11"}),
+    (lambda f, r: f["reconnect"]["confirm"].update(same_task=False), {"P11"}),
+    (lambda f, r: f["offline"]["direct_task"].update(same_task=False), {"P5"}),
+    # The partition itself: no live link closed, a link not drained, nothing rejected, a tunnel let through.
+    (lambda f, r: f["partition"].update(closed=0, closed_opened_before_submission=0, live_link_closed=False), {"P3"}),
+    (lambda f, r: f["partition"].update(live_link_closed=False), {"P3"}),
+    (lambda f, r: f["partition"].update(closed_opened_before_submission=0), {"P3"}),
+    (lambda f, r: f["partition"].update(drained=False), {"P3"}),
+    (lambda f, r: f["completed_offline"]["relay"].update(accepted_during_partition=1), {"P6"}),
+    (lambda f, r: f["completed_offline"]["relay"].update(rejected_during_partition=0), {"P6"}),
+    (lambda f, r: f["completed_offline"]["relay"].update(forwarding=True), {"P6"}),
+    (lambda f, r: f["completed_offline"]["relay"].update(active=1), {"P6"}),
+    # The wrong route: the node not behind the relay, or the harness's own clients through it.
+    (lambda f, r: f["route"].update(node_profile_via_relay=False), {"P2"}),
+    (lambda f, r: f["route"].update(hub_client_direct=False), {"P2"}),
+    (lambda f, r: f["route"].update(runtime_client_direct=False), {"P2"}),
+    (lambda f, r: f["route"].update(tunnels_before_submission=0), {"P2"}),
+    # A signalled, crashed or restarted NodeAgent, a replaced service, a replacement profile or another relay.
+    (lambda f, r: f["partition"].update(node_process_running=False), {"P3"}),
+    (lambda f, r: f["partition"]["identities_alive"].update({"B node run": False}), {"P3"}),
+    (lambda f, r: f["offline"]["identities_alive"].update({"B hub serve": False}), {"P5"}),
+    (lambda f, r: f["completed_offline"].update(node_exit_code=-9), {"P7"}),
+    (lambda f, r: f["completed_offline"]["identities_alive"].pop("B runtime supervisor"), {"P7"}),
+    (lambda f, r: f["reopen"].update(node_runs=["B node run", "B node run (restarted)"]), {"P10"}),
+    (lambda f, r: f["reopen"]["identities_alive"].update({"B runtime api": False}), {"P10"}),
+    (lambda f, r: f["reopen"].update(profile_unchanged=False), {"P10"}),
+    (lambda f, r: f["reopen"].update(same_port=False), {"P10"}),
+    (lambda f, r: f["reopen"].update(accepted_after_reopen=0, active=0), {"P10"}),
+    (lambda f, r: f["reconnect"].update(node_devices=2), {"P11"}),
+    (lambda f, r: f["final"]["identities_alive"].update({"B node run": False}), {"P14"}),
+    # Early completion, release before the offline report, duplicate start, extra submission or any cancel.
+    (lambda f, r: f["offline"]["direct_task"].update(state="succeeded"), {"P5"}),
+    (lambda f, r: f["completed_offline"].update(released_after_offline_observed=False), {"P7"}),
+    (lambda f, r: f["completed_offline"]["execution"].update(start_markers=2), {"P8"}),
+    (lambda f, r: f["final"].update(tasks_in_workspace=2), {"P14"}),
+    (lambda f, r: r.append({"operation": "task.submit"}), {"P15"}),
+    (lambda f, r: r.append({"operation": "task.cancel"}), {"P15"}),
+    (lambda f, r: f["final"].update(direct_state="cancelled", cancel_requested=True), {"P14"}),
+])
+def test_partition_offline_timeout_stale_data_wrong_task_or_restarted_node_fails(change, broken):
+    module = harness()
+    facts, requests = passing_partition_facts(module), copy.deepcopy(COMPLETION_REQUESTS)
+    change(facts, requests)
+    assert partition_failing(module, facts, requests) == broken
+
+
+def test_the_completion_checks_keep_their_ids_and_texts_when_reused():
+    """The offline-completion scenario's C1-C12 (pinned literal texts below) stay as they were; the partition reuses
+    their predicates by ID under its own P names."""
+    module = harness()
+    facts = passing_completion_facts(module)
+    ids = [item["id"] for item in module.completion_assertions(facts, COMPLETION_REQUESTS)]
+    assert [name.split()[0] for name in ids] == [f"C{i}" for i in range(1, 13)]
+    assert ids[0] == ("C1 one submission; the program printed its ready line and runs unreleased with one start "
+                      "marker")
+    assert ids[11] == ("C12 one workspace creation and one submission; no Hub action after the submission and no "
+                       "cancel")
+    assert not any(name.startswith("P") for name in ids)
+    assert [name for name, _ in module.completion_checks(facts, COMPLETION_REQUESTS)] == \
+        [item["id"] for item in module.completion_assertions(facts, COMPLETION_REQUESTS)]
+    assert module.PLAYS["cancel"] == (module.scenario, module.assertions, module.manifest)
+
+
+def echo_server():
+    """A loopback echo server standing in for the Hub; it counts the connections it accepted."""
+    import socketserver
+    import threading
+
+    class Echo(socketserver.BaseRequestHandler):
+        def handle(self):
+            self.server.accepted += 1
+            while data := self.request.recv(4096):
+                self.request.sendall(data)
+
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Echo)
+    server.daemon_threads, server.accepted = True, 0
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+    return server
+
+
+def closed_by_peer(sock, timeout=5):
+    """True when the peer closed the connection (EOF or reset) before the timeout, with no data forwarded."""
+    import socket
+    sock.settimeout(timeout)
+    try:
+        return sock.recv(4096) == b""
+    except (ConnectionResetError, BrokenPipeError):
+        return True
+    except socket.timeout:
+        return False
+
+
+def test_the_relay_closes_the_live_tunnel_rejects_new_ones_and_reopens_on_the_same_port():
+    import socket
+    relay_module = harness().load_partition()
+    upstream = echo_server()
+    relay = relay_module.Relay(upstream.server_address[1])
+    try:
+        assert relay.server_address[0] == "127.0.0.1" and relay.url == f"http://127.0.0.1:{relay.port}"
+        live = socket.create_connection(("127.0.0.1", relay.port), timeout=5)
+        live.sendall(b"ping")
+        assert live.recv(4) == b"ping"  # echoed through the tunnel
+        submitted_at = time.monotonic()
+        live.sendall(b"beat")  # node traffic after the submission
+        assert live.recv(4) == b"beat"
+        cut = relay.cut(submitted_at)
+        assert cut["closed"] == 1 and cut["closed_opened_before_submission"] == 1
+        assert cut["live_link_closed"] is True and cut["drained"] is True
+        assert closed_by_peer(live)
+        live.close()
+
+        accepted = upstream.accepted
+        refused = socket.create_connection(("127.0.0.1", relay.port), timeout=5)
+        try:
+            refused.sendall(b"lost")
+        except OSError:
+            pass
+        assert closed_by_peer(refused)
+        refused.close()
+        stats = relay.stats()
+        assert stats["rejected"] == 1 and stats["accepted"] == 1 and stats["active"] == 0
+        assert upstream.accepted == accepted  # nothing reached the Hub side during the partition
+
+        assert relay.reopen() == {"same_port": True, "listening": True}
+        again = socket.create_connection(("127.0.0.1", relay.port), timeout=5)
+        again.sendall(b"back")
+        assert again.recv(4) == b"back"
+        assert relay.stats()["accepted"] == 2 and relay.stats()["port"] == relay.port
+        again.close()
+    finally:
+        assert relay.close() is True
+        upstream.shutdown()
+        upstream.server_close()
+
+
+def test_a_tunnel_opened_after_the_submission_or_idle_since_is_not_the_live_link():
+    import socket
+    relay_module = harness().load_partition()
+    upstream = echo_server()
+    relay = relay_module.Relay(upstream.server_address[1])
+    try:
+        idle = socket.create_connection(("127.0.0.1", relay.port), timeout=5)
+        idle.sendall(b"once")
+        assert idle.recv(4) == b"once"
+        submitted_at = time.monotonic()  # the old tunnel carries nothing after this
+        late = socket.create_connection(("127.0.0.1", relay.port), timeout=5)
+        late.sendall(b"late")
+        assert late.recv(4) == b"late"
+        cut = relay.cut(submitted_at)
+        assert cut["closed"] == 2 and cut["closed_opened_before_submission"] == 1
+        assert cut["live_link_closed"] is False
+        idle.close()
+        late.close()
+    finally:
+        assert relay.close() is True
+        upstream.shutdown()
+        upstream.server_close()
+
+
+class OwnedStub:
+    """Only the cleanup record of an owned run."""
+    def __init__(self):
+        self.resources = {"processes": [], "directories": [], "cleanup": []}
+
+
+def refused_now(port):
+    import socket
+    try:
+        probe = socket.create_connection(("127.0.0.1", port), timeout=2)
+    except OSError:
+        return True
+    probe.close()
+    return False
+
+
+@pytest.mark.parametrize("after_cut", [False, True])
+def test_a_failed_partition_run_still_closes_its_relay(monkeypatch, after_cut):
+    """An error after the relay exists (before, or in the middle of, the partition) propagates to run()'s error
+    export, and the relay is closed and recorded as stopped before the usual cleanup."""
+    module = harness()
+    upstream = echo_server()
+    seen = []
+
+    def failing_play(owned, env, facts, log, clients, route, relays):
+        route(upstream.server_address[1])
+        seen.append(relays[0].port)
+        if after_cut:
+            relays[0].cut()
+        raise module.off.HarnessError("manufactured failure")
+
+    monkeypatch.setattr(module, "play_partition", failing_play)
+    owned = OwnedStub()
+    try:
+        with pytest.raises(module.off.HarnessError):
+            module.scenario_partition(owned, {}, {}, [], [])
+        assert owned.resources["cleanup"] == [{"label": "B socket relay", "stopped": True}]
+        assert refused_now(seen[0])
+        assert module.off.cleanup_status({**owned.resources, "leftover_pids_after_cleanup": [],
+                                          "removed_work_dir": True}, keep=False)
+    finally:
+        upstream.shutdown()
+        upstream.server_close()
+
+@pytest.mark.parametrize("operation", ["cut", "close"])
+def test_a_pending_upstream_connect_cannot_count_as_drained_or_survive_reopen(monkeypatch, operation):
+    import socket
+    import threading
+
+    relay_module = harness().load_partition()
+    upstream = echo_server()
+    relay = relay_module.Relay(upstream.server_address[1])
+    entered, release = threading.Event(), threading.Event()
+    connect = socket.create_connection
+
+    def gated_connect(address, *args, **kwargs):
+        if address == relay.upstream:
+            entered.set()
+            assert release.wait(5)
+        return connect(address, *args, **kwargs)
+
+    monkeypatch.setattr(relay_module, "DRAIN_WAIT", 0.1)
+    monkeypatch.setattr(relay_module.socket, "create_connection", gated_connect)
+    try:
+        with connect(relay.server_address, timeout=2) as pending:
+            assert entered.wait(2)
+            if operation == "cut":
+                drained = relay.cut()["drained"]
+                assert relay.reopen()["listening"] is True
+            else:
+                drained = relay.close()
+            assert drained is False
+            release.set()
+            assert closed_by_peer(pending, timeout=2)
+            deadline = time.monotonic() + 2
+            while True:
+                with relay.lock:
+                    if not relay.requests:
+                        break
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+            assert relay.stats()["accepted"] == 0
+    finally:
+        release.set()
+        monkeypatch.setattr(relay_module, "DRAIN_WAIT", 5)
+        assert relay.close() is True
+        upstream.shutdown()
+        upstream.server_close()
+
+
+def test_a_failed_partition_receipt_does_not_claim_verification(tmp_path, monkeypatch):
+    module = harness()
+
+    def fail(*_args):
+        raise module.off.HarnessError("synthetic early failure")
+
+    monkeypatch.setitem(module.PLAYS, "socket-partition", (fail, module.partition_assertions, module.partition_manifest))
+    monkeypatch.setattr(module.off, "module_origins", lambda *_args: {"consistent": True})
+    evidence = tmp_path / "evidence"
+    ok, error, _ = module.run(evidence, tmp_path, mode="source", scenario_name="socket-partition")
+    assert not ok and error == {"kind": "error", "message": "synthetic early failure"}
+    manifest = json.loads((evidence / "run-manifest.json").read_text())
+    assert manifest["ok"] is False and manifest["verified"] == []

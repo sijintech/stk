@@ -282,9 +282,13 @@ def stop_runtime(owned, state, env, label):
         owned.resources["cleanup"].append({"label": f"{label} runtime", "stopped": False, "error": type(exc).__name__})
 
 
-def start_hub(owned, base, env, runtime_state, extra_templates=None):
+def start_hub(owned, base, env, runtime_state, extra_templates=None, node_route=None):
     """``extra_templates`` (optional) registers further exact templates of a caller's own scenario in this Hub
-    only; ``TEMPLATES`` itself is never changed, and without it the template file is exactly ``TEMPLATES``."""
+    only; ``TEMPLATES`` itself is never changed, and without it the template file is exactly ``TEMPLATES``.
+
+    ``node_route`` (optional) is called with the Hub's port once it listens and returns the loopback control URL
+    the NodeAgent is paired with, and so runs through (a caller's own relay). The returned client always talks to
+    the Hub directly; without it the NodeAgent is paired with the Hub's own URL, as before."""
     if set(extra_templates or ()) & set(TEMPLATES):
         raise HarnessError("an extra template may not replace one of the fixed parity templates")
     from suan.desktop_bridge.hub import HubClient
@@ -303,7 +307,8 @@ def start_hub(owned, base, env, runtime_state, extra_templates=None):
     url = f"http://127.0.0.1:{port}"
     code = json.loads(owned.run("B pair node", control + ["pair", "--state-dir", str(control_state), "--role", "node"],
                                 env))["code"]
-    owned.run("B node pair", node + ["pair", "--control-url", url, "--name", "parity-node", "--runtime-state-dir",
+    node_url = url if node_route is None else node_route(port)
+    owned.run("B node pair", node + ["pair", "--control-url", node_url, "--name", "parity-node", "--runtime-state-dir",
                                      str(runtime_state), "--state-dir", str(node_state)], env, stdin=code + "\n")
     owned.spawn("B node run", node + ["run", "--state-dir", str(node_state)], env, base / "node.log")
     code = json.loads(owned.run("B pair client", control + ["pair", "--state-dir", str(control_state), "--role",
