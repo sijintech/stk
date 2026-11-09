@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from click.testing import CliRunner
 import pytest
 
+from conftest import finish
 from mupro_fake import make_fake_mpiexec, make_fake_sdk, make_fake_srun, write_case, write_outputs
 from suan.mupro import cli as mupro_cli
 from suan.mupro import run as mupro_run
@@ -29,8 +30,9 @@ NODE_ENV = ("STK_MUPRO_ENV_SCRIPTS", "MUPRO_SDK_PREFIX", "MUPROROOT", "STK_MUPRO
 
 
 class FakeClient:
-    def __init__(self, resources=("ranks", "threads_per_rank"), report=None):
+    def __init__(self, resources=("ranks", "threads_per_rank"), report=None, task_state="succeeded"):
         self.resources, self.report = resources, report
+        self.task_state = task_state
         self.uploads, self.submitted = [], []
 
     def health(self):
@@ -49,6 +51,9 @@ class FakeClient:
 
     def wait(self, task_id, timeout):
         return {"id": task_id, "state": "failed"}
+
+    def task(self, task_id):
+        return {"id": task_id, "state": self.task_state}
 
     def download(self, task_id, remote_path, destination):
         Path(destination).write_text(json.dumps(self.report), encoding="utf-8")
@@ -272,6 +277,37 @@ def test_result_exits_by_verification_status(tmp_path, monkeypatch):
     report = {"state": "failed", "verification": {"status": "not_run"}}
     result = invoke(FakeClient(report=report), monkeypatch, ["result", "c" * 32])
     assert result.exit_code == 3 and '"not_run"' in result.output
+
+
+def test_result_keeps_passed_report_for_a_cancelled_task(tmp_path, monkeypatch):
+    report = {"state": "succeeded", "verification": {"status": "passed"}}
+    kept = tmp_path / "kept.json"
+    client = FakeClient(report=report, task_state="cancelled")
+    result = invoke(client, monkeypatch, ["result", "c" * 32, "--output", str(kept)])
+    assert result.exit_code == 3 and json.loads(result.output) == report
+    assert json.loads(kept.read_text(encoding="utf-8")) == report
+
+
+@pytest.mark.server
+def test_result_exits_nonzero_after_runtime_rejects_an_output_of_a_verified_run(runtime, tmp_path, monkeypatch):
+    client, supervisor, server, _ = runtime
+    for name in NODE_ENV:
+        monkeypatch.delenv(name, raising=False)
+    sdk = make_fake_sdk(tmp_path / "synthetic-sdk")
+    workspace = client.create_workspace("MuFerro result fixture")["id"]
+    spec = muferro_spec(workspace, example=True, sdk_prefix=str(sdk), launcher="none")
+    spec["outputs"].append("missing-output.dat")
+    task_id = client.submit(spec)["id"]
+    task = finish(client, supervisor, task_id)
+    assert task["state"] == "failed" and "missing-output.dat" in task["reason"]
+    report_path = server.service.task_dir(task_id) / "work" / "stk-mupro.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["state"] == "succeeded" and report["verification"]["status"] == "passed"
+
+    kept = tmp_path / "kept.json"
+    result = invoke(client, monkeypatch, ["result", task_id, "--output", str(kept)])
+    assert result.exit_code == 3 and json.loads(result.output) == report
+    assert kept.read_bytes() == report_path.read_bytes()
 
 
 def test_verify_classifies_outputs(tmp_path):

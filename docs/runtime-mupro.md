@@ -103,7 +103,7 @@ suan mupro verify ./work --case-dir case16
   `resources` 含 `ranks`、`threads_per_rank` 以及给出的 `nodes`、`walltime_seconds`、
   `memory_mb`、`queue`、`account`。Python 客户端可用 `suan.mupro.muferro_spec(...)` 生成。
 - `suan mupro result TASK_ID` 下载并打印已结束任务的 `stk-mupro.json`，`--output` 另存；
-  校验通过时退出码 0，否则 3。Runtime 在任务结束后才列出结果文件。
+  Runtime 任务成功且报告校验通过时退出码 0，否则 3。Runtime 在任务结束后才列出结果文件。
 - `suan mupro verify RUN_DIR [--case-dir REL]` 只做本地校验，退出码同上。
 
 ## 计算节点命令

@@ -123,13 +123,14 @@ def submit(profile, state_dir, workspace_id, input_dir, case_dir, example, remot
 @click.argument("task_id")
 @click.option("--output", type=click.Path(dir_okay=False, path_type=Path), help="Keep stk-mupro.json here.")
 def result(profile, state_dir, task_id, output):
-    """Print a finished task's stk-mupro.json; exit 0 only if verification passed."""
+    """Print a finished task's stk-mupro.json; exit 0 for a verified, successful Runtime task."""
     client = get_client(profile, state_dir)
     with tempfile.TemporaryDirectory() as folder:
         path = client.download(task_id, "stk-mupro.json", output or Path(folder) / "stk-mupro.json")
         report = json.loads(Path(path).read_text(encoding="utf-8"))
     dump(report)
-    if report.get("verification", {}).get("status") != "passed":
+    if (report.get("verification", {}).get("status") != "passed"
+            or client.task(task_id).get("state") != "succeeded"):
         raise click.exceptions.Exit(3)
 
 
