@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · 冻结连接和传输恢复
+
+MuFerro 已接入冻结端点检查，覆盖产物列表、下载启动及按日志恢复的后端。Claude37 补冷重启后恢复原连接的完整成功路径。Cocoa 静默对照仍在当前 Desktop 队列，Windows 联接点已通过独立客户端矩阵。 [执行器试点](design/mupro-executor-pilot.md) [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 已收集产物和冻结连接
 
 MuFerro 项目收集及 Viewer 打开前校验已收集清单，保留普通备注。两处桌面连接切换已用内存后端复现，Claude36 设计按已冻结身份检查实际产物后端和传输重试。D1 F9 已补真实线路。两种 Windows Python 的真实目录联接点已通过，Cocoa 静默对照仍待 `bc25f579` Desktop。 [验收记录](runtime-validation.md) [CP-0 矩阵](design/cloud-project-service.md)

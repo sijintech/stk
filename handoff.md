@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · MuFerro 收集绑定冻结连接
+
+本地 `5821e025` 采纳 Claude36 `1150229f` 的可选端点前置条件。MuFerro 产物查询和下载使用保存的连接身份及节点。两个连接切换反例均在替换后端 I/O 前返回冲突。已有同键传输使用日志中的身份，冷重启后的工作线程继续核对。
+
+Linux 桥与传输联合 99 项，MuFerro 和智能体联合 54 项通过。隔离 wheel 桥 51 项和 MuFerro 定向通过，Linux C++ schema 七项通过。Claude37 在独立 worktree 接手恢复原连接后用同一传输 ID 完成下载的冷重启验收。
+
+远端 `bc25f579` Runtime 全过，Desktop 的 Linux 三项已过。Windows CPU 和 macOS 仍在执行，Cocoa 静默对照在 macOS 待运行队列。本地批次待整轮终态。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · 已收集帧、F9 与 Windows 联接点
 
 远端 `bc25f579` Runtime 13 项通过。Windows Python 3.11/3.12 都执行并通过 CLI 和项目导入的真实目录联接点用例。Desktop 尚在运行，本地批次待整轮终态。 [验收记录](docs/runtime-validation.md)

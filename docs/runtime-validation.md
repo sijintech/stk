@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · MuFerro 收集端点前置条件
+
+`5821e025c5f28ff89eb984c8aa0b5a71f9e5bf00` 采用 Claude36 `1150229f0de21df4ce302a980ed5c96f74eeb9ae` 方案，在 `task.artifacts` 与 `download.start` 增加可选 `expected_connection_identity`。MuFerro 使用冻结计划的身份和节点。两项旧代码反例分别在刷新后、产物列表后观察到替换后端调用，修复后均返回 `conflict`，替换后端无产物调用且无新传输日志。默认缓存目录保留私有权限，匹配日志可返回原传输，身份缺失或不符时拒绝带前置条件的重放。冷重启在错配后端上恢复时拒绝传输。
+
+最终 Linux 源码桥、传输与脚本联合 99 项通过，MuFerro 和智能体联合 54 项通过，1 项为真实许可条件跳过。隔离 wheel 桥 51 项和 MuFerro 真实合成 Runtime 定向一项通过。Linux 重编原生嵌入 schema，七项 schema 测试通过。结构对照确认发布 schema 只增加上述两个可选参数及共同格式。证据在本机 `root-delivery-20261109-74`。 [桥接契约](specs/stk-desktop-bridge-v1.md) [试点接线](design/mupro-executor-pilot.md)
+
+远端 `bc25f579` Runtime 13 项和 Desktop Linux 三项已通过。Windows CPU 与 macOS 尚运行，Cocoa 静默隐藏对照仍待本轮执行。本地批次待 Desktop 整轮终态。 [Desktop](https://github.com/sijintech/stk/actions/runs/42584441296)
+
 ## 2026-11-09 UTC · 已收集 MuFerro 结果、F9 与 Windows 联接点
 
 `6cae6312daa20df12a2aacd893278a146bc764cd` 在 MuFerro 项目收集及调用 Viewer 前拒绝未登记的原生产物。保留原文件字节，仅新增合成 `Polar.00000099.dat` 时，通用目录读取的最新 Polar 从第 2 步变为第 99 步。旧项目收集与查看分别接受这一反例。修复后两入口拒绝新增帧、HDF5 和能改变自动案例目录的启动器报告，普通备注及移除额外文件后的查看仍通过，拒绝时项目修订保持。Linux 源码 32 项通过，1 项真实许可条件跳过。隔离 wheel 定向通过。范围为稳定本地文件与 Viewer 打开前的工作流检查。 [项目工作流](simulation-muferro.md)
