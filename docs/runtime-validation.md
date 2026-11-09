@@ -1,5 +1,17 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 13:01 UTC · 直读、监控、Hub 回环及 Desktop 终态
+
+`8a50e343240edd8fa07780a9286b0620ff323f67` 把 MuFerro DAT 帧和统计绑定到同一份私有快照。旧版本本机同时间戳和长度改写、Runtime 暖缓存改写、统计旧键污染三个反例均复现。新版本来源摘要跟随实际解析字节，自定义远程摘要不符和无效路径继续为 `invalid_data`。源码 256 过 2 条件跳过，隔离 wheel 242 过 1 条件跳过。证据 `root-delivery-20261109-88/dat-source-final.xml` 与 `dat-wheel/installed-final.xml`。
+
+干净 Python 3.11 的 `a656f879` 全量含 Peer 依赖，6430 过、1 败、180 跳过、4 排除，1190.59 秒。失败是 root 早先的 MuFerro 安全打开改动让标准库监控模块加载连接器。`d49f668535c9e8008bf9bd3f218ed445db100927` 只在 MuFerro 调用端注入安全打开，通用 tail 保留非阻塞 FIFO 处理。源码与隔离 wheel 各 114 过 2 跳过，安装态独立导入也核对了 `sys.modules`。同头的新全量已在独立环境启动。证据 `root-delivery-20261109-87/runtime-full311/result.xml`、`root-delivery-20261109-88/monitor-import-green-final.xml`、`monitor-wheel/installed.xml` 和 `runtime-full311/`。
+
+`7132755f` 集成 Claude45 对节点能力、实际执行与授权的区分。`c8618a4f0823addff5d577a403b6bad7f233b2c5` 把 Claude46 的 `b64da145` 证据合入既有本机 Hub、Node、Runtime 用例，目标重复 3/3，Hub 与 Desktop 桥联跑 57/57。真实断线时，列表保留最近心跳与读取能力，精确读取返回 Hub 503。测试仅模拟心跳老化，之后列表离线但保留快照，精确读取返回本地离线错误。真实重连后，同一节点刷新心跳并恢复原任务精确读取。观察期间原任务、动作行和动作事件相同。独立复核在原 Claude 候选移除本地离线门后得到预期失败。证据 `root-delivery-20261109-88/claude46-root-bridges.xml`、`claude46-root-repeat-*.xml` 和 `claude46-independent/`。
+
+`ab86c2eebb1567c2dcacdd9d645d7faf871ca09d` Desktop 于 12:59:20Z 终态失败。三个 Linux 作业通过，主测试 2134/2134。Windows CPU 1460/1460，1179 项必需，932.58 秒。Windows 原生 6/6，1349.93 秒。PDF 20 轮、160 张图像，无捕获失败或遗弃会话，最长捕获启动 101 毫秒。该轮早于下一批的 Windows 分步探针，上一轮间歇卡顿的具体阶段仍待复现。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42611844039) [Windows 原生证据](https://github.com/sijintech/stk/actions/runs/42611844039/artifacts/13677191513)
+
+同头 macOS CPU 1518/1518，Metal 254/254，原生基线 4/6，视频和 HTML 暂停未通过。两组可见对照各 2/2，第二次可见暂停分别在 38.76、45.38 毫秒取得原生暂停状态，并完成可见保持及后续 DOM 观察。三组隐藏对照各 0/2，quiet HTML 在隐藏前的初始显式暂停即失败。两个独立隐藏脚本返回 DOM paused，原生仍分别回复 30/30 与 28/28 次 Playing，触发看门狗。`e1cf1d47cc3b2cfd492afb1b41ead94ad21bd963` 补同会话的媒体代次、焦点、真实可见性和原生回复轨迹，Linux 原生窗口构建通过，证据门 12 项及 7 子测通过，Apple 条件分支语法和合成观察检查通过。Cocoa SDK 编译和原生轨迹待目标 CI。 [macOS 原生证据](https://github.com/sijintech/stk/actions/runs/42611844039/artifacts/13674470811)
+
 ## 2026-11-09 12:31 UTC · S2c 实窗审批、产物核验和最小安装
 
 独立 `66b8eb58` 的 S2c 原生联合验收通过三次。固定起点为英语 X11/Xvfb 1280×1600、缩放 1、软件 OpenGL、a2 智能体区域最大化，已选原待批准卡片、Prepare 关闭。XTest 实际点击两次，先在 `(640,693)` 读取完整计划，再在 `(396,1023)` 批准。复核展示 3608 字节，按界面换行显示 128 行，审批前 Runtime 保持零任务。严格 Python stdio 桥与独立 JSON Schema 校验各通过一次 `run_plan` 和一次 `run_decide`。真实回环 Runtime 完成一个合成 MuFerro 任务，绑定原计划摘要与原案例行，在第一次尝试完成工作流，卡片进入原回执 Observe。批准后没有额外规划或直接任务写调用。Viewer、布局和会话选择一致，跟踪进程已回收。早期两次外部适配分别纠正 X11 坐标和产物回执字段，随后三次通过。证据 `root-delivery-20261109-87/s2c-native-receipt/evidence/run-05/receipt.json` 与三张截图。平台范围为 Linux 软件 OpenGL，使用脚本规划器和合成求解器。

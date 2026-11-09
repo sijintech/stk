@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 13:01 UTC · MuFerro 字节绑定与目标平台回执
+
+本批 `8a50e343` 修复 DAT 直读和统计摘要错配，源码 256 项、隔离 wheel 242 项通过。`d49f6685` 修复 Python 3.11 全量发现的独立监控导入回归，源码与 wheel 各 114 项通过。原全量 6430 过、1 败、180 跳过、4 排除，修复后的新一轮全量已启动。`7132755f` 集成 Claude45 的节点能力方案，`c8618a4f` 集成 Claude46 的真实断线及心跳老化验证。Claude47 在独立 worktree 核查 `graph.meta` 观察的实际传递边界。
+
+远端 `ab86c2ee` Desktop 已于 12:59:20Z 终态。三个 Linux、Windows CPU 和 Windows 原生通过，macOS 原生失败。Windows 原生 6/6，PDF 重准备 20 轮、160 图像。macOS 两组匹配的可见暂停对照通过，隐藏路径仍有连续 Playing 回执。本地 `e1cf1d47` 增加同会话 Cocoa 焦点与可见性探针，目标系统验收留到新 CI。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 12:31 UTC · S2c 原生审批与 MuFerro 读取边界
 
 本地 `7daf672f` 要求 MuFerro 核验及末次监控只消费普通结果文件。源码 135 项通过，隔离 wheel 112 项通过。`a656f879` 集成 Claude44 的 NumPy 缺失诊断，root 保留缺绑定错误优先级。源码 175 项和三种独立安装对照通过。Claude45 在独立 worktree 比较节点能力声明方案。

@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 13:01 UTC · DAT、Cocoa、监控导入及 Hub 回环
+
+root 提交 `8a50e343`、`e1cf1d47`、`d49f6685`。三个提交分别绑定直读实际字节、补 Cocoa 隐藏暂停探针、恢复独立监控导入。root 以 `7132755f` 集成 Claude45 的 `2563468d`，以 `c8618a4f` 将 Claude46 的 `b64da145` 改为扩充现有回环测试。Claude47 接手现有 `graph.meta` 观察证据。前一轮 Desktop 已终态且结果入档，本批满足推送等待条件。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 12:31 UTC · MuFerro 输出和原生审批证据
 
 root 以 `7daf672f` 修复链接产物误判和管道阻塞，并以 `a656f879` 集成 Claude44 的 `e0498ee0`，保留图绑定错误和轻量结果描述。S2c 的隔离 Linux 实窗联合验收三次通过。Claude45 接节点能力设计。完整 Desktop 仍运行，后续本地批次待推。 [验收记录](runtime-validation.md)
