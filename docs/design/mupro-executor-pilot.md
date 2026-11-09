@@ -4,6 +4,10 @@
 数据格式由插件定义，MuPRO 使用 HDF5；同意扩展 S2c 智能体 prepare/run 权限。
 这些是当前开发方向的决定，下面区分实施切片、既有合同和仍未验证的部分。
 
+2026-11-09 按 main `7cf0462b` 校订：已收集结果的原生 HDF5 场与步选择（H1）已发布，见
+[已发布的原生 HDF5 场与步选择](#已发布的原生-hdf5-场与步选择h1)。较早的本地探针保留为历史记录，
+所有者决定不变。
+
 ## 已决定的范围
 
 - 先打通软件发现/能力预检、冻结输入、显式执行、日志与产物核验、按原任务恢复，再扩展跨端入口。
@@ -14,6 +18,8 @@
 - 分工由 root 总负责；Claude 在独立 worktree 实现分配的文档及模块。D1 兼容门清单已经 root 审阅修正后合入 main；
   单主机任务/故障子集已验证，D1 完整退出仍未完成。HDF5 读取模块已修正审查问题，由 root 在 main `56f51af7` 接为显式 FileSource/图数据源，
   [读取契约](../specs/mupro-hdf5-1.md)已发布。main `89e40c89` 增加有界元数据发现、限定字段句柄和同一已成功任务的 HDF5 附加产物收集；
+  `395e78fd` 让显式字段源按登记摘要约束容器，`c3061e78` 发布单容器元数据节点，`9e22e6ed` 提供已验证载荷的延后接纳，
+  `49140b04` 在仿真面板接入列出、明确选择和打开，`0b9b1c90` 增加只读的查找重试，`fa2ef209`、`9ac67dde` 固定其原生请求与回执回归。
   HDF5-only 完成验证与真实执行验收仍待后续增量。有限 S2c 已按[首次批准契约](../specs/agent-muferro-run-1.md)接入：仅桌面明确直连/SSH目标、本地冻结与人工首次批准；不是模型自动执行。
 
 ## 当前可复用的实现与缺口
@@ -21,8 +27,9 @@
 | 入口 | 当前事实 | 试点需要的增量 |
 |---|---|---|
 | [`suan/mupro/spec.py`](../../suan/mupro/spec.py)、[`run.py`](../../suan/mupro/run.py) | 已有结构化 TaskSpec、Linux/MPI 启动、程序解析与完整输出核验；许可只配置目录 | 定向预检实际引擎/依赖/许可配置及可运行算例，记录真实启动/退出与失败，不读取许可正文 |
-| [`suan/workflows/muferro.py`](../../suan/workflows/muferro.py) | 既有执行链已补同任务 `case/run.h5` 的摘要、冻结网格及跨步类型核验和登记 | 收集仍要求旧 DAT 完成验证；继续真实软件与 HDF5-only 输出验收，不另建调度器 |
+| [`suan/workflows/muferro.py`](../../suan/workflows/muferro.py) | 既有执行链已补同任务 `case/run.h5` 的摘要、冻结网格及跨步类型核验和登记，结果行记录其 SHA-256 | 收集仍要求旧 DAT 完成验证；继续真实软件与 HDF5-only 输出验收，不另建调度器 |
 | [`suan/connectors/mupro/`](../../suan/connectors/mupro/) | 0.2.0 已发现 `run.h5` 并以 `hdf5:<field>` 打开；DAT/表格保持，HDF5 错误有单独诊断 | 合成/CLI 软件验证不代真实 HDF5 输出、完成证据或目标 OS，不能称整个执行器已完成 |
+| [`muferro_hdf5_view.cc`](../../desktop/engine/lib/stk_app/src/muferro_hdf5_view.cc)、[图节点](../specs/stk-graph-v1.md) | 已发布 `stk.source.mupro_hdf5_fields@1` 列出场与步号；面板以固定 `results/muferro/<run_id>/case/run.h5` 和登记摘要列出、明确选择并打开一帧。DAT 的查看已收集结果不变 | 仅 Linux 合成验收；真实许可输出、macOS/Windows 面板和 Viewer 内步滑块未验证或未实施 |
 | [数据格式 v1 §10](../specs/stk-data-format-v1.md) | 已写明 MuPRO `run.h5:/tNNNNNNNN/<name>` 数组为 `(nx,ny,nz,nc)`，读入需转成 `(nz,ny,nx,nc)` | 按现有轴序做独立适配；组/字段/步号、类型、几何、单位和限制在插件合同中明示，不猜物理量或六分量张量顺序 |
 | [`suan/agent/levels.py`](../../suan/agent/levels.py)、[`tools.py`](../../suan/agent/tools.py) | 已有有限prepare_muferro_run工具与桌面完整计划/单次首次批准；旧会话工具集合不增权，submit_run不进Agent | 真实MuPRO和目标平台验证仍缺；不支持Hub准备，不以本机身份标签充当认证，丢回执仅观察原身份 |
 
@@ -43,6 +50,9 @@
    工具执行来源由服务核定，不能信任模型给出的权限、路径或状态；取消意图与实际停止分开留证。
 6. **跨端与交付**：Web/CLI/Desktop 读取同一任务与产物；固定布局和实际点击验收保护 Viewer/草稿。
    目标 OS、真实许可/GPU、故障恢复及科学参考分别验收，来源与结果记入运行验收。
+
+截至 `7cf0462b`，第 2、3 步的合成读取与收集接入已发布；第 6 步只完成了桌面已收集结果的 Linux 合成点击验收，
+见[已发布的原生 HDF5 场与步选择](#已发布的原生-hdf5-场与步选择h1)。第 4 步的真实执行链仍缺授权软件与算例。
 
 ## 收集时核对冻结的 Runtime 端点
 
@@ -117,7 +127,11 @@ Claude 以 `a656f879` 为基线核对执行器和读取器入口。下文比较�
 
 合成结果来自节点代理子进程和进程内 TestClient。定向 23 项通过，证据为 `root-delivery-20261109-88/claude47/evidence/graph_meta_receipt.json` 和 `pytest_targeted.txt`。实际旧部署、支持 VTK 的渲染节点、真实 MuPRO 节点以及新客户端兼容仍待核验。 [图测试](../../tests/test_control_graph.py)
 
-## 收集结果的 HDF5 场显式查看（核查，基线 `7ac983e8`）
+## 收集结果的 HDF5 场显式查看（历史核查，基线 `7ac983e8`）
+
+本节是 H1 之前的本地探针记录，保留原观察以便追溯。其中“缺少原生入口”的结论已由
+`c3061e78` 与 `49140b04` 解决，当前行为以[已发布的原生 HDF5 场与步选择](#已发布的原生-hdf5-场与步选择h1)
+和已发布契约为准。
 
 本节核对已收集运行的 `case/run.h5` 经 `mupro_hdf5@1` 显式查看的入口。完成核验和默认 View 沿用 DAT 契约。下文的选择器用于合成验证，真实求解器输出、许可和研究步号需要独立依据。
 
@@ -140,21 +154,95 @@ Claude 以 `a656f879` 为基线核对执行器和读取器入口。下文比较�
 | 已保存分析的数据绑定 | 把 `scalar-volume` 的 `src` 换成 `mupro_hdf5@1`，并把 `selector` 声明为字符串参数，校验通过。快照冻结的 `run.h5` SHA 等于登记值。真实 GraphWorker 生成了与第 0 分量转置一致的载荷 | 可经现有分析编辑器打开载荷。选择器写在分析参数里，换步需要新的分析运行。分析输入上限 256 MiB，低于 HDF5 源的 1 GiB |
 | 专用显式预设 | 可用新增预设或从现有图派生。打开目录和 `ui.viewer.open(path, preset, parameters)` 沿用现有协议 | 由调用方从收集观测传入选择器和摘要。当前节点的字符串参数只回显选择，步滑块需要独立的步号选择逻辑 |
 
-已有的可用路径是已保存分析。此探针用 `prepared` 夹具登记一份同字节副本，然后经现有 `files.index` 和快照冻结。实际收集记录的摘要交接另由 Runtime 合成回环覆盖。 [分析运行](../../suan/project/analysis_runs.py) [分析执行](../../suan/desktop_bridge/analysis_runs.py)
+基线时已有的可用路径是已保存分析。此探针用 `prepared` 夹具登记一份同字节副本，然后经现有 `files.index` 和快照冻结。实际收集记录的摘要交接另由 Runtime 合成回环覆盖。 [分析运行](../../suan/project/analysis_runs.py) [分析执行](../../suan/desktop_bridge/analysis_runs.py)
 
-### 缺口与检查
+### 当时的缺口与检查
 
-交互选择步或场需要显式的选择器选项，或新增从运行索引到 HDF5 选择器的节点。现有节点仅报告字符串值，运行索引的 `frames` 表和 `muferro_frame@1` 仍按 DAT 契约工作。 [图契约](../specs/stk-graph-v1.md)
+探针当时的结论是：交互选择步或场需要显式的选择器选项，或新增从已登记容器到 HDF5 选择器的节点。
+这一缺口已由 `stk.source.mupro_hdf5_fields@1` 和仿真面板的列出、选择、打开解决，没有改变运行索引的
+`frames` 表和 `muferro_frame@1`，二者仍按 DAT 契约工作。Viewer 内拖动 HDF5 步号仍未实施。 [图契约](../specs/stk-graph-v1.md)
 
 外部探针 `probe_collected_hdf5_view.py` 生成 `receipt.json` 和 `probe_stdout.txt`。定向测试包括 `test_mupro_hdf5_source`、`test_mupro_hdf5_results`、`test_mupro_hdf5_collection`、`test_muferro_collected_view`、`test_graph_presets` 及 `test_analysis_run_executor` 的真实载荷用例，结果 73 项通过，1 项跳过（需 `STK_PERF=1` 的性能基准）。
-证据位于 `root-delivery-20261109-91/claude50/evidence/`。原生桌面中分析载荷的点击验收、Hub/Runtime 绑定的分析运行、真实求解器 HDF5 输出和许可证据仍未核验。
+证据位于 `root-delivery-20261109-91/claude50/evidence/`。这些是 H1 之前基线的结果，不是当前面板的验收。
+已收集结果的原生点击验收见下节；Hub/Runtime 绑定的分析运行、真实求解器 HDF5 输出和许可证据仍未核验。
+
+## 已发布的原生 HDF5 场与步选择（H1）
+
+本节按 main `7cf0462b` 的已发布契约、用户指南和运行验收整理。设计依据见
+[HDF5 场与步选择设计核查](mupro-hdf5-result-selection.md)。
+
+### 已发布的读取节点
+
+- **`stk.source.mupro_hdf5_fields@1`**：参数为 `binding`、相对 `path` 和 64 位小写十六进制的 `expected_sha256`。
+  规划在缓存查找前对实际字节流求 SHA-256，不符时报 `invalid_data`。缓存未命中时，先按同一摘要核验私有副本，再打开元数据。
+  输出含 `path`、实测 `sha256`、`size`、`reader` 及 `fields`，每项给出确切 `selector`、整数 `step`、场名、原生 `shape` 和 `dtype`，
+  先按步号、再按场名排序。发现最多访问 4096 个链接，最多返回 256 项场与步号，超出任一上限都报 `budget_exceeded`，不返回部分列表。
+  节点只读元数据，不证明求解完成。 [已验证的字段元数据](../specs/mupro-hdf5-1.md#verified-field-metadata)
+- **`stk.source.mupro_hdf5@1`**：调用方明确给出 `/tNNNNNNNN/<field>`，没有最新帧或字段回退。可选 `expected_sha256`
+  约束容器，规划在缓存查找前核对。容器上限 1 GiB，所选数组上限 256 MiB，并受求值内存预算限制。
+  [FileSource 与图](../specs/mupro-hdf5-1.md#filesource-and-graph) · [原生字段](../specs/mupro-hdf5-1.md#native-field)
+
+### 原生面板流程
+
+在**仿真运行记录**中选中已收集的运行，依次操作。 [仿真指南的 MuPRO HDF5 结果补充](../simulation-muferro.md)
+
+1. **列出 HDF5 帧**：只读。经严格桥 `graph.evaluate` 本地求值内联 `mupro_hdf5_fields@1`，绑定当前项目根，
+   路径固定为 `results/muferro/<run_id>/case/run.h5`，`expected_sha256` 取结果行登记的摘要。列表求值输出上限 256 KiB。
+   不写项目，不提交，不下载，也不改变 Viewer。
+2. **选择**：单个下拉框，条目形如 `Polar · step 2`。初始不选中，明确选中前不能打开。
+3. **打开所选 HDF5 帧**：再次核对上下文后，用所选 `selector` 和同一登记摘要求值 `mupro_hdf5@1`，帧载荷上限 256 MiB。
+   校验并持有载荷后才接纳到 Viewer。求值失败或答复到达时上下文已变化，则保留原画面。
+4. **重试查找 HDF5 结果**：结果行查找失败时出现。点击只重新读取该运行的结果行，不自动列出或打开。
+
+只收集了 DAT 的运行仍通过**查看已收集结果**一次打开最近输出的极化帧，DAT 默认路径、`latest` 默认值和 DAT 步选项不变。
+列出的选项绑定项目、修订和所选运行，上下文变化即清空，需要重新列出。 [面板实现](../../desktop/engine/lib/stk_app/src/muferro_hdf5_view.cc)
+
+### Linux 合成验收
+
+以下结果记录在[运行验收](../runtime-validation.md)的 2026-11-09 17:28、17:56 和 18:07 UTC 三节，均使用公开合成算例。
+
+- **固定起点与点击数。** Linux X11/Xvfb 1440×1600，软件 OpenGL，缩放 1。Project 最大化，Simulations 与 Simulation runs 已展开，
+  选中唯一已成功并收集的运行，Viewer 为空，Python 草稿隐藏。依次点击列出、下拉、`Polar · step 2`、打开，共四次，零滚动、零键入。
+  Viewer 显示第 2 步 `Polar_x` 的 24 个体素，值域 `[0, 69]`。
+- **来源已变化。** 同大小改写容器后，打开因摘要不符被拒绝，原 Viewer 保留。实际严格桥另核对了缓存改写，以及排队后改开其他来源时返回冲突并保留新来源。
+  访问以规范化项目根和固定相对路径限定，拒绝把算例目录换成指向项目外链接的反例。
+- **迟到答复。** 成功答复挂起期间另点一次审阅页，放行后保留审阅页画面和原 Viewer。
+- **草稿与项目状态。** 以上三组均保留原 Runtime 任务、项目修订 8 和隐藏的 Python 草稿。
+- **查找重试。** 严格桥在第一次真实结果行查询后返回可重试错误。旧版刷新并重新展开后仍只有第一次查询；当前版一次重试只补一次查询，
+  随后四次点击打开同一帧。
+- **冷重开与 DAT 兼容。** 冷启动重开 HDF5 项目，在空 Viewer 起点四次点击、零滚动打开原任务的 Polar 第 2 步。旧 DAT-only 项目在相同起点一次点击、
+  零滚动打开普通畴 Viewer 的原末帧第 2 步。同一会话从 HDF5 项目切到 DAT 项目再切回，原 HDF5 选择被清空，明确重新列出后恢复四个选项。
+  项目切换与重新列出期间保留已有 Viewer 画面、未发送草稿、项目修订和原 Runtime 任务。
+- **持久回归。** `fa2ef209` 固定列出与打开的请求和解码，见运行验收 18:25 UTC 一节。`9ac67dde` 固定查找重试，在缺少按钮的旧版复现失败，
+  集成记录见 [交接](../../handoff.md) 18:55 UTC 一节；运行验收 18:55 UTC 一节记录随后以空模型 API key 重跑的仿真与 HDF5 原生定向 20/20。
+
+### 尚未建立的范围
+
+- **真实许可输出。** 夹具是合成的。真实许可 MuPRO 是否写出 `/tNNNNNNNN/<field>` 布局，以及场名和步号间隔，尚无证据；不读取合作方私有实现来补猜。
+- **HDF5-only 完成。** HDF5 元数据可读不代表求解成功。自动收集仍要求既有 DAT 完成核验通过，只有 HDF5 的运行目录不会被登记为成功结果。
+- **目标 OS。** 四次点击的原生面板流程已在 Linux 合成实窗验收。Windows Python 3.11 和 3.12 客户端 CI 已运行 HDF5 读取相关测试，
+  macOS 和 Windows 的原生面板实窗流程待验。 [Windows 3.11](https://github.com/sijintech/stk/actions/runs/42679509438/job/129369927288) ·
+  [Windows 3.12](https://github.com/sijintech/stk/actions/runs/42679509438/job/129369926548)
+- **物理含义与科学参考。** 长度单位为 `grid_index`，场单位 `unspecified`，物理时间未知。步号不对应外加电场值，也没有参考数据或科学结论。
+- **后续接口。** Viewer 内的 HDF5 步滑块需要按版本新增节点并改契约（H2），HDF5 体素拾取需扩展 `probe`，均未决定。
+  Hub 或远端未收集的运行不在范围内，契约也不提供写入中 `run.h5` 的实时访问。
 
 ## 电场扫描与剩余决定
 
-电场扫描是将外加电场按任务方案改变，获得 P–E 回线等响应。任务需明确场方向、幅度和单位、
-升降/循环顺序、步长、每点推进/采样、初始状态以及是否舍弃预循环；这些不是文件容器格式。
-所有者尚未指定这些数值，MuPRO 插件应显式描述和验证，研究任务给定实际参数。
-现有合成回线网格不自动成为真实 MuPRO 扫描参数，也不能据运行退出 0 认定材料结论。
+电场扫描是将外加电场按任务方案改变，获得 P–E 回线等响应。这些是研究任务的输入，不是文件容器格式。
+所有者尚未指定这些数值。任务需逐项明确：
+
+- 场方向，以及所用坐标系或分量；
+- 幅度范围和单位；
+- 升降与循环顺序、循环次数；
+- 场步长或场点数；
+- 每个场点的推进步数和采样/输出间隔，由此确定输出步号与场值的对应；
+- 初始状态；
+- 是否舍弃预循环；
+- 用于比较的参考值，以及可用的许可软件、主机和算例。
+
+MuPRO 插件应显式描述和验证这些输入，研究任务给定实际参数。H1 的 `Polar · step N` 只是原生输出步号，
+在上述对应给定前不表示某个电场值。现有合成回线网格不自动成为真实 MuPRO 扫描参数，也不能据运行退出 0 认定材料结论。
 
 仍待决定的是分析修改提案的持久形式，以及首个研究任务的实际参数/参考值和可用资产。
 原“合作数据格式统一待定”和“S2c 是否扩展”已由上述决定更新，历史文档中的禁止/待决条目不表示新功能已经实现，
