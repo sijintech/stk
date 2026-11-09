@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import pytest
 
-from suan.peer.authority import PeerAuthority, auth_message, peer_id_for
+from suan.peer.authority import PeerAuthority, PeerDenied, auth_message, peer_id_for
 from suan.peer.endpoint import (AUTH_FORMAT, MAX_AUTH_BYTES, PeerCallUncertain,
                                 PeerEndpoint, _auth_frame)
 from suan.peer.protocol import (FORMAT, METHODS, PeerProtocolError, decode_message,
@@ -1314,6 +1314,134 @@ def test_real_rebind_invalidates_old_context_and_generation_without_automatic_re
     with pytest.raises(PeerProtocolError) as error:
         a2.request("project.catalog", old)
     assert error.value.code == "forbidden"
+
+
+def test_real_observed_database_replacement_durably_revokes_the_old_grant_until_explicit_rebind(connected, sides):
+    """CP-0 F8b live, CURRENT behavior on one Linux host only: after a known authenticated UDP edit, the
+    owner's real project.sqlite3 path is atomically replaced by a byte-identical synthetic copy at another
+    inode (same project UUID, revision, history and receipt rows). The first old-grant catalog observes that
+    replacement, is forbidden and durably invalidates the binding, every grant and the caller's epoch without
+    touching the store. Restoring the original inode revives nothing; only an explicit owner rebind, a new
+    grant and a freshly authenticated connection read the preserved content, under a new receipt scope.
+    No multi-host, cloud, unobserved in-place restore or recovery policy is chosen here."""
+    client, _ = connected()
+    caller, owner = sides
+    store, target, authority = owner.store, owner.target, owner.authority
+    directory, path = store.directory, store.path
+    apply, get = "project.edit_operations.apply_once", "project.edit_operations.get"
+    hello = {"protocols": [1], "capabilities": {"peer.hello": 1}}
+
+    def read_only(database, sql, *args):
+        """mode=ro and never used while a journal exists, so it cannot write or recover anything."""
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
+            return db.execute(sql, args).fetchall()
+
+    def authority_state():
+        return (read_only(authority.path, "SELECT active FROM grants WHERE grant_id=? AND peer_id=?",
+                          target["grant_id"], caller.peer_id),
+                read_only(authority.path, "SELECT generation, device, inode, revision, active FROM projects "
+                          "WHERE project_id=?", target["project_id"]),
+                read_only(authority.path, "SELECT epoch, active FROM peers WHERE peer_id=?", caller.peer_id))
+
+    def physical():
+        info = path.lstat()
+        return ((str(info.st_dev), str(info.st_ino)), info.st_size, info.st_mtime_ns, path.read_bytes(),
+                sorted(item.name for item in directory.iterdir()))
+
+    def stored_receipts():
+        return read_only(path, "SELECT scope, operation_id, request, receipt FROM project_edit_operations")
+
+    def invoke(endpoint, method, values):
+        try:
+            return endpoint.request(method, values, timeout=20), None
+        except PeerProtocolError as error:
+            return None, error.code
+
+    # A known positive edit, receipt lookup and catalog through the authenticated UDP grant.
+    operation = uuid()
+    params = {**target, "operation_id": operation, "expected_revision": 0,
+              "commands": [{"op": "create_table", "name": "Preserved across replacement"}]}
+    result = client.request(apply, params)
+    receipt = result["receipt"]
+    assert not result["replayed"] and (receipt["base_revision"], receipt["applied_revision"]) == (0, 1)
+    table_id = receipt["commands"][0]["id"]
+    assert client.request(get, {**target, "operation_id": operation}) == {"receipt": receipt}
+    catalog = client.request("project.catalog", target)
+    assert catalog["project"]["revision"] == 1 and [item["id"] for item in catalog["tables"]] == [table_id]
+    snapshot, history, rows = store.snapshot(), store.history(), stored_receipts()
+    assert len(history) == 1 and [(row[0], row[1], json.loads(row[3])) for row in rows] == [
+        (receipt["scope"], operation, receipt)]
+
+    original = physical()
+    generation = target["database_generation"]
+    grant_row, project_row, peer_row = authority_state()
+    (epoch, active), = peer_row
+    assert grant_row == [(1,)] and active == 1
+    assert project_row == [(generation, *original[0], 1, 1)]  # the registry pins this real inode, watermark 1
+    assert not any(name.startswith(path.name + "-") for name in original[4])  # no journal or sidecar
+
+    # Atomic same-directory replacement by a byte-identical copy; a hard link keeps the original inode.
+    keep = path.with_name(path.name + ".original-inode")
+    copy = path.with_name(path.name + ".synthetic-copy")
+    os.link(path, keep)
+    copy.write_bytes(original[3])
+    copy_identity = (str(copy.lstat().st_dev), str(copy.lstat().st_ino))
+    os.replace(copy, path)
+    replaced = physical()
+    assert replaced[0] == copy_identity and copy_identity[1] != original[0][1]  # exactly the synthetic inode
+    assert replaced[0][0] == original[0][0]  # same device, so the original can be restored by rename
+    assert replaced[1] == original[1] and replaced[3] == original[3]  # exactly equal bytes
+    assert (str(keep.lstat().st_dev), str(keep.lstat().st_ino)) == original[0] and not copy.exists()
+    assert (store.snapshot(), store.history(), stored_receipts()) == (snapshot, history, rows)
+    assert store.info()["id"] == target["project_id"] and physical() == replaced
+    assert authority_state() == (grant_row, project_row, peer_row)  # not observed by the owner yet
+
+    # The first old-grant observation is refused and durably revokes; the replaced store is untouched.
+    assert invoke(client, "project.catalog", target) == (None, "forbidden")
+    invalidated = authority_state()
+    assert invalidated == ([(0,)], [(generation, *original[0], 1, 0)], [(epoch + 1, 1)])
+    assert physical() == replaced and stored_receipts() == rows
+
+    # The old grant and connection stay refused for the actual old receipt, its replay and a fresh edit.
+    for method, values in (("project.catalog", target),
+                           ("project.table.read", {**target, "table_id": table_id, "expected_revision": 1}),
+                           (get, {**target, "operation_id": operation}),
+                           (apply, params),
+                           (apply, {**target, "operation_id": uuid(), "expected_revision": 1,
+                                    "commands": [{"op": "create_table", "name": "After replacement"}]})):
+        assert invoke(client, method, values) == (None, "forbidden"), method
+        assert authority_state() == invalidated and physical() == replaced, method
+    assert (store.snapshot(), store.history(), stored_receipts()) == (snapshot, history, rows)
+
+    # Restoring the registered inode exactly does not revive the old binding, grant or connection.
+    os.replace(keep, path)
+    assert physical() == original
+    assert invoke(client, "project.catalog", target) == (None, "forbidden")
+    assert invoke(client, "peer.hello", hello) == (None, "forbidden")
+    with pytest.raises(PeerDenied):
+        authority.bind_project(directory)  # an implicit re-bind of the matching inode is refused
+    fresh_old, _ = connected()  # newly authenticated, but no active grant is offered for the old binding
+    assert fresh_old.capabilities == {"peer.hello": 1}
+    assert invoke(fresh_old, "project.catalog", target) == (None, "unsupported")
+    assert authority_state() == invalidated and physical() == original
+
+    # Explicit owner rebind, a new read grant and a new connection read the preserved content. Its
+    # receipt remains stored, but under the old generation's scope, so the new scope cannot see it.
+    rebound = authority.rebind_project(target["project_id"], directory)
+    assert rebound["database_generation"] != generation
+    grant = authority.grant(caller.peer_id, target["project_id"], ["project.read"])
+    assert grant["database_generation"] == rebound["database_generation"]
+    fresh = {"project_id": target["project_id"], "grant_id": grant["grant_id"],
+             "database_generation": grant["database_generation"]}
+    assert authority_state()[1] == [(rebound["database_generation"], *original[0], 1, 1)]
+    renewed, _ = connected()
+    assert renewed.request("project.catalog", fresh) == catalog
+    page = renewed.request("project.table.read", {**fresh, "table_id": table_id, "expected_revision": 1})
+    assert (page["revision"], page["table"]["id"], page["table"]["name"]) == (
+        1, table_id, "Preserved across replacement")
+    assert invoke(renewed, get, {**fresh, "operation_id": operation}) == (None, "not_found")
+    assert (store.snapshot(), store.history(), stored_receipts()) == (snapshot, history, rows)
+    assert physical() == original and authority_state()[0] == [(0,)]
 
 
 class AlterControl:
