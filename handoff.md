@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · MuPRO SDK 样例和 Claude28 后续
+
+MuPRO 样例预检与重试修复已本地提交 `bac536c9`。联合 133 项通过，隔离 wheel 启动器 46 项通过，仅真实许可资产用例按条件跳过。HDF5-only 完成仍待真实格式证据。Claude28 首轮只交仓库外候选，后续在原独立分支用 Xvfb 真窗口验证重复暂停，任务与运行证据见本机 `root-delivery-20261109-61`。
+
+远端 `a8872719` 的 Windows 3.11 Runtime 唯一失败已单独重跑。Desktop 仍在运行，本地提交待其终态。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · Claude28 和 Secret scan 重跑
 
 `a8872719` 的 Secret scan 同头第二次已通过，第一次安装遇 HTTP 504。root 已提交固定 gitleaks 备用下载 `f8d2f79e`，正常下载、真实 API 备用、损坏内容和双路不可用四个场景符合预期。上一轮 Desktop 仍运行，本地提交待整轮终态后推送。 [验收记录](docs/runtime-validation.md)

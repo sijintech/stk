@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · MuPRO 样例预检、重试与 Windows Runtime
+
+`bac536c92ca0a1a998c579bc7195e3529bede05b` 的两个反例先在旧源码失败，分别覆盖 SDK 缺少材料和目标材料路径无法写入。修复后均可在补齐或修正路径后原地重试。联合 133 项通过、2 项仅真实许可资产跳过。隔离安装 wheel 的启动器 46 项通过，1 项仅真实许可资产跳过。源文件与 wheel 安装字节一致。暂存扫描零发现。证据见本机 `root-delivery-20261109-61`。 [计算节点入口](runtime-mupro.md)
+
+`a8872719` Runtime 第一次 12/13 个任务成功。Windows Python 3.11 的外国热日志用例在子进程 join 20 秒后被测试终止，未执行到数据库原字节断言。同头只重跑该 Windows job。Desktop 整轮仍在运行。 [失败 job](https://github.com/sijintech/stk/actions/runs/42570072715/job/129005168400) [Runtime 重跑](https://github.com/sijintech/stk/actions/runs/42570072715/attempts/2) [Desktop](https://github.com/sijintech/stk/actions/runs/42570072786)
+
 ## 2026-11-09 UTC · a8872719 密钥扫描重跑与下载验证
 
 `a88727199d25a5651789d79e2e6650547145e5ee` 的 Secret scan 首次在安装步骤收到 HTTP 504，扫描被跳过。第二次同头执行于 06:07:29Z 完成，安装和实际扫描均通过。Docs 已部署，Desktop 和 Runtime 在本次核对时仍运行。 [Secret scan 第 2 次](https://github.com/sijintech/stk/actions/runs/42570072800/attempts/2) [Docs](https://github.com/sijintech/stk/actions/runs/42570072760) [Desktop](https://github.com/sijintech/stk/actions/runs/42570072786) [Runtime](https://github.com/sijintech/stk/actions/runs/42570072715)
