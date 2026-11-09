@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · 已登记的 Viewer 输入与观察水位
+
+root 提交 `6cae6312`，用两个旧代码反例证明加入未登记 Polar 帧后旧收集与查看均接受。修复后拒绝新增原生产物。root 以 `5ddcdf17` 集成 Claude35 `eade871d` 的真实 UDP 水位回退测试。另以纯内存后端验证刷新、产物清单和下载间的连接切换，Claude36 接手实施方案。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · Runtime 结果出口与物理替换
 
 root 提交 `8bf08606`，真实 Runtime 在合成求解器通过后因另一必需产物缺失而判失败，CLI 现在退出 3 并保留原报告。root 以 `210036e3` 集成 Claude34 `a7572ba9`。Claude35 已在独立分支接手 F9。 [验收记录](runtime-validation.md)

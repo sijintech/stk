@@ -454,6 +454,8 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 
 **1o. F8b 的真实数据库替换。** root 以 `210036e3` 集成 Claude34 的 `a7572ba9`。已认证 UDP 上先提交一笔编辑，再把数据库原子替换为同设备、不同 inode 的字节相同副本。旧授权首次读取返回 `forbidden`，同时持久禁用绑定和授权并推进认证 epoch。恢复原 inode 后仍须显式重新绑定。新授权及新连接能读到原项目内容，原回执保留在原 scope。Linux 源码 172 项和隔离 wheel 定向一项通过。隔离反例屏蔽 inode 变化时，首次旧授权读取错误返回目录，命中预期断言。证据见 `root-delivery-20261109-70/claude34` 与 `root-delivery-20261109-72`。
 
+**1p. F9 的真实修订回退。** root 以 `5ddcdf17` 集成 Claude35 的 `eade871d`。本机提交修订 1 后，已认证 UDP 对未使用的回执 ID 查询得到 `not_found`，授权水位仍持久推进到 1。原数据库在同一 inode 恢复修订 0 后，下一次目录读取返回 `forbidden`，绑定、旧授权和认证 epoch 随之更新，恢复字节、历史和回执表保持。随后查询和新写入均被拒绝。Linux 源码 173 项和隔离 wheel 定向一项通过。隔离反例跳过失败查询后的水位更新，在预期断言处失败。证据见 `root-delivery-20261109-72/claude35` 与 `root-delivery-20261109-73`。
+
 **2. root 外部探针（仓库外，未提交）。** 证据记录在 `root-delivery-20261109-43/closure.json` 的 `cp0` 节：
 - 两个脚本：`cp0-parity-probe.py`（sha256 `23de877c…`）和 `cp0-hot-journal-probe.py`（sha256 `1d951c7c…`）；
 - 用合成项目，在 source 和同一份 Python 源码的中性隔离安装中运行；
@@ -475,7 +477,7 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 这些探针仍是有效的历史观察。F23 与 F5b/F5c 现在另有 1c 中的已提交测试，探针不再是这几行的唯一证据。
 
 **3. 仍待验证。**
-- **活 peer：** F3/F11d、F5c、F8b、F10、F11a/F11b、F12–F15 和 F23 见 1d、1f、1h–1o。其余缺少真实通道证据的场景仍待 `PeerEndpoint` 与原生 helper 验收。
+- **活 peer：** F3/F11d、F5c、F8b–F10、F11a/F11b、F12–F15 和 F23 见 1d、1f、1h–1p。其余缺少真实通道证据的场景仍待 `PeerEndpoint` 与原生 helper 验收。
 - **平台：** Windows、macOS 上这些行的复验。
 - **F14 配额监控：** 实际上限及拒绝路径见 1e、1f，监控仍待验证。
 - **F5c：** 保留现行恢复行为还是改为拒绝，仍由 root 决定。

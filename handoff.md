@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · 已收集帧、F9 与 Windows 联接点
+
+远端 `bc25f579` Runtime 13 项通过。Windows Python 3.11/3.12 都执行并通过 CLI 和项目导入的真实目录联接点用例。Desktop 尚在运行，本地批次待整轮终态。 [验收记录](docs/runtime-validation.md)
+
+本地 `6cae6312` 让 MuFerro 项目收集和查看拒绝目录中新增的未登记帧、HDF5 或启动器报告，普通备注仍允许。Linux 源码 32 项和隔离 wheel 定向通过。另用内存后端复现收集阶段两处连接切换，Claude36 在独立 worktree 设计冻结目标接线，待 root 审阅后实施。
+
+Claude35 `eade871d` 已集成为 `5ddcdf17`。真实 UDP 查询未找到回执仍持久推进授权水位，同 inode 恢复旧修订后旧授权失效。Linux 源码 173 项和隔离 wheel 定向通过。 [CP-0 矩阵](docs/design/cloud-project-service.md)
+
 ## 2026-11-09 UTC · CLI 结果状态、F8b 与新头 CI
 
 远端 `bc25f579` 已开始 Desktop 和 Runtime，Docs 与 Secret scan 已过。Cocoa 静默对照和 Windows 原生联接点在该远端头验证。本地后续批次待 Desktop 整轮终态。 [验收记录](docs/runtime-validation.md)

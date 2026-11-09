@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 已收集 MuFerro 结果、F9 与 Windows 联接点
+
+`6cae6312daa20df12a2aacd893278a146bc764cd` 在 MuFerro 项目收集及调用 Viewer 前拒绝未登记的原生产物。保留原文件字节，仅新增合成 `Polar.00000099.dat` 时，通用目录读取的最新 Polar 从第 2 步变为第 99 步。旧项目收集与查看分别接受这一反例。修复后两入口拒绝新增帧、HDF5 和能改变自动案例目录的启动器报告，普通备注及移除额外文件后的查看仍通过，拒绝时项目修订保持。Linux 源码 32 项通过，1 项真实许可条件跳过。隔离 wheel 定向通过。范围为稳定本地文件与 Viewer 打开前的工作流检查。 [项目工作流](simulation-muferro.md)
+
+`5ddcdf1709f14e72dce6cb83ac76100f59b6f62f` 集成 Claude35 `eade871d878d35ea05b266ace00479ee22e8244d`。真实 UDP 未找到回执时仍将授权水位推进至 1，之后同 inode 恢复修订 0 触发持久撤权。恢复的数据库字节、历史与回执表保持，后续查询和写入被拒绝。Linux 源码 173 项和隔离 wheel 定向一项通过，零跳过。隔离反例仅跳过失败查询后的水位更新，在预期断言处失败。 [CP-0 矩阵](design/cloud-project-service.md)
+
+另用内存后端确认手动收集的连接切换。刷新后切换时，产物查询走替换连接。产物清单后切换时，下载描述走替换连接。两项探针使用真实严格桥与合成后端对象。方案待审，证据见本机 `root-delivery-20261109-73/frozen-target-repro`。
+
+远端 `bc25f579` Runtime 13 项于 08:33:54Z 全部通过。Windows 客户端 3.11.9 和 3.12.10 各 5141 通过、266 跳过、654 未选。对齐同提交收集顺序与官方模块进度和跳过清单，CLI 与项目导入的真实 `mklink /J` 用例在两个作业均通过。官方日志以模块进度显示，核对记录在本机 `root-delivery-20261109-73/windows-junction`。Desktop 仍运行，本地批次待整轮终态后推送。 [Runtime](https://github.com/sijintech/stk/actions/runs/42584441104) [Windows 3.11](https://github.com/sijintech/stk/actions/runs/42584441104/job/129050765928) [Windows 3.12](https://github.com/sijintech/stk/actions/runs/42584441104/job/129050765950) [Desktop](https://github.com/sijintech/stk/actions/runs/42584441296)
+
 ## 2026-11-09 UTC · CLI 成功条件、F8b 与 bc25f579 CI
 
 `8bf086068ae9a0e02873f2236a791c268e2daf2f` 使 `suan mupro result` 在报告校验通过后再读取原任务状态，只有 Runtime 成功才返回 0。实际合成求解器完成并写入通过报告，Runtime 因缺少另一个必需产物判失败。取消态客户端夹具也保留通过报告。两例旧 CLI 都退出 0，修复后退出 3，仍打印并另存报告。Linux 源码 80 项、隔离 wheel 64 项通过，各有 Windows 联接点与真实许可两项条件跳过。Python 3.11、3.12、3.14 的 Linux 结果命令定向各三项通过。 [命令文档](runtime-mupro.md)

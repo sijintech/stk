@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · 已收集产物和冻结连接
+
+MuFerro 项目收集及 Viewer 打开前校验已收集清单，保留普通备注。两处桌面连接切换已用内存后端复现，Claude36 设计按已冻结身份检查实际产物后端和传输重试。D1 F9 已补真实线路。两种 Windows Python 的真实目录联接点已通过，Cocoa 静默对照仍待 `bc25f579` Desktop。 [验收记录](runtime-validation.md) [CP-0 矩阵](design/cloud-project-service.md)
+
 ## 2026-11-09 UTC · CLI 终态与 F8b
 
 本地 MuPRO CLI 校验报告后核对原 Runtime 任务状态。D1 F8b 已在真实 UDP 验证物理替换与重新绑定，Claude35 接手 F9 的同 inode 旧修订恢复。Cocoa 静默对照及 Windows 原生联接点等待远端 `bc25f579` 复验。 [CP-0 矩阵](design/cloud-project-service.md) [验收记录](runtime-validation.md)
