@@ -2871,6 +2871,7 @@
   "literature.query": "Search text",
   "literature.search": "Search",
   "literature.search_prerequisites": "Choose search libraries, refresh their metadata and select a local model first. Build an index before its first search.",
+  "literature.open_citation": "Open cited page",
   "literature.resolve": "Resolve selected citation",
   "literature.render": "Show cited page",
   "literature.previous": "Previous",

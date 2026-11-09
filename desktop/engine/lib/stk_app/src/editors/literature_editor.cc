@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 
@@ -48,7 +49,7 @@ class LiteratureEditor final : public Editor {
   {
     attach(ctx); ui_ = ctx.ui; fields_.clear(); auto &body = layout.scope(scope_);
     if (!state_->supported()) { body.paragraph(ctx.tr("literature.unsupported")); return; }
-    state_->pump(view_); wake(ctx);
+    state_->pump(view_); advance_citation_open(); wake(ctx);
     body.tabs("literature_sections", {std::string(ctx.tr("literature.reading")),
       std::string(ctx.tr("literature.library")), std::string(ctx.tr("literature.encoder")),
       std::string(ctx.tr("literature.history"))},
@@ -130,6 +131,12 @@ class LiteratureEditor final : public Editor {
   std::map<std::string, std::string> text_;
   std::map<ui::WidgetId, std::string> fields_;
   std::string scope_, error_, import_review_, encoder_review_, render_request_, adopted_render_, restored_corpus_;
+  struct CitationOpen {
+    std::string resolve_id;
+    uint64_t page_epoch;
+    std::function<bool()> live;
+  };
+  std::optional<CitationOpen> citation_open_;
   std::vector<std::string> restored_scopes_;
   bool restore_selection_ = false, authorized_ = false, wake_scheduled_ = false, hidden_ = false;
   uint64_t generation_ = 0, input_generation_ = 0, view_lifetime_ = 0, texture_ = 0;
@@ -156,6 +163,7 @@ class LiteratureEditor final : public Editor {
   }
   void release_page()
   {
+    citation_open_.reset();
     if (texture_ && free_texture_) { free_texture_(texture_); }
     texture_ = 0; free_texture_ = {}; page_.clear(); highlights_.reset();
     render_request_.clear(); adopted_render_.clear(); text_page_ = 0;
@@ -262,15 +270,42 @@ class LiteratureEditor final : public Editor {
       }}, {.max_length = size_t(key == "source" || key == "assets" ? 4096 : key == "evidence" ? 2048 : 256)});
     fields_[w.id] = key; w.disable(!idle());
   }
-  void act(const std::string &method, Json params)
+  bool act(const std::string &method, Json params)
   {
     // A new render must never reuse the prior GPU texture or pixel overlays.
     if (method == "pages.render") { release_page(); }
-    if (!state_->act(view_, method, std::move(params))) { error_ = "literature.invalid_params"; return; }
+    if (!state_->act(view_, method, std::move(params))) { error_ = "literature.invalid_params"; return false; }
     error_.clear();
     if (method == "import.review") { import_review_ = view_->operation_id; }
     if (method == "encoder.review") { encoder_review_ = view_->operation_id; }
     if (method == "pages.render") { render_request_ = view_->operation_id; adopted_render_.clear(); }
+    return true;
+  }
+  void open_citation(const Json &citation)
+  {
+    if (!state_->set_citation(view_, citation)) { error_ = "literature.invalid_params"; return; }
+    if (act("citations.resolve", {{"scopes", view_->scopes}, {"citation", citation}})) {
+      citation_open_ = CitationOpen{view_->operation_id, view_->page_epoch, guard(true)};
+    }
+  }
+  void advance_citation_open()
+  {
+    if (!citation_open_) { return; }
+    if (section_ != 0 || !citation_open_->live() || view_->page_epoch != citation_open_->page_epoch ||
+        view_->operation_id != citation_open_->resolve_id) {
+      citation_open_.reset(); return;
+    }
+    const auto &resolved = value("citations.resolve");
+    if (!resolved.is_object()) {
+      if (!view_->reading() && view_->follow_until <= 0) { citation_open_.reset(); }
+      return;
+    }
+    // Only this current, accepted resolve can continue the user's explicit page-open request.
+    if (!idle() || io::get_string(view_->operation, "state") != "completed") { return; }
+    const Json citation = view_->citation;
+    citation_open_.reset();
+    if (resolved.at("citation") != citation) { return; }
+    act("pages.render", {{"scopes", view_->scopes}, {"citation", citation}, {"long_edge", 1600}});
   }
   void action(ui::Layout &row, EditorContext &ctx, const char *key, const char *label,
               const std::string &method, std::function<Json()> params, bool enabled = true)
@@ -433,11 +468,12 @@ class LiteratureEditor final : public Editor {
         const auto citation = hit.at("citation");
         const auto text = io::get_string(hit, "text");
         const auto number = n++;
-        const auto label = std::to_string(number + 1) + " · " + std::string(ctx.tr("literature.page")) + " " +
+        const auto label = std::string(ctx.tr("literature.open_citation")) + " · " + std::to_string(number + 1) +
+          " · " + std::string(ctx.tr("literature.page")) + " " +
           std::to_string(io::get_int(citation.at("inner"), "page_index", 0) + 1) + " · " +
           std::string(core::utf8::truncate_bytes(text, 80));
         body.button("literature_hit/" + std::to_string(number), label,
-          [this, citation, live = guard(true)] { if (live() && idle()) { state_->set_citation(view_, citation); } }).disable(!idle());
+          [this, citation, live = guard(true)] { if (live() && idle()) { open_citation(citation); } }).disable(!idle());
         body.paragraph(core::utf8::truncate_bytes(text, 1024));
         if (text.size() > 1024) { body.paragraph(ctx.tr("literature.excerpt")); }
       }

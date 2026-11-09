@@ -2871,6 +2871,7 @@
   "literature.query": "检索内容",
   "literature.search": "检索",
   "literature.search_prerequisites": "请先选择检索范围、刷新元数据并选择本地模型，首次检索前需构建索引。",
+  "literature.open_citation": "打开引用页",
   "literature.resolve": "定位所选引用",
   "literature.render": "显示引用页",
   "literature.previous": "上一页",

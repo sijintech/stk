@@ -469,7 +469,7 @@ INSTANTIATE_TEST_SUITE_P(FixedLayouts, LiteratureMouse, ::testing::Bool());
 // inference. Interpreter selection is trusted Bridge construction, never UI/RPC.
 constexpr const char *real_assets_script = R"PY(
 from pathlib import Path
-import json,sys,threading,os
+import json,sys,threading,os,time
 control=Path(sys.argv.pop(1))
 sys.path.insert(0,str(Path(os.environ['PYTHONPATH'])/'tests'))
 from test_literature_pdf import make_pdf
@@ -495,10 +495,24 @@ class TrustedBridge(BaseBridge):
             literature_parser_python=os.environ['STK_LITERATURE_TEST_PYTHON'],
             literature_encoder_python=os.environ['STK_LITERATURE_E5_PYTHON'],**kwargs)
     def send(self,message,method=None):
+        delayed=False
         if method and method.startswith('literature.') and 'result' in message:
             with lock,control.with_suffix('.replies').open('a') as f:
                 f.write(json.dumps({'method':method,'result':message['result']},allow_nan=False)+'\n')
-        return super().send(message,method)
+            result=message['result']
+            if (method=='literature.operations.result' and
+                result.get('operation',{}).get('action')=='citations.resolve' and
+                control.with_suffix('.hold_resolve').exists() and
+                not control.with_suffix('.held_resolve').exists()):
+                assert result['operation']['state']=='completed' and isinstance(result['result'],dict)
+                delayed=True
+                control.with_suffix('.held_resolve').write_text('completed')
+                until=time.monotonic()+45
+                while not control.with_suffix('.release_resolve').exists() and time.monotonic()<until:
+                    time.sleep(.005)
+        sent=super().send(message,method)
+        if delayed:control.with_suffix('.sent_resolve').write_text('sent')
+        return sent
 server.Bridge=TrustedBridge
 from suan.desktop_bridge.__main__ import main
 raise SystemExit(main())
@@ -523,6 +537,7 @@ class LiteratureRealAssets : public LiteratureMouse {
     options.env["STK_LITERATURE_TEST_PYTHON"] = parser_python_;
     options.env["STK_LITERATURE_E5_PYTHON"] = encoder_python_;
     options.env["HF_HUB_OFFLINE"] = "1"; options.env["TRANSFORMERS_OFFLINE"] = "1";
+    options.env["PYTHONPYCACHEPREFIX"] = dir.str() + "/bytecode";
   }
   static std::string required_environment(const char *key)
   {
@@ -563,6 +578,7 @@ class LiteratureRealAssets : public LiteratureMouse {
   }
   void TearDown() override
   {
+    marker("release_resolve");
     LiteratureBridge::TearDown(); // Bridge invalidation releases the editor's copied free hook first.
     state().sync({}); // Also covers a failed setup/close with no queued state notification.
     EXPECT_TRUE(capture_->live_textures.empty());
@@ -645,7 +661,137 @@ class LiteratureRealAssets : public LiteratureMouse {
       }
     }
   }
+  void seed_cited_search(std::string &scope)
+  {
+    // Seeding uses the actual service, parser and encoder. Only the subsequent
+    // search/open and invalidating inputs are the UI behavior under test.
+    auto v = state().new_view(); scope = create(v);
+    ASSERT_FALSE(scope.empty());
+    const auto perform = [&](const std::string &action, Json params) {
+      ASSERT_TRUE(state().act(v, action, std::move(params)));
+      ASSERT_NO_FATAL_FAILURE(settle(v));
+      ASSERT_TRUE(v->values.contains(action)) << action;
+    };
+    auto params = review_params(scope);
+    params["source"] = (dir.path() / "real-owned.pdf").string();
+    ASSERT_NO_FATAL_FAILURE(perform("import.review", params));
+    const auto review = v->operation_id;
+    const auto review_sha = LiteratureState::checksum(v->values.at("import.review"));
+    ASSERT_NO_FATAL_FAILURE(perform("import.commit", {{"review_id", review}, {"review_sha256", review_sha}}));
+    ASSERT_NO_FATAL_FAILURE(perform("index.start", {{"corpus_id", scope}, {"version_id", v->version_id}}));
+    ASSERT_TRUE(state().read(v, "encoder.info"));
+    ASSERT_NO_FATAL_FAILURE(settle(v));
+    ASSERT_NO_FATAL_FAILURE(perform("encoder.review", {{"assets", assets_}}));
+    const auto encoder_review = v->operation_id;
+    const auto encoder_sha = LiteratureState::checksum(v->values.at("encoder.review"));
+    ASSERT_NO_FATAL_FAILURE(perform("encoder.select", {{"review_id", encoder_review},
+      {"review_sha256", encoder_sha}, {"expected_generation", 0}}));
+    ASSERT_NO_FATAL_FAILURE(perform("dense.build", {{"corpus_id", scope},
+      {"expected_generation", state().corpus_info(scope)->at("generation")}, {"encoder_generation", 1}}));
+    ASSERT_NO_FATAL_FAILURE(click("tool_literature"));
+    auto *area = literature_area(); ASSERT_NE(area, nullptr);
+    auto draft = area->editor().save_workspace_state();
+    draft["corpus"] = scope; draft["scopes"] = Json::array({scope}); draft["query"] = "solar cell sunlight";
+    EXPECT_TRUE(area->editor().load_workspace_state(draft)); frame();
+    ASSERT_NO_FATAL_FAILURE(click("literature_refresh"));
+    ASSERT_NO_FATAL_FAILURE(click("literature_search"));
+    ASSERT_NO_FATAL_FAILURE(wait_result("search", 1, [&] { return enabled("literature_hit/0"); }, 145));
+  }
+  void hold_completed_resolve()
+  {
+    marker("hold_resolve");
+    ASSERT_NO_FATAL_FAILURE(click("literature_hit/0"));
+    ASSERT_TRUE(loop.pump_until([&] { frame(); return exists("held_resolve"); }, 45));
+    ASSERT_EQ(results("citations.resolve").size(), 1u);
+    EXPECT_EQ(results("citations.resolve").at(0).at("operation").at("state"), "completed");
+    EXPECT_EQ(calls("pages.render"), 0);
+  }
+  void release_completed_resolve()
+  {
+    marker("release_resolve");
+    ASSERT_TRUE(loop.pump_until([&] { frame(); return exists("sent_resolve"); }, 45));
+    // A subsequent wire round-trip and two UI turns consume the released reply
+    // and its deferred callbacks; no timing-only sleep establishes this barrier.
+    const auto barrier = client->call("connections.list").wait_for(std::chrono::seconds(30));
+    ASSERT_TRUE(barrier && barrier->ok());
+    loop.run_ready(); frame(); loop.run_ready(); frame();
+    EXPECT_EQ(calls("pages.render"), 0);
+    EXPECT_EQ(widget("literature_page"), nullptr);
+    EXPECT_TRUE(capture_->live_textures.empty());
+  }
+  void explicit_search_and_open(const size_t search_ordinal)
+  {
+    ASSERT_NO_FATAL_FAILURE(click("literature_search"));
+    ASSERT_NO_FATAL_FAILURE(wait_result("search", search_ordinal, [&] { return enabled("literature_hit/0"); }, 145));
+    ASSERT_NO_FATAL_FAILURE(click("literature_hit/0"));
+    ASSERT_NO_FATAL_FAILURE(wait_result("pages.render", 1, [&] {
+      return widget("literature_page") && capture_->live_textures.size() == 1;
+    }));
+    ASSERT_EQ(calls("citations.resolve"), 2);
+    ASSERT_EQ(results("citations.resolve").size(), 2u);
+    ASSERT_NO_FATAL_FAILURE(verify_page(results("citations.resolve").at(1).at("result"),
+                                       results("pages.render").at(0).at("result")));
+  }
+  void interrupted_citation_open(const bool hide)
+  {
+    auto &bottom = fixture.area("a4"); ASSERT_TRUE(bottom.set_tabs({kEditorLogs, kEditorPython}, 0));
+    auto draft = bottom.tab(1).save_workspace_state(); draft["source"] = "print('keep interrupted citation draft')";
+    ASSERT_TRUE(bottom.tab(1).load_workspace_state(draft));
+    store.viewer().set_auto_evaluate(false); store.viewer().prefetch_neighbours = false;
+    const auto payload = std::make_shared<io::Payload>(io::read_stkp(
+      std::string(STK_REPO_ROOT) + "/desktop/tests/viewer/fixtures/muferro_domains.stkp"));
+    store.viewer().open_payload(payload, "Owned citation interruption fixture");
+    ASSERT_TRUE(loop.pump_until([&] {
+      store.viewer().pump(); return !store.viewer().presets().empty() &&
+        store.viewer().catalog().is_object() && store.viewer().colormaps();
+    }));
+    const auto viewer = store.viewer().save_workspace_state();
+    const auto camera = store.viewer().camera_serial(), serial = store.viewer().payload_serial();
+    std::string scope;
+    ASSERT_NO_FATAL_FAILURE(seed_cited_search(scope));
+    ASSERT_NO_FATAL_FAILURE(hold_completed_resolve());
+    if (hide) {
+      auto *area = literature_area(); ASSERT_NE(area, nullptr);
+      const int tab = area->active_tab();
+      ASSERT_TRUE(area->add_tab(kEditorLogs)); area->set_active_tab(area->tab_count() - 1); frame();
+      ASSERT_NO_FATAL_FAILURE(release_completed_resolve());
+      area->set_active_tab(tab); frame(); loop.run_ready(); frame();
+      EXPECT_EQ(calls("pages.render"), 0) << "Showing the tab must not resume its old page-open intent";
+      EXPECT_EQ(widget("literature_page"), nullptr);
+      EXPECT_EQ(widget("literature_query")->string.value(), "solar cell sunlight");
+    }
+    else {
+      // Operation status is already completed; only the successful result wire
+      // reply is delayed, so these are enabled, ordinary user input events.
+      if (GetParam()) { ASSERT_NO_FATAL_FAILURE(click("literature_scope/" + scope)); }
+      else { ASSERT_NO_FATAL_FAILURE(text("literature_query", "solar cell sunlight changed")); }
+      ASSERT_NO_FATAL_FAILURE(release_completed_resolve());
+      if (GetParam()) { ASSERT_NO_FATAL_FAILURE(click("literature_scope/" + scope)); }
+      else { EXPECT_EQ(widget("literature_query")->string.value(), "solar cell sunlight changed"); }
+    }
+    EXPECT_EQ(calls("citations.resolve"), 1);
+    EXPECT_EQ(calls("pages.render"), 0);
+    ASSERT_NO_FATAL_FAILURE(explicit_search_and_open(2));
+    EXPECT_TRUE(store.viewer().save_workspace_state() == viewer);
+    EXPECT_EQ(store.viewer().base_payload(), payload);
+    EXPECT_EQ(store.viewer().camera_serial(), camera); EXPECT_EQ(store.viewer().payload_serial(), serial);
+    EXPECT_EQ(bottom.tab(1).save_workspace_state(), draft); EXPECT_TRUE(bottom.tab(1).has_unsaved_changes());
+    std::cout << "LITERATURE_CITATION_INTERRUPTION layout=" << (GetParam() ? "zh_CN/1000x1200" : "en/1600x1100")
+              << " action=" << (hide ? "hide/show" : GetParam() ? "scope" : "query")
+              << " real_completed_resolve=true stale_render=0 explicit_new_render=1"
+              << " cpu_ui_only=true real_pdfium=true real_e5=true viewer_hidden_draft_preserved=true\n";
+  }
 };
+
+TEST_P(LiteratureRealAssets, DelayedCompletedResolveCannotRenderAfterQueryOrScopeChanges)
+{
+  ASSERT_NO_FATAL_FAILURE(interrupted_citation_open(false));
+}
+
+TEST_P(LiteratureRealAssets, DelayedCompletedResolveCannotResumeAfterHidingAndShowingTheTab)
+{
+  ASSERT_NO_FATAL_FAILURE(interrupted_citation_open(true));
+}
 
 TEST_P(LiteratureRealAssets, OwnedPdfAndPinnedE5ThroughExplicitCpuUiPreserveViewerDraftAndRevocation)
 {
@@ -734,15 +880,15 @@ TEST_P(LiteratureRealAssets, OwnedPdfAndPinnedE5ThroughExplicitCpuUiPreserveView
   const auto search = results("search").at(0).at("result"); ASSERT_FALSE(search.at("hits").empty());
   const auto hit = search.at("hits").at(0); EXPECT_EQ(io::get_string(hit, "corpus_id"), scope);
   EXPECT_NE(io::get_string(hit, "text").find("sunlight"), std::string::npos);
+  const int before_open = clicks;
   ASSERT_NO_FATAL_FAILURE(click("literature_hit/0"));
-  ASSERT_NO_FATAL_FAILURE(click("literature_resolve"));
   ASSERT_NO_FATAL_FAILURE(wait_result("citations.resolve", 1, [&] { return enabled("literature_render"); }));
   const auto resolved = results("citations.resolve").at(0).at("result");
   EXPECT_EQ(resolved.at("citation"), hit.at("citation")); EXPECT_EQ(resolved.at("text"), hit.at("text"));
   EXPECT_EQ(resolved.at("parser").at("pypdfium2"), "5.14.0");
   EXPECT_EQ(resolved.at("text_status"), "mapped"); EXPECT_EQ(resolved.at("structure_status"), "unreviewed");
-  ASSERT_NO_FATAL_FAILURE(click("literature_render"));
   ASSERT_NO_FATAL_FAILURE(wait_result("pages.render", 1, [&] { return widget("literature_page") && capture_->live_textures.size() == 1; }));
+  EXPECT_EQ(clicks - before_open, 1) << "Open cited page resolves and renders the exact hit with one explicit click";
   const auto rendered = results("pages.render").at(0).at("result");
   EXPECT_EQ(rendered.at("source_sha256"), review.at("source_sha256"));
   ASSERT_NO_FATAL_FAILURE(verify_page(resolved, rendered));
