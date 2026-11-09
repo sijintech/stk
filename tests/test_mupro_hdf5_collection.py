@@ -1,5 +1,7 @@
 """A real Runtime collects an explicitly synthetic HDF5 sidecar under the original task."""
 import hashlib
+import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -15,7 +17,7 @@ from suan.connectors.files import LocalFiles  # noqa: E402
 from suan.connectors.mupro import MuFerroConnector  # noqa: E402
 from suan.desktop_bridge.workflow_runs import WorkflowRunExecutor, _Job  # noqa: E402
 from suan.project import ProjectError, ProjectStore  # noqa: E402
-from suan.workflows.muferro import RESULT_TABLE_ID  # noqa: E402
+from suan.workflows.muferro import RESULT_FIELD_IDS, RESULT_TABLE_ID, native_action  # noqa: E402
 from test_desktop_bridge_runtime import add_profile  # noqa: E402
 from test_workflow_muferro import project, scripts, bridge_env, revision  # noqa: E402,F401
 
@@ -62,14 +64,65 @@ def test_collect_hdf5_sidecar_is_verified_registered_and_not_resubmitted(project
     collected = api.muferro.collect(run["id"])
     assert any(file["path"].endswith("/case/run.h5") for file in collected["files"])
     assert (Path(collected["directory"]) / "run.h5").read_bytes() == sidecar.read_bytes()
-    assert api.muferro.collect(run["id"]) == collected
+    report_path = Path(collected["directory"]).parent / "stk-mupro.json"
+    report = json.loads(report_path.read_bytes())
+    digest = report["program"]["sha256"]
+    forged = "0" * 64 if digest != "0" * 64 else "1" * 64
+    original_read_text = Path.read_text
+
+    def substitute_on_reopen(candidate, *args, **kwargs):
+        if candidate == report_path:
+            report["program"]["sha256"] = forged
+            candidate.write_text(json.dumps(report), encoding="utf-8")
+        return original_read_text(candidate, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_text", substitute_on_reopen)
+        assert api.muferro.collect(run["id"]) == collected
+    table = next(table for table in p.snapshot()["tables"] if table["id"] == RESULT_TABLE_ID)
+    assert table["records"][0]["values"][RESULT_FIELD_IDS["program"]] == digest
+
     connector, source = MuFerroConnector(), LocalFiles(collected["directory"])
     image = connector.open(source, "hdf5:Polar").read(frame={"first": True})
     np.testing.assert_array_equal(image.array("Polar"), values.transpose(2, 1, 0, 3))
     assert image.array("Polar").dtype == np.dtype("float32")
     assert len(client.tasks()) == 1
-    with open(Path(collected["directory"]) / "run.h5", "ab") as file:
-        file.write(b"changed")
+    path = Path(collected["directory"]) / "run.h5"
+    opened = []
+    monkeypatch.setattr(api.viewer, "open", lambda folder, *, preset: opened.append((folder, preset)))
+    params = {"project_id": p.snapshot()["project"]["id"], "run_id": run["id"]}
+    native_action(api, "view", params)
+    assert opened == [(path.parent, "muferro-domains")]
+
+    path.unlink()
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(path)
+        original_open = Path.open
+
+        def guard_fifo(candidate, *args, **kwargs):
+            if candidate == path:
+                pytest.fail("View tried a blocking open on the result FIFO")
+            return original_open(candidate, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "open", guard_fifo)
+            with pytest.raises(ValueError, match="changed locally"):
+                native_action(api, "view", params)
+        path.unlink()
+    if hasattr(os, "symlink") and os.name != "nt":
+        alias = path.parent / "duplicate-sidecar.h5"
+        alias.write_bytes(sidecar.read_bytes())
+        path.symlink_to(alias)
+        with pytest.raises(ValueError, match="changed locally"):
+            native_action(api, "view", params)
+        with pytest.raises(ValueError, match="must not be symbolic links"):
+            api.muferro.collect(run["id"])
+        path.unlink()
+    with pytest.raises(ValueError, match="changed locally"):
+        native_action(api, "view", params)
+    assert opened == [(path.parent, "muferro-domains")]
+
+    path.write_bytes(sidecar.read_bytes() + b"changed")
     with pytest.raises(ValueError, match="changed locally"):
         api.muferro.collect(run["id"])
     assert len(client.tasks()) == 1

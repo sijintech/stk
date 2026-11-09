@@ -8,6 +8,7 @@ All project changes use the public revisioned facade, never a second SQLite conn
 from copy import deepcopy
 import hashlib
 import math
+import os
 from pathlib import Path
 import re
 import shutil
@@ -15,6 +16,7 @@ import stat
 from tempfile import TemporaryDirectory
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
+from suan.connectors.files import open_regular
 from suan.connectors.mupro.inputs import dump_toml
 from .common import (_canonical, _capture, _cells, _copy_input, _create_table, _directory, _folder,  # noqa: F401
                      _hash, _revision, _table)
@@ -150,6 +152,35 @@ def _check_local_result_inventory(folder, expected):
     native = (RESULT, *RUN_OUTPUTS, *OPTIONAL_RUN_OUTPUTS)
     if any(path not in expected and (path.name in native or FRAME.search(path.name)) for path in folder.iterdir()):
         raise ValueError("MuFerro case contains an unregistered result file; inspect the collected directory")
+
+
+def _matches_result(path, expected_sha256, *, expected_size=None, copy_to=None):
+    """Verify the bytes of a stable ordinary result without following its final path component."""
+    digest = hashlib.sha256()
+    try:
+        with open_regular(path, follow_symlinks=False) as stream:
+            before = os.fstat(stream.fileno())
+            if expected_size is not None and before.st_size != expected_size:
+                return False
+            remaining = before.st_size
+            while remaining:
+                block = stream.read(min(1024 * 1024, remaining))
+                if not block:
+                    return False
+                digest.update(block)
+                if copy_to is not None:
+                    copy_to.extend(block)
+                remaining -= len(block)
+            after = os.fstat(stream.fileno())
+            current = path.lstat()
+    except OSError:
+        return False
+    # Compare ctime only between fstat calls. Windows path stat can report creation time.
+    return (os.path.samestat(after, current)
+            and before.st_size == after.st_size == current.st_size
+            and before.st_mtime_ns == after.st_mtime_ns == current.st_mtime_ns
+            and before.st_ctime_ns == after.st_ctime_ns
+            and digest.hexdigest() == expected_sha256)
 
 
 def describe_case(model, record_id, connection, options, identity=None):
@@ -329,14 +360,14 @@ class MuFerro:
         runtime = self.stk.runtime(plan["connection"], node=plan["node"])
         expected = plan["connection_identity"]
         artifacts = {item["path"]: item for item in runtime.tasks.artifacts(task["id"], expected_connection_identity=expected)}
-        names = sorted(set(plan["input_bindings"]) | {"stk-mupro.json"} |
+        names = sorted(set(plan["input_bindings"]) | {RESULT} |
                        {"case/" + name for name in (*RUN_OUTPUTS, *expected_frames(case))} |
                        ({"case/run.h5"} if "case/run.h5" in artifacts else set()))
         if len(names) > 10000:
             raise ValueError("Invalid download budget or more than 10000 result files")
         if any(name not in artifacts for name in names):
             raise ValueError("Successful task has missing MuFerro outputs or original inputs")
-        if sum(artifacts[name]["size"] for name in names) > max_bytes or artifacts["stk-mupro.json"]["size"] > 2 * 1024 * 1024:
+        if sum(artifacts[name]["size"] for name in names) > max_bytes or artifacts[RESULT]["size"] > 2 * 1024 * 1024:
             raise ValueError("MuFerro results exceed the download budget")
         if any(artifacts[f["path"]]["sha256"] != f["sha256"] for f in plan["inputs"]):
             raise ValueError("Task input bytes do not match the frozen run plan")
@@ -345,6 +376,7 @@ class MuFerro:
         case_folder = _folder(destination, "case")
         _check_local_result_inventory(case_folder, {destination / name for name in names})
         paths = []
+        report_bytes = bytearray()
         for name in names:
             path = destination / relative_path(name)
             _folder(destination, *Path(name).parts[:-1])
@@ -355,10 +387,12 @@ class MuFerro:
                     idempotency_key=f"muferro:{run_id}:result:" + hashlib.sha256(name.encode()).hexdigest(),
                     expected_connection_identity=expected)
                 self._transfer(transfer)
-            if not path.is_file() or path.stat().st_size != artifacts[name]["size"] or _hash(path) != artifacts[name]["sha256"]:
+            artifact = artifacts[name]
+            if not _matches_result(path, artifact["sha256"], expected_size=artifact["size"],
+                                   copy_to=report_bytes if name == RESULT else None):
                 raise ValueError(f"Result changed locally or was not downloaded: {name}; inspect Transfers before repairing")
             paths.append(path)
-        report = _native_result_json((destination / "stk-mupro.json").read_text(encoding="utf-8"))
+        report = _native_result_json(report_bytes.decode("utf-8"))
         verification = verify_run(destination, "case")
         program_digest = _successful_report_program(report, case, verification)
         if "case/run.h5" in artifacts:
@@ -403,7 +437,11 @@ class MuFerro:
         registered = set()
         for file in row["values"][RESULT_FIELD_IDS["files"]]:
             path = root / relative_path(file["path"])
-            if not path.resolve().is_relative_to(root.resolve()) or _hash(path) != file["sha256"]:
+            try:
+                contained = path.resolve().is_relative_to(root.resolve())
+            except (OSError, RuntimeError):
+                contained = False
+            if not contained or not _matches_result(path, file["sha256"]):
                 raise ValueError("Collected result changed locally; inspect its files before viewing")
             registered.add(path)
         folder = root / "results" / "muferro" / str(UUID(run_id)) / "case"
