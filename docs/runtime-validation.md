@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · MuPRO 布局绑定与 D1 同修订竞争
+
+`9a357f75abe3842c7a75e59f267ce1e088de5845` 的旧码反例让合成求解器把预检三步改为一步，旧启动器退出 0。修复后退出 3，`case_layout` 失败，保留三步预检及空 QoI，独立离线核验仍读当前一步目录。源码联合 126 项通过、2 项仅真实许可资产跳过。隔离 wheel 启动器 47 项通过、1 项仅真实资产跳过。 [节点入口](runtime-mupro.md)
+
+`7017fb938804ccb208a42ef1fe353c3ef6b491be` 在同一 Linux SQLite 项目用严格桥与已认证 UDP WebRTC 各发一项修订 0 编辑，恰一提交和回执，败方及后续陈旧请求无回执。root 源码联跑 185 项、零跳过，隔离 wheel 定向通过。移除 CAS 与改错 peer 冲突映射的两个反例在预期断言处失败。证据见本机 `root-delivery-20261109-63`。 [CP-0 矩阵](design/cloud-project-service.md)
+
+`a8872719` Desktop 的 Windows CPU 及 Linux 三项通过，Windows 原生已通过 Mesa 准备并进入 WebView2 和报告测试，macOS 已进入 WKWebView 和报告测试。整轮仍运行。 [Windows 原生](https://github.com/sijintech/stk/actions/runs/42570072786/job/129016929205) [macOS](https://github.com/sijintech/stk/actions/runs/42570072786/job/129005168960)
+
 ## 2026-11-09 UTC · 文献热日志夹具阶段取证
 
 `03bb7fbc8f310e53ff6dbba3b294205aec440688` 在外部数据库热日志夹具中使用 `python -I -S`，显式关闭父连接，保留事务写入、缓存落盘和故意退出。文献与项目编辑联合 170 项通过、零跳过，使用固定 PDFium 5.14.0 和独立无 PDFium 环境。Python 3.11、3.12、3.14 的物理热日志与真实子进程子集各 6 项通过。

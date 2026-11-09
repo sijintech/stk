@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · MuPRO 布局核验与 D1 实线竞争
+
+MuPRO 启动后的结果按预检布局验收，保留离线核验入口。D1 的 F3/F11d 已用本机桥和真实 WebRTC 验证单库同修订竞争，目标平台和跨部署另验。Windows Mesa 准备通过，原生报告运行中。Claude28B 已交候选，root 继续核对窗口提前关闭时的测试夹具及 Linux 必跑门。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · Windows 文献热日志复验
 
 外部数据库热日志夹具已从 Python multiprocessing spawn 改为独立标准库子进程。Windows 先看 `a8872719` 同头重跑，再用新头验证阶段日志、实写热日志和原字节保护。Linux 三个 Python 版本的物理夹具通过。 [验收记录](runtime-validation.md)
