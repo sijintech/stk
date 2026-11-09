@@ -229,11 +229,127 @@ capture_geometry::Rect geometry_rect(RECT rect)
   return {int32_t(rect.left), int32_t(rect.top), int32_t(rect.right), int32_t(rect.bottom)};
 }
 
+// stk-start-timing-begin
+// Capture-start timing for the opt-in acceptance executables only. Every constructor step
+// is timed with the monotonic clock and costs no output on the normal path. A start that
+// fails, or whose total reaches the slow threshold, prints one bounded line containing only
+// fixed step labels, counts, milliseconds and an HRESULT. It has its own line budget, so a
+// stage() budget already consumed by probe and lifecycle lines cannot hide it. A call that
+// never returns cannot be reported from this thread; last_stage still names its step for the
+// crash filter. Keep this block free of Windows types (it is compiled alone on Linux).
+// Step milliseconds: -1 means no clean measurement (not reached, or the failure site).
+// capture.scope-exit is the release of the start's local COM references after StartCapture
+// returned. After a throw, the failing call's own time cannot be separated from the throw
+// and the unwinding of those locals, so failed_step names the site and the whole mixed span
+// goes to capture.failed-step-and-unwind, never to an API step.
+enum StartStep : unsigned {
+  kStartOptions, kStartApartment, kStartWindowChecks, kStartIsSupported, kStartWindowOwner,
+  kStartDwmGeometry, kStartItemFactory, kStartCreateForWindow, kStartItemSize, kStartWindowGeometry,
+  kStartD3dDevice, kStartDxgiAdapter, kStartWinrtDevice, kStartFramePool,
+  kStartCreateSession, kStartCursorOption, kStartStartCapture, kStartScopeExit,
+  kStartFailedAndUnwind, kStartErrorText, kStartStepCount
+};
+constexpr const char *start_step_labels[kStartStepCount] = {
+    "capture.options", "capture.apartment", "capture.window-checks", "capture.is-supported",
+    "capture.window-owner", "capture.dwm-geometry", "capture.item-factory", "capture.create-for-window",
+    "capture.item-size", "capture.window-geometry", "capture.d3d-device", "capture.dxgi-adapter",
+    "capture.winrt-device", "capture.frame-pool", "capture.create-session", "capture.cursor-option",
+    "capture.start-capture", "capture.scope-exit", "capture.failed-step-and-unwind", "capture.error-text"};
+constexpr int64_t slow_start_ms = 1000;  // Successful starts on the hosted runner took 57-67 ms.
+constexpr unsigned start_line_limit = 16;
+unsigned start_sequence = 0, start_lines = 0;  // Captures start only on the acceptance UI thread.
+
+class StartTiming {
+ public:
+  using Clock = std::chrono::steady_clock;
+  StartTiming() noexcept { for (auto &value : ms_) { value = -1; } }  // -1: step not reached.
+  void enter(StartStep step) noexcept
+  {
+    leave();
+    current_ = step;
+    step_began_ = Clock::now();
+    last_stage.store(start_step_labels[step], std::memory_order_relaxed);
+  }
+  // Ends the open step (re-entry accumulates) and returns its fixed label, or nullptr.
+  const char *leave() noexcept
+  {
+    if (current_ >= kStartStepCount) { return nullptr; }
+    const auto elapsed = since(step_began_);
+    ms_[current_] = ms_[current_] < 0 ? elapsed : ms_[current_] + elapsed;
+    const auto *label = start_step_labels[current_];
+    current_ = kStartStepCount;
+    return label;
+  }
+  // For a catch handler: returns the failure site's label, or nullptr, but books the open
+  // span (failing call + throw + unwind of try-scope locals) to the mixed bucket only.
+  const char *fail() noexcept
+  {
+    if (current_ >= kStartStepCount) { return nullptr; }
+    const auto *label = start_step_labels[current_];
+    current_ = kStartFailedAndUnwind;
+    return leave() ? label : nullptr;
+  }
+  StartStep slowest() const noexcept
+  {
+    unsigned index = 0;
+    for (unsigned i = 1; i < kStartStepCount; ++i) { if (ms_[i] > ms_[index]) { index = i; } }
+    return StartStep(index);
+  }
+  int64_t ms(StartStep step) const noexcept { return ms_[step]; }
+  int64_t total_ms() const noexcept { return since(began_); }
+ private:
+  static int64_t since(Clock::time_point from) noexcept
+  {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - from).count();
+  }
+  Clock::time_point began_ = Clock::now(), step_began_{};
+  StartStep current_ = kStartStepCount;
+  int64_t ms_[kStartStepCount];
+};
+
+// Returns whether the start is reportable (failed or slow); prints within the line budget.
+// No word here may match the evidence gate's failure pattern on a successful slow start.
+bool report_start_timing(const StartTiming &timing, int64_t total, unsigned sequence, unsigned long thread,
+                         bool failed, const char *failed_step, int32_t hresult) noexcept
+{
+  last_stage.store("capture.start.returned", std::memory_order_relaxed);
+  if (!failed && total < slow_start_ms) { return false; }
+  if (start_lines >= start_line_limit) { return true; }
+  ++start_lines;
+  const auto slowest = timing.slowest();
+  char line[1536]{};
+  int used = std::snprintf(line, sizeof(line),
+      "STK_NATIVE_CAPTURE_START sequence=%u thread=%lu outcome=%s failed_step=%s hresult=0x%08lx "
+      "slowest_step=%s slowest_ms=%lld total_ms=%lld threshold_ms=%lld steps=",
+      sequence, thread, failed ? "error" : "slow", failed && failed_step ? failed_step : "none",
+      static_cast<unsigned long>(static_cast<uint32_t>(hresult)), start_step_labels[slowest],
+      static_cast<long long>(timing.ms(slowest)), static_cast<long long>(total),
+      static_cast<long long>(slow_start_ms));
+  for (unsigned i = 0; i < kStartStepCount && used > 0 && size_t(used) < sizeof(line); ++i) {
+    const int added = std::snprintf(line + used, sizeof(line) - size_t(used), "%s%s:%lld", i ? "," : "",
+                                    start_step_labels[i], static_cast<long long>(timing.ms(StartStep(i))));
+    used = added < 0 ? -1 : used + added;
+  }
+  if (used <= 0 || size_t(used) >= sizeof(line)) {  // Fixed labels fit; never print a partial line.
+    std::printf("STK_NATIVE_CAPTURE_START sequence=%u outcome=unformatted\n", sequence);
+  }
+  else { std::printf("%s\n", line); }
+  if (start_lines == start_line_limit) { std::printf("STK_NATIVE_CAPTURE_START_LIMIT lines=%u\n", start_line_limit); }
+  std::fflush(stdout);
+  return true;
+}
+// stk-start-timing-end
+
 class Capture final : public WindowEvidenceCapture {
  public:
   explicit Capture(wm::NativeWindowHandle parent)
   {
+    StartTiming timing;
+    const unsigned sequence = ++start_sequence;
+    const char *failed_step = nullptr;
+    int32_t failed_hresult = 0;
     try {
+      timing.enter(kStartOptions);
       // Test-only, explicit selection: never silently reinterpret a hardware failure as WARP.
       wchar_t requested[16]{};
       const auto count = GetEnvironmentVariableW(L"STK_NATIVE_EVIDENCE_D3D_DRIVER", requested, 16);
@@ -244,25 +360,39 @@ class Capture final : public WindowEvidenceCapture {
         throw std::runtime_error("STK_NATIVE_EVIDENCE_D3D_DRIVER must be hardware or warp");
       }
       backend_ += warp ? ";d3d11_request=warp" : ";d3d11_request=hardware";
+      timing.enter(kStartApartment);
       winrt::init_apartment(winrt::apartment_type::single_threaded);
       apartment_ = true;
+      timing.enter(kStartWindowChecks);
       window_ = static_cast<HWND>(parent.value);
+      // Same short-circuit order and refusal as one condition; the step open at the throw names
+      // which part refused (window state, or IsSupported only after the window checks passed).
+      constexpr const char *capture_refusal =
+          "Windows Graphics Capture needs a visible STK window and supported interactive session";
       if (parent.kind != wm::NativeWindowKind::Win32 || !IsWindow(window_) ||
-          !IsWindowVisible(window_) || IsIconic(window_) || !GraphicsCaptureSession::IsSupported()) {
-        throw std::runtime_error("Windows Graphics Capture needs a visible STK window and supported interactive session");
+          !IsWindowVisible(window_) || IsIconic(window_)) {
+        throw std::runtime_error(capture_refusal);
       }
+      timing.enter(kStartIsSupported);
+      if (!GraphicsCaptureSession::IsSupported()) { throw std::runtime_error(capture_refusal); }
+      timing.enter(kStartWindowOwner);
       DWORD owner = 0;
       if (!GetWindowThreadProcessId(window_, &owner) || owner != GetCurrentProcessId()) {
         throw std::runtime_error("Evidence capture refuses a window outside this STK process");
       }
+      timing.enter(kStartDwmGeometry);
       client_ = client_bounds();
       winrt::check_hresult(DwmGetWindowAttribute(window_, DWMWA_EXTENDED_FRAME_BOUNDS,
                                                  &outer_, sizeof(outer_)));
+      timing.enter(kStartItemFactory);
       auto interop = winrt::get_activation_factory<GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
+      timing.enter(kStartCreateForWindow);
       winrt::check_hresult(interop->CreateForWindow(window_, winrt::guid_of<GraphicsCaptureItem>(),
                                                    winrt::put_abi(item_)));
+      timing.enter(kStartItemSize);
       const auto size = item_.Size();
       pool_width_ = size.Width; pool_height_ = size.Height;
+      timing.enter(kStartWindowGeometry);
       SetLastError(ERROR_SUCCESS);
       const bool got_window_rect = GetWindowRect(window_, &window_rect_) != FALSE;
       const DWORD window_rect_error = got_window_rect ? ERROR_SUCCESS : GetLastError();
@@ -303,10 +433,12 @@ class Capture final : public WindowEvidenceCapture {
       // Microsoft supports WARP through this same API. WGC support and actual pixels still
       // have to pass below; choosing WARP does not bypass any capability or image check.
       D3D_FEATURE_LEVEL feature_level{};
+      timing.enter(kStartD3dDevice);
       winrt::check_hresult(D3D11CreateDevice(nullptr,
           warp ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_HARDWARE, nullptr,
           D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
           device_.put(), &feature_level, context_.put()));
+      timing.enter(kStartDxgiAdapter);
       const auto dxgi = device_.as<IDXGIDevice>();
       winrt::com_ptr<IDXGIAdapter> adapter;
       winrt::check_hresult(dxgi->GetAdapter(adapter.put()));
@@ -317,17 +449,46 @@ class Capture final : public WindowEvidenceCapture {
           ";adapter_software=" + (software ? std::string("true") : std::string("false")) +
           ";feature_level=" + std::to_string(unsigned(feature_level));
       if (warp && !software) { throw std::runtime_error("WARP capture did not report a software DXGI adapter"); }
+      timing.enter(kStartWinrtDevice);
       winrt::com_ptr<IInspectable> inspectable;
       winrt::check_hresult(CreateDirect3D11DeviceFromDXGIDevice(dxgi.get(), inspectable.put()));
+      timing.enter(kStartFramePool);
       pool_ = Direct3D11CaptureFramePool::CreateFreeThreaded(inspectable.as<IDirect3DDevice>(),
           DirectXPixelFormat::B8G8R8A8UIntNormalized, 1, size);
+      timing.enter(kStartCreateSession);
       session_ = pool_.CreateCaptureSession(item_);
+      timing.enter(kStartCursorOption);
       session_.IsCursorCaptureEnabled(false);
       // Keep the OS capture indicator; do not ask for borderless-capture privileges.
+      timing.enter(kStartStartCapture);
       session_.StartCapture();
+      // Stays open across the closing brace: the try-scope locals (interop, dxgi, adapter,
+      // inspectable) release their references there, not inside StartCapture.
+      timing.enter(kStartScopeExit);
     }
-    catch (const winrt::hresult_error &e) { error_ = winrt::to_string(e.message()); }
-    catch (const std::exception &e) { error_ = e.what(); }
+    catch (const winrt::hresult_error &e) {
+      failed_step = timing.fail(); failed_hresult = int32_t(e.code());
+      timing.enter(kStartErrorText);
+      error_ = winrt::to_string(e.message());
+    }
+    catch (const std::exception &e) {
+      failed_step = timing.fail();
+      timing.enter(kStartErrorText);
+      error_ = e.what();
+    }
+    timing.leave();  // Closes scope-exit (success) or error-text (failure).
+    const bool failed = failed_step != nullptr || !error_.empty();
+    const auto total = timing.total_ms();
+    if (report_start_timing(timing, total, sequence, GetCurrentThreadId(), failed, failed_step, failed_hresult) &&
+        !failed) {
+      // A slow start that still yields pixels also carries its attribution into the receipt.
+      try {
+        backend_ += std::string(";start_slow_step=") + start_step_labels[timing.slowest()] +
+            ";start_slow_ms=" + std::to_string(timing.ms(timing.slowest())) +
+            ";start_total_ms=" + std::to_string(total);
+      }
+      catch (...) {}
+    }
   }
   ~Capture() override
   {
