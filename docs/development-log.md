@@ -1,5 +1,11 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · 集成 Claude25 与复验 CP-0 安装态
+
+审阅 `claude/cp0-evidence-matrix-25` 的 `08773ca5`，逐项核对测试名、基线和入口后，以原文件集成到 `db9a7ed8`。root 在设计矩阵补上 F14 的真实 WebRTC 写后溢出，以及三个 Python 版本各 116 项零跳过的 Linux wheel 复验。数量满和字节已耗尽均属写前拒绝，新回执超限属于写后回滚。Claude26 接手 F5b/F5c/F23 的隔离反例。 [设计矩阵](design/cloud-project-service.md)
+
+`49837655` 的前序 Desktop 整轮于 04:46:03Z 终态失败。Windows 原生 6/6 和其余四项平台任务通过，macOS 原组 4/6、定位前对照 0/2。 [Desktop 42558025291](https://github.com/sijintech/stk/actions/runs/42558025291)
+
 ## 2026-11-09 UTC · 核验 49837655 的 macOS 失败条目
 
 root 按范围核对四份结果。独立视频原组与对照都在任何定位前出现显式暂停读数回退。HTML 原组在隐藏保持回退，HTML 对照保持通过后只取得一次匹配截图。现有失败记录尚未给出视图关闭来源。新增 `b386929b` 在显式暂停前后分别记录探针的原生暂停快照，并把隐藏关闭对象带到失败日志。Linux 25 项通过。

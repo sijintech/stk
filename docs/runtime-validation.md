@@ -1,5 +1,30 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · CP-0 wheel 复验与 49837655 Desktop 终态
+
+| Python | SQLite | 通过 | 跳过 |
+|---|---|---:|---:|
+| 3.11.16 | 3.53.1 | 116 | 0 |
+| 3.12.14 | 3.53.1 | 116 | 0 |
+| 3.14.4 | 3.46.1 | 116 | 0 |
+
+Linux wheel 来自 `49837655`，SHA256 为 `03c2bb32a931d2a5567d26a85511659f0f84510c345312ee8f63b91a589a70dd`。`74ee8b4e` 导出的两份项目编辑测试及一个 F14 原生 helper 用例，在三个解释器有完全相同的测试 ID。主进程与实际热日志子进程均从隔离安装目录导入。真实 WebRTC 限 F14 缩小写后字节预算的同库用例，其他结果按 store、桥和 peer 适配器范围记录。本机合成项目仍待跨主机及目标平台复验。证据目录 `root-delivery-20261109-56` 的 `installed-cp0-matrix.json` 绑定三个 JUnit 和解释器元数据的 SHA256。 [CP-0 矩阵](design/cloud-project-service.md)
+
+[Desktop 42558025291](https://github.com/sijintech/stk/actions/runs/42558025291) 对精确 `4983765575ec708ceb52e195afe87ea3f6211396` 于 04:46:03Z 终态失败。六个任务均已结束。
+
+| 任务 | 结果 |
+|---|---|
+| Linux Ubuntu 24.04 发行包 `128968016251` | 通过 |
+| Ubuntu 24.04 全新环境解包冒烟 `128969883943` | 通过 |
+| Linux Ubuntu 26.04 `128968016349` | 通过，2118 CTest |
+| Windows CPU `128968016066` | 通过，1460 CTest |
+| Windows 原生 `128978712754` | 通过，六项 OpenGL 文档验收 6/6，CTest 1313.55 秒 |
+| macOS 原生 `128968016291` | 失败，原组 4/6，定位前对照 0/2 |
+
+Windows 六项为文档预览、Markdown、HTML、PDF、Video 和 HTML video。证据包于 04:45:59Z 上传。macOS 的两类媒体失败及原始证据见下一节。 [Windows 原生任务](https://github.com/sijintech/stk/actions/runs/42558025291/job/128978712754#step:7:1) [Windows 证据 13650009117](https://github.com/sijintech/stk/actions/runs/42558025291/artifacts/13650009117)
+
+同头 Runtime `42558025404` 13 项任务通过，Docs `42558025283` 和 Secret scan `42558025253` 通过。
+
 ## 2026-11-09 UTC · 49837655 macOS 失败阶段及原生暂停取证
 
 [macOS 128968016291](https://github.com/sijintech/stk/actions/runs/42558025291/job/128968016291) 于 04:27:26Z 终态失败。第 18 步原组 4/6，第 19 步定位前对照 0/2。定向读取四份原 JSON，共 266,735 字节，逐条校验 ZIP CRC32 与实际 SHA256。[产物 13649638003](https://github.com/sijintech/stk/actions/runs/42558025291/artifacts/13649638003)
