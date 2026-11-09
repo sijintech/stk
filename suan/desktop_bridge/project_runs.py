@@ -44,13 +44,13 @@ class ProjectRuns:
             elif action == "refresh" and not task and not status.get("action"):
                 # Do not turn a read into submission, including recovery after response loss.
                 return {"run": run}
+            result = {}
             try:
                 if action == "submit":
                     result = backend.submit(plan["spec"], plan["idempotency_key"])
                 elif action == "cancel":
                     result = backend.cancel(task["id"], plan["idempotency_key"] + ":cancel")
                 else:
-                    result = {}
                     pending = status.get("action")
                     if pending and (not task or pending["state"] not in FINISHED_ACTIONS):
                         record = backend.action_record(pending["id"])
@@ -77,6 +77,9 @@ class ProjectRuns:
                     patch["submission"] = "uncertain"
                 if isinstance(exc.data, dict) and "action" in exc.data:
                     patch["action"] = exc.data["action"]
+                elif action == "refresh" and "action" in result:
+                    # The Hub action was observed independently of the Runtime task read.
+                    patch["action"] = result["action"]
                 runs.observe(run_id, patch)
                 raise
             return {"run": runs.get(run_id)}

@@ -235,6 +235,69 @@ def test_hub_review_refresh_recovers_approved_task_without_posting_or_approving(
     assert run["status"]["submission"] == "accepted" and run["status"]["task"]["id"] == "c" * 32
 
 
+def test_hub_refresh_retains_failed_cancel_when_the_runtime_task_is_unavailable(model):
+    store, ids = model
+    task_id, action_id = "c" * 32, "b" * 32
+    calls = []
+
+    class Backend:
+        server_key = "a" * 16
+        online = False
+
+        def submit(self, spec, key):
+            calls.append(("submit", key))
+            return {"task": {"id": task_id, "state": "running"}}
+
+        def cancel(self, identity, key):
+            assert identity == task_id
+            calls.append(("cancel", key))
+            raise BridgeError("timeout", "The Hub action has not finished",
+                              data={"action": {"id": action_id, "kind": "task.cancel", "state": "queued"}})
+
+        def action_record(self, identity):
+            assert identity == action_id
+            calls.append(("action", identity))
+            return {"id": identity, "state": "failed", "request": {"kind": "task.cancel"}}
+
+        def task(self, identity):
+            assert identity == task_id
+            calls.append(("task", identity))
+            if not self.online:
+                raise BridgeError("unavailable", "The execution node is offline", retryable=True)
+            return {"task": {"id": identity, "state": "succeeded"}}
+
+    backend = Backend()
+    svc, p = service(store, backend)
+    run_id = svc.call("prepare", {**p, "connection": "hub:Test", "node": "d" * 32,
+                                  "entries": [entry(ids)], "expected_revision": 1})["run_ids"][0]
+    p = {**p, "run_id": run_id}
+    submitted = svc.call("submit", p)["run"]
+    with pytest.raises(BridgeError) as timeout:
+        svc.call("cancel", p)
+    assert timeout.value.code == "timeout"
+    pending = svc.call("get", p)["run"]
+    assert pending["status"]["action"]["state"] == "queued"
+    assert pending["status"]["task"] == submitted["status"]["task"]
+
+    with pytest.raises(BridgeError) as error:
+        svc.call("refresh", p)
+    assert error.value.code == "unavailable" and error.value.retryable is True
+    reopened = ProjectStore(store.directory)
+    status = reopened.runs.get(run_id)["status"]
+    assert status["action"] == {"id": action_id, "kind": "task.cancel", "state": "failed"}
+    assert status["submission"] == "accepted" and status["task"] == submitted["status"]["task"]
+    assert status["error"] == error.value.to_json()
+
+    backend.online = True
+    svc, p = service(reopened, backend)
+    status = svc.call("refresh", {**p, "run_id": run_id})["run"]["status"]
+    assert status["action"]["state"] == "failed"
+    assert status["task"] == {"id": task_id, "state": "succeeded"} and status["error"] is None
+    key = submitted["plan"]["idempotency_key"]
+    assert calls == [("submit", key), ("cancel", key + ":cancel"), ("action", action_id),
+                     ("task", task_id), ("task", task_id)]
+
+
 def test_console_frozen_input_run_persists_after_close_and_validates_history(scripts, runtime, tmp_path):
     client, supervisor, _, _ = runtime
     connection = add_profile(scripts, runtime)
