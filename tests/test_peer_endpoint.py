@@ -1444,6 +1444,98 @@ def test_real_observed_database_replacement_durably_revokes_the_old_grant_until_
     assert physical() == original and authority_state()[0] == [(0,)]
 
 
+def test_real_failed_peer_receipt_lookup_records_revision_before_same_inode_rollback(connected, sides):
+    """CP-0 F9 live, CURRENT behavior on one Linux host only (live mirror of the adapter test
+    test_failed_receipt_lookup_records_revision_before_same_inode_restore): the owner's store is bound at
+    revision 0 and a local edit reaches revision 1 unobserved by any peer. An authenticated UDP receipt
+    lookup for a never-used operation is not_found, yet durably advances the authority watermark to 1 with
+    the grant still active. The exact revision-0 preimage is then written back in place (same device and
+    inode). The next peer observation is forbidden and durably invalidates the binding, grants and the
+    caller's epoch without creating an edit or receipt. Not covered: F8b inode replacement, explicit rebind,
+    restores no peer request observed, multi-host, cloud or any recovery policy."""
+    client, _ = connected()
+    caller, owner = sides
+    store, target, authority = owner.store, owner.target, owner.authority
+    directory, path = store.directory, store.path
+    apply, get = "project.edit_operations.apply_once", "project.edit_operations.get"
+
+    def read_only(database, sql, *args):
+        """mode=ro and never used while a journal exists, so it cannot write or recover anything."""
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
+            return db.execute(sql, args).fetchall()
+
+    def authority_state():
+        return (read_only(authority.path, "SELECT active FROM grants WHERE grant_id=? AND peer_id=?",
+                          target["grant_id"], caller.peer_id),
+                read_only(authority.path, "SELECT generation, device, inode, revision, active FROM projects "
+                          "WHERE project_id=?", target["project_id"]),
+                read_only(authority.path, "SELECT epoch, active FROM peers WHERE peer_id=?", caller.peer_id))
+
+    def physical():
+        info = path.lstat()
+        return ((str(info.st_dev), str(info.st_ino)), info.st_size, path.read_bytes(),
+                sorted(item.name for item in directory.iterdir()))
+
+    def stored_receipts():
+        return read_only(path, "SELECT scope, operation_id, request, receipt FROM project_edit_operations")
+
+    def invoke(endpoint, method, values):
+        try:
+            return endpoint.request(method, values, timeout=20), None
+        except PeerProtocolError as error:
+            return None, error.code
+
+    # Bound at revision 0 on this real inode; save the exact preimage while no journal exists.
+    generation = target["database_generation"]
+    preimage = physical()
+    assert not any(name.startswith(path.name + "-") for name in preimage[3])  # no journal or sidecar
+    preimage_snapshot, preimage_history = store.snapshot(), store.history()
+    assert store.info()["revision"] == 0 and preimage_snapshot["tables"] == [] and stored_receipts() == []
+    grant_row, project_row, peer_row = authority_state()
+    (epoch, active), = peer_row
+    assert grant_row == [(1,)] and active == 1
+    assert project_row == [(generation, *preimage[0], 0, 1)]
+
+    # A local owner edit reaches revision 1; no peer catalog/read observed it, so the watermark stays 0.
+    store.apply([{"op": "create_table", "name": "Unobserved local edit"}], expected_revision=0)
+    edited = physical()
+    assert store.info()["revision"] == 1 and edited[0] == preimage[0] and edited[2] != preimage[2]
+    assert not any(name.startswith(path.name + "-") for name in edited[3])
+    assert stored_receipts() == []
+    assert authority_state() == (grant_row, project_row, peer_row)
+
+    # A real peer receipt lookup for a never-used operation fails as not_found, yet that authorized lease
+    # durably records the revision it observed; the grant, binding and caller epoch stay active.
+    missing = uuid()
+    assert invoke(client, get, {**target, "operation_id": missing}) == (None, "not_found")
+    observed = authority_state()
+    assert observed == (grant_row, [(generation, *preimage[0], 1, 1)], peer_row)
+    assert physical() == edited and stored_receipts() == []
+
+    # Out-of-band exact in-place restore of the revision-0 preimage, preserving device and inode.
+    path.write_bytes(preimage[2])
+    restored = physical()
+    assert restored == preimage  # same (dev, inode), size, exact bytes and directory listing
+    info = store.info()
+    assert (info["id"], info["revision"]) == (target["project_id"], 0) and physical() == preimage
+    assert authority_state() == observed  # the rollback is not observed by the owner yet
+
+    # The next peer observation sees revision 0 below the watermark: forbidden, durably invalidated.
+    assert invoke(client, "project.catalog", target) == (None, "forbidden")
+    invalidated = authority_state()
+    assert invalidated == ([(0,)], [(generation, *preimage[0], 1, 0)], [(epoch + 1, 1)])
+    assert physical() == preimage and stored_receipts() == []
+
+    # Follow-ups stay denied: the missing receipt lookup and a new edit valid at the restored revision 0.
+    for method, values in ((get, {**target, "operation_id": missing}),
+                           (apply, {**target, "operation_id": uuid(), "expected_revision": 0,
+                                    "commands": [{"op": "create_table", "name": "After rollback"}]})):
+        assert invoke(client, method, values) == (None, "forbidden"), method
+        assert authority_state() == invalidated and physical() == preimage, method
+    assert (store.snapshot(), store.history(), stored_receipts()) == (preimage_snapshot, preimage_history, [])
+    assert store.info()["id"] == target["project_id"] and store.info()["revision"] == 0
+
+
 class AlterControl:
     """Fault injector around an actual native encrypted link; never a replacement transport."""
     def __init__(self, transport, mutate):
