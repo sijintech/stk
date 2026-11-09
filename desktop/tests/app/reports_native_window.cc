@@ -82,7 +82,12 @@ Json native_pause_json(const NativePause &pause)
   if (!pause.available) return nullptr;
   return {{"media_generation", pause.media_generation},
       {"navigation_generation", pause.navigation_generation},
-      {"acknowledged", pause.acknowledged}, {"verified", pause.verified}};
+      {"acknowledged", pause.acknowledged}, {"verified", pause.verified},
+      {"visible_at_dispatch", pause.visible_at_dispatch},
+      {"query_count", pause.query_count}, {"reply_count", pause.reply_count},
+      {"playing_reply_count", pause.playing_reply_count},
+      {"first_query_seconds", pause.query_count ? Json(pause.first_query_seconds) : Json(nullptr)},
+      {"last_reply_seconds", pause.reply_count ? Json(pause.last_reply_seconds) : Json(nullptr)}};
 }
 Json native_pause_pair_json(const std::optional<NativePausePair> &pause)
 {

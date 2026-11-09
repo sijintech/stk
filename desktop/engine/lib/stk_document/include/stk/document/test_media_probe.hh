@@ -37,6 +37,9 @@ struct NativePauseSnapshot {
   bool available = false;
   uint64_t media_generation = 0, navigation_generation = 0;
   bool acknowledged = false, verified = false;
+  bool visible_at_dispatch = false;
+  uint64_t query_count = 0, reply_count = 0, playing_reply_count = 0;
+  double first_query_seconds = 0, last_reply_seconds = 0;
 };
 
 struct MediaProbeResult {

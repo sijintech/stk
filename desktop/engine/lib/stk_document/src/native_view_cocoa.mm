@@ -124,12 +124,18 @@ struct PauseRequest {
   detail::MediaPauseVerification verification;
   bool acknowledged = false;
   bool query_inflight = false;
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+  detail::MediaPauseVerification::Clock::time_point started;
+#endif
 
-  PauseRequest(const std::shared_ptr<State> &source, uint64_t generation)
+  PauseRequest(const std::shared_ptr<State> &source, uint64_t generation,
+               detail::MediaPauseVerification::Clock::time_point now)
       : state(source),
         view(source->view),
-        verification(generation, source->result.navigation_generation,
-                     detail::MediaPauseVerification::Clock::now())
+        verification(generation, source->result.navigation_generation, now)
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+        , started(now)
+#endif
   {
   }
 };
@@ -141,8 +147,9 @@ static void verify_pause(std::shared_ptr<PauseRequest> request)
     return;
   }
   using Check = detail::MediaPauseVerification;
+  const auto now = Check::Clock::now();
   const auto pending = request->verification.expire(
-      current->media_generation, current->result.navigation_generation, Check::Clock::now());
+      current->media_generation, current->result.navigation_generation, now);
   if (pending == Check::Result::Failed) {
     shutdown(current, NativeViewStatus::Failed, kPauseWatchdogFailure);
     return;
@@ -159,24 +166,29 @@ static void verify_pause(std::shared_ptr<PauseRequest> request)
     return;
   }
   request->query_inflight = true;
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+  auto &pause = current->test_last_pause;
+  if (++pause.query_count == 1) {
+    pause.first_query_seconds = std::chrono::duration<double>(now - request->started).count();
+  }
+#endif
   [current->view requestMediaPlaybackStateWithCompletionHandler:^(WKMediaPlaybackState playback) {
     request->query_inflight = false;
     auto completed = request->state.lock();
     if (!live(completed) || completed->view != request->view) {
       return;
     }
+    const auto replied = Check::Clock::now();
+    const bool playing = playback == WKMediaPlaybackStatePlaying;
     const auto result = request->verification.observe(
-        playback == WKMediaPlaybackStatePlaying, completed->media_generation,
-        completed->result.navigation_generation, Check::Clock::now());
+        playing, completed->media_generation, completed->result.navigation_generation, replied);
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
-    // Paused is returned only for the original request's media/navigation pair
-    // before its unchanged absolute deadline. Observing !Playing alone is weaker.
-    if (result == Check::Result::Paused) {
+    if (result != Check::Result::Ignored) {
       auto &pause = completed->test_last_pause;
-      if (pause.available && pause.media_generation == completed->media_generation &&
-          pause.navigation_generation == completed->result.navigation_generation) {
-        pause.verified = true;
-      }
+      ++pause.reply_count;
+      pause.playing_reply_count += playing;
+      pause.last_reply_seconds = std::chrono::duration<double>(replied - request->started).count();
+      pause.verified = result == Check::Result::Paused;
     }
 #endif
     if (result == Check::Result::Failed) {
@@ -733,10 +745,11 @@ class CocoaDocumentView final : public NativeDocumentView {
       return false;
     }
     const auto generation = ++state->media_generation;
-    const auto request = std::make_shared<cocoa::PauseRequest>(state, generation);
+    const auto request = std::make_shared<cocoa::PauseRequest>(
+        state, generation, detail::MediaPauseVerification::Clock::now());
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
     const auto navigation = state->result.navigation_generation;
-    state->test_last_pause = {true, generation, navigation, false, false};
+    state->test_last_pause = {true, generation, navigation, false, false, !state->view.hidden};
 #endif
     cocoa::verify_pause(request);
     // Public macOS 12+ API; project JavaScript remains disabled. Pausing never resumes media.
