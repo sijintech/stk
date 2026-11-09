@@ -683,6 +683,11 @@ jobs:
           $mesaUrl = 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.4/mesa3d-26.2.4-release-msvc.7z'
           $mesaSha = '351fc8c8b695878ffb3eaa044b3ead08672a48b1a045e3c3e3975811df0f6695'
           & curl.exe --fail --location --retry 2 --connect-timeout 20 --max-time 180 --output $mesaArchive $mesaUrl
+          if ($LASTEXITCODE -ne 0) {
+            # The release API can still resolve the exact pinned asset when the browser URL fails.
+            $mesaUrl = 'https://api.github.com/repos/pal1000/mesa-dist-win/releases/assets/609112860'
+            & curl.exe --fail --location --retry 2 --connect-timeout 20 --max-time 180 --header 'Accept: application/octet-stream' --output $mesaArchive $mesaUrl
+          }
           if ($LASTEXITCODE -ne 0) { throw 'Pinned Mesa archive download failed' }
           if ((Get-Item $mesaArchive).Length -ne 70257286 -or (Get-FileHash $mesaArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $mesaSha) {
             throw 'Pinned Mesa archive size or SHA-256 mismatch'
