@@ -1,13 +1,20 @@
 """A frozen workflow target survives profile changes and transfer-worker/restart boundaries."""
 from contextvars import ContextVar
+import hashlib
+import os
 import threading
 
 import pytest
 
+from mupro_fake import write_case
 from suan.desktop_bridge.transfers import TransferManager
 from suan.desktop_bridge.protocol import BridgeError
+from suan.mupro import muferro_spec
+from suan.mupro.run import RUN_OUTPUTS, expected_frames, read_case
 from suan.project import ProjectStore
-from test_desktop_bridge import bridge_env, inproc  # noqa: F401
+from suan.scripting import API
+from suan.workflows.muferro import FIELD_IDS, LABEL, TABLE_ID
+from test_desktop_bridge import BridgeCallError, bridge_env, inproc  # noqa: F401
 
 
 class Backend:
@@ -70,21 +77,167 @@ def test_transfer_worker_retains_workflow_context(tmp_path, monkeypatch):
     manager.stop()
 
 
-def test_reopened_transfer_refuses_changed_endpoint_before_any_bytes_move(tmp_path, monkeypatch):
+@pytest.mark.parametrize("kind", ["upload", "download"])
+def test_reopened_transfer_refuses_changed_endpoint_before_any_bytes_move(tmp_path, monkeypatch, kind):
     a, b = Backend("a" * 16), Backend("b" * 16)
     source = tmp_path / "input.txt"
     source.write_text("manufactured input")
     first = TransferManager(tmp_path / "bridge", lambda *args: None, lambda *args: a)
     monkeypatch.setattr(first, "_launch", lambda identity: None)  # crash after journaling, before worker dispatch
-    transfer = first.start_upload("runtime:lab", "c" * 32, source)
+    if kind == "upload":
+        transfer = first.start_upload("runtime:lab", "c" * 32, source)
+    else:
+        transfer = first.start_download("runtime:lab", "task", "c" * 32, "result.dat", tmp_path / "result.dat",
+                                        expected_connection_identity=a.server_key)
     assert first.load(transfer["id"])["connection_identity"] == a.server_key
     first.stop()
     reopened = TransferManager(tmp_path / "bridge", lambda *args: None, lambda *args: b)
     moved = []
-    monkeypatch.setattr(reopened, "_upload", lambda *args: moved.append(True))
+    monkeypatch.setattr(reopened, "_" + kind, lambda *args: moved.append(True))
     reopened.resume(transfer["id"])
     reopened.threads[transfer["id"]].join(5)
     record = reopened.load(transfer["id"])
     assert record["state"] == "failed" and record["error"]["code"] == "conflict"
     assert moved == []
     reopened.stop()
+
+
+def test_guarded_keyed_download_replays_the_matching_journal_and_preserves_legacy_calls(inproc, tmp_path, monkeypatch):
+    h = inproc()
+    a, b = Backend("a" * 16), Backend("b" * 16)
+    active, resolutions, launches = [a], [], []
+
+    def resolve(connection, node=None):
+        resolutions.append((connection, node))
+        return active[0]
+
+    manager = h.bridge.transfers
+    monkeypatch.setattr(h.bridge.connections, "backend", resolve)
+    monkeypatch.setattr(manager, "_launch", launches.append)
+    params = {"connection": "hub:fixture", "node": "e" * 32, "task_id": "c" * 32,
+              "path": "case/energy_out.dat", "idempotency_key": "download-once"}
+    dest = str(tmp_path / "legacy.dat")
+    legacy = h.call("download.start", {**params, "dest": dest})["transfer"]
+    guarded = {**params, "idempotency_key": "guarded-default", "expected_connection_identity": a.server_key}
+    original = h.call("download.start", guarded)["transfer"]
+    cached = h.bridge.download_dir / a.server_key / params["task_id"]
+    assert cached.is_dir()
+    if os.name != "nt":
+        assert cached.stat().st_mode & 0o777 == 0o700
+    assert resolutions == [(params["connection"], params["node"])] * 2
+    assert launches == [legacy["id"], original["id"]]
+    assert manager.load(legacy["id"])["connection_identity"] == a.server_key
+    assert manager.load(original["id"])["connection_identity"] == a.server_key
+    assert "expected_connection_identity" not in manager.load(original["id"])["request"]
+
+    active[0] = b
+    assert h.call("download.start", guarded)["transfer"] == original
+    assert h.call("download.start", {**params, "dest": dest, "expected_connection_identity": a.server_key})["transfer"] == legacy
+    assert len(resolutions) == 2 and len(launches) == 2
+
+    with pytest.raises(BridgeCallError) as wrong:
+        h.call("download.start", {**params, "dest": dest, "expected_connection_identity": b.server_key})
+    assert wrong.value.code == "conflict" and wrong.value.error["data"]["transfer_id"] == legacy["id"]
+    old_record = manager.load(legacy["id"])
+    old_record.pop("connection_identity")
+    manager.save(old_record)
+    with pytest.raises(BridgeCallError) as missing:
+        h.call("download.start", {**params, "dest": dest, "expected_connection_identity": a.server_key})
+    assert missing.value.code == "conflict" and missing.value.error["data"]["transfer_id"] == legacy["id"]
+    assert h.call("download.start", {**params, "dest": dest})["transfer"]["id"] == legacy["id"]
+    assert len(resolutions) == 2 and len(launches) == 2
+    assert manager.load(legacy["id"]) == old_record
+
+    rejected_task = "d" * 32
+    with pytest.raises(BridgeCallError) as switched:
+        h.call("download.start", {**guarded, "idempotency_key": "fresh-mismatch", "task_id": rejected_task})
+    assert switched.value.code == "conflict"
+    assert {entry["id"] for entry in manager.list()} == {legacy["id"], original["id"]}
+    assert launches == [legacy["id"], original["id"]]
+    assert len(resolutions) == 3 and not (cached.parent / rejected_task).exists()
+
+
+@pytest.mark.parametrize("bad", [None, "../cache-escape", "A" * 16, "a" * 16 + "\n"])
+def test_connection_identity_precondition_rejects_malformed_values(inproc, monkeypatch, bad):
+    h = inproc()
+
+    def unexpected(*args):
+        pytest.fail("An invalid identity must be refused before resolving a backend")
+
+    monkeypatch.setattr(h.bridge.connections, "backend", unexpected)
+    params = {"connection": "runtime:lab", "task_id": "c" * 32, "expected_connection_identity": bad}
+    for operation, fields in (("task.artifacts", {}), ("download.start", {"path": "result.dat"})):
+        with pytest.raises(BridgeCallError) as error:
+            h.call(operation, {**params, **fields}, check=False)
+        assert error.value.code == "invalid_params"
+
+
+@pytest.mark.parametrize("switch_after", ["project.runs.refresh", "task.artifacts"])
+def test_muferro_collect_rejects_a_profile_switch_before_artifact_io(inproc, tmp_path, monkeypatch, switch_after):
+    h = inproc()
+    task = "a" * 32
+    profile = "runtime:synthetic"
+    source = tmp_path / "fixture-case"
+    write_case(source)
+    observed = []
+    available = []
+
+    class FixtureBackend:
+        kind = "runtime"
+
+        def __init__(self, name):
+            self.name = name
+            self.server_key = hashlib.sha256(name.encode()).hexdigest()[:16]
+
+        def task(self, task_id):
+            observed.append((self.name, "task", task_id))
+            return {"task": {"id": task_id, "state": "succeeded"}}
+
+        def artifacts(self, task_id):
+            observed.append((self.name, "artifacts", task_id))
+            return {"artifacts": list(available)}
+
+        def describe(self, owner, task_id, path):
+            observed.append((self.name, "describe", task_id))
+            raise BridgeError("not_found", "Synthetic source has no file contents")
+
+    original = FixtureBackend("original")
+    replacement = FixtureBackend("replacement")
+    active = [original]
+    monkeypatch.setattr(h.bridge.connections, "backend", lambda name, node=None: active[0])
+
+    def call(operation, params):
+        result = h.call(operation, params)
+        if operation == switch_after:
+            active[0] = replacement
+        return result
+
+    api = API(call)
+    p = api.projects.create(tmp_path / "fixture-project", "Fixture")
+    row_id = api.muferro.import_case(source, expected_revision=0, project=p)["record_id"]
+    model = p.snapshot()
+    row = next(table for table in model["tables"] if table["id"] == TABLE_ID)["records"][0]
+    frozen = row["values"][FIELD_IDS["source"]]
+    bindings = {"case/" + name: value for name, value in frozen["bindings"].items()}
+    spec = muferro_spec("b" * 32, case_dir="case", launcher="none", inputs=list(bindings))
+    run_id = p.runs.prepare([{"label": LABEL + "Fixture", "table_id": TABLE_ID, "record_id": row_id,
+        "input_snapshot_id": frozen["snapshot_id"], "input_bindings": bindings, "spec": spec}],
+        connection=profile, expected_revision=model["project"]["revision"])["run_ids"][0]
+    store = h.bridge.projects._stores[p.handle]
+    store.runs.observe(run_id, {"task": {"id": task, "state": "succeeded"}, "submission": "accepted"})
+    plan = p.runs.get(run_id)["plan"]
+    if switch_after == "task.artifacts":
+        hashes = {item["path"]: item["sha256"] for item in plan["inputs"]}
+        names = set(bindings) | {"stk-mupro.json"} | {
+            "case/" + name for name in (*RUN_OUTPUTS, *expected_frames(read_case(source)))}
+        available.extend({"path": name, "size": 1, "sha256": hashes.get(name, "0" * 64)} for name in sorted(names))
+
+    with pytest.raises(BridgeCallError) as error:
+        api.muferro.collect(run_id, project=p)
+    assert error.value.code == "conflict"
+    expected = [("original", "task", task)]
+    if switch_after == "task.artifacts":
+        expected.append(("original", "artifacts", task))
+    assert observed == expected
+    assert h.bridge.transfers.list() == []
+    assert p.snapshot()["project"]["revision"] == model["project"]["revision"] + 1

@@ -156,6 +156,12 @@
       "type": "string",
       "pattern": "^[a-f0-9]{32}$"
     },
+    "connectionIdentity": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 16,
+      "pattern": "^[a-f0-9]{16}$"
+    },
     "sha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
@@ -1021,6 +1027,9 @@
           "properties": {
             "connection": {
               "$ref": "#/$defs/connectionId"
+            },
+            "expected_connection_identity": {
+              "$ref": "#/$defs/connectionIdentity"
             },
             "node": {
               "$ref": "#/$defs/hex32"
@@ -1989,6 +1998,9 @@
           "properties": {
             "connection": {
               "$ref": "#/$defs/connectionId"
+            },
+            "expected_connection_identity": {
+              "$ref": "#/$defs/connectionIdentity"
             },
             "node": {
               "$ref": "#/$defs/hex32"

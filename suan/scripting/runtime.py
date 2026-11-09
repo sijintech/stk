@@ -90,13 +90,16 @@ class Runtime:
             params["remote"] = remote
         return self._request("upload.start", **params)["transfer"]
 
-    def download(self, path, *, idempotency_key, task_id=None, workspace_id=None, dest=None):
+    def download(self, path, *, idempotency_key, task_id=None, workspace_id=None, dest=None,
+                 expected_connection_identity=None):
         if (task_id is None) == (workspace_id is None):
             raise ValueError("Choose exactly one of task_id and workspace_id")
         params = {"path": path, "idempotency_key": idempotency_key}
         params["task_id" if task_id is not None else "workspace_id"] = task_id if task_id is not None else workspace_id
         if dest is not None:
             params["dest"] = str(Path(dest).absolute())
+        if expected_connection_identity is not None:
+            params["expected_connection_identity"] = expected_connection_identity
         return self._request("download.start", **params)["transfer"]
 
 
@@ -137,8 +140,9 @@ class Tasks:
     def cancel(self, task_id, *, idempotency_key):
         return self._runtime._request("task.cancel", task_id=task_id, idempotency_key=idempotency_key)
 
-    def artifacts(self, task_id):
-        return self._runtime._request("task.artifacts", task_id=task_id)["artifacts"]
+    def artifacts(self, task_id, *, expected_connection_identity=None):
+        params = {} if expected_connection_identity is None else {"expected_connection_identity": expected_connection_identity}
+        return self._runtime._request("task.artifacts", task_id=task_id, **params)["artifacts"]
 
     def logs(self, task_id, *, stream="stdout", offset=0, limit=65536):
         """A bounded byte chunk. Decode after joining chunks, or use an incremental UTF-8 decoder."""

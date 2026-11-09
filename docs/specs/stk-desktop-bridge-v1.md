@@ -199,7 +199,7 @@ Connection ids are opaque to the app; the bridge resolves them:
 | `task.list` | `connection, node?, workspace_id?` | `{tasks}` newest first |
 | `task.get` | `connection, node?, task_id` | `{task}` (with `monitor` once events exist) |
 | `task.cancel` | `connection, node?, task_id, idempotency_key?` | `{task?, action?}` |
-| `task.artifacts` | `connection, node?, task_id` | `{artifacts: [{path, size, sha256, media_type}]}` (empty while running) |
+| `task.artifacts` | `connection, node?, task_id, expected_connection_identity?` | `{artifacts: [{path, size, sha256, media_type}]}` (empty while running) |
 | `hub.devices` | `connection` | `{devices: [{id, name, role, online, snapshot}]}` |
 | `hub.templates` | `connection` | `{templates: {<name>: {argv, inputs?, outputs?, resources?, ...}}}`: an object keyed by template name (the hub's `GET /api/v1/templates`); the names are what `task.submit {template}` takes |
 | `hub.actions` | `connection` | `{actions}`: recent actions plus every action in review (without results); each record carries `kind` at the top level (the hub keeps it in `request.kind`, which stays) |
@@ -337,7 +337,7 @@ retrying (`final: true` when the subscription ended because of it, e.g. `not_fou
 | Method | Params | Result |
 |---|---|---|
 | `upload.start` | `connection, node?, workspace_id, source` (absolute file or folder), `remote?` (relative path; default the source name; `"."` puts a folder's contents at the workspace root and keeps a file's name), `idempotency_key?` | `{transfer}` |
-| `download.start` | `connection, node?, task_id \| workspace_id, path, dest?` (absolute; default `<download_dir>/<server key>/<task or workspace id>/<path>`), `idempotency_key?` | `{transfer}` |
+| `download.start` | `connection, node?, task_id \| workspace_id, path, dest?` (absolute; default `<download_dir>/<server key>/<task or workspace id>/<path>`), `idempotency_key?, expected_connection_identity?` | `{transfer}` |
 | `transfer.list` / `transfer.get {id}` | – / `id` | `{transfers}` / `{transfer}` |
 | `transfer.resume` | `id` | `{transfer}` (continues an `interrupted` or `failed` transfer) |
 | `transfer.cancel` | `id` | `{transfer}` in state `cancelled` |
@@ -356,6 +356,17 @@ on every state change and at most every 250 ms while bytes move.
   task/workspace, path, dest`) is `conflict` with `data.transfer_id`. A failed or cancelled keyed
   transfer is continued with `transfer.resume`, not by repeating `*.start`. Keys are remembered as
   long as the journal (finished journals are kept 7 days).
+- **Endpoint precondition.** `expected_connection_identity` is the 16-character lowercase hexadecimal
+  endpoint key stored by a prepared project run. `task.artifacts` and a new `download.start` check
+  the resolved backend before requesting artifacts or writing a transfer journal, respectively.
+  A mismatch returns `conflict`. The key binds the configured endpoint and the Hub node where
+  applicable. A credential change for the same endpoint keeps the existing identity.
+  For a download without an explicit destination, the expected key determines the default cache
+  path. A keyed replay returns the original transfer if its journaled identity matches. A missing
+  or different identity returns `conflict` with `data.transfer_id`. The precondition is separate
+  from the idempotency key and request signature. The worker checks the journaled identity on its
+  actual backend before transferring bytes, including after resume. Clients requiring a frozen
+  endpoint propagate validation failure if an older bridge rejects this optional field.
 - **Journal.** `<state-dir>/transfers/<id>.json` is written atomically before and during the work. A
   transfer found `queued`/`running` at start-up was interrupted: it becomes `interrupted` and
   continues on `transfer.resume` or `hello` (`resume_transfers`, default true). One bridge runs a

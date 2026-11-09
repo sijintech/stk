@@ -825,7 +825,11 @@ class Bridge:
     # -- helpers ------------------------------------------------------------------------------
 
     def _backend(self, params):
-        return self._bound_backend(params["connection"], params.get("node"))
+        backend = self._bound_backend(params["connection"], params.get("node"))
+        expected = params.get("expected_connection_identity")
+        if expected is not None and backend.server_key != expected:
+            raise BridgeError("conflict", "The Runtime endpoint differs from the expected connection")
+        return backend
 
     def _bound_backend(self, connection, node=None):
         """Validate the frozen workflow target on the exact backend instance that will perform I/O."""
@@ -1279,16 +1283,22 @@ class Bridge:
         owner = "task" if "task_id" in params else "workspace"
         owner_id = params.get("task_id") or params.get("workspace_id")
         dest = params.get("dest")
+        expected = params.get("expected_connection_identity")
+        cache_directory = None
         if dest is None:
-            backend = self._backend(params)
-            root = self.download_dir / backend.server_key / owner_id
-            root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            key = expected if expected is not None else self._backend(params).server_key
+            root = self.download_dir / key / owner_id
+            if expected is None:
+                root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            else:
+                cache_directory = root
             try:
                 dest = str(inside(root, params["path"]))
             except ValueError as exc:
                 raise BridgeError("invalid_params", str(exc)) from None
         transfer = self.transfers.start_download(params["connection"], owner, owner_id, params["path"], dest,
-                                                 params.get("node"), idempotency_key=params.get("idempotency_key"))
+                                                 params.get("node"), idempotency_key=params.get("idempotency_key"),
+                                                 expected_connection_identity=expected, cache_directory=cache_directory)
         return {"transfer": transfer}
 
     def unsubscribe(self, params, context):

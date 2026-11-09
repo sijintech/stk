@@ -326,8 +326,9 @@ class MuFerro:
             case = read_case(folder)
         if type(max_bytes) is not int or max_bytes <= 0 or expected_frame_count(case) > 10000:
             raise ValueError("Invalid download budget or more than 10000 result files")
-        runtime = self.stk.runtime(plan["connection"])
-        artifacts = {item["path"]: item for item in runtime.tasks.artifacts(task["id"])}
+        runtime = self.stk.runtime(plan["connection"], node=plan["node"])
+        expected = plan["connection_identity"]
+        artifacts = {item["path"]: item for item in runtime.tasks.artifacts(task["id"], expected_connection_identity=expected)}
         names = sorted(set(plan["input_bindings"]) | {"stk-mupro.json"} |
                        {"case/" + name for name in (*RUN_OUTPUTS, *expected_frames(case))} |
                        ({"case/run.h5"} if "case/run.h5" in artifacts else set()))
@@ -351,7 +352,8 @@ class MuFerro:
                 raise ValueError("Result paths must not be symbolic links")
             if not path.exists():
                 transfer = runtime.download(name, task_id=task["id"], dest=path,
-                    idempotency_key=f"muferro:{run_id}:result:" + hashlib.sha256(name.encode()).hexdigest())
+                    idempotency_key=f"muferro:{run_id}:result:" + hashlib.sha256(name.encode()).hexdigest(),
+                    expected_connection_identity=expected)
                 self._transfer(transfer)
             if not path.is_file() or path.stat().st_size != artifacts[name]["size"] or _hash(path) != artifacts[name]["sha256"]:
                 raise ValueError(f"Result changed locally or was not downloaded: {name}; inspect Transfers before repairing")

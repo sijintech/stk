@@ -34,7 +34,7 @@ import time
 import uuid
 
 from suan.control.limits import IMPORT_MAX_FILES, IMPORT_REQUEST_BYTES, encoded_size
-from suan.runtime.common import atomic_json, instance_lock, now, read_json
+from suan.runtime.common import atomic_json, inside, instance_lock, now, read_json
 from suan.runtime.models import relative_path
 
 from .backends import action_failure, action_id, summary
@@ -167,7 +167,7 @@ class TransferManager:
         """The transfer id of an idempotency key: ``sha256("<kind>.start\\0<key>")[:32]``."""
         return hashlib.sha256(f"{kind}.start\0{key}".encode("utf-8")).hexdigest()[:32]
 
-    def _existing(self, kind, key, request):
+    def _existing(self, kind, key, request, *, expected_connection_identity=None):
         """The journaled transfer of ``key`` (same request), ``None`` when there is none; else conflict."""
         if key is None:
             return None
@@ -177,12 +177,17 @@ class TransferManager:
         if record.get("request") != request:
             raise BridgeError("conflict", f"The idempotency key names an earlier {kind} with a different request",
                               data={"transfer_id": record.get("id")})
+        if expected_connection_identity is not None and record.get("connection_identity") != expected_connection_identity:
+            raise BridgeError("conflict", "The earlier transfer does not match the expected Runtime endpoint",
+                              data={"transfer_id": record.get("id")})
         return self.public(record)
 
-    def _new(self, kind, key=None, request=None, **fields):
+    def _new(self, kind, key=None, request=None, *, connection_identity=None, **fields):
+        if connection_identity is None:
+            connection_identity = self.backend_for(fields["connection"], fields.get("node")).server_key
         record = {"id": self.keyed_id(kind, key) if key is not None else uuid.uuid4().hex, "kind": kind,
-                  "state": "queued", "bytes_done": 0, "files_done": 0, "created_at": now(), **fields}
-        record["connection_identity"] = self.backend_for(fields["connection"], fields.get("node")).server_key
+                  "state": "queued", "bytes_done": 0, "files_done": 0, "created_at": now(),
+                  **fields, "connection_identity": connection_identity}
         if key is not None:
             record["idempotency_key"] = key
             record["request"] = request
@@ -266,18 +271,22 @@ class TransferManager:
                 "sha256": None, "done": False}
 
     @_writer
-    def start_download(self, connection, owner, owner_id, path, dest, node=None, idempotency_key=None):
+    def start_download(self, connection, owner, owner_id, path, dest, node=None, idempotency_key=None,
+                       *, expected_connection_identity=None, cache_directory=None):
         """A new download, or with ``idempotency_key`` the transfer an earlier request with that key
         started (a different request under the key is ``conflict``)."""
         request = {"connection": connection, "node": node, "owner": owner, "owner_id": owner_id, "path": path,
                    "dest": str(dest)}
         with self.lock:
-            existing = self._existing("download", idempotency_key, request)
+            existing = self._existing("download", idempotency_key, request,
+                                      expected_connection_identity=expected_connection_identity)
             if existing is not None:
                 return existing
-            return self._start_download(connection, owner, owner_id, path, dest, node, idempotency_key, request)
+            return self._start_download(connection, owner, owner_id, path, dest, node, idempotency_key, request,
+                                        expected_connection_identity, cache_directory)
 
-    def _start_download(self, connection, owner, owner_id, path, dest, node, key, request):
+    def _start_download(self, connection, owner, owner_id, path, dest, node, key, request,
+                        expected_connection_identity, cache_directory):
         try:
             path = relative_path(path)
         except ValueError as exc:
@@ -285,7 +294,18 @@ class TransferManager:
         dest = Path(dest)
         if not dest.is_absolute():
             raise BridgeError("invalid_params", "'dest' must be an absolute local path")
-        record = self._new("download", key, request, connection=connection, node=node, owner=owner,
+        identity = self.backend_for(connection, node).server_key
+        if expected_connection_identity is not None and identity != expected_connection_identity:
+            raise BridgeError("conflict", "The Runtime endpoint differs from the expected connection")
+        if cache_directory is not None:
+            cache_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            try:
+                if inside(cache_directory, path) != dest:
+                    raise ValueError("Default download destination changed")
+            except ValueError as exc:
+                raise BridgeError("invalid_params", str(exc)) from None
+        record = self._new("download", key, request, connection_identity=identity,
+                           connection=connection, node=node, owner=owner,
                            task_id=owner_id if owner == "task" else None,
                            workspace_id=owner_id if owner == "workspace" else None,
                            local=str(dest), remote=path,
