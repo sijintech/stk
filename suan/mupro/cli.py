@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import json
+import stat
 import tempfile
 import uuid
 
@@ -15,6 +16,31 @@ from .spec import LAUNCHERS, muferro_spec
 @click.group(cls=FriendlyGroup)
 def mupro():
     """MuPRO jobs queued by the STK Runtime."""
+
+
+def _case_uploads(folder, case_dir):
+    from .run import case_input_info
+
+    try:
+        input_info = case_input_info(folder / "input.toml")
+    except OSError as exc:
+        raise ValueError(f"Cannot read input.toml: {exc}") from exc
+    if not stat.S_ISREG(input_info.st_mode):
+        raise ValueError("Cannot read input.toml: expected a regular file")
+
+    prefix = "" if case_dir == "." else case_dir + "/"
+    pending, uploads = [folder], []
+    while pending:
+        for path in pending.pop().iterdir():
+            info = case_input_info(path)
+            if stat.S_ISDIR(info.st_mode):
+                pending.append(path)
+            elif stat.S_ISREG(info.st_mode):
+                remote = relative_path(prefix + path.relative_to(folder).as_posix())
+                uploads.append((path, remote))
+            else:
+                raise ValueError("Case inputs must be regular files")
+    return sorted(uploads)
 
 
 @mupro.command("submit")
@@ -51,10 +77,11 @@ def submit(profile, state_dir, workspace_id, input_dir, case_dir, example, remot
     if remote_dir and not input_dir:
         raise click.UsageError("--remote-dir only applies to --input")
     if input_dir:
-        case_dir = remote_dir or input_dir.resolve().name
+        input_dir = input_dir.resolve()
+        case_dir = remote_dir or input_dir.name
     if case_dir:
         case_dir = "." if case_dir == "." else relative_path(case_dir)
-    # Validate the layout before connecting or uploading anything; the inputs are filled in below.
+    # Validate the layout and the full local manifest before connecting or uploading.
     spec = muferro_spec(workspace_id, case_dir=case_dir or ".", example=example, ranks=ranks,
                         threads_per_rank=threads_per_rank, nodes=nodes, backend=backend, program=program,
                         launcher=launcher, sdk_prefix=sdk_prefix, env_scripts=env_scripts, license_dir=license_dir,
@@ -62,6 +89,8 @@ def submit(profile, state_dir, workspace_id, input_dir, case_dir, example, remot
                         name=name)
     TaskSpec(**spec)  # The Runtime's own checks, e.g. ranks must be a multiple of nodes.
     if input_dir:
+        uploads = _case_uploads(input_dir, case_dir)
+        spec["inputs"] = [remote for _, remote in uploads]
         from .run import check_case, read_case
 
         check_case(read_case(input_dir), input_dir, ranks)
@@ -69,17 +98,9 @@ def submit(profile, state_dir, workspace_id, input_dir, case_dir, example, remot
     if "ranks" not in client.health().get("resources", []):
         raise click.ClickException("This Runtime does not accept MPI rank resources; upgrade the STK server")
     if input_dir:
-        inputs = []
-        for path in sorted(input_dir.rglob("*")):
-            if path.is_file():
-                remote = path.relative_to(input_dir).as_posix()
-                remote = remote if case_dir == "." else f"{case_dir}/{remote}"
-                client.upload(workspace_id, path, remote)
-                click.echo(f"Uploaded {remote}", err=True)
-                inputs.append(remote)
-        if not inputs:
-            raise click.ClickException(f"No files in {input_dir}")
-        spec["inputs"] = inputs
+        for path, remote in uploads:
+            client.upload(workspace_id, path, remote)
+            click.echo(f"Uploaded {remote}", err=True)
     elif case_dir:
         inputs = [item["path"] for item in client.files(workspace_id)
                   if case_dir == "." or item["path"].startswith(case_dir + "/")]

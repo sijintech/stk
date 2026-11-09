@@ -112,6 +112,17 @@ def test_submit_uploads_case_and_submits_dict_spec(tmp_path, monkeypatch):
                                           "--remote-dir", "runs/a"])
     assert result.exit_code == 0, result.output
     assert client.submitted[-1][0]["inputs"] == ["runs/a/input.toml", "runs/a/material.toml"]
+
+    case = tmp_path / "case16"
+    (case / "Polar.in").write_bytes(b"synthetic restart input")
+    (case / "fields").mkdir()
+    (case / "fields" / "material.h5").write_bytes(b"synthetic input")
+    result = invoke(client, monkeypatch, ["submit", "--workspace", WORKSPACE, "--input", str(case),
+                                          "--remote-dir", "."])
+    assert result.exit_code == 0, result.output
+    assert client.submitted[-1][0]["inputs"] == client.uploads[-4:]
+    assert set(client.uploads[-4:]) == {"Polar.in", "fields/material.h5", "input.toml", "material.toml"}
+
     result = invoke(client, monkeypatch, ["submit", "--workspace", WORKSPACE, "--case-dir", "case16"])
     assert result.exit_code == 0, result.output
     assert client.submitted[-1][0]["inputs"] == ["case16/input.toml", "case16/material.toml"]
@@ -147,6 +158,57 @@ def test_submit_uploads_case_and_submits_dict_spec(tmp_path, monkeypatch):
     assert result.exit_code == 1 and "already holds muFerro outputs" in result.output
     assert "energy_out.dat" in result.output and "clean case directory" in result.output
     assert client.uploads == [] and client.submitted == []
+
+
+@pytest.mark.parametrize("kind, message", [
+    ("license_dir", "Licence files must stay on the compute host"),
+    ("license_file", "Licence files must stay on the compute host"),
+    pytest.param("invalid_path", "Path must stay inside the workspace",
+                 marks=pytest.mark.skipif(os.name == "nt", reason="Windows cannot create a path with a colon")),
+    ("file_link", "without symbolic links"),
+    ("input_link", "without symbolic links"),
+    ("directory_link", "without symbolic links"),
+])
+def test_submit_rejects_unsafe_local_case_before_connecting(tmp_path, monkeypatch, kind, message):
+    case = tmp_path / "case"
+    write_case(case)
+    if kind == "license_dir":
+        (case / "nested" / "Key").mkdir(parents=True)
+        (case / "nested" / "Key" / "placeholder.txt").write_text("synthetic fixture")
+    elif kind == "license_file":
+        (case / "zzz.LIC").write_text("synthetic fixture")
+    elif kind == "invalid_path":
+        (case / "zzz:invalid.toml").write_text("synthetic fixture")
+    else:
+        target = tmp_path / "outside.toml"
+        target.write_text("synthetic invalid TOML")
+        link = case / "zzz-alias.toml"
+        if kind == "input_link":
+            link = case / "input.toml"
+            link.unlink()
+        elif kind == "directory_link":
+            target = case / "shared"
+            target.mkdir()
+            (target / "layout.toml").write_text("[unused]\nvalue = 1\n")
+            link = case / "alias"
+            entry = case / "input.toml"
+            entry.write_text("include = 'alias/layout.toml'\n" + entry.read_text(encoding="utf-8"), encoding="utf-8")
+        try:
+            link.symlink_to(target, target_is_directory=kind == "directory_link")
+        except OSError as exc:
+            pytest.skip(f"Cannot create a test symbolic link: {exc}")
+
+    client = FakeClient()
+    connections = []
+
+    def connect(*_):
+        connections.append(True)
+        return client
+
+    monkeypatch.setattr(mupro_cli, "get_client", connect)
+    result = CliRunner().invoke(mupro_cli.mupro, ["submit", "--workspace", WORKSPACE, "--input", str(case)])
+    assert result.exit_code == 1 and message in result.output, result.output
+    assert connections == [] and client.uploads == [] and client.submitted == []
 
 
 def test_submit_refuses_runtime_without_mpi_resources(tmp_path, monkeypatch):

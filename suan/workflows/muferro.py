@@ -19,7 +19,7 @@ from suan.connectors.mupro.inputs import dump_toml
 from .common import (_canonical, _capture, _cells, _copy_input, _create_table, _directory, _folder,  # noqa: F401
                      _hash, _revision, _table)
 from suan.mupro.run import (_toml_document, read_case, check_case, verify_run, expected_frames,
-                            RUN_OUTPUTS, VERIFIER, tomllib)
+                            case_input_info, RUN_OUTPUTS, VERIFIER, tomllib)
 from suan.mupro.spec import muferro_spec
 from suan.runtime.models import TaskSpec, relative_path
 
@@ -60,11 +60,7 @@ def _inputs(folder):
             visited += 1
             if visited > 256:
                 raise ValueError("Use a clean case directory with at most 100 input files and 256 entries")
-            info = path.lstat()
-            if path.name.lower() == "key" or path.suffix.lower() == ".lic":
-                raise ValueError("Licence files must stay on the compute host, outside the case directory")
-            if stat.S_ISLNK(info.st_mode):
-                raise ValueError("Case inputs must be regular files, without symbolic links")
+            info = case_input_info(path)
             if stat.S_ISDIR(info.st_mode):
                 pending.append(path)
             elif stat.S_ISREG(info.st_mode) and path.suffix.lower() in {".toml", ".in"}:

@@ -84,8 +84,9 @@ suan mupro verify ./work --case-dir case16
 - 本机后端（`--backend` 的默认值）在 Runtime 所在主机上直接运行 muFerro。Runtime 部署在
   集群登录节点时（[并行云站点验收清单](runtime-paratera.md) 的方案 A），每次提交都必须带
   `--backend slurm`，不要使用本机后端。
-- `--input DIR`、`--case-dir REL`、`--example` 三选一。`--input` 把目录下所有文件上传到
-  工作区的同名目录（或 `--remote-dir`）；`--case-dir` 使用工作区中已上传的文件。
+- `--input DIR`、`--case-dir REL`、`--example` 三选一。`--input` 上传案例目录的普通文件到工作区同名目录
+  （或 `--remote-dir`）。解析案例和连接前会检查整份清单，拒绝非法工作区路径和案例目录内的符号链接、目录联接及许可路径。
+  `--case-dir` 使用工作区中已上传的文件。
 - `--input` 必须是干净的案例目录。muFerro 会在已有的 `energy_out.dat` 与
   `mupro_progress.jsonl` 之后追加，在同一目录重跑会在用完机时后才校验失败；因此目录中已有
   `energy_out.dat`、`mupro_progress.jsonl`、`mupro_completion.json` 或场帧时，客户端在上传前

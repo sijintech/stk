@@ -27,6 +27,7 @@ import math
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -148,6 +149,16 @@ def read_case(case_dir, root=None):
     if case["start_step"] + case["steps"] > 999999:
         raise MuproError("timestep_start + timestep_total must be at most 999999 (muFerro's energy trace column)")
     return case
+
+
+def case_input_info(path):
+    """Check a case entry before opening it or descending into its directory."""
+    if path.name.lower() == "key" or path.suffix.lower() == ".lic":
+        raise MuproError("Licence files must stay on the compute host, outside the case directory")
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode) or (os.name == "nt" and info.st_reparse_tag == stat.IO_REPARSE_TAG_MOUNT_POINT):
+        raise MuproError("Case inputs must be regular files, without symbolic links or junctions")
+    return info
 
 
 def check_case(case, folder, ranks):
