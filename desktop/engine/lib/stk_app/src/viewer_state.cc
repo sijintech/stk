@@ -159,7 +159,7 @@ std::string ViewerSource::key() const
          (field_file.empty() ? "" : "|field:" + field_file);
 }
 
-ViewerSource classify_path(const std::string &path, std::string *r_error)
+ViewerSource classify_path(const std::string &path, std::string *r_error, const std::string &preset)
 {
   ViewerSource s;
   auto fail = [&](const std::string &why) {
@@ -215,6 +215,11 @@ ViewerSource classify_path(const std::string &path, std::string *r_error)
   }
   if (!fs::is_directory(p, ec)) {
     return fail("not a file or directory: " + path);
+  }
+  if (preset == "muferro-collected-domains" && fs::is_regular_file(fs::symlink_status(p / "input.toml", ec))) {
+    s.kind = SourceKind::RunDir;
+    s.path = abs;
+    return s;
   }
   Json doc;
   if (fs::is_regular_file(p / "manifest.json", ec) && read_json(p / "manifest.json", doc) &&
@@ -1653,7 +1658,7 @@ bool ViewerState::open_path(const std::string &path, const std::string &preset, 
 {
   Impl &m = *impl_;
   std::string err;
-  ViewerSource s = classify_path(path, &err);
+  ViewerSource s = classify_path(path, &err, preset);
   if (s.kind == SourceKind::None) {
     m.open_error = err;
     store_.log(store_.catalog().format("viewer.log.open_failed", {{"path", path}, {"error", err}}));

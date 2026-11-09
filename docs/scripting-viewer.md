@@ -25,6 +25,8 @@ print(shown["error"], shown["layers"])
 `unit` 只更换结果标签，不转换数值，见[标量体渲染](scalar-volume.md)。默认 `volume` 仍计算模长。
 可用预设及其参数声明见 `stk.viewer.presets()`；
 启动期间 `ready=False` 表示元数据仍在加载，等待后再指定预设。载荷/已保存结果不接受图预设参数。
+显式选择 `muferro-collected-domains` 时，含普通 `input.toml` 的目录会按 MuFerro 算例打开，即使目录里也有已保存的结果。
+直接打开保存结果的清单文件可查看那份结果。
 路径由 Python 按当前工作目录转为绝对路径；打开时默认切换到 Viewer 标签，`focus=False` 保持当前标签。
 
 `open` 接受打开请求后即返回；图求值是异步的，不能将收到回复当成已经生成三维画面。

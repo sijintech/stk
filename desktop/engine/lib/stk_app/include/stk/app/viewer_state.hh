@@ -80,8 +80,9 @@ struct ViewerSource {
  * stk.payload/2) or that manifest, a result directory (result.json / series.json) or a run
  * directory (any other directory). Field files (DAT/NPY/VTI/VTK/VTKHDF) bind their parent
  * directory and carry the exact filename in field_file. Kind None with `r_error` when it cannot be opened.
+ * The explicit collected MuFerro preset selects a case directory with an ordinary input.toml.
  */
-ViewerSource classify_path(const std::string &path, std::string *r_error = nullptr);
+ViewerSource classify_path(const std::string &path, std::string *r_error = nullptr, const std::string &preset = {});
 /** A preset for a run directory: muFerro frames (Polar.*) -> "muferro-domains"; else "". */
 std::string guess_preset(const std::string &run_dir);
 

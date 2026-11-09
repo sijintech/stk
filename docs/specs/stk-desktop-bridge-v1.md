@@ -1563,6 +1563,9 @@ Operation shapes: `layout.get {}` → `{layout}` (`stk.desktop.layout/1`),
 checked against the current source key before applying. Configure validates all supplied parameters/display
 settings before changing any; graph semantic/data errors can still occur asynchronously. Open returns acceptance,
 not completion. Status reports current source, parameters, layers, pending/evaluating flags, errors and timeline.
+An explicit `muferro-collected-domains` preset opens a directory with an ordinary `input.toml` as a MuFerro
+run, including when it also contains a saved payload or result. Open the saved `result.json` directly
+to select the saved result.
 Presets returns `{ready, presets, error}`; other operations return status. The shared Viewer data model is global
 across windows; open focuses an existing Viewer tab or adds one unless `focus=false`. These are local UI operations,
 not network endpoints. See [Viewer scripting](../scripting-viewer.md) for exact options and wait semantics.

@@ -560,6 +560,35 @@ TEST(ViewerPaths, ExplicitFieldsKeepTheirFilenameEvenInsideAResultFolder)
   EXPECT_FALSE(late.evaluating());
 }
 
+TEST(ViewerPaths, ExplicitCollectedMuFerroPresetDisambiguatesRunFolder)
+{
+  TempDir d("viewer-collected-muferro");
+  write_result_dir(d.path());
+  ASSERT_TRUE(write_text((d.path() / "input.toml").string(), "[system]\n"));
+  ASSERT_TRUE(write_text((d.path() / "Polar.00000002.dat").string(), "1 1 1\n"));
+
+  app::AppStore store;
+  auto &viewer = store.viewer();
+  Json metadata = repo_presets();
+  const auto &presets = metadata.at("presets");
+  auto live = std::find_if(presets.begin(), presets.end(), [](const Json &preset) {
+    return preset.at("id") == "muferro-domains";
+  });
+  ASSERT_NE(live, presets.end());
+  Json collected = *live;
+  collected["id"] = "muferro-collected-domains";
+  metadata["presets"].push_back(std::move(collected));
+  viewer.set_metadata(metadata, repo_catalog());
+
+  ASSERT_TRUE(viewer.open_path(d.str()));
+  EXPECT_EQ(viewer.source().kind, SourceKind::ResultDir);
+  ASSERT_TRUE(viewer.open_path(d.str(), "muferro-collected-domains"));
+  EXPECT_EQ(viewer.source().kind, SourceKind::RunDir);
+  EXPECT_EQ(viewer.preset_id(), "muferro-collected-domains");
+  ASSERT_TRUE(viewer.open_path((d.path() / "result.json").string()));
+  EXPECT_EQ(viewer.source().kind, SourceKind::ResultDir);
+}
+
 TEST(ViewerPaths, OpensResultAndSeriesFolders)
 {
   TempDir d("viewer-results");

@@ -153,7 +153,7 @@ void AppShell::perform_viewer_request(wm::Screen &screen, const std::string &ope
     const Json parameters = params.value("parameters", Json::object());
     check_parameters(preset_id.empty() ? nullptr : viewer.preset(preset_id), parameters);
     std::string why;
-    const auto source = classify_path(path, &why);
+    const auto source = classify_path(path, &why, preset_id);
     require(source.kind != SourceKind::None, why);
     require(source.evaluates() || (preset_id.empty() && parameters.empty()), "Payload/result sources do not accept a graph preset or parameters");
     if (!viewer.open_path(path, preset_id, parameters)) {
