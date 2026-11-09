@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · 发布包文献实窗与回执配额
+
+root 在 Ubuntu 26.04 用远端 `49837655` CI 产出的 24.04 可重定位包、同头 wheel 和独立桥目录，复跑中文文献引用页。8 次点击显示、5 次撤权，网格 Viewer 像素一致。包与内层压缩包均验 SHA256，字体、语言资源来自已解包前缀，桥来自 wheel。证据见 `root-delivery-20261109-54/closure.json`。目标 Mac/Windows 文献页待验。
+
+Claude 的 `651295d8` 已按原测试字节集成到本地 `5c4723f4`。两入口共享回执数量及字节配额、越限回滚、原回执读和精确重放均有覆盖。实装 helper 五文件 249 项通过，零跳过。Claude25 已转独立 `claude/cp0-evidence-matrix-25`，只更新云项目 CP-0 证据矩阵。root 保留 Cocoa 诊断和主线发布。
+
+远端 `49837655` 的 Runtime 13 项全部成功，Linux Desktop 三项通过。Desktop 整轮尚待 Mac/Windows，终态登记后推送本地候选。
+
 ## 2026-11-09 UTC · CP-0 双入口回归已集成
 
 root 将 Claude 的 `d84fe104` 原字节测试集成为本地 `b8e42c66`。Bridge／peer 同修订竞争、首次陈旧写入、分页预算和格式 14 覆盖通过。显式使用已安装 peer helper 的五文件联跑 246 项通过，零跳过，三个隔离反例均触发对应测试失败。Claude 已转独立 `claude/cp0-receipt-quota-24`，只负责 F14 共享回执配额用例。root 仍负责 macOS 和 CI。
