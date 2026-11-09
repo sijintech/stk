@@ -1,5 +1,9 @@
-"""Owned loopback Runtime for native workflow tests; fake SDK by default, real SDK only by opt-in."""
+"""Owned loopback Runtime for native workflow tests; fake SDK by default, real SDK only by opt-in.
+
+Run as a script, this module is instead a strict bridge that logs collected-result lookups (see lookup_bridge).
+"""
 import atexit
+import json
 import os
 from pathlib import Path
 import sys
@@ -14,14 +18,18 @@ from suan.runtime.supervisor import Supervisor
 
 
 class SimulationRuntime:
-    def __init__(self, directory):
+    def __init__(self, directory, hdf5=False):
         self.root = Path(directory)
         self.root.mkdir(parents=True)
         prefix = os.environ.get('STK_TEST_MUPRO_PREFIX')
+        if prefix and hdf5:
+            raise ValueError('The synthetic run.h5 is written only by the fake MuFerro SDK')
         if not prefix:
             sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'tests'))
             from mupro_fake import make_fake_sdk
-            prefix = str(make_fake_sdk(self.root / 'sdk'))
+            prefix = str(make_fake_sdk(self.root / 'sdk', **({'steps': 4} if hdf5 else {})))
+            if hdf5:
+                self._write_hdf5(Path(prefix))
             for name in ('STK_MUPRO_ENV_SCRIPTS', 'MUPROROOT'):
                 os.environ.pop(name, None)
         # This helper lives only in the test's disposable, trusted Python worker.
@@ -30,6 +38,22 @@ class SimulationRuntime:
             os.environ.pop(name, None)
         self.source = str(Path(prefix) / 'share/mupro/skills/mupro-muferro/examples')
         self._start()
+
+    def _write_hdf5(self, sdk):
+        """Let the fake solver also leave a small synthetic run.h5 (Polar at steps 2 and 4) in its case."""
+        import h5py
+        import numpy as np
+        sidecar = self.root / 'synthetic-run.h5'
+        polar = np.arange(72, dtype=np.float32).reshape(4, 3, 2, 3)
+        with h5py.File(sidecar, 'w') as file:
+            file.create_dataset('t00000002/Polar', data=polar)
+            file.create_dataset('t00000004/Polar', data=polar + 100)
+        program = sdk / 'bin/muFerro'
+        solver = program.read_text()
+        needle = "sys.exit(fake_muferro('ok'))"
+        assert solver.count(needle) == 1
+        program.write_text(solver.replace(needle, "result = fake_muferro('ok')\nimport shutil\n"
+                           f"shutil.copyfile({str(sidecar)!r}, 'run.h5')\nsys.exit(result)"))
 
     def _start(self):
         (self.root / 'source.txt').write_text(self.source, encoding='utf-8')
@@ -121,3 +145,68 @@ class LammpsRuntime(SimulationRuntime):
         self.source = str(source)
         (self.root / 'program.txt').write_text(self.program, encoding='utf-8')
         self._start()
+
+
+def lookup_bridge(control):
+    """Run the real strict bridge, logging collected MuFerro result lookups and graph requests to control/wire.jsonl.
+
+    While control/refuse-lookup exists, the next lookup (a one-row query of the result table filtered by run) is
+    answered with a retryable "unavailable" error instead of its rows, and the file is removed.
+    """
+    import threading
+    from suan.desktop_bridge import server
+    from suan.desktop_bridge.__main__ import main
+    from suan.desktop_bridge.protocol import decode_line
+    from suan.workflows.muferro import RESULT_FIELD_IDS, RESULT_TABLE_ID
+
+    control = Path(control)
+    lock = threading.Lock()
+    refused = set()
+
+    def record(entry):
+        with lock, (control / 'wire.jsonl').open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps(entry, sort_keys=True) + '\n')
+
+    class LookupBridge(server.Bridge):
+        def handle_line(self, raw):
+            try:
+                message = decode_line(raw)
+            except Exception:  # the real bridge answers malformed lines itself
+                message = {}
+            params = message.get('params') if isinstance(message.get('params'), dict) else {}
+            method = message.get('method')
+            entry = {'kind': 'request', 'id': message.get('id'), 'method': method}
+            if method == 'project.table.query' and params.get('table_id') == RESULT_TABLE_ID:
+                filters = (params.get('definition') or {}).get('filters')
+                lookup = params.get('limit') == 1 and isinstance(filters, dict) and \
+                    filters.get('field_id') == RESULT_FIELD_IDS['run'] and filters.get('op') == 'eq'
+                entry.update(table_id=RESULT_TABLE_ID, lookup=lookup, handle=params.get('handle'),
+                             expected_revision=params.get('expected_revision'),
+                             run=filters.get('value') if lookup else None)
+                with lock:
+                    if lookup and (control / 'refuse-lookup').exists():
+                        (control / 'refuse-lookup').unlink()
+                        refused.add(message.get('id'))
+            if method == 'graph.evaluate':
+                request = params.get('request') or {}
+                entry.update(outputs=request.get('outputs'),
+                             nodes=[node.get('type') for node in (request.get('graph') or {}).get('nodes', [])])
+            record(entry)
+            return super().handle_line(raw)
+
+        def send(self, message, method=None):
+            if method == 'project.table.query' and message.get('id') in refused:
+                refused.discard(message['id'])
+                message = {'id': message['id'], 'error': {
+                    'code': 'unavailable', 'message': 'Fixture transient result lookup failure', 'retryable': True}}
+                record({'kind': 'refused', 'id': message['id']})
+            elif method == 'project.table.query' and (message.get('result') or {}).get('table_id') == RESULT_TABLE_ID:
+                record({'kind': 'reply', 'id': message.get('id'), 'records': len(message['result'].get('records', []))})
+            return super().send(message, method)
+
+    server.Bridge = LookupBridge
+    return main()
+
+
+if __name__ == '__main__':
+    raise SystemExit(lookup_bridge(sys.argv.pop(1)))

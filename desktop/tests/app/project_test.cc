@@ -4390,6 +4390,200 @@ TEST_F(SimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndReopenOf
   EXPECT_FALSE(viewer.payload()->layers().empty());
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
+/** The real strict bridge run through simulation_fixture.lookup_bridge, which logs collected MuFerro result lookups
+ * and graph requests to <dir>/wire.jsonl and, while <dir>/refuse-lookup exists, refuses one lookup as retryable. */
+class Hdf5LookupSimulationPython : public SimulationPython {
+ protected:
+  void configure_bridge(bridge::ClientOptions &options, const std::string &python) override
+  {
+    options.command = {python, std::string(STK_REPO_ROOT) + "/desktop/tests/app/simulation_fixture.py", dir.str(),
+        "--stdio", "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
+  }
+
+  std::vector<Json> wire(size_t from = 0)
+  {
+    std::vector<Json> entries;
+    std::ifstream file(core::path_from_utf8(dir.str() + "/wire.jsonl"));
+    for (std::string line; std::getline(file, line);) { entries.push_back(Json::parse(line)); }
+    entries.erase(entries.begin(), entries.begin() + std::ptrdiff_t(std::min(from, entries.size())));
+    return entries;
+  }
+
+  static std::vector<Json> requests(const std::vector<Json> &entries, const std::string &method, bool lookup_only = false)
+  {
+    std::vector<Json> found;
+    for (const auto &entry : entries) {
+      if (entry.at("kind") == "request" && entry.at("method") == method && (!lookup_only || entry.value("lookup", false))) {
+        found.push_back(entry);
+      }
+    }
+    return found;
+  }
+};
+
+TEST_F(Hdf5LookupSimulationPython, CollectedHdf5LookupRetryRereadsOnlyThatRowAndListsOnlyWhenAsked)
+{
+  if (const char *prefix = std::getenv("STK_TEST_MUPRO_PREFIX"); prefix && *prefix) {
+    GTEST_SKIP() << "The synthetic run.h5 is written only by the fake MuFerro SDK";
+  }
+  populated();
+  auto &scripts = f.shell->store().scripts();
+  auto &jobs = f.shell->store().jobs();
+  auto &viewer = f.shell->store().viewer();
+  auto python_done = [&] {
+    ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy() && !state().busy(); }, 60));
+    ASSERT_TRUE(scripts.error().empty()) << scripts.error();
+    ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+    ASSERT_NO_FATAL_FAILURE(settled_ui());
+  };
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  ASSERT_TRUE(scripts.execute("import sys\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
+      ")\nfrom simulation_fixture import SimulationRuntime\nfrom suan.desktop_bridge.connections import ConnectionStore\n"
+      "_simulation_runtime = SimulationRuntime(" + Json(dir.str() + "/simulation-runtime").dump() + ", hdf5=True)\n"
+      "ConnectionStore(" + Json(dir.str() + "/bridge").dump() +
+      ").add_runtime('simulation-test', _simulation_runtime.url, _simulation_runtime.config['token'], check=False)"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  jobs.sync();
+  jobs.refresh_connections();
+  ASSERT_TRUE(loop.pump_until([&] {
+    return std::any_of(jobs.connections().begin(), jobs.connections().end(), [](const auto &item) { return item.info.id == "runtime:simulation-test"; });
+  }, 30));
+  jobs.select_connection("runtime:simulation-test");
+  std::string source;
+  { std::ifstream file(core::path_from_utf8(dir.str() + "/simulation-runtime/source.txt")); std::getline(file, source); }
+  ASSERT_FALSE(source.empty());
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_simulation");
+  f.drv->click(x, y);
+  f.drv->frame();
+  auto widget = [&](const std::string &id) { return f.screen.ui()->find("a2/main/project_simulation/" + id); };
+  auto until = [&](auto condition) {
+    return loop.pump_until([&] { f.screen.run_deferred(); f.drv->frame(); return condition(); }, 30);
+  };
+  auto click = [&](const std::string &id) {
+    ASSERT_TRUE(until([&] { const auto *item = widget(id); return item && item->enabled; })) << id << " run=" << state().run().dump();
+    widget(id)->on_click();
+  };
+  widget("simulation_source")->string.assign(source);
+  ASSERT_NO_FATAL_FAILURE(click("simulation_import"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  state().select_table("27e50c45-2d61-523c-a56b-f505bbd595c5");
+  ASSERT_NO_FATAL_FAILURE(settled_ui());
+  ASSERT_NE(state().table(), nullptr);
+  ASSERT_EQ(state().table()->records.size(), 1u);
+  ASSERT_NO_FATAL_FAILURE(click("simulation_prepare"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  ASSERT_TRUE(state().load_runs());
+  settled();
+  ASSERT_EQ(state().runs().size(), 1u) << state().error();
+  const auto run = state().run_id();
+  const auto [rx, ry] = f.widget_center("a2/main/project_runs");
+  f.drv->click(rx, ry);
+  ASSERT_TRUE(until([&] { const auto *item = f.screen.ui()->find("a2/main/project_runs/submit"); return item && item->enabled; }));
+  f.screen.ui()->find("a2/main/project_runs/submit")->on_click();
+  settled();
+  ASSERT_TRUE(loop.pump_until([&] {
+    if (state().busy()) { return false; }
+    const auto phase = io::get_string(state().run().value("status", Json::object()).value("task", Json::object()), "state");
+    if (phase == "succeeded" || phase == "failed" || phase == "cancelled") { return true; }
+    state().refresh_run();
+    return false;
+  }, 90));
+  ASSERT_EQ(state().run().at("status").at("task").at("state"), "succeeded") << state().run().dump();
+  ASSERT_NO_FATAL_FAILURE(click("simulation_collect"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  // The collected row registers the synthetic run.h5, so an undisturbed lookup offers the explicit List.
+  ASSERT_TRUE(until([&] { return widget("simulation_hdf5_list") != nullptr; }));
+  ASSERT_TRUE(scripts.execute("assert len(_simulation_runtime.client.tasks()) == 1\n_simulation_runtime.close()"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+
+  // Fixed start: the collected project reopened offline with its run selected, an empty Viewer and a hidden draft.
+  const std::string draft = "print('unsent HDF5 draft')\n";
+  ASSERT_TRUE(f.area("a1").add_tab(kEditorPython, false));
+  Editor *editor = nullptr;
+  for (int i = 0; i < f.area("a1").tab_count(); ++i) {
+    if (f.area("a1").tab(i).type().id == kEditorPython) { editor = &f.area("a1").tab(i); }
+  }
+  ASSERT_NE(editor, nullptr);
+  ASSERT_TRUE(editor->load_state({{"source", draft}, {"baseline", ""}}));
+  ASSERT_TRUE(state().close());
+  settled();
+  { std::ofstream refuse(core::path_from_utf8(dir.str() + "/refuse-lookup")); }
+  const auto start = wire().size();
+  ASSERT_TRUE(state().open(dir.str() + "/project"));
+  settled();
+  ASSERT_TRUE(state().load_runs());
+  settled();
+  ASSERT_EQ(state().run_id(), run);
+  const auto project = state().project()->id;
+  const auto handle = state().project()->handle;
+  const auto revision = state().project()->revision;
+  const auto shows = [&](const std::string &text) {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) { if (item.text.find(text) != std::string::npos) { return true; } }
+    }
+    return false;
+  };
+  ASSERT_TRUE(until([&] { return shows("Fixture transient result lookup failure"); }));
+  for (int i = 0; i < 10; ++i) { f.screen.run_deferred(); f.drv->frame(); loop.run_ready(); }
+  auto after_failure = wire(start);
+  ASSERT_EQ(requests(after_failure, "project.table.query", true).size(), 1u);
+  ASSERT_EQ(std::count_if(after_failure.begin(), after_failure.end(), [](const Json &e) { return e.at("kind") == "refused"; }), 1);
+  EXPECT_FALSE(std::filesystem::exists(core::path_from_utf8(dir.str() + "/refuse-lookup")));
+  EXPECT_EQ(widget("simulation_hdf5_list"), nullptr);
+  const auto *retry = widget("simulation_hdf5_lookup_retry");
+  ASSERT_NE(retry, nullptr) << "a refused lookup must offer an explicit retry";
+  ASSERT_TRUE(retry->enabled);
+
+  // One click re-reads only this run's result row; listing waits for its own explicit click.
+  const auto before_retry = wire().size();
+  retry->on_click();
+  ASSERT_TRUE(until([&] { const auto *item = widget("simulation_hdf5_list"); return item && item->enabled; }));
+  for (int i = 0; i < 10; ++i) { f.screen.run_deferred(); f.drv->frame(); loop.run_ready(); }
+  EXPECT_EQ(widget("simulation_hdf5_lookup_retry"), nullptr);
+  EXPECT_EQ(widget("simulation_hdf5_frame"), nullptr);
+  const auto retried = wire(before_retry);
+  const auto results_queries = requests(retried, "project.table.query");
+  const auto reread = std::count_if(results_queries.begin(), results_queries.end(),
+                                    [](const Json &e) { return e.contains("table_id"); });
+  EXPECT_EQ(reread, 1);
+  const auto lookups = requests(retried, "project.table.query", true);
+  ASSERT_EQ(lookups.size(), 1u);
+  EXPECT_EQ(lookups[0].at("handle"), handle);
+  EXPECT_EQ(lookups[0].at("expected_revision"), revision);
+  EXPECT_EQ(lookups[0].at("run"), run);
+  const auto reply = std::find_if(retried.begin(), retried.end(), [&](const Json &e) {
+    return e.at("kind") == "reply" && e.at("id") == lookups[0].at("id");
+  });
+  ASSERT_NE(reply, retried.end());
+  EXPECT_EQ(reply->at("records"), 1);
+  EXPECT_TRUE(requests(wire(start), "graph.evaluate").empty());
+
+  widget("simulation_hdf5_list")->on_click();
+  ASSERT_TRUE(until([&] { return widget("simulation_hdf5_frame") != nullptr; }));
+  EXPECT_EQ(widget("simulation_hdf5_frame")->items.size(), 3u);  // "Choose" plus Polar at steps 2 and 4
+  const auto everything = wire(start);
+  const auto graphs = requests(everything, "graph.evaluate");
+  ASSERT_EQ(graphs.size(), 1u);
+  EXPECT_EQ(graphs[0].at("outputs"), Json::array({"fields"}));
+  EXPECT_EQ(graphs[0].at("nodes"), Json::array({"stk.source.mupro_hdf5_fields@1"}));
+  EXPECT_EQ(requests(everything, "project.table.query", true).size(), 2u);
+  for (const auto *method : {"project.apply", "project.runs.submit", "project.runs.cancel", "script.execute"}) {
+    EXPECT_TRUE(requests(everything, method).empty()) << method;
+  }
+  EXPECT_EQ(state().project()->id, project);
+  EXPECT_EQ(state().project()->handle, handle);
+  EXPECT_EQ(state().project()->revision, revision);
+  EXPECT_EQ(state().run_id(), run);
+  EXPECT_FALSE(viewer.payload());
+  EXPECT_EQ(viewer.source().kind, SourceKind::None);
+  EXPECT_EQ(editor->save_state().at("source"), draft);
+  EXPECT_TRUE(editor->has_unsaved_changes());
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
 TEST_F(SimulationPython, NativeBatchButtonsPersistAndSubmitEachMemberOnce)
 {
   populated();
