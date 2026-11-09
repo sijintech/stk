@@ -1,5 +1,22 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · fbe4b0cc 整轮 Desktop 终态
+
+[Desktop 42551958437](https://github.com/sijintech/stk/actions/runs/42551958437) 在代码头 `fbe4b0cc64d283fe5298bb76f3f14e16fa244906` 于 03:41:28Z 结束，结论失败。下表是同一轮的全部六个任务。
+
+| 任务 | 结果 | 证据 |
+|---|---|---|
+| Ubuntu 24.04 可重定位包 | 失败 | Ubuntu 镜像连接超时，APT 退出 100，未编译 |
+| Ubuntu 26.04 GPU | 失败 | Ubuntu 镜像连接超时，APT 退出 100，未编译 |
+| Ubuntu 24.04 包安装冒烟 | 跳过 | 上游包任务失败 |
+| macOS arm64 | 失败 | 原生原组 4/6，定位前隐藏对照 0/2 |
+| Windows MSVC CPU | 通过 | 任务 `128949277443`，03:20:49Z |
+| Windows 原生文档 | 通过 | 任务 `128961373052`，03:41:27Z。第 7 步六项强制门通过，第 8 步上传成功 |
+
+Windows 原生第 7 步覆盖软件 OpenGL/WARP 上的 20 轮原型和生产报告的 Markdown、HTML、PDF、独立视频、HTML 视频，并逐项要求成功标记。目标 Windows 文献页仍待验。[Windows 原生证据 13647913277](https://github.com/sijintech/stk/actions/runs/42551958437/artifacts/13647913277)
+
+[Runtime 42551958449](https://github.com/sijintech/stk/actions/runs/42551958449) 同头 13 项成功。Docs `42551958518`、Secret scan `42551958603` 成功。上述 CI 结果属于 `fbe4b0cc`。后续 GUI 修复 `2bf4bd50` 的 Linux 本地 37 项及双语文献实窗见下文。
+
 ## 2026-11-09 UTC · 中文文献实窗及 macOS 隐藏对照
 
 中文验收使用本地 `2bf4bd50` 二进制、Xvfb X11、Mesa llvmpipe OpenGL，`zh_CN` 1000×1200、scale 1。默认工作台的 Viewer 已装载合成网格。独立真实桥目录预置一份自制 PDF 和固定 E5、PDFium 5.14.0 索引，预置不计入界面点击。

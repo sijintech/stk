@@ -1,5 +1,9 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · 前一代码头 Desktop 已终态
+
+远端前头 `fbe4b0cc` 的 Desktop `42551958437` 于 03:41:28Z 终态失败。Windows CPU 和 Windows 软件 OpenGL/WARP 原生报告组均通过。macOS 原组和定位前对照失败，Linux 两个任务在 Ubuntu 镜像依赖安装阶段失败，24.04 安装冒烟跳过。Runtime 13 项、Docs 与 Secret scan 成功。root 已核对整轮，准备推送 GUI 桥目录修复和双语文献验收。Windows 报告组结果不覆盖文献页验收。
+
 ## 2026-11-09 UTC · 双语文献实窗与 macOS 隐藏对照
 
 root 用 `2bf4bd50` 在 Linux X11 软件 OpenGL 的默认工作台完成简体中文引用页验收。8 次点击显示完整页图和逐字高亮，再 5 次撤销合成授权并确认页图消失。中英文两次使用独立合成库，桥返回的 PNG 字节相同。两次的网格 Viewer 区域各自保持像素一致。证据见 `root-delivery-20261109-51/closure.json`。目标 Mac/Windows 的文献页面待验。
