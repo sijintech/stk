@@ -46,10 +46,18 @@ def run(self, identity, method, params):
 Bridge._run = run
 original_send = Bridge.send
 def send(self, message, method=None):
-    if method == 'project.analysis_runs.result' and 'result' in message:
-        mode = (control / 'mode').read_text() if (control / 'mode').exists() else ''
+    mode = (control / 'mode').read_text() if (control / 'mode').exists() else ''
+    if mode and 'result' in message and method in ('project.analysis_runs.get', 'project.analysis_runs.result'):
         envelope = message['result']
-        record, result = envelope['run'], envelope['result']
+        record = envelope['run']
+        if record['result'] is None:
+            return original_send(self, message, method)
+        if method == 'project.analysis_runs.get':
+            # Pin the synthetic table's receipt when the run is selected.
+            path = control / 'project' / record['result']['directory'] / 'graph-result.json'
+            result = json.loads(path.read_text(encoding='utf-8'))
+        else:
+            result = envelope['result']
         table = None
         if mode == 'paged':
             names = ['9', '0', '科学', 'a/b~c'] + [f'col{i}' for i in range(4, 16)]

@@ -45,27 +45,40 @@ def run(self, identity, method, params):
     return original_run(self, identity, method, params)
 Bridge._run = run
 original_send = Bridge.send
+
+def replace_result(record, result, mode):
+    if mode in ('overflow', 'replacement'):
+        value = 18446744073709551617 if mode == 'overflow' else 42.5
+        result['outputs']['table']['columns']['temperature'][0] = value
+    else:
+        result['outputs']['table'] = {'type': 'value', 'value': {
+            '0': [18446744073709551615, -9223372036854775808, 1.0, -0.0, None, 'null', '', 'NaN'],
+            'a/b~c': {'': True},
+            'pages': {f'key{i:03}': i if i < 64 else 191 - i for i in range(128)},
+            'long': '科学\n' * 2500, 'identity': {'x' * 5000 + 'A': 1, 'x' * 5000 + 'B': 2}}}
+    raw = json.dumps(result, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    record['result']['manifest_sha256'] = hashlib.sha256(raw).hexdigest()
+    record['result']['size_bytes'] = len(raw)
+
 def send(self, message, method=None):
+    mode = (control / 'mode').read_text() if (control / 'mode').exists() else ''
+    if method == 'project.analysis_runs.get' and 'result' in message and mode in ('complex', 'replacement-get'):
+        record = message['result']['run']
+        if mode == 'complex':
+            # The synthetic complex archive must have the same receipt at selection and at read.
+            path = control / 'project' / record['result']['directory'] / 'graph-result.json'
+            replace_result(record, json.loads(path.read_text(encoding='utf-8')), mode)
+        else:
+            record['result']['size_bytes'] += 1
     if method == 'project.analysis_runs.result' and 'result' in message:
-        mode = (control / 'mode').read_text() if (control / 'mode').exists() else ''
         envelope = message['result']
         record, result = envelope['run'], envelope['result']
         if mode == 'hold':
             (control / 'held').write_text('ready')
             while not (control / 'release').exists() and not self.closing.wait(0.01):
                 pass
-        elif mode in ('overflow', 'complex'):
-            if mode == 'overflow':
-                result['outputs']['table']['columns']['temperature'][0] = 18446744073709551617
-            else:
-                result['outputs']['table'] = {'type': 'value', 'value': {
-                    '0': [18446744073709551615, -9223372036854775808, 1.0, -0.0, None, 'null', '', 'NaN'],
-                    'a/b~c': {'': True},
-                    'pages': {f'key{i:03}': i if i < 64 else 191 - i for i in range(128)},
-                    'long': '科学\n' * 2500, 'identity': {'x' * 5000 + 'A': 1, 'x' * 5000 + 'B': 2}}}
-            raw = json.dumps(result, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
-            record['result']['manifest_sha256'] = hashlib.sha256(raw).hexdigest()
-            record['result']['size_bytes'] = len(raw) + 1024
+        elif mode in ('overflow', 'complex', 'replacement'):
+            replace_result(record, result, mode)
         elif mode == 'hash':
             record['result']['manifest_sha256'] = '0' * 64
             record['error']['message'] = 'untrusted replacement'
@@ -370,18 +383,36 @@ TEST_F(AnalysisResultInspectionEditorPython, RejectedRefreshKeepsTheEntireVerifi
 {
   ProjectAnalysisRuns runs(store()); ASSERT_TRUE(runs.load(run_id));
   ASSERT_TRUE(loop.pump_until([&] { return !runs.busy(); }, 30));
+  const auto selected = exact(runs.run());
+  const auto unread_generation = runs.result_generation();
+  bool verified = false;
+  ASSERT_NO_FATAL_FAILURE(mode("replacement"));
+  ASSERT_TRUE(runs.read_result([&] { verified = true; }));
+  ASSERT_TRUE(loop.pump_until([&] { return !runs.busy(); }, 30));
+  EXPECT_FALSE(verified); EXPECT_EQ(runs.error(), "The archived analysis receipt changed");
+  EXPECT_FALSE(runs.result_inspection());
+  EXPECT_EQ(exact(runs.run()), selected); EXPECT_EQ(runs.result_generation(), unread_generation);
+  ASSERT_NO_FATAL_FAILURE(mode(""));
   ASSERT_NO_FATAL_FAILURE(controller_read(runs)); ASSERT_TRUE(runs.error().empty());
   ASSERT_TRUE(runs.result_inspection()); const auto model = runs.result_inspection();
   ASSERT_TRUE(runs.load_page()); ASSERT_TRUE(loop.pump_until([&] { return !runs.busy(); }, 30));
   const auto generation = runs.result_generation(); const auto original = exact(runs.run()), page = exact(runs.page());
-  for (const auto *failure : {"hash", "graph", "plan", "summary", "overflow", "receipt_extra"}) {
+  for (const auto *failure : {"hash", "graph", "plan", "summary", "overflow", "receipt_extra", "replacement"}) {
     SCOPED_TRACE(failure);
-  ASSERT_NO_FATAL_FAILURE(mode(failure));
+    ASSERT_NO_FATAL_FAILURE(mode(failure));
     ASSERT_NO_FATAL_FAILURE(controller_read(runs)); EXPECT_FALSE(runs.error().empty());
+    if (std::string_view(failure) == "overflow") {
+      EXPECT_EQ(runs.error(), "The archived result does not match its verified receipt");
+    }
     EXPECT_EQ(runs.result_inspection(), model); EXPECT_EQ(runs.result_generation(), generation);
     EXPECT_EQ(exact(runs.run()), original); EXPECT_EQ(exact(runs.page()), page);
     EXPECT_EQ(exact(runs.result()), exact(model->result()));
   }
+  ASSERT_NO_FATAL_FAILURE(mode("replacement-get")); ASSERT_TRUE(runs.load(run_id));
+  ASSERT_TRUE(loop.pump_until([&] { return !runs.busy(); }, 30));
+  EXPECT_EQ(runs.error(), "The archived analysis receipt changed");
+  EXPECT_EQ(runs.result_inspection(), model); EXPECT_EQ(runs.result_generation(), generation);
+  EXPECT_EQ(exact(runs.run()), original); EXPECT_EQ(exact(runs.page()), page);
   // The overflow fixture writes the actual JSON integer token 18446744073709551617 and
   // its Python-computed receipt. Native double promotion cannot pass the exact SHA check.
   ASSERT_NO_FATAL_FAILURE(mode("")); ASSERT_TRUE(runs.load(run_id));

@@ -188,14 +188,19 @@ void ProjectAnalysisRuns::accept_run(const Json &value, const std::string &id)
   if (!project_.project() || !valid_run(value, project_.project()->id, true) || value.at("id") != id) {
     throw std::runtime_error("Invalid analysis run response");
   }
-  if (!run_.is_null() && run_.at("id") == id && run_.at("plan_sha256") != value.at("plan_sha256")) {
-    throw std::runtime_error("The frozen analysis run identity changed");
-  }
   if (run_.is_null() || run_.at("id") != id) {
     ++selection_generation_; clear_result();
     reusable_inputs_.reset(); ++reusable_inputs_generation_;
   }
-  else if (!same_json(run_.at("result"), value.at("result"))) { clear_result(); }
+  else {
+    if (run_.at("plan_sha256") != value.at("plan_sha256")) {
+      throw std::runtime_error("The frozen analysis run identity changed");
+    }
+    const auto &receipt = run_.at("result");
+    if (!receipt.is_null() && !same_json(receipt, value.at("result"))) {
+      throw std::runtime_error("The archived analysis receipt changed");
+    }
+  }
   run_ = value;
   if (!page_.is_null()) {
     for (auto &item : page_.at("runs")) {
