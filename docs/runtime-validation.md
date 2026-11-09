@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 项目工作目录边界和 F10 实线
+
+`2bf8d83bb8f746c300772461349aab6550fc409a` 检查仿真工作流已有目录组件的真实元数据。Linux 用实际符号链接模拟 Windows 联接点的目录类型和重解析标志。旧 MuFerro 导入返回成功，在项目外创建 `input.toml` 和 `material.toml`。修复后导入拒绝，项目修订、表和外部哨兵均保持。Windows 夹具直接创建真实目录联接点，待目标矩阵执行。测试覆盖稳定目录和已有组件的检查。Linux 源码联合 108 项通过，2 项真实许可条件跳过。隔离 wheel 的 MuFerro 工作流 13 项通过，1 项真实许可条件跳过。Python 3.11、3.12、3.14 的 Linux 导入定向各 6 项通过。 [项目工作流](simulation-muferro.md)
+
+`fb4dbd39f2f9268b5887e8eb545f4b178a9f9db3` 集成 Claude33 `4e1767477a298fe8c6dd042a59fc13af2b85fc4a`。真实 UDP 编辑获准后在 SQLite 写入口等待，撤权线程到达授权事务。放行编辑后撤权才能完成，观察时原回执已持久化。旧授权的目录、表页、回执查询、精确重放和新写均返回 `forbidden`，回执、修订和历史保持。Linux 源码 171 项和隔离 wheel 定向一项通过，零跳过。隔离副本提前释放授权时在预期的撤权等待断言失败。证据见本机 `root-delivery-20261109-70`。 [CP-0 矩阵](design/cloud-project-service.md)
+
+远端 `bb4cea9d` 的 Runtime 13 项、Windows CPU 和 Linux 三项通过，macOS 失败证据见下节。Windows 原生作业仍运行，本地待整轮终态后推送。 [Windows 原生](https://github.com/sijintech/stk/actions/runs/42576437438/job/129041311528) [Desktop](https://github.com/sijintech/stk/actions/runs/42576437438)
+
 ## 2026-11-09 UTC · MuPRO 大步数空结果与 F5c 实线
 
 `1cd5bbbd2a019426f73f25d0dbc884151c238925` 逐行校验实际能量和进度，按需生成缺帧诊断，并在收集展开名单前检查现有文件数上限。999,999 步、间隔 1 的合法合成布局有 14,999,986 个预期 DAT 帧。空结果目录在旧源码和 224 MiB 地址空间上限下，直接核验、连接器和收集探针触发 `MemoryError`，CLI 退出 1 且无结构化输出。修复后直接核验与 CLI 返回四项检查、`invalid_result` 和前五个缺帧，连接器返回前五十个，合成成功任务收集按 10,000 文件上限拒绝。四次独立进程峰值 RSS 约 26 至 29 MiB，只覆盖空结果探针。

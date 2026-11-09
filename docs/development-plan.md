@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · 项目目录边界和 F10
+
+项目仿真共享目录已在 Linux 用合成 Windows 元数据和真实导入路径验证，真 junction 由 Windows 矩阵复验。D1 F10 已有 Linux 真实线路和安装态证据。Claude34 继续 F8b，核对同内容数据库被物理替换后的授权失效。Cocoa 静默对照仍随待推批次。 [CP-0 矩阵](design/cloud-project-service.md) [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · MuPRO 核验资源与 D1 物理恢复
 
 MuPRO 大步数案例可在缺产物时返回有限诊断，收集先用现有文件数量门槛。F5c 已记录 Linux 真实 peer 的当前物理恢复行为，Claude33 继续 F10 撤权并发。Cocoa 在上一轮已观察到显式暂停成功，隐藏期仍失败。下一轮用本地已提交的无 DOM 采样对照区分隐藏期状态和探针影响。 [CP-0 矩阵](design/cloud-project-service.md) [验收记录](runtime-validation.md)

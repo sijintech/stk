@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · 项目工作目录与 F10 撤权并发
+
+本地 `2bf8d83b` 拒绝共享仿真工作目录中的符号链接和 Windows 联接点。MuFerro 合成导入反例在旧代码向项目外写入两个 TOML，修复后在写入和登记前拒绝。Linux 源码联合 108 项、隔离 wheel 13 项通过。原生联接点待 Windows 客户端矩阵。
+
+Claude33 `4e176747` 已集成为 `fb4dbd39`。真实 UDP 编辑和撤权并发时原回执先持久化，旧授权随后无法读写或重放。Linux 源码 171 项和隔离安装定向通过。Claude34 在独立 worktree 的 `claude/cp0-f8b-wire-34` 接手数据库替换后的授权失效验收。
+
+远端 `bb4cea9d` 只剩 Windows 原生任务运行。整轮终态后推送本地批次，启动 Cocoa 静默对照和 Windows 联接点复验。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · MuPRO 大步数核验、F5c 与 macOS 回执
 
 本地 `1cd5bbbd` 逐行核验 MuPRO 能量和进度，按名称顺序只收集有限缺帧提示。项目收集先检查 10,000 文件预算。999,999 步空结果的四条受限探针已复验，Linux 源码 119 项、隔离 wheel 62 项通过。
