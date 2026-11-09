@@ -300,6 +300,61 @@ def test_real_cas_same_operation_changed_request_and_unknown_receipt(connected, 
     assert sides[1].store.info()["revision"] == 1
 
 
+def test_real_peer_and_bridge_reject_stale_project_page_continuations(connected, sides, inproc):
+    store = sides[1].store
+    table, other_table, first_record, second_record = (uuid() for _ in range(4))
+    store.apply([
+        {"op": "create_table", "id": table, "name": "First table"},
+        {"op": "create_table", "id": other_table, "name": "Second table"},
+        {"op": "add_record", "id": first_record, "table_id": table},
+        {"op": "add_record", "id": second_record, "table_id": table},
+    ], expected_revision=0)
+    endpoint, _ = connected()
+    target = sides[1].target
+    bridge = inproc()
+    handle = bridge.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+
+    catalog_method = "project.catalog"
+    table_method = "project.table.read"
+    catalog = endpoint.request(catalog_method, {**target, "limit": 1})
+    assert catalog == bridge.call(catalog_method, {"handle": handle, "limit": 1})
+    assert catalog["project"]["revision"] == 1
+    assert [item["id"] for item in catalog["tables"]] == [table]
+    assert (catalog["offset"], catalog["next_offset"], catalog["total"]) == (0, 1, 2)
+    catalog_next = {"limit": 1, "offset": catalog["next_offset"],
+                    "expected_revision": catalog["project"]["revision"]}
+
+    table_start = {"table_id": table, "limit": 1, "expected_revision": catalog["project"]["revision"]}
+    records = endpoint.request(table_method, {**target, **table_start})
+    assert records == bridge.call(table_method, {"handle": handle, **table_start})
+    assert records["revision"] == 1
+    assert [item["id"] for item in records["table"]["records"]] == [first_record]
+    assert (records["offset"], records["next_offset"], records["total"]) == (0, 1, 2)
+    records_next = {**table_start, "offset": records["next_offset"], "expected_revision": records["revision"]}
+
+    second_catalog = endpoint.request(catalog_method, {**target, **catalog_next})
+    assert second_catalog == bridge.call(catalog_method, {"handle": handle, **catalog_next})
+    assert [item["id"] for item in second_catalog["tables"]] == [other_table]
+    assert (second_catalog["project"]["revision"], second_catalog["next_offset"]) == (1, None)
+    second_page = endpoint.request(table_method, {**target, **records_next})
+    assert second_page == bridge.call(table_method, {"handle": handle, **records_next})
+    assert [item["id"] for item in second_page["table"]["records"]] == [second_record]
+    assert (second_page["revision"], second_page["next_offset"]) == (1, None)
+
+    store.apply([{"op": "delete_record", "id": first_record}], expected_revision=1)
+    for method, continuation in ((catalog_method, catalog_next), (table_method, records_next)):
+        with pytest.raises(PeerProtocolError) as stale:
+            endpoint.request(method, {**target, **continuation})
+        assert stale.value.code == "conflict"
+        assert bridge.error(method, {"handle": handle, **continuation})["code"] == "conflict"
+
+    current = endpoint.request(table_method, {**target, **table_start, "expected_revision": 2})
+    assert [item["id"] for item in current["table"]["records"]] == [second_record]
+    assert (current["revision"], current["next_offset"], current["total"]) == (2, None, 1)
+    assert store.info()["revision"] == 2
+    bridge.assert_clean()
+
+
 def test_real_peer_and_bridge_share_receipt_byte_limit_on_the_same_project(connected, sides, inproc, monkeypatch):
     client, _ = connected()
     store, target = sides[1].store, sides[1].target
