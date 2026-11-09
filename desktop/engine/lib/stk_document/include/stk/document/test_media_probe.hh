@@ -26,10 +26,23 @@ struct MediaSnapshot {
   uint64_t navigation_generation = 0; // Native identity; never accepted from DOM JSON.
 };
 
+// Last native pause request, not the current playback state: a user may have
+// played again since it completed. Unavailable is unknown, never a negative ACK.
+// verified records only the existing native not-Playing check within its deadline;
+// it does not assert that the DOM media time has settled.
+struct NativePauseSnapshot {
+  bool available = false;
+  uint64_t media_generation = 0, navigation_generation = 0;
+  bool acknowledged = false, verified = false;
+};
+
 struct MediaProbeResult {
   bool ok = false;
   std::string error;
   MediaSnapshot media;
+  // Native facts sampled at probe dispatch and callback, outside the 17-field
+  // DOM profile. Platforms without this instrumentation leave both unavailable.
+  NativePauseSnapshot native_pause_before, native_pause_after;
 };
 using MediaProbeCallback = std::function<void(MediaProbeResult)>;
 

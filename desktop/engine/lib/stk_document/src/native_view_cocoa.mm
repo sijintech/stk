@@ -34,9 +34,22 @@ struct State {
   bool policy_failed = false;
   bool visible = false;
   bool has_bounds = false;
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+  test::NativePauseSnapshot test_last_pause;
+#endif
 };
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
 static std::vector<std::weak_ptr<State>> test_states;
+
+static test::NativePauseSnapshot test_pause_snapshot(const std::shared_ptr<State> &state)
+{
+  const auto &pause = state->test_last_pause;
+  if (pause.available && pause.media_generation == state->media_generation &&
+      pause.navigation_generation == state->result.navigation_generation) {
+    return pause;
+  }
+  return {}; // No matching request observation; not evidence of a missing ACK.
+}
 #endif
 
 static NSString *string(std::string_view value)
@@ -152,6 +165,17 @@ static void verify_pause(std::shared_ptr<PauseRequest> request)
     const auto result = request->verification.observe(
         playback == WKMediaPlaybackStatePlaying, completed->media_generation,
         completed->result.navigation_generation, Check::Clock::now());
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+    // Paused is returned only for the original request's media/navigation pair
+    // before its unchanged absolute deadline. Observing !Playing alone is weaker.
+    if (result == Check::Result::Paused) {
+      auto &pause = completed->test_last_pause;
+      if (pause.available && pause.media_generation == completed->media_generation &&
+          pause.navigation_generation == completed->result.navigation_generation) {
+        pause.verified = true;
+      }
+    }
+#endif
     if (result == Check::Result::Failed) {
       shutdown(completed, NativeViewStatus::Failed, "Could not pause document media playback");
     }
@@ -693,12 +717,28 @@ class CocoaDocumentView final : public NativeDocumentView {
     }
     const auto generation = ++state->media_generation;
     const auto request = std::make_shared<cocoa::PauseRequest>(state, generation);
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+    const auto navigation = state->result.navigation_generation;
+    state->test_last_pause = {true, generation, navigation, false, false};
+#endif
     cocoa::verify_pause(request);
     // Public macOS 12+ API; project JavaScript remains disabled. Pausing never resumes media.
     // Completion acknowledges the pause command; independently verify the resulting
     // state within the original deadline rather than treating the first sample as final.
     [state->view pauseAllMediaPlaybackWithCompletionHandler:^{
       request->acknowledged = true;
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+      auto completed = request->state.lock();
+      if (cocoa::live(completed) && completed->view == request->view &&
+          completed->media_generation == generation &&
+          completed->result.navigation_generation == navigation) {
+        auto &pause = completed->test_last_pause;
+        if (pause.available && pause.media_generation == generation &&
+            pause.navigation_generation == navigation) {
+          pause.acknowledged = true;
+        }
+      }
+#endif
     }];
     return true;
   }
@@ -912,11 +952,13 @@ bool probe_media(wm::NativeWindowHandle parent, std::string_view session_id,
   }
   const auto navigation = state->result.navigation_generation;
   const auto session = state->resources;
+  const auto pause_before = cocoa::test_pause_snapshot(state);
   const std::weak_ptr<cocoa::State> weak = state;
   __weak WKWebView *expected_view = state->view;
   NSString *script = [NSString stringWithUTF8String:kMediaProbeScript];
   [state->view evaluateJavaScript:script completionHandler:^(id value, NSError *failure) {
     MediaProbeResult result;
+    result.native_pause_before = pause_before;
     const auto current = weak.lock();
     if (!cocoa::live(current) || current->result.status != NativeViewStatus::Ready ||
         current->resources != session || !session->active() ||
@@ -951,9 +993,11 @@ bool probe_media(wm::NativeWindowHandle parent, std::string_view session_id,
           ", reason=" + reason + ")";
     }
     else if (failure || ![value isKindOfClass:NSDictionary.class]) {
+      result.native_pause_after = cocoa::test_pause_snapshot(current);
       result.error = "Read-only media test probe failed";
     }
     else {
+      result.native_pause_after = cocoa::test_pause_snapshot(current);
       NSError *encoding_error = nil;
       NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:&encoding_error];
       if (encoding_error || !data || data.length > 4096) { result.error = "Invalid media test probe response"; }

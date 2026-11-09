@@ -59,6 +59,8 @@ void write(const fs::path &path, const std::string &text)
 struct Options { std::string python, backend, source = "markdown"; fs::path output, media_fixture; };
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
 using Media = document_preview::test::MediaSnapshot;
+using NativePause = document_preview::test::NativePauseSnapshot;
+using NativePausePair = std::array<NativePause, 2>;
 Json media_json(const Media &media)
 {
   return {{"paused", media.paused}, {"ended", media.ended}, {"seeking", media.seeking},
@@ -69,6 +71,19 @@ Json media_json(const Media &media)
       {"video_rect_css", {media.rect_x, media.rect_y, media.rect_width, media.rect_height}},
       {"viewport_size_css", {media.viewport_width, media.viewport_height}},
       {"navigation_generation", media.navigation_generation}};
+}
+Json native_pause_json(const NativePause &pause)
+{
+  if (!pause.available) return nullptr;
+  return {{"media_generation", pause.media_generation},
+      {"navigation_generation", pause.navigation_generation},
+      {"acknowledged", pause.acknowledged}, {"verified", pause.verified}};
+}
+Json native_pause_pair_json(const std::optional<NativePausePair> &pause)
+{
+  if (!pause) return nullptr;
+  return {{"dispatch", native_pause_json((*pause)[0])},
+      {"callback", native_pause_json((*pause)[1])}};
 }
 struct MediaProbeObservation {
   Clock::time_point started = Clock::now();
@@ -91,6 +106,7 @@ struct HiddenMediaObservation {
   const char *failure_kind = nullptr;
   std::optional<std::array<bool, 3>> hidden_checks;
   std::optional<std::array<bool, 5>> hold_checks;
+  std::optional<NativePausePair> playing_native_pause, first_paused_native_pause;
 };
 double media_seconds(Clock::time_point start, Clock::time_point end)
 {
@@ -585,6 +601,12 @@ class Exercise {
       throw;
     }
   }
+  std::optional<NativePausePair> last_native_pause() const noexcept
+  {
+    if (!last_media_probe_ || !last_media_probe_->reply) return std::nullopt;
+    const auto &reply = *last_media_probe_->reply;
+    return NativePausePair{reply.native_pause_before, reply.native_pause_after};
+  }
   void begin_hidden_media(int cycle, const std::string &session, const Media &playing,
                           Clock::time_point playing_returned) noexcept
   {
@@ -594,6 +616,7 @@ class Exercise {
       phase.started = playing_returned;
       phase.cycle = cycle; phase.session = session; phase.session_sha256 = core::Sha256::hex(session);
       phase.playing = playing; phase.before = playing; phase.last_valid = playing;
+      phase.playing_native_pause = last_native_pause();
       last_media_probe_.reset();
     }
     catch (...) { hidden_media_.reset(); }
@@ -612,6 +635,7 @@ class Exercise {
   {
     if (!hidden_media_) return;
     auto &phase = *hidden_media_;
+    phase.first_paused_native_pause = last_native_pause();
     phase.hidden_checks = std::array<bool, 3>{
         hidden.current_time < 2.9, hidden.current_time >= playing.current_time - 0.05, !hidden.ended};
     if (!std::all_of(phase.hidden_checks->begin(), phase.hidden_checks->end(), [](bool value) { return value; })) {
@@ -635,6 +659,8 @@ class Exercise {
             {"callback_received", bool(r.reply)}, {"reply_ok", r.reply ? Json(r.reply->ok) : Json(nullptr)},
             {"snapshot_available", available},
             {"decoder_ok", available ? Json(r.reply->media.error_code == 0) : Json(nullptr)},
+            {"native_pause_before", r.reply ? native_pause_json(r.reply->native_pause_before) : Json(nullptr)},
+            {"native_pause_after", r.reply ? native_pause_json(r.reply->native_pause_after) : Json(nullptr)},
             {"started_seconds", media_seconds(p.started, r.started)},
             {"dispatched_seconds", media_time(p.started, r.dispatched)},
             {"callback_seconds", media_time(p.started, r.callback)},
@@ -645,6 +671,8 @@ class Exercise {
           {"requested_session_matches", p.requested_session_matches ? Json(*p.requested_session_matches) : Json(nullptr)},
           {"expected_navigation_generation", p.playing.navigation_generation},
           {"playing_before_hide", media_json(p.playing)}, {"before", media_json(p.before)},
+          {"playing_native_pause", native_pause_pair_json(p.playing_native_pause)},
+          {"first_paused_native_pause", native_pause_pair_json(p.first_paused_native_pause)},
           {"current", sample(p.current)}, {"failed", sample(p.failed)},
           {"last_valid", sample(p.last_valid)},
           {"last_valid_meaning", "previous successful probe; initialized from play-before-hide"},
