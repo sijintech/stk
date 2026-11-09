@@ -401,7 +401,16 @@ void ProjectSimulationView::draw_muferro_hdf5(ui::Layout &layout, EditorContext 
   }
   if (hdf5_.key != key) { return; }
   if (!hdf5_.error.empty()) { layout.paragraph(hdf5_.error); }
-  if (hdf5_.sha256.empty()) { return; }
+  if (hdf5_.sha256.empty()) {
+    if (!hdf5_.error.empty()) {
+      layout.button("simulation_hdf5_lookup_retry", ctx.tr("simulation.hdf5_lookup_retry"), [this, visible, store] {
+        if (!visible() || hdf5_.busy) { return; }
+        hdf5_.key.clear();
+        store->changed();
+      }).disable(!enabled || hdf5_.busy);
+    }
+    return;
+  }
 
   read.timeout_s = 330;
   layout.button("simulation_hdf5_list", ctx.tr("simulation.hdf5_list"),

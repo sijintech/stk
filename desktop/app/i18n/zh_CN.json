@@ -1335,6 +1335,7 @@
   "pet_study.frozen_target": "已准备研究的运行环境：{runtime}",
   "simulation.view": "查看已收集结果",
   "simulation.hdf5_list": "列出 HDF5 帧",
+  "simulation.hdf5_lookup_retry": "重试查找 HDF5 结果",
   "simulation.hdf5_open": "打开所选 HDF5 帧",
   "simulation.hdf5_frame": "HDF5 场与步号",
   "simulation.hdf5_choose": "选择场与步号",
