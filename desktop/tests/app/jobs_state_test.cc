@@ -32,6 +32,17 @@ void set_f03_phase(const FakeJobs &fixture, const char *value)
   std::filesystem::rename(fixture.jobs_dir() + "/f03-phase.next", fixture.jobs_dir() + "/f03-phase");
 }
 
+void release_artifact_start(FakeJobs &fixture, const std::string &completed_id)
+{
+  bool received = false;
+  /* The fake sends the held start response before replying to this read. */
+  fixture.client->transfer_get(completed_id).then([&](const auto &reply) {
+    EXPECT_TRUE(reply && reply.value().state == "completed");
+    received = true;
+  });
+  ASSERT_TRUE(fixture.pump([&] { return received; }));
+}
+
 const app::TaskRow *task_named(JobsState &j, const std::string &name)
 {
   for (const app::TaskRow &t : j.tasks()) {
@@ -698,6 +709,95 @@ TEST_F(JobsFake, CompletedTransfersKeepTheirStateAndOwnershipWhenStartRepliesArr
   EXPECT_EQ(j.preview().texture, 1u);
   EXPECT_EQ(previews, 1);
   EXPECT_EQ(f.opened, (std::vector<std::string>{dest}));
+}
+
+TEST_F(JobsFake, NewerArtifactSaveKeepsItsRowAndPreviewAfterAnOlderStartReply)
+{
+  for (const bool first_fails : {false, true}) {
+    SCOPED_TRACE(first_fails);
+    FakeJobs f({"--late-transfer-start", first_fails ? "--hold-artifact-start-error" : "--hold-artifact-start"});
+    JobsState &j = f.jobs();
+    int previews = 0;
+    j.create_texture = [&](const io::Image &) -> uint64_t { return ++previews; };
+    j.free_texture = [](uint64_t) {};
+    ASSERT_TRUE(f.connect("runtime:lab"));
+    const auto submit = [&](const std::string &name) {
+      j.form().name = name;
+      ASSERT_TRUE(j.submit());
+      ASSERT_TRUE(f.pump([&] {
+        const auto *task = task_named(j, name);
+        return task && j.selected() == task->id && j.artifacts().size() == 2;
+      }));
+    };
+    ASSERT_NO_FATAL_FAILURE(submit("first artifact task"));
+    const std::string first = (f.dir.path() / "first.png").string();
+    const std::string second = (f.dir.path() / "second.png").string();
+    j.download_artifact("result.png", first);
+    if (first_fails) {
+      ASSERT_TRUE(f.pump([&] { return has(f.methods(), "download.start"); }));
+      ASSERT_NO_FATAL_FAILURE(submit("second artifact task"));
+    }
+    else {
+      ASSERT_TRUE(f.pump([&] { return j.transfers().size() == 1 && j.transfers()[0].state == "completed"; }));
+    }
+    EXPECT_EQ(previews, 0);
+    j.download_artifact("result.png", second);
+    ASSERT_TRUE(f.pump([&] {
+      return j.artifacts()[0].local == second && j.artifacts()[0].verify == app::ArtifactRow::Verify::Ok;
+    }));
+    const auto second_id = j.artifacts()[0].transfer_id;
+    ASSERT_NO_FATAL_FAILURE(release_artifact_start(f, second_id));
+    EXPECT_EQ(j.artifacts()[0].transfer_id, second_id);
+    EXPECT_EQ(j.artifacts()[0].local, second);
+    EXPECT_EQ(j.artifacts()[0].verify, app::ArtifactRow::Verify::Ok);
+    EXPECT_EQ(j.preview().path, second);
+    EXPECT_EQ(previews, 1);
+    EXPECT_TRUE(f.opened.empty());
+    EXPECT_EQ(std::filesystem::exists(first), !first_fails);
+    EXPECT_TRUE(std::filesystem::exists(second));
+    EXPECT_EQ(j.transfers().size(), first_fails ? 1u : 2u);
+    EXPECT_TRUE(std::all_of(j.transfers().begin(), j.transfers().end(),
+                            [](const auto &t) { return t.state == "completed"; }));
+  }
+}
+
+TEST_F(JobsFake, OpeningADetachedArtifactRechecksItsDownloadedBytes)
+{
+  for (const bool tamper : {false, true}) {
+    SCOPED_TRACE(tamper);
+    FakeJobs f({"--late-transfer-start", "--hold-artifact-start"});
+    JobsState &j = f.jobs();
+    ASSERT_TRUE(f.connect("runtime:lab"));
+    j.form().name = "detached artifact";
+    ASSERT_TRUE(j.submit());
+    ASSERT_TRUE(f.pump([&] { return j.artifacts().size() == 2; }));
+    j.download_artifact("out/summary.txt");
+    ASSERT_TRUE(f.pump([&] { return j.transfers().size() == 1 && j.transfers()[0].state == "completed"; }));
+    const auto id = j.transfers()[0].id;
+    const auto local = j.transfers()[0].local;
+    ASSERT_TRUE(std::filesystem::exists(local));
+    ASSERT_TRUE(f.opened.empty());
+    j.select_task("");
+    ASSERT_TRUE(j.artifacts().empty());
+    if (tamper) {
+      std::fstream file(local, std::ios::binary | std::ios::in | std::ios::out);
+      const int first = file.get();
+      ASSERT_NE(first, std::char_traits<char>::eof());
+      file.seekp(0);
+      file.put(char(first ^ 1));
+      ASSERT_TRUE(file.good());
+    }
+    ASSERT_NO_FATAL_FAILURE(release_artifact_start(f, id));
+    ASSERT_NE(j.transfer(id), nullptr);
+    EXPECT_EQ(j.transfer(id)->state, "completed");
+    if (tamper) {
+      EXPECT_TRUE(f.opened.empty());
+      EXPECT_EQ(j.status().kind, ui::ToastKind::Error);
+    }
+    else {
+      EXPECT_EQ(f.opened, (std::vector<std::string>{local}));
+    }
+  }
 }
 
 TEST_F(JobsFake, CancelShowsCancellingThenCancelled)

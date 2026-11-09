@@ -10,6 +10,7 @@
 #include <fstream>
 
 #include "stk/app/app_store.hh"
+#include "stk/core/mmap.hh"
 #include "stk/core/paths.hh"
 #include "stk/core/sha256.hh"
 #include "stk/io/png.hh"
@@ -21,6 +22,31 @@ using bridge::Error;
 using bridge::ErrorCode;
 
 namespace {
+
+constexpr int64_t kMaxLocalDownloadCheck = int64_t(256) << 20;
+
+bool verify_detached_artifact(const bridge::FileEntry &artifact, const bridge::Transfer &transfer)
+{
+  if (!artifact.sha256.empty() && !transfer.sha256.empty() && artifact.sha256 != transfer.sha256) {
+    return false;
+  }
+  const bool has_manifest = !artifact.sha256.empty();
+  const auto &digest = has_manifest ? artifact.sha256 : transfer.sha256;
+  const auto size = has_manifest ? artifact.size : transfer.bytes_total;
+  if (digest.empty() || size > kMaxLocalDownloadCheck) {
+    return true;
+  }
+  if (size < 0) {
+    return false;
+  }
+  try {
+    const auto bytes = core::SharedBytes::read_exact_file(core::path_from_utf8(transfer.local), size_t(size));
+    return core::Sha256::hex(bytes.data(), bytes.size()) == digest;
+  }
+  catch (const std::exception &) {
+    return false;
+  }
+}
 
 std::string get_str(const Json &j, const char *key)
 {
@@ -1596,7 +1622,7 @@ void JobsState::refresh_transfers()
       else {
         transfer_observations_.erase(id);
         upload_ids_.erase(id);
-        download_for_.erase(id);
+        download_artifacts_.erase(id);
         open_after_.erase(id);
       }
     }
@@ -2321,8 +2347,11 @@ void JobsState::download_artifact(const std::string &path, const std::string &de
   p.path = path;
   p.dest = dest;
   p.idempotency_key = new_idempotency_key();
+  bridge::FileEntry artifact;
+  artifact.path = path;
   for (ArtifactRow &a : artifacts_) {
     if (a.file.path == path) {
+      artifact = a.file;
       a.download_request = p.idempotency_key;
       a.transfer_id.clear();
       a.verify = ArtifactRow::Verify::Pending;
@@ -2332,8 +2361,10 @@ void JobsState::download_artifact(const std::string &path, const std::string &de
   const uint64_t epoch = detail_epoch_;
   const bool open_after = dest.empty();
   on_bridge_read(client_->download_start(p),
-                 [this, path, epoch, open_after, request = p.idempotency_key, since = transfer_sequence_]
+                 [this, artifact = std::move(artifact), epoch, open_after, request = p.idempotency_key,
+                  since = transfer_sequence_]
                  (const bridge::Result<bridge::Transfer> &r) {
+    const auto &path = artifact.path;
     ArtifactRow *row = nullptr;
     if (epoch == detail_epoch_) {
       for (ArtifactRow &a : artifacts_) {
@@ -2351,7 +2382,7 @@ void JobsState::download_artifact(const std::string &path, const std::string &de
       fail(store_.catalog().format("jobs.op.download_file", {{"file", path}}), r.error());
       return;
     }
-    download_for_[r.value().id] = path;
+    download_artifacts_[r.value().id] = artifact;
     if (open_after) {
       open_after_.insert(r.value().id);
     }
@@ -2378,13 +2409,13 @@ void JobsState::apply_download_start(const bridge::Transfer &t, uint64_t since)
 
 void JobsState::download_done(const bridge::Transfer &t, bool notify)
 {
-  const auto it = download_for_.find(t.id);
+  const auto it = download_artifacts_.find(t.id);
   ArtifactRow *row = nullptr;
   const auto scope = target();
   const bool same_task = t.connection == scope.connection && t.node == scope.node && t.task_id == selected_;
   for (ArtifactRow &a : artifacts_) {
     if (a.transfer_id == t.id || (same_task && a.transfer_id.empty() && a.download_request.empty() &&
-                                  it != download_for_.end() && a.file.path == it->second)) {
+                                  it != download_artifacts_.end() && a.file.path == it->second.path)) {
       row = &a;
       break;
     }
@@ -2400,6 +2431,10 @@ void JobsState::download_done(const bridge::Transfer &t, bool notify)
   }
   const bool open = open_after_.erase(t.id) > 0;
   if (!row) {
+    if (open && it != download_artifacts_.end() && !verify_detached_artifact(it->second, t)) {
+      set_status(store_.catalog().format("jobs.status.verify_failed", {{"path", t.local}}), ui::ToastKind::Error);
+      return;
+    }
     if (notify) {
       set_status(store_.catalog().format("jobs.status.downloaded", {{"path", t.local}}), ui::ToastKind::Success);
     }
@@ -2432,8 +2467,7 @@ void JobsState::verify_download(ArtifactRow &row)
 {
   /* The bridge moved the file into place only after its sha256 matched; this re-reads it so the
    * UI's "verified" mark is about the bytes on disk now. Large files keep the bridge's check. */
-  constexpr int64_t kMaxLocalCheck = int64_t(256) << 20;
-  if (row.file.size > kMaxLocalCheck || row.file.sha256.empty()) {
+  if (row.file.size > kMaxLocalDownloadCheck || row.file.sha256.empty()) {
     row.verify = ArtifactRow::Verify::Ok;
     return;
   }

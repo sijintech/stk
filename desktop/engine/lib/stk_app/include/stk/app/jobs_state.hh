@@ -511,7 +511,7 @@ class JobsState {
   };
   std::map<std::string, TransferObservation> transfer_observations_;
   std::set<std::string> upload_ids_; /**< uploads started from here (status messages) */
-  std::map<std::string, std::string> download_for_; /**< transfer id -> artifact path */
+  std::map<std::string, bridge::FileEntry> download_artifacts_; /**< transfer id -> requested artifact */
   std::set<std::string> open_after_;                /**< downloads opened when verified */
 
   /* Submit. */

@@ -39,6 +39,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <unistd.h>
@@ -56,6 +57,8 @@ namespace fs = std::filesystem;
 
 namespace {
 
+enum class HeldArtifactStart { None, Success, Error };
+
 struct Options {
   std::string dir;
   std::string review_policy = "any";
@@ -66,6 +69,7 @@ struct Options {
   bool late_transfer_snapshots = false;
   bool completed_transfer_list_first = false;
   bool late_transfer_start = false;
+  HeldArtifactStart held_artifact_start = HeldArtifactStart::None;
   int submit_fail = 0;
   int stale_workspace_lists = 0; /**< hub: new workspaces missing from the next N listings */
 } g_opt;
@@ -77,6 +81,7 @@ Json g_model;               /* guarded by g_m */
 Json g_held_transfer_list;
 Json g_held_transfer_resume;
 Json g_held_transfer_event;
+Json g_held_artifact_start;
 std::set<std::string> g_inspected;
 std::map<std::string, Json> g_watches;  /* sub -> {connection, node, workspace_id, last} */
 std::set<std::string> g_hub_subs;
@@ -472,7 +477,7 @@ void ticker()
   }
 }
 
-void respond_transfer_start(const Json &id, Json transfer)
+void respond_transfer_start(const Json &id, Json transfer, bool hold = false)
 {
   transfer.erase("files");
   if (g_opt.late_transfer_start) {
@@ -480,7 +485,12 @@ void respond_transfer_start(const Json &id, Json transfer)
     tick_transfers_locked();
     save_locked();
   }
-  respond(id, {{"transfer", std::move(transfer)}});
+  if (hold) {
+    g_held_artifact_start = {{"id", id}, {"result", {{"transfer", std::move(transfer)}}}};
+  }
+  else {
+    respond(id, {{"transfer", std::move(transfer)}});
+  }
 }
 
 void run_logs(const std::string sub, const std::string task_id, const Json streams, const Json offsets)
@@ -581,6 +591,10 @@ void init(const std::string &dir, std::vector<std::string> args, SendFn send)
     }
     else if (args[i] == "--late-transfer-start") {
       g_opt.late_transfer_start = true;
+    }
+    else if (args[i] == "--hold-artifact-start" || args[i] == "--hold-artifact-start-error") {
+      g_opt.held_artifact_start = args[i] == "--hold-artifact-start" ? HeldArtifactStart::Success :
+                                                                     HeldArtifactStart::Error;
     }
     else if (args[i] == "--stale-workspace-lists" && i + 1 < args.size()) {
       g_opt.stale_workspace_lists = std::atoi(args[++i].c_str());
@@ -903,6 +917,13 @@ bool handle(const Json &id, const std::string &method, const Json &p)
     return true;
   }
   if (method == "download.start") {
+    const auto hold = p.contains("task_id") ? std::exchange(g_opt.held_artifact_start, HeldArtifactStart::None) :
+                                             HeldArtifactStart::None;
+    if (hold == HeldArtifactStart::Error) {
+      g_held_artifact_start = {{"id", id}, {"error", {{"code", "not_found"},
+          {"message", "The requested artifact disappeared"}, {"retryable", false}}}};
+      return true;
+    }
     const std::string path = p.value("path", std::string());
     const std::string owner = p.contains("task_id") ? p["task_id"].get<std::string>() : p.value("workspace_id", std::string());
     std::string dest = p.value("dest", std::string());
@@ -919,7 +940,7 @@ bool handle(const Json &id, const std::string &method, const Json &p)
                {"created_at", iso(t)}, {"updated_at", iso(t)}, {"files", Json::array()}};
     g_model["transfers"].push_back(tr);
     save_locked();
-    respond_transfer_start(id, std::move(tr));
+    respond_transfer_start(id, std::move(tr), hold == HeldArtifactStart::Success);
     return true;
   }
   if (method == "transfer.list") {
@@ -991,6 +1012,10 @@ bool handle(const Json &id, const std::string &method, const Json &p)
     if (method == "transfer.get" && !g_held_transfer_event.is_null()) {
       g_send(g_held_transfer_event);
       g_held_transfer_event = Json();
+    }
+    if (method == "transfer.get" && !g_held_artifact_start.is_null()) {
+      g_send(g_held_artifact_start);
+      g_held_artifact_start = Json();
     }
     respond(id, {{"transfer", pub}});
     if (late && !g_held_transfer_list.is_null()) {
