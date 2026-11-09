@@ -15,6 +15,8 @@ resolved content (docs/specs/stk-graph-v1.md §5): ``muferro_frame`` declares
 ``step=3`` resolving to frame 2, ``step=2`` and ``latest`` share one entry, and
 energy rows appended by a live run do not invalidate frame-derived nodes.
 """
+from hashlib import sha256
+
 from suan.graph.registry import (NodeExecutionError, Port, array, binding, enum, int3, integer, json_param, node,
                                  rel_path, step, string, string_list, vector3)
 
@@ -434,14 +436,33 @@ def _table_format(path, text, wanted):
 
 def _table_fingerprint(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
+    from suan.connectors.files import RuntimeFiles
     source = _source(ctx, params["binding"])
+    path = params["path"]
     try:
-        return {"path": params["path"], "sha256": source.sha256(params["path"]), "format": params["format"]}
+        if isinstance(source, RuntimeFiles):
+            identity = source.sha256(path).lower()
+        else:
+            # A rewrite can preserve every field of the FileSource hash memo key.
+            digest = sha256()
+            remaining = TABLE_LIMIT
+            with source.open(path) as stream:
+                while True:
+                    ctx.check()
+                    chunk = stream.read(min(1 << 20, remaining + 1))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    if remaining < 0:
+                        raise NodeExecutionError(f"{path} is larger than {TABLE_LIMIT} bytes", code="budget_exceeded")
+                    digest.update(chunk)
+            identity = digest.hexdigest()
     except ConnectorError as exc:
         raise _failure(exc) from None
+    return {"path": path, "sha256": identity, "format": params["format"]}
 
 
-@node("stk.source.table", impl_version=2, title={"en": "Table file", "zh": "表格文件"},
+@node("stk.source.table", impl_version=3, title={"en": "Table file", "zh": "表格文件"},
       description={"en": "Read a table file inside a binding: muFerro energy_out.dat, whitespace columns "
                          "(optional header), CSV or a progress JSONL log."},
       outputs=[Port("out", "table")],
@@ -469,6 +490,10 @@ def table_source(ctx, inputs, params):
             raw = stream.read(TABLE_LIMIT + 1)
         if len(raw) > TABLE_LIMIT:
             raise NodeExecutionError(f"{path} is larger than {TABLE_LIMIT} bytes", code="budget_exceeded")
+        ctx.check()
+        sha = sha256(raw).hexdigest()
+        if sha != ctx.source_fingerprint["sha256"]:
+            raise NodeExecutionError(f"{path} does not match the planned table content", code="invalid_data")
         text = raw.decode("utf-8", "replace")
         kind = _table_format(path, text, params["format"])
         table_id = re.sub(r"[^A-Za-z0-9_]", "_", PurePosixPath(path).name.split(".")[0]) or "table"
@@ -481,7 +506,6 @@ def table_source(ctx, inputs, params):
         else:
             reader = {"columns": read_columns, "csv": read_csv, "progress_jsonl": read_jsonl}[kind]
             table = reader(text, id=table_id, units=params["units"], keep=params["columns"])
-        sha = source.sha256(path)
     except ConnectorError as exc:
         raise _failure(exc) from None
     reader_id = {"muferro_energy": "mupro.energy@1", "progress_jsonl": "stk.jsonl@1", "csv": "stk.csv@1",

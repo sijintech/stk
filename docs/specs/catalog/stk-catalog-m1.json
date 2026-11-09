@@ -5322,7 +5322,7 @@
    "id": "stk.source.table@1",
    "type": "stk.source.table",
    "version": 1,
-   "impl_version": 2,
+   "impl_version": 3,
    "stage": "source",
    "category": "source",
    "title": {

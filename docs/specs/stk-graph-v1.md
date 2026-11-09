@@ -1330,7 +1330,7 @@ Unless stated otherwise: input fields are kept (zero-copy), coordinates are phys
 
 **Sources**
 
-- `muferro_run`: implementation 2 additionally discovers the selected case's `run.h5`, binding its
+- `muferro_run`: the selected case's `run.h5` discovery binds its
   metadata observation to the planned container SHA. HDF5 descriptors are qualified as `hdf5:<field>`
   in `result.datasets`; the `frames` table and `muferro_frame@1` retain their DAT contract. Native
   selectors are read by `mupro_hdf5@1`; see [MuPRO HDF5/1](mupro-hdf5-1.md).
@@ -1368,6 +1368,9 @@ Unless stated otherwise: input fields are kept (zero-copy), coordinates are phys
   Names must be unique after the existing normalization (trim, replace `/` and `.` with `_`,
   truncate to 128 characters). Ambiguous headers are rejected before forming column dictionaries;
   duplicate measured columns must not silently overwrite each other.
+  Runtime bindings use the published artifact digest. Other bindings hash the current bytes within
+  the 256 MiB input limit. The node checks the bytes it will parse against the planned digest before
+  parsing or caching and uses that digest in provenance. A digest mismatch returns `invalid_data`.
 
 **Filters**
 
