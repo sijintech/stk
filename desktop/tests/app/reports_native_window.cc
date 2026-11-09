@@ -699,10 +699,11 @@ class Exercise {
     return document_preview::test::arm_isolated_pause(window_.native_window_handle(), session, navigation);
   }
   std::shared_ptr<const document_preview::test::NativeCloseObservation> observe_native_close(
-      const std::string &session) noexcept
+      const std::string &session, uint64_t watch_pause_navigation = 0) noexcept
   {
     try {
-      return document_preview::test::observe_native_close(window_.native_window_handle(), session);
+      return document_preview::test::observe_native_close(
+          window_.native_window_handle(), session, watch_pause_navigation);
     }
     catch (...) { return {}; }
   }
@@ -775,6 +776,27 @@ class Exercise {
     save();
     require(after.navigation_generation == playing.navigation_generation && after.paused && !after.ended && !after.seeking,
         "The first post-hold DOM sample must show the same visible media paused");
+  }
+  void record_hidden_native_trace(const document_preview::test::NativeCloseObservation *close,
+                                  const std::string &session) noexcept
+  {
+    try {
+      if (!close || !close->hide_pause) { return; }
+      const auto &pause = *close->hide_pause;
+      Json events = Json::array();
+      for (size_t i = 0; i < pause.event_count; ++i) {
+        const auto &event = pause.events[i];
+        events.push_back({{"phase", event.phase}, {"elapsed_seconds", event.elapsed_seconds},
+            {"visible", event.visible}, {"webview_hidden", event.webview_hidden},
+            {"owns_focus", event.owns_focus},
+            {"raw_playback_state", event.playback_state ? Json(*event.playback_state) : Json(nullptr)}});
+      }
+      result_["hidden_media_native_pause_trace"] = {{"session_sha256", core::Sha256::hex(session)},
+          {"media_generation", pause.media_generation},
+          {"navigation_generation", pause.navigation_generation}, {"overflow", pause.overflow},
+          {"events", std::move(events)}};
+    }
+    catch (...) {} // Diagnostics must never replace the original test exception.
   }
   void record_hidden_native_close(const document_preview::test::NativeCloseObservation *close,
                                   const std::string &session, Clock::time_point playing_returned) noexcept
@@ -1723,7 +1745,7 @@ raise SystemExit(main())
 #endif
       ui.begin_hidden_media(cycle, session, playing, playing_returned);
 #ifdef __APPLE__
-      const auto close = ui.observe_native_close(session);
+      const auto close = ui.observe_native_close(session, playing.navigation_generation);
 #endif
       auto hidden = [&] {
         try {
@@ -1782,12 +1804,16 @@ raise SystemExit(main())
           ui.finish_hidden_media(true);
           ui.media_capture(cycle, "hidden-video-tab", 0, rectangle, hidden,
               options.quiet_hidden_hold ? std::string{} : session);
+#ifdef __APPLE__
+          ui.record_hidden_native_trace(close.get(), session);
+#endif
           return hidden;
         }
         catch (...) {
           ui.finish_hidden_media(false);
 #ifdef __APPLE__
           ui.record_hidden_native_close(close.get(), session, playing_returned);
+          ui.record_hidden_native_trace(close.get(), session);
 #endif
           throw;
         }

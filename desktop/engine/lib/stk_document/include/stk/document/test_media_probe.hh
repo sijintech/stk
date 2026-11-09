@@ -63,16 +63,36 @@ bool probe_media(wm::NativeWindowHandle parent, std::string_view session_id,
 std::shared_ptr<ResourceSession> resource_session(wm::NativeWindowHandle parent,
                                                  std::string_view session_id, std::string &error);
 #ifdef __APPLE__
+struct NativeHidePauseEvent {
+  std::string_view phase;
+  double elapsed_seconds = 0;
+  bool visible = false, webview_hidden = false, owns_focus = false;
+  std::optional<int> playback_state;
+};
+
+struct NativeHidePauseTrace {
+  uint64_t media_generation = 0, navigation_generation = 0;
+  std::chrono::steady_clock::time_point dispatched;
+  bool overflow = false;
+  // The original 1 s watchdog permits at most 40 query/reply pairs. Leave room
+  // for dispatch, ACK, focus/visibility transitions and shutdown.
+  std::array<NativeHidePauseEvent, 96> events{};
+  std::size_t event_count = 0;
+};
+
 struct NativeCloseObservation {
   std::string_view reason; // Empty until the exact observed view enters shutdown.
   std::chrono::steady_clock::time_point when;
   uint64_t media_generation = 0, navigation_generation = 0;
   NativePauseSnapshot pause;
+  std::optional<NativeHidePauseTrace> hide_pause;
 };
 
-/** UI-thread only. The observation survives view destruction without owning the view or its resources. */
+/** UI-thread only. The observation survives view destruction without owning the view or its resources.
+ * A matching nonzero navigation also records the next pause and its hide lifecycle. */
 std::shared_ptr<const NativeCloseObservation> observe_native_close(wm::NativeWindowHandle parent,
-                                                                 std::string_view session_id);
+                                                                 std::string_view session_id,
+                                                                 uint64_t watch_pause_navigation = 0);
 /** UI-thread only: arm a fixed, one-shot pause action on this visible test navigation. */
 bool arm_isolated_pause(wm::NativeWindowHandle parent, std::string_view session_id,
                         uint64_t navigation_generation);
