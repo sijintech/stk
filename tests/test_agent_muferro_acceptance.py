@@ -87,8 +87,12 @@ def wait(h, handle, session_id, timeout=60):
     return view
 
 
-def test_agent_prepares_existing_case_then_human_first_start_runs_once(scan, monitor):
-    """Real Runtime and manufactured MuFerro, with scripted planner replies and strict bridge messages."""
+def test_agent_prepares_existing_case_then_human_first_start_runs_once(scan, monitor, inproc, monkeypatch):
+    """Real Runtime and manufactured MuFerro, with scripted planner replies and strict bridge messages.
+
+    The desktop bridge is closed in order and a fresh strict bridge reopens the same state, project and session
+    before approval: the persisted plan and hashes survive, but the earlier process's inspection does not.
+    """
     s = scan
     h, store, handle = s["h"], s["store"], s["handle"]
     gateway = h.bridge.projects.models
@@ -118,16 +122,70 @@ def test_agent_prepares_existing_case_then_human_first_start_runs_once(scan, mon
     plan = h.call("project.agent.run_plan", args)["run"]
     assert [r["id"] for r in plan["rows"]] == [s["rows"][0]]
     assert plan["simulation"]["connection"] == s["connection"] and s["client"].tasks() == []
+    target = view["run_target"]
+    assert target is not None
+
+    # Cold reopen before approval: orderly close, then a fresh strict bridge on the same state directory.
+    assert h.call("project.close", {"handle": handle})["closed"] is True
+    h.close()
+    h = inproc()
+    h.bridge.analysis_executor.worker = s["worker"]
+    h.bridge.workflow_executor.poll_seconds = 0.02
+    starts = []
+    start = h.bridge.workflow_executor.start
+
+    def record_start(store, run_id, **kwargs):
+        starts.append(run_id)
+        return start(store, run_id, **kwargs)
+
+    monkeypatch.setattr(h.bridge.workflow_executor, "start", record_start)
+    old_handle, handle = handle, h.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    assert handle != old_handle
+    s["h"], s["handle"] = h, handle  # settled() follows the fresh bridge
+    params = {"handle": handle, "session_id": sid}
+    args = {**params, "item_id": item["item_id"]}
+    decision = {**args, "decision": "start", "plan_sha256": item["plan_sha256"],
+                "expected_revision": item["expected_revision"]}
+    # The earlier handle is gone; its start is refused at this bridge's review gate before any project lookup.
+    assert h.error("project.agent.get", {**params, "handle": old_handle})["code"] == "not_found"
+    assert h.error("project.agent.run_decide", {**decision, "handle": old_handle})["code"] == "conflict"
+    reopened = h.call("project.agent.get", params)
+    assert [card["item"] for card in reopened["run_approvals"]] == [item]
+    assert reopened["run_approvals"][0]["decision"] is None and reopened["run_approvals"][0]["receipt"] is None
+    assert len(reopened["awaiting"]) == 1 and reopened["run_target"] == target
+    assert h.call("project.agent.verify", params)["ok"]
+    # Observing is not a review: the earlier process's inspection cannot authorize this bridge's start.
+    assert h.call("project.agent.run_observe", args)["receipt"] == {"outcome": "pending", "item": item}
+    refused = h.error("project.agent.run_decide", decision)
+    assert refused["code"] == "conflict" and "Read the complete frozen run plan" in refused["message"]
+    assert s["client"].tasks() == []
+    assert h.call("project.agent.get", params)["run_approvals"][0]["decision"] is None
+    reviewed = h.call("project.agent.run_plan", args)
+    assert reviewed["item"] == item and reviewed["run"] == plan
+    assert reviewed["run"]["plan_sha256"] == item["plan_sha256"] and s["client"].tasks() == []
+    assert starts == []
+
     first = h.call("project.agent.run_decide", decision)
     assert first["receipt"]["outcome"] == "started"
     completed = settled(s, item["run_id"], timeout=90)
     assert all(t["status"] == "succeeded" for t in completed["tasks"])
     count = len(s["client"].tasks())
     assert count == 1 and len(s["worker"].files) == 1
-    assert h.call("project.agent.run_observe", args)["receipt"]["outcome"] == "started"
+    observed = h.call("project.agent.run_observe", args)["receipt"]
+    assert observed["outcome"] == "started" and observed["run_id"] == item["run_id"]
+    assert observed["approval"]["approval_id"] == item["item_id"]
+    assert observed["approval"]["plan_sha256"] == item["plan_sha256"]
     replay = h.call("project.agent.run_decide", decision)
     assert replay["receipt"]["run_status"] == "stopped" and len(s["client"].tasks()) == count
-    assert h.call("project.agent.get", params)["awaiting"] == []
+    assert replay["receipt"]["outcome"] == "started" and replay["receipt"]["run_id"] == item["run_id"]
+    assert replay["receipt"]["executor_id"] == observed["executor_id"]
+    assert starts == [item["run_id"]]
+    final_view = h.call("project.agent.get", params)
+    assert final_view["awaiting"] == []
+    decided = [e for e in final_view["events"] if e["kind"] == "approval_decided"]
+    assert len(decided) == 1 and decided[0]["item_id"] == item["item_id"]
+    assert h.call("project.agent.verify", params)["ok"]
+    assert not h.violations
 
 
 def test_the_agent_proposes_a_scan_a_person_runs_it_and_the_agent_analyses_the_results(scan, monitor):
