@@ -1,5 +1,17 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 14:40 UTC · 冻结 HDF5 归档的原生首帧
+
+`71f878df` 修正 Viewer 在采纳归档后首帧被旧灰色背景盖住的问题。旧代码回归失败，修正后相关 C++ 67/67。 编辑区先构建本帧内容，再取背景，使背景透明度与本帧载荷状态一致。旧测试首命令为全区 `Rect`，新测试从 `ClipPush` 开始。本机证据 `root-delivery-20261109-94/{red-first-frame,green-first-frame}.xml`。
+
+实窗固定为 Linux X11/Xvfb、软件 OpenGL、英语、1440×1600、请求缩放 1，程序记录实际 1.04。从项目已打开的 Home 到成功运行选中，依次打开 Analysis runs、折叠准备、读取列表、选中运行，共四次点击。固定起点为 Runs 侧栏已选 `40bc4b12` 且 Viewer 为空。四次左键分别读取并验证、打开输出下拉、选择 `view`、显示输出，零滚轮。原始 `run.h5` 不在原路径。旧首帧中区 424000 像素全灰，额外重绘才显示；新首帧中区有 1505 种 RGB 值，并显示 `Polar_x` 的 24 个体素、外框、坐标轴与色条。
+
+严格桥在测量区间只收到一次 `project.analysis_runs.result`，运行 ID、冻结计划及归档清单摘要吻合。项目修订 13、两份数据库、5 个归档文件、52 个任务文件及一个 Runtime 任务一致。隐藏 Python 草稿执行的字节摘要与原稿相同。修复版正常退出。固定起点、首帧及回执见 `root-delivery-20261109-94/native-fixed/evidence/` 的 `ui-9.png`、`ui-12.png`、`receipt.json`。
+
+root 以 `641b2807` 集成 Claude52 的 `0cda6bcc` 与 `6464a3c0`，审批跨进程和相邻回归 102/102。 严格桥握手核对真实 PID。首个桥在审批回执写出但未交付后被 SIGKILL，原任务仍在 Runtime 排队。新桥观测同一批准、运行和执行器，测试范围内一次真实提交、零取消或恢复。作者三种故障注入均回收子进程。证据 `root-delivery-20261109-94/claude52-review/evidence/inject/` 与 `claude52-root.xml`。
+
+本机 `395e78fd` 隔离 Python 3.11 全量 6446 过、180 跳过、4 排除、零失败。远端 `971c0cbf` Runtime 13/13 已于 14:39:55Z 结束，Desktop 仍运行。 项目 CPU 首跑的 12 个 Peer 失败涉及缺少 cryptography 和已安装 helper，重建 Peer 目标并补齐后定向 20/20，全组 1041/1041。证据 `root-delivery-20261109-94/{project-cpu,project-peer,project-cpu-final}.xml`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42633409122) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42633409136)
+
 ## 2026-11-09 14:12 UTC · 上一轮 Desktop 终态与冻结 HDF5 分析
 
 远端 `249698d0` 的 Desktop 于 14:12:41Z 结束。三个 Linux 作业通过，Windows CPU 1460/1460、原生 6/6，macOS 原生 4/6。Runtime 13/13。 Linux 主作业 2134/2134，Windows CPU 的 1179 项必测全部运行。Windows 原生 6/6、零跳过、1333.70 秒，PDF 20 轮取得 160 张截图，20 次重准备均记录，未观察到遗留会话。捕获启动最长 96 毫秒，低于 1 秒诊断阈值，此次尚未定位此前的间歇性长停顿。macOS CPU 1518/1518、Metal 254/254，两个原生失败为视频和 HTML 视频。首轮和第二轮可见暂停对照各 2/2，六条隐藏对照在隐藏后取得回执，随后原生状态仍为 Playing。工件核验见本机 `root-delivery-20261109-88/ci249/{windows,macos}/receipt.json`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42621953590) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42621953348) [Windows 工件](https://github.com/sijintech/stk/actions/runs/42621953590/artifacts/13681666456) [macOS 工件](https://github.com/sijintech/stk/actions/runs/42621953590/artifacts/13680007342)

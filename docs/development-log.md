@@ -1,5 +1,11 @@
 # 开发交接记录
 
+## 2026-11-09 14:40 UTC · 冻结 HDF5 归档的原生首帧
+
+`71f878df` 修正 Viewer 在采纳归档后首帧被旧灰色背景盖住的问题。旧代码回归失败，修正后相关 C++ 67/67。 根工作树按相同布局做了旧、新二进制像素对照，第四次点击后无需额外输入即可显示体数据。 root 以 `641b2807` 集成 Claude52 的 `0cda6bcc` 与 `6464a3c0`，审批跨进程和相邻回归 102/102。 [验收记录](runtime-validation.md)
+
+本机 `395e78fd` 隔离 Python 3.11 全量 6446 过、180 跳过、4 排除、零失败。远端 `971c0cbf` Runtime 13/13 已于 14:39:55Z 结束，Desktop 仍运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42633409122)
+
 ## 2026-11-09 14:12 UTC · 上一轮 Desktop 终态与冻结 HDF5 分析
 
 root 以 `9f2bcfd3` 集成 Claude51 的 `047f20b3`，将合成求解器步数与 HDF5 夹具对齐，并在两次分析期间移开原收集文件来验证冻结读取。根工作树收集回归 7/7。 [验收记录](runtime-validation.md)

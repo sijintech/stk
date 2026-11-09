@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 14:40 UTC · 冻结 HDF5 归档的原生首帧
+
+`71f878df` 修正 Viewer 在采纳归档后首帧被旧灰色背景盖住的问题。旧代码回归失败，修正后相关 C++ 67/67。 Linux 实窗从已选中的成功运行四次点击，立即看到冻结归档的第 4 步 `Polar_x`。原收集 HDF5 已移开，归档只读一次，项目修订、一个 Runtime 任务及隐藏 Python 草稿一致。
+
+本机 `395e78fd` 隔离 Python 3.11 全量 6446 过、180 跳过、4 排除、零失败。远端 `971c0cbf` Runtime 13/13 已于 14:39:55Z 结束，Desktop 仍运行。 root 以 `641b2807` 集成 Claude52 的 `0cda6bcc` 与 `6464a3c0`，审批跨进程和相邻回归 102/102。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42633409122) [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 14:12 UTC · 上一轮 Desktop 终态与冻结 HDF5 分析
 
 远端 `249698d0` 的 Desktop 于 14:12:41Z 结束。三个 Linux 作业通过，Windows CPU 1460/1460、原生 6/6，macOS 原生 4/6。Runtime 13/13。 本批在前一轮整轮终态入档后交付，当前主线头和后续 CI 以实际 Git 为准。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42621953590) [验收记录](docs/runtime-validation.md)
