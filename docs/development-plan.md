@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-09 21:54 UTC · MuPRO 查看源校验与 Windows 回归
+
+`89ffacbd` 完成 MuPRO 收集来源到 Viewer、图缓存、探针与工作区恢复的文件摘要绑定。真实许可和目标平台界面继续验收。 [运行验收](runtime-validation.md)
+
+已推送的 `75b20fc6` Runtime `42702712232` 全部 13/13 作业通过。Windows Python 3.11、3.12 客户端分别 5246 过、275 跳过、934 排除。两组的同 inode 同大小恢复 mtime 文件签名、真实 NTFS 联接的严格 Bridge 拒绝和原生 ChangeTime 三项目标均由官方逐文件进度、精确源码收集顺序及完整跳过记录映射确认通过。该工作流未生成具名 JUnit，映射经独立复核。同头 Desktop `42702711687` 仍运行，本地查看链路修复等待整轮终态再推送。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42702712232) · [Desktop CI](https://github.com/sijintech/stk/actions/runs/42702711687)
+
+实际 Claude71 在独立 `claude/cocoa-frame-clock-71` 从冻结基线 77c83814 开发可选可见帧编号诊断。独立合成视频和 OS 截图用于区分播放时钟回退与可见画面回退。旧固定视频和既有验收下界继续作为原验收依据，新的诊断仍待 root 审阅及目标 macOS 执行。
+
 ## 2026-11-09 21:27 UTC · 前一 Desktop 终态与 Cocoa 配对对照
 
 远端 `a7fce899` Desktop `42692999966` 于 21:26:05 UTC 终态 failure，6 个作业全部结束，5 个成功。Linux 主测 2159/2159，两个打包作业成功。Windows CPU 1478/1478，独立原生 6/6 且零跳过。macOS CPU 1537/1537、Metal 254/254，主原生 4/6，视频与 HTML 的隐藏暂停下界失败。同头 Runtime 13/13。前头整轮终态已满足本批推送前提，当前 Viewer 修改继续作为未提交开发。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42692999966) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42692999966/artifacts/13711373511) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42692999627)

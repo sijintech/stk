@@ -1,5 +1,17 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 21:54 UTC · MuPRO 查看源校验与 Windows 回归
+
+`89ffacbd` 把收集结果中算例文件的路径与 SHA-256 清单带入 Viewer 来源。来源与可编辑预设参数分开保存，打开、步进、预取、探针和工作区恢复后显式求值沿用该清单。图节点缓存命中前仍检查当前内容，读入经过项目目录约束和摘要校验的私有快照。本机缓存显示和探针网格缓存均不能绕过这次读取。
+
+集成 Claude69 `2e3c4940` 与 Claude70 `9bd6d96a` 的回归。真实合成任务在 Viewer 调用处遭同大小、同 mtime 改写时拒绝冷、暖缓存结果，恢复原文件后回到原帧和原畴比例，零新增任务。严格子进程 Bridge 和图 worker 的求值、探针、清单范围及本机来源拒绝转发 Hub 四项通过。普通目录探针仍可携带未使用的失效绑定。
+
+Python 3.12 联测 101/101，独立字节码目录的核心回归 52/52，最终严格 Bridge 4/4。既有 MuFerro 流程与 HDF5 收集兼容 41 过、1 项真实许可条件跳过。Python 3.14 定向 51/51，隔离 wheel 安装态 46/46，8 个安装成员与最终源码一致。Linux 原生 CPU 状态及工作区测试 40/40，包含来源传递、重复显式求值、探针和惰性恢复。这些原生状态测试使用测试桥，实际目标平台界面与真实 MuPRO 许可场景待验。
+
+已推送的 `75b20fc6` Runtime `42702712232` 全部 13/13 作业通过。Windows Python 3.11、3.12 客户端分别 5246 过、275 跳过、934 排除。两组的同 inode 同大小恢复 mtime 文件签名、真实 NTFS 联接的严格 Bridge 拒绝和原生 ChangeTime 三项目标均由官方逐文件进度、精确源码收集顺序及完整跳过记录映射确认通过。该工作流未生成具名 JUnit，映射经独立复核。同头 Desktop `42702711687` 仍运行，本地查看链路修复等待整轮终态再推送。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42702712232) · [Desktop CI](https://github.com/sijintech/stk/actions/runs/42702711687)
+
+本机证据 `root-delivery-20261109-117/` 的 `source-clean-bytecode.xml`、`source-chain-final.xml`、`strict-source-final.xml`、`muferro-compatibility.xml`、`source-314.xml`、`wheel-source-final.xml`、`wheel-binding.json`、`native-workspace.xml` 和 `native-viewer.xml`。Windows 映射证据在 `root-delivery-20261109-109/ci75/windows-targeted-summary.json`。
+
 ## 2026-11-09 21:27 UTC · 前一 Desktop 终态与 Cocoa 配对对照
 
 远端 `a7fce899` Desktop `42692999966` 于 21:26:05 UTC 终态 failure，6 个作业全部结束，5 个成功。Linux 主测 2159/2159，两个打包作业成功。Windows CPU 1478/1478，独立原生 6/6 且零跳过。macOS CPU 1537/1537、Metal 254/254，主原生 4/6，视频与 HTML 的隐藏暂停下界失败。同头 Runtime 13/13。前头整轮终态已满足本批推送前提，当前 Viewer 修改继续作为未提交开发。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42692999966) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42692999966/artifacts/13711373511) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42692999627)
