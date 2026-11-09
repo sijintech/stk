@@ -216,7 +216,10 @@ def _native_result_json(text):
             record[key] = value
         return record
 
-    return json.loads(text, parse_constant=_reject_constant, object_pairs_hook=unique_fields)
+    try:
+        return json.loads(text, parse_constant=_reject_constant, object_pairs_hook=unique_fields)
+    except RecursionError as exc:
+        raise ValueError("JSON record exceeds the decoder's nesting limit") from exc
 
 
 def _same_native_record(record, expected):

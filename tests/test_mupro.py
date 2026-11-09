@@ -10,12 +10,14 @@ import os
 import shutil
 import subprocess
 import sys
+from types import SimpleNamespace
 
 from click.testing import CliRunner
 import pytest
 
 from mupro_fake import make_fake_mpiexec, make_fake_sdk, make_fake_srun, write_case, write_outputs
 from suan.mupro import cli as mupro_cli
+from suan.mupro import run as mupro_run
 from suan.mupro import muferro_spec
 from suan.mupro.run import EXAMPLES, FRAME, RUN_OUTPUTS, MuproError, expected_frames, main, read_case, verify_run
 from suan.runtime.common import sha256
@@ -211,6 +213,31 @@ def test_submit_rejects_unsafe_local_case_before_connecting(tmp_path, monkeypatc
     assert connections == [] and client.uploads == [] and client.submitted == []
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows directory junction")
+def test_submit_rejects_windows_junction_before_reading_case(tmp_path, monkeypatch):
+    case = tmp_path / "case"
+    write_case(case)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "field.in").write_text("synthetic fixture", encoding="utf-8")
+    junction = case / "fields" / "junction"
+    junction.parent.mkdir()
+    created = subprocess.run(["cmd", "/c", "mklink", "/J", str(junction), str(outside)],
+                             capture_output=True, check=False, timeout=10)
+    assert created.returncode == 0, created.stderr
+
+    def unexpected(*_):
+        raise AssertionError("Junction preflight must precede TOML parsing and connection")
+
+    try:
+        monkeypatch.setattr("suan.mupro.run.read_case", unexpected)
+        monkeypatch.setattr(mupro_cli, "get_client", unexpected)
+        result = CliRunner().invoke(mupro_cli.mupro, ["submit", "--workspace", WORKSPACE, "--input", str(case)])
+        assert result.exit_code == 1 and "without symbolic links or junctions" in result.output, result.output
+    finally:
+        os.rmdir(junction)
+
+
 def test_submit_refuses_runtime_without_mpi_resources(tmp_path, monkeypatch):
     write_case(tmp_path / "case16")
     client = FakeClient(resources=())
@@ -342,6 +369,29 @@ def test_verify_rejects_ambiguous_native_step_records(tmp_path, edit, check, cla
     edit(tmp_path)
     report = verify_run(tmp_path)
     assert report["classification"] == classification and report["qoi"] is None, report
+    assert [c["id"] for c in report["verification"]["checks"] if c["status"] == "fail"] == [check]
+
+
+@pytest.mark.parametrize("filename, check", [("mupro_completion.json", "completion"),
+                                             ("mupro_progress.jsonl", "progress")])
+def test_verify_reports_excessively_nested_native_json_as_invalid(tmp_path, monkeypatch, filename, check):
+    write_case(tmp_path, steps=1)
+    write_outputs(tmp_path, steps=1)
+    record = "[" * 32 + "0" + "]" * 32
+    (tmp_path / filename).write_text(record + "\n", encoding="utf-8")
+
+    def load(text, **options):
+        # The JSON decoder's nesting limit varies across Python versions and platforms.
+        if text.strip() == record:
+            raise RecursionError("JSON nesting limit")
+        return json.loads(text, **options)
+
+    monkeypatch.setattr(mupro_run, "json", SimpleNamespace(loads=load))
+
+    result = CliRunner().invoke(mupro_cli.mupro, ["verify", str(tmp_path)])
+    assert result.exit_code == 3, result.output
+    report = json.loads(result.output)
+    assert report["classification"] == "invalid_result" and report["qoi"] is None, report
     assert [c["id"] for c in report["verification"]["checks"] if c["status"] == "fail"] == [check]
 
 
