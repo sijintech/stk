@@ -31,7 +31,8 @@ def _protocol_stdout():
         except (OSError, AttributeError, ImportError):
             pass
     sys.stdout = sys.stderr
-    return os.fdopen(fd, "wb", buffering=0)
+    # Each protocol send flushes, while the buffered writer handles short pipe writes.
+    return os.fdopen(fd, "wb")
 
 
 def _protocol_stdin():

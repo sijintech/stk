@@ -9,7 +9,7 @@ import pytest
 from suan.agent import AgentBusy, AgentExecutor, levels
 from suan.agent.run_approvals import RunApprovals, run_identity
 from suan.desktop_bridge import workflow_runs
-from suan.desktop_bridge.protocol import BridgeError
+from suan.desktop_bridge.protocol import MAX_ID_LENGTH, BridgeError, encode_message
 from suan.models import ModelGateway
 from suan.project import ProjectError, RevisionConflict
 from suan.project.agent_sessions import digest
@@ -176,6 +176,35 @@ def test_oversize_plan_is_not_marked_reviewed(service, monkeypatch):
     assert h.error("project.agent.run_plan", {**params, "item_id": item["item_id"]})["code"] == "result_too_large"
     assert not h.bridge._agent_run_reviews
     assert RunApprovals(store).decision(params["session_id"], item["item_id"]) is None
+
+
+def test_complete_plan_review_uses_the_actual_response_line(service, monkeypatch):
+    h, store, params, item = service
+    method = "project.agent.run_plan"
+    args = {**params, "item_id": item["item_id"]}
+    plan = RunApprovals(store).review(params["session_id"], item["item_id"])
+    identity = "\x01" * MAX_ID_LENGTH  # Each control character occupies six JSON bytes.
+    request = encode_message({"id": identity, "method": method, "params": args})
+    response_size = len(encode_message({"id": identity, "result": plan})) - 1
+    h.methods[identity] = method
+
+    monkeypatch.setattr(h.bridge, "max_line", response_size - 1)
+    assert len(request) - 1 <= h.bridge.max_line
+    h.send_line(request)
+    assert h.response(identity)["error"]["code"] == "result_too_large"
+    assert not h.bridge._agent_run_reviews
+
+    decision = {**args, "decision": "start", "plan_sha256": item["plan_sha256"],
+                "expected_revision": item["expected_revision"]}
+    assert h.error("project.agent.run_decide", decision)["code"] == "conflict"
+    assert RunApprovals(store).decision(params["session_id"], item["item_id"]) is None
+
+    h.responses.pop(identity)
+    monkeypatch.setattr(h.bridge, "max_line", response_size)
+    h.send_line(request)
+    assert h.response(identity)["result"] == plan
+    assert h.call("project.agent.run_decide", {**decision, "decision": "decline"})["receipt"]["outcome"] == "declined"
+    assert h.bridge._agent_run_reviews
 
 
 def test_target_schema_rejects_model_selected_identity_and_hub(service):

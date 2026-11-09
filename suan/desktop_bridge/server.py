@@ -140,6 +140,7 @@ def refuse(stream, writer, error, max_line=MAX_LINE_BYTES):
 class _Context:
     def __init__(self):
         self.callbacks = []
+        self.run_review = None
 
     def after(self, callback):
         """Run ``callback`` once the response has been written (subscriptions start then)."""
@@ -485,35 +486,41 @@ class Bridge:
     # -- output -------------------------------------------------------------------------------
 
     def send(self, message, method=None):
+        """Write a message and report whether the original message was flushed."""
+        original = True
         if self.strict:
             issues = bridge_schema.validate_outgoing(message, method)
             if issues:
                 print(f"stk-desktop-bridge: schema violation in {method or message.get('event')}: {issues[:3]}",
                       file=sys.stderr)
                 if "event" in message:
-                    return
+                    return False
                 message = {"id": message.get("id"), "error": error_object(
                     "internal_error", f"The bridge produced a result that violates the protocol schema: "
                     f"{issues[0][0]} {issues[0][1]}")}
+                original = False
         try:
             line = encode_message(message)
         except (TypeError, ValueError) as exc:
             if "event" in message:
-                return
+                return False
             line = encode_message({"id": message.get("id"), "error": error_object(
                 "internal_error", f"The result is not JSON: {exc}")})
+            original = False
         if len(line) > self.max_line + 1:
             if "event" in message:
                 print("stk-desktop-bridge: dropped an oversized event", file=sys.stderr)
-                return
+                return False
             line = encode_message({"id": message.get("id"), "error": error_object(
                 "result_too_large", f"The result exceeds {self.max_line} bytes; request less data")})
+            original = False
         with self.write_lock:
             try:
                 self.writer.write(line)
                 self.writer.flush()
             except (BrokenPipeError, OSError, ValueError):
-                pass  # the app is gone; jobs and transfers keep their durable state
+                return False  # the app is gone; jobs and transfers keep their durable state
+        return original
 
     def emit(self, event, data):
         self.send({"event": event, "data": data})
@@ -552,16 +559,9 @@ class Bridge:
 
     def agent_run_plan(self, params, context):
         result = self.projects.agent("run_plan", params)
-        # Do not mark a partial/oversized response as inspected. This process
-        # receipt is a review precondition, not authentication of the human.
-        if len(encode_message({"id": 0, "result": result})) > self.max_line - 256:
-            raise BridgeError("result_too_large", "The complete frozen run plan exceeds the bridge response limit")
         key = (params["handle"], params["session_id"], params["item_id"])
-        with self._agent_run_review_lock:
-            self._agent_run_reviews[key] = {"plan_sha256": result["item"]["plan_sha256"],
-                                            "expected_revision": result["item"]["expected_revision"]}
-            while len(self._agent_run_reviews) > 64:
-                self._agent_run_reviews.pop(next(iter(self._agent_run_reviews)))
+        context.run_review = (key, {"plan_sha256": result["item"]["plan_sha256"],
+                                    "expected_revision": result["item"]["expected_revision"]})
         return result
 
     def agent_run_decide(self, params, context):
@@ -655,7 +655,17 @@ class Bridge:
                 traceback.print_exc(file=sys.stderr)
                 self.respond_error(identity, BridgeError("internal_error", f"{type(exc).__name__}: {exc}"), method)
                 return
-            self.send({"id": identity, "result": result}, method)
+            response = {"id": identity, "result": result}
+            if context.run_review is None:
+                self.send(response, method)
+            else:
+                # An immediate approval must wait until the complete plan is flushed and recorded.
+                with self._agent_run_review_lock:
+                    if self.send(response, method):
+                        key, review = context.run_review
+                        self._agent_run_reviews[key] = review
+                        if len(self._agent_run_reviews) > 64:
+                            self._agent_run_reviews.pop(next(iter(self._agent_run_reviews)))
             for callback in context.callbacks:
                 callback()
         finally:
