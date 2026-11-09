@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 15:30 UTC · Cocoa 隐藏采样、MuFerro 人工接续与桌面终态
+
+`f6730c49` 增加 macOS 探针对照。先确认同一导航的可见原生暂停，真实切换标签时只跳过本次再次派发，隐藏保持后独立读一次 WebKit 播放状态。 探针绑定确切窗口、会话和已验证的媒体代次，保留首次真实 ACK 和计数。普通标签切换实际隐藏和释放焦点。1.25 秒保持后，原生轨迹只接一组只读查询及回复，原始枚举作为独立证据。采样要求同一存活、隐藏、失焦的视图，DOM 采样为零。诊断通过表示成功取得原生枚举。
+
+Linux 媒体及证据 34/34，合成守卫 42/42，Apple 条件 C++ 语法及 CTest 注册通过。真实 Apple SDK 构建及 WKWebView 结果待新 CI。 CI 新作业步骤单独归档两例 JUnit 和各自的结果，缺失、失败与跳过均由原检查器报告。证据 `root-delivery-20261109-96/{native-evidence-final.xml,forced-apple-test-syntax-final.log,apple-ctest-registration.json,workflow-validation.json,native-control-proof/receipt.json}`。
+
+root 以 `767903df` 集成 Claude54 `43e52c63`。真实第三个 Bridge 观察原任务时不收集。人工恢复将消失的旧执行尝试标为中断，明确启动后第 2 次尝试接管原成功 Runtime 任务，保留原批准并核对原始输出字节。真实 GraphWorker 生成 Total Energy `[-1.125, -2.25, -3.375]` 并在 Bridge 退出后回收。定向 1/1，六个验收和 Bridge 测试文件共 112/112，均零跳过。使用受控求解器夹具，商业许可宿主仍待验。证据 `root-delivery-20261109-96/claude54-root-final.xml`。
+
+远端 `971c0cbf` Desktop `42633409122` 于 15:30:19Z 终态，五个作业通过，macOS 原生失败。Linux 主测试 2135/2135，Windows CPU 1460/1460，Windows 原生 6/6、零跳过，六项各 20 轮，PDF 160 张截图且重准备 20 次。macOS 原生 4/6，首次可见暂停 2/2，可见二次暂停 1/2，重复隐藏暂停 0/2。两例均先获得可见原生 Paused，真实隐藏后的二次请求收到 ACK，随后 26 和 23 次原生查询均为 Playing。macOS CPU 1518/1518、Metal 254/254，Runtime 13/13。 [Windows 工件](https://github.com/sijintech/stk/actions/runs/42633409122/artifacts/13688110049) · [macOS 工件](https://github.com/sijintech/stk/actions/runs/42633409122/artifacts/13684539547) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42633409122)
+
 ## 2026-11-09 15:10 UTC · 一次点击查看已验证的历史分析
 
 `e345038f` 给成功的历史分析增加“读取并显示结果”。归档校验后只有一个可显示载荷时直接打开，多个时保留手动选择。 沿用原归档校验与 Viewer 延迟交接，绑定原项目会话、运行计划和清单摘要。收到回复时原运行页须可见，Viewer 打开后再关也会使待显示结果失效。普通读档和显式输出选择仍可用。
