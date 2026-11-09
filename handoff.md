@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · 真实 Jobs 回环与 MuFerro case 绑定
+
+本地 `1980660f` 集成 Claude41 的 C++ 桥接回归，root 重跑 71 项通过。Jobs 的独立 Linux/Xvfb 试验从预选 Hub 作用域点击原任务、离线刷新和恢复刷新。同一任务在真实 NodeAgent 停止期间完成，重连后仍在心跳窗口外，三次读取依次为运行中、可重试不可用和成功。没有提交或取消请求。
+
+本地 `ea035adf` 将实际读取的 case 和 include 字节纳入 MuFerro 图索引计划。源码和隔离 wheel 各 270 项通过、4 项条件跳过。Claude42 在独立 worktree 核验最小安装的 HDF5 可用性。`15531049` 的 Windows CPU 1460/1460，Windows 原生仍运行，推送等待该 Desktop 整轮终态。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · Jobs 观察、撤权和 Cocoa 对照
 
 本地 `9f4a9f4d` 修复 Hub 节点撤权后桥仍从旧快照读到任务的路径，原 watch 以 `unauthorized` 结束。源码 109 项、隔离 wheel 定向两项通过。 `322d4084` 集成 Jobs 选中任务的最近事实、独立实时观察及取消确认校验，Jobs 46 项和报告相关 19 项通过。

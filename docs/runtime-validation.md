@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 真实 Hub 原生任务与 MuFerro case
+
+`1980660fb92c758ffe872fdff5ce7178761bde17` 集成 Claude41 的真实单机 Hub、NodeAgent、Runtime 和 C++ 桥。根构建的 bridge 标签 71/71，零跳过。两个新用例验证窗口外精确读取、对窗口内合成且 Runtime 不存在的任务明确报错、离线可重试和同一节点重连、代理探针零连接及关闭。作者负对照让快照代替实时读取、让离线生成虚构终态以及让夹具异常退出，测试均拒绝。证据 `root-delivery-20261109-85/claude41-root.xml`。
+
+独立 `af106b9c` 加测试适配的 Linux/Xvfb 试验通过两轮，每轮约 34.69 秒。同一适配的两项原有脚本化用例通过。固定起点为英语 1100×980 OpenGL 原生窗口，Jobs 最大化，预选合成 Hub 的原节点及工作区、尚未选择任务。实际 XTest 点击任务行一次、Refresh 两次。运行中选择成立后，真实 NodeAgent 退出且原 Runtime 任务仍运行。离线刷新后详情保留运行中并显示观察不可用，列表为空。原任务在 NodeAgent 停止期间完成，同一配置重连后任务仍在 200 条合成心跳窗口之外，恢复刷新显示成功且已核验。严格桥审计三次同任务精确读取、零提交和取消，清理无遗留进程。独立适配和运行器留在 `root-delivery-20261109-85/jobs-real-f03/`，第二轮 `evidence/real-02/receipt.json` 含源码及工件摘要。范围为本机 Linux，尚缺跨主机及其他系统联合证据。
+
+`ea035adf9603deba62012e7befa36dc1a5bae167` 核对图索引实际消费的 `input.toml` 与 include，拒绝计划后字节变化和 Runtime 暖缓存中不符的已发布内容。未发布或无效 TOML 的原诊断与 DAT 回退可重现，已发布的读取失败按错误返回。对照覆盖相同时间和长度、本地其他扩展名、超过 64 个无关 TOML、缺失依赖补齐，以及已发布依赖不可用、消失和超限。源码与从独立目录加载的 wheel 各 270 项通过、4 项跳过，后者为两个可选性能例、Windows junction 和真实许可 MuFerro。隔离安装首轮少复制公开 DAT 夹具，两个旧测试找不到数据，补齐后全量重跑。证据 `root-delivery-20261109-85/case-root-source.xml` 和 `case-wheel/case-installed-final.xml`。
+
+`15531049` 的 Windows CPU 已完成，1460/1460，1179 项必需，930.24 秒。Linux 三项通过，macOS 原生失败，Windows 原生仍运行。Runtime 同头终态 8 通过、5 失败，五项作业的目录同步错误已在本地 `9c1255a6` 修复。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42601829902) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42601829951)
+
 ## 2026-11-09 UTC · 撤权观察与原生窗口
 
 `9f4a9f4d545ba84df1c1c3108cd970a0c06faad6` 在真实回环 Hub 和 Runtime 中复现节点撤权后仍能从桥读取工作区快照。修复后旧快照仍在 Hub 内部记录，桥的工作区列表、任务列表、普通及精确任务读取返回 `unauthorized`，原 watch 最终以相同错误结束，动作记录数保持一致。源码相关 109 项通过，隔离 wheel 定向两项通过。 [桥契约](specs/stk-desktop-bridge-v1.md)

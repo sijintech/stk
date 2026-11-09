@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · 桥接真实回环和图索引输入
+
+root 将 Claude41 的 `4eaf211c` 和 `5fa320ca` 集成为 `1980660f`，独立桥标签 71 项通过。真实原生 Jobs 的独立适配试验两轮通过，回执和截图留在本地证据目录。`ea035adf` 绑定 MuFerro 实际 case 字节，源码和隔离安装各 270 项通过、4 项条件跳过。Claude42 接最小安装 HDF5 证据。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 设备撤权、Jobs 和 Cocoa
 
 root 以 `9f4a9f4d` 修复桥的旧快照读取，以 `322d4084` 集成 Jobs 任务观察和取消作用域，另以 `c634dca5` 加入第二次可见暂停对照。独立 Jobs 46 项、报告 19 项和 Hub/Python 109 项通过。 [验收记录](runtime-validation.md)
