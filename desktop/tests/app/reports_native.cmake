@@ -107,6 +107,17 @@ if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW AND (APPLE OR WIN32))
           TIMEOUT 180 RESOURCE_LOCK native_window
           FAIL_REGULAR_EXPRESSION "FAIL:|Error: Not freed memory|leaked")
       endforeach()
+      set(_control reports_visible_native_pause_${_source}_metal)
+      add_test(NAME ${_control} COMMAND "${STK_BRIDGE_TEST_PYTHON}"
+        "${CMAKE_SOURCE_DIR}/tests/check_native_evidence.py"
+        --success-marker "PASS: Cocoa visible native pause diagnostic" --timeout 150 --
+        $<TARGET_FILE:stk-reports-native-window>
+        --python "${STK_BRIDGE_TEST_PYTHON}" --gpu-backend metal --source ${_source}
+        --media-fixture "${_reports_spike}/fixtures/frozen-preview.mp4" --visible-native-pause-control
+        --evidence-dir "${CMAKE_CURRENT_BINARY_DIR}/reports-visible-native-pause-${_source}")
+      set_tests_properties(${_control} PROPERTIES LABELS "project;gpu;window;document_preview"
+        TIMEOUT 180 RESOURCE_LOCK native_window
+        FAIL_REGULAR_EXPRESSION "FAIL:|Error: Not freed memory|leaked")
     endforeach()
   endif()
 endif()

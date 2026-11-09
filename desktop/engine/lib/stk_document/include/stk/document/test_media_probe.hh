@@ -6,7 +6,9 @@
 #include "stk/wm/native_window.hh"
 
 #ifdef __APPLE__
+#  include <array>
 #  include <chrono>
+#  include <optional>
 #endif
 #include <cstdint>
 #include <functional>
@@ -74,6 +76,29 @@ std::shared_ptr<const NativeCloseObservation> observe_native_close(wm::NativeWin
 /** UI-thread only: arm a fixed, one-shot pause action on this visible test navigation. */
 bool arm_isolated_pause(wm::NativeWindowHandle parent, std::string_view session_id,
                         uint64_t navigation_generation);
+struct VisiblePauseEvent {
+  std::string_view phase;
+  double elapsed_seconds = 0;
+  bool visible = false;
+  std::optional<int> playback_state; // Only a WK playback-state reply carries a native enum value.
+};
+
+struct VisiblePauseObservation {
+  uint64_t media_generation = 0, navigation_generation = 0;
+  bool verified = false, visibility_lost = false, overflow = false;
+  std::optional<bool> visible_at_close;
+  // One dispatch and ACK plus at most one query/reply per 25 ms over the 1 s watchdog.
+  std::array<VisiblePauseEvent, 84> events{};
+  std::size_t event_count = 0;
+};
+
+/** UI-thread only: run the production native pause on an exact ready and actually visible test view. */
+std::shared_ptr<const VisiblePauseObservation> begin_visible_pause_control(
+    wm::NativeWindowHandle parent, std::string_view session_id, uint64_t navigation_generation);
+/** UI-thread only: check visibility and native identity without a DOM read. */
+bool visible_pause_target(wm::NativeWindowHandle parent, std::string_view session_id,
+                          const VisiblePauseObservation &observation);
+
 /** UI-thread only: bind an input target to the unique ready session and its native navigation.
  * expected_view is compared with the real WKWebView; no native object is returned or sent over IPC.
  */

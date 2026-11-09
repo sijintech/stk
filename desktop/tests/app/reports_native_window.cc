@@ -63,7 +63,8 @@ struct Options {
   bool pre_seek_hide_control = false;
   bool quiet_hidden_hold = false;
   bool isolated_pause_control = false;
-  int reading_cycles() const { return pre_seek_hide_control ? 1 : 20; }
+  bool visible_pause_control = false;
+  int reading_cycles() const { return (pre_seek_hide_control || visible_pause_control) ? 1 : 20; }
 };
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
 using Media = document_preview::test::MediaSnapshot;
@@ -702,6 +703,70 @@ class Exercise {
       return document_preview::test::observe_native_close(window_.native_window_handle(), session);
     }
     catch (...) { return {}; }
+  }
+  void visible_pause_diagnostic(const std::string &session, const Media &playing,
+                                const std::shared_ptr<document_preview::ResourceSession> &resources)
+  {
+    const auto close = observe_native_close(session);
+    require(bool(close), "Visible pause diagnostic needs the exact native close observer");
+    const auto parent = window_.native_window_handle();
+    const auto last_dom_probe = last_media_probe_;
+    const auto started = Clock::now();
+    const auto observation = document_preview::test::begin_visible_pause_control(
+        parent, session, playing.navigation_generation);
+    require(bool(observation), "Could not request the production pause on the exact visible navigation");
+    bool stayed_visible = true;
+    const auto record = [&] {
+      Json events = Json::array();
+      for (size_t i = 0; i < observation->event_count; ++i) {
+        const auto &event = observation->events[i];
+        events.push_back({{"phase", event.phase}, {"elapsed_seconds", event.elapsed_seconds},
+            {"visible", event.visible},
+            {"raw_playback_state", event.playback_state ? Json(*event.playback_state) : Json(nullptr)}});
+      }
+      result_["visible_pause_observation"] = {{"session_sha256", core::Sha256::hex(session)},
+          {"media_generation", observation->media_generation},
+          {"navigation_generation", observation->navigation_generation},
+          {"playing", media_json(playing)}, {"events", std::move(events)},
+          {"native_non_playing_verified", observation->verified}, {"trace_overflow", observation->overflow},
+          {"visible_at_poll_checks", stayed_visible}, {"host_visibility_lost", observation->visibility_lost},
+          {"session_active_before_dom_probe", resources->active()},
+          {"dom_probe_dispatched_during_hold", last_media_probe_ != last_dom_probe},
+          {"elapsed_seconds", media_seconds(started, Clock::now())},
+          {"close_reason", close->reason.empty() ? Json(nullptr) : Json(close->reason)},
+          {"close_visible", observation->visible_at_close ? Json(*observation->visible_at_close) : Json(nullptr)},
+          {"close_media_generation", close->reason.empty() ? Json(nullptr) : Json(close->media_generation)},
+          {"close_navigation_generation", close->reason.empty() ? Json(nullptr) : Json(close->navigation_generation)},
+          {"close_elapsed_seconds", close->reason.empty() ? Json(nullptr) : Json(media_seconds(started, close->when))}};
+    };
+    try {
+      const auto until = Clock::now() + document_preview::detail::MediaPauseVerification::timeout +
+                         std::chrono::milliseconds(250);
+      // Only the production watchdog and native state callbacks run before the post-hold DOM probe.
+      wait([&] {
+        if (!resources->active()) { return true; }
+        stayed_visible = document_preview::test::visible_pause_target(parent, session, *observation);
+        return !stayed_visible || Clock::now() >= until;
+      }, "Visible pause hold without DOM observation", 3);
+    }
+    catch (...) {
+      try { record(); } catch (...) {} // Preserve the original wait failure.
+      throw;
+    }
+    record(); save();
+    require(resources->active(), "Native media session closed during the visible hold without DOM observation");
+    const auto end = observation->events.begin() + observation->event_count;
+    require(stayed_visible && std::all_of(observation->events.begin(), end,
+        [](const auto &event) { return event.visible; }), "The exact native pause target must remain visible");
+    require(last_media_probe_ == last_dom_probe, "Visible pause hold must not dispatch a DOM sample");
+    require(observation->verified && !observation->overflow,
+        "Visible pause must pass the original native verification with a complete diagnostic trace");
+    const auto after = media(session);
+    result_["visible_pause_observation"]["after"] = media_json(after);
+    result_["visible_pause_observation"]["paused_time_delta_seconds"] = after.current_time - playing.current_time;
+    save();
+    require(after.navigation_generation == playing.navigation_generation && after.paused && !after.ended && !after.seeking,
+        "The first post-hold DOM sample must show the same visible media paused");
   }
   void record_hidden_native_close(const document_preview::test::NativeCloseObservation *close,
                                   const std::string &session, Clock::time_point playing_returned) noexcept
@@ -1449,10 +1514,13 @@ raise SystemExit(main())
   require(!fs::exists(trace), "Selecting a report must not prepare/read any content");
   result["project_id"] = project.project()->id; result["report_id"] = kReport;
   result["source_sha256"] = report.at("source_sha256"); result["source_kind"] = options.source;
-  result["body_text_pixel_criterion"] = pdf ? "not applied: PDF page identities use independent page-embedded RGB stripes" :
-      "Three aligned 20-column U+2588/space rows, independently required beside the frozen PNG";
+  if (!options.visible_pause_control) {
+    result["body_text_pixel_criterion"] = pdf ? "not applied: PDF page identities use independent page-embedded RGB stripes" :
+        "Three aligned 20-column U+2588/space rows, independently required beside the frozen PNG";
+  }
   const int cycles = options.reading_cycles();
-  const size_t required_images = video ? (options.pre_seek_hide_control ? 6 : 161) : (pdf ? 160 : 140);
+  const size_t required_images = options.visible_pause_control ? 0 :
+      (video ? (options.pre_seek_hide_control ? 6 : 161) : (pdf ? 160 : 140));
   result["required_images"] = required_images;
   result["starting_layout"] = "Actual client size recorded; default a3 Reports/Python with one recorded upper-row splitter drag; Viewer stays beside report; Reports selected by one mouse click";
   auto ready = [&] {
@@ -1473,7 +1541,9 @@ raise SystemExit(main())
     result["media_fixture"] = {{"size", media_bytes.size()}, {"sha256", kMediaSha256},
         {"container", "MP4"}, {"video_codec", "H264 Baseline"}, {"audio_codec", "AAC"},
         {"duration_seconds", 6}, {"live_source_deleted_before_prepare", true}};
-    result["body_text_pixel_criterion"] = "Pinned MP4 decoded red/blue picture region in independent OS client captures; HTML contains no poster/image/script";
+    if (!options.visible_pause_control) {
+      result["body_text_pixel_criterion"] = "Pinned MP4 decoded red/blue picture region in independent OS client captures; HTML contains no poster/image/script";
+    }
     result["not_proven_here"] = "Physical hardware input, audio output, arbitrary codec support, IME, physical scanout and browser memory stability; final guarded memory remains the separate after-static spike gate";
     result["native_media_inputs"] = Json::array(); result["media_holds"] = Json::array();
     result["media_scope_revocations"] = Json::array(); result["media_transitions"] = Json::array();
@@ -1565,6 +1635,15 @@ raise SystemExit(main())
           "Initial or explicitly reprepared video must never autoplay");
       ui.held_media(cycle, "initial-no-autoplay", session, initial, 0.50);
       auto bounds = ui.widget("reports_document_viewport")->rect;
+#ifdef __APPLE__
+      if (options.visible_pause_control) {
+        const auto playing = play(cycle, "visible-pause-control-play", session, bounds);
+        ui.visible_pause_diagnostic(session, playing, resources);
+        result["completed_cycles"] = cycle;
+        ui.save();
+        return; // This diagnostic has its own success marker and evidence contract.
+      }
+#endif
       try {
         result["last_explicit_pause_observation"] = {{"cycle", cycle}, {"phase", "explicit-pause"},
             {"playing", nullptr}, {"paused", nullptr}};
@@ -1886,6 +1965,7 @@ int main(int argc, char **argv)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
 #if defined(__APPLE__) && defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES)
+    if (arg == "--visible-native-pause-control") { options.visible_pause_control = true; continue; }
     if (arg == "--pre-seek-hide-control") { options.pre_seek_hide_control = true; continue; }
     if (arg == "--quiet-pre-seek-hide-control" || arg == "--isolated-quiet-pre-seek-hide-control") {
       options.pre_seek_hide_control = true;
@@ -1903,18 +1983,25 @@ int main(int argc, char **argv)
     else { return 2; }
   }
   if (options.python.empty() || options.output.empty() ||
-      (options.pre_seek_hide_control && options.source != "video" && options.source != "html-video") ||
+      (options.visible_pause_control && options.pre_seek_hide_control) ||
+      ((options.visible_pause_control || options.pre_seek_hide_control) &&
+          options.source != "video" && options.source != "html-video") ||
       (options.source != "markdown" && options.source != "html" && options.source != "pdf"
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
        && options.source != "video" && options.source != "html-video"
 #endif
       )) {
-    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control]\n"); return 2;
+    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control|--visible-native-pause-control]\n"); return 2;
   }
   Json result = {{"format", "stk.reports-native-evidence/1"}, {"status", "running"}, {"required_cycles", options.reading_cycles()},
       {"completed_cycles", 0}, {"images", Json::array()}, {"native_scroll_requests", Json::array()},
       {"claim", "Production ReportsEditor app actions, frozen bridge resources and OS-composited STK client pixels; opt-in media also records bounded local native child input and fixed read-only media observations"},
       {"not_proven_here", "OS hardware input, IME, arbitrary PDF fidelity/search/selection, modal same-OS-batch ordering, physical scanout and browser memory stability; URL410/parent-close are separate Host CPU and spike native tests; final guarded memory is the separate after-static spike gate"}};
+  if (options.visible_pause_control) {
+    result["scenario"] = "visible-native-pause-control";
+    result["claim"] = "Cocoa baseline for the first native pause after initial playback in a visible frozen report";
+    result["production_ui_acceptance"] = false;
+  }
   if (options.pre_seek_hide_control) {
     result["scenario"] = options.isolated_pause_control ? "isolated-quiet-pre-seek-hide-control" :
         (options.quiet_hidden_hold ? "quiet-pre-seek-hide-control" : "pre-seek-hide-control");
@@ -1937,6 +2024,11 @@ int main(int argc, char **argv)
     // Engine static destructors and the final guarded leak gate belong to the separate spike.
     result["status"] = "passed";
     write(directory / "result.json", result.dump(2));
+    if (options.visible_pause_control) {
+      std::fprintf(stdout, "PASS: Cocoa visible native pause diagnostic; cycles=%d; %s\n",
+          options.reading_cycles(), core::path_to_utf8(directory).c_str());
+      return 0;
+    }
     const char *scenario = "native evidence";
     if (options.pre_seek_hide_control) {
       scenario = options.isolated_pause_control ? "isolated quiet pre-seek hide control" :

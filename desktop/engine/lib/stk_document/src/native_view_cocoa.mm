@@ -40,6 +40,7 @@ struct State {
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
   test::NativePauseSnapshot test_last_pause;
   std::shared_ptr<test::NativeCloseObservation> test_close_observation;
+  std::weak_ptr<test::VisiblePauseObservation> test_visible_pause;
   uint64_t test_isolated_pause_navigation = 0;
 #endif
 };
@@ -123,6 +124,15 @@ static constexpr char kPauseWatchdogFailure[] = "Could not verify paused documen
 static constexpr char kPauseReplyFailure[] = "Could not pause document media playback";
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
 static constexpr char kIsolatedPauseFailure[] = "The isolated test pause did not pause its media element";
+
+static bool visible_for_pause_control(const std::shared_ptr<State> &state)
+{
+  NSWindow *parent = state->parent;
+  WKWebView *view = state->view;
+  return parent && view && view.superview == parent.contentView && view.window == parent &&
+         !view.isHiddenOrHasHiddenAncestor && !NSIsEmptyRect(view.visibleRect) &&
+         parent.isVisible && !parent.isMiniaturized;
+}
 #endif
 
 struct PauseRequest {
@@ -133,6 +143,20 @@ struct PauseRequest {
   bool query_inflight = false;
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
   detail::MediaPauseVerification::Clock::time_point started;
+  std::shared_ptr<test::VisiblePauseObservation> visible_control;
+
+  void observe(std::string_view phase, const std::shared_ptr<State> &current,
+               detail::MediaPauseVerification::Clock::time_point now, std::optional<int> playback = {})
+  {
+    if (!visible_control) { return; }
+    auto &trace = *visible_control;
+    if (trace.event_count == trace.events.size()) {
+      trace.overflow = true;
+      return;
+    }
+    trace.events[trace.event_count++] = {phase, std::chrono::duration<double>(now - started).count(),
+                                        visible_for_pause_control(current), playback};
+  }
 #endif
 
   PauseRequest(const std::shared_ptr<State> &source, uint64_t generation,
@@ -178,6 +202,7 @@ static void verify_pause(std::shared_ptr<PauseRequest> request)
   if (++pause.query_count == 1) {
     pause.first_query_seconds = std::chrono::duration<double>(now - request->started).count();
   }
+  request->observe("query", current, now);
 #endif
   [current->view requestMediaPlaybackStateWithCompletionHandler:^(WKMediaPlaybackState playback) {
     request->query_inflight = false;
@@ -196,6 +221,8 @@ static void verify_pause(std::shared_ptr<PauseRequest> request)
       pause.playing_reply_count += playing;
       pause.last_reply_seconds = std::chrono::duration<double>(replied - request->started).count();
       pause.verified = result == Check::Result::Paused;
+      request->observe("reply", completed, replied, int(playback));
+      if (request->visible_control) { request->visible_control->verified = pause.verified; }
     }
 #endif
     if (result == Check::Result::Failed) {
@@ -208,6 +235,9 @@ static void sync_visibility(const std::shared_ptr<State> &state)
 {
   const bool show = live(state) && state->visible && state->has_bounds;
   if (!show) {
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+    if (const auto trace = state->test_visible_pause.lock()) { trace->visibility_lost = true; }
+#endif
     ++state->focus_generation;
     if (!relinquish_focus(state)) {
       shutdown(state, NativeViewStatus::Failed, "Could not relinquish document keyboard focus.");
@@ -644,6 +674,11 @@ static void shutdown(const std::shared_ptr<State> &state, NativeViewStatus statu
     return;
   }
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+  if (const auto trace = state->test_visible_pause.lock();
+      trace && trace->media_generation == state->media_generation &&
+      trace->navigation_generation == state->result.navigation_generation) {
+    trace->visible_at_close = visible_for_pause_control(state);
+  }
   if (state->test_close_observation) {
     const std::string_view failure = message;
     const char *reason = "other";
@@ -746,9 +781,14 @@ class CocoaDocumentView final : public NativeDocumentView {
     }
   }
 
-  bool pause_media(std::string &error) override
+  bool pause_media(std::string &error) override { return request_pause(state_, error); }
+
+  static bool request_pause(std::shared_ptr<cocoa::State> state, std::string &error
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+      , std::shared_ptr<test::VisiblePauseObservation> visible_control = {}
+#endif
+  )
   {
-    const auto state = state_;
     error.clear();
     if (![NSThread isMainThread] || !cocoa::live(state) || !state->view) {
       error = "The native document view is closed or unavailable";
@@ -765,6 +805,12 @@ class CocoaDocumentView final : public NativeDocumentView {
       return false;
     }
     state->test_last_pause = {true, generation, navigation, false, false, !state->view.hidden};
+    if (visible_control) {
+      visible_control->media_generation = generation;
+      visible_control->navigation_generation = navigation;
+      state->test_visible_pause = visible_control;
+      request->visible_control = std::move(visible_control);
+    }
 #endif
     cocoa::verify_pause(request);
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
@@ -803,6 +849,9 @@ class CocoaDocumentView final : public NativeDocumentView {
     // Public macOS 12+ API; project JavaScript remains disabled. Pausing never resumes media.
     // Completion acknowledges the pause command; independently verify the resulting
     // state within the original deadline rather than treating the first sample as final.
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+    request->observe("dispatch", state, detail::MediaPauseVerification::Clock::now());
+#endif
     [state->view pauseAllMediaPlaybackWithCompletionHandler:^{
       request->acknowledged = true;
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
@@ -814,6 +863,7 @@ class CocoaDocumentView final : public NativeDocumentView {
         if (pause.available && pause.media_generation == generation &&
             pause.navigation_generation == navigation) {
           pause.acknowledged = true;
+          request->observe("ack", completed, detail::MediaPauseVerification::Clock::now());
         }
       }
 #endif
@@ -1035,6 +1085,31 @@ bool arm_isolated_pause(wm::NativeWindowHandle parent, std::string_view session_
   }
   state->test_isolated_pause_navigation = navigation_generation;
   return true;
+}
+
+std::shared_ptr<const VisiblePauseObservation> begin_visible_pause_control(
+    wm::NativeWindowHandle parent, std::string_view session_id, uint64_t navigation_generation)
+{
+  std::string error;
+  const auto state = find_view(parent, session_id, error);
+  if (!state || state->result.status != NativeViewStatus::Ready || !navigation_generation ||
+      state->result.navigation_generation != navigation_generation || state->test_isolated_pause_navigation ||
+      !cocoa::visible_for_pause_control(state)) {
+    return {};
+  }
+  auto observation = std::make_shared<VisiblePauseObservation>();
+  return CocoaDocumentView::request_pause(state, error, observation) ? observation : nullptr;
+}
+
+bool visible_pause_target(wm::NativeWindowHandle parent, std::string_view session_id,
+                          const VisiblePauseObservation &observation)
+{
+  std::string error;
+  const auto state = find_view(parent, session_id, error);
+  return !observation.visibility_lost && state && state->result.status == NativeViewStatus::Ready &&
+         state->test_visible_pause.lock().get() == &observation &&
+         state->result.navigation_generation == observation.navigation_generation &&
+         state->media_generation == observation.media_generation && cocoa::visible_for_pause_control(state);
 }
 
 bool matches_native_view(wm::NativeWindowHandle parent, std::string_view session_id,
