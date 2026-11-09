@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-09 14:12 UTC · 上一轮 Desktop 终态与冻结 HDF5 分析
+
+MuFerro 收集记录已在合成 Runtime 实际生成后进入冻结分析。GraphWorker 从快照读取所选步骤和分量，错误容器摘要被拒绝。下一项是验证原生加载该分析载荷。真实许可主机、科学参数和 HDF5-only 完成仍待验证。
+
+上一轮 Desktop 的 Windows 原生通过 20 轮 PDF 重准备，macOS 视频与 HTML 视频仍失败。新头继续在目标平台核对新增暂停顺序。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 14:06 UTC · 显式 HDF5 读取和 macOS 诊断
 
 收集记录的 SHA-256 现在可绑定显式 HDF5 图源。冻结分析已有合成载荷证据，下一项是用实际收集记录验证图求值。HDF5 的图参数仍为显式选择器，Viewer 时间轴、真实许可和 HDF5-only 完成待分别验证。macOS 下一轮新增可见原生确认后走正常隐藏的对照，保留主验收和既有对照。 [验收记录](runtime-validation.md)

@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 14:12 UTC · 上一轮 Desktop 终态与冻结 HDF5 分析
+
+远端 `249698d0` 的 Desktop 于 14:12:41Z 结束。三个 Linux 作业通过，Windows CPU 1460/1460、原生 6/6，macOS 原生 4/6。Runtime 13/13。 本批在前一轮整轮终态入档后交付，当前主线头和后续 CI 以实际 Git 为准。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42621953590) [验收记录](docs/runtime-validation.md)
+
+`9f2bcfd3` 集成 Claude51 的收集记录回归。合成 Runtime 的 `run.h5` 按登记 SHA-256 冻结，移开原文件后，严格 Bridge 的 GraphWorker 仍从快照读取显式第 4 步。错误摘要失败，Runtime 任务总数为一。真实许可软件、原生 HDF5 查看及 HDF5-only 完成待各自验证。
+
 ## 2026-11-09 14:06 UTC · HDF5 摘要约束与 Cocoa 暂停顺序
 
 `395e78fd` 给显式 HDF5 图源增加可选 `expected_sha256`，对收集文件的改写在缓存查找前拒绝。源码 260 过、2 跳过，隔离 wheel 25/25。`2eb64f04` Python 3.11 全量 6442 过、2 败，节点参考页和旧 View 断言两项遗漏已修，含修正的新全量已启动。`40608ca1` 集成 Claude50 的 HDF5 查看核查。Claude51 在独立 worktree 验证实际收集文件记录进入冻结分析并由 GraphWorker 读取。

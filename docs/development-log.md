@@ -1,5 +1,11 @@
 # 开发交接记录
 
+## 2026-11-09 14:12 UTC · 上一轮 Desktop 终态与冻结 HDF5 分析
+
+root 以 `9f2bcfd3` 集成 Claude51 的 `047f20b3`，将合成求解器步数与 HDF5 夹具对齐，并在两次分析期间移开原收集文件来验证冻结读取。根工作树收集回归 7/7。 [验收记录](runtime-validation.md)
+
+远端 `249698d0` 的 Desktop 于 14:12:41Z 结束。三个 Linux 作业通过，Windows CPU 1460/1460、原生 6/6，macOS 原生 4/6。Runtime 13/13。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42621953590)
+
 ## 2026-11-09 14:06 UTC · HDF5 实际摘要、图目录复验与隐藏对照
 
 root 提交 `395e78fd`，复验 HDF5 摘要和 Python 全量发现的两处目录遗漏。`40608ca1` 集成 Claude50 的 `5f954d84`。Claude51 接手实际收集记录的冻结分析回归。`090fe8f2` 集成独立 Cocoa 诊断，Windows 原生仍是前一轮 Desktop 唯一未完成作业。 [验收记录](runtime-validation.md)

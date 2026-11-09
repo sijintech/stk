@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 14:12 UTC · 上一轮 Desktop 终态与冻结 HDF5 分析
+
+远端 `249698d0` 的 Desktop 于 14:12:41Z 结束。三个 Linux 作业通过，Windows CPU 1460/1460、原生 6/6，macOS 原生 4/6。Runtime 13/13。 Linux 主作业 2134/2134，Windows CPU 的 1179 项必测全部运行。Windows 原生 6/6、零跳过、1333.70 秒，PDF 20 轮取得 160 张截图，20 次重准备均记录，未观察到遗留会话。捕获启动最长 96 毫秒，低于 1 秒诊断阈值，此次尚未定位此前的间歇性长停顿。macOS CPU 1518/1518、Metal 254/254，两个原生失败为视频和 HTML 视频。首轮和第二轮可见暂停对照各 2/2，六条隐藏对照在隐藏后取得回执，随后原生状态仍为 Playing。工件核验见本机 `root-delivery-20261109-88/ci249/{windows,macos}/receipt.json`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42621953590) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42621953348) [Windows 工件](https://github.com/sijintech/stk/actions/runs/42621953590/artifacts/13681666456) [macOS 工件](https://github.com/sijintech/stk/actions/runs/42621953590/artifacts/13680007342)
+
+`9f2bcfd3` 集成 Claude51 的 `047f20b3`。真实本机 Runtime 用合成求解器收集 `run.h5`，工作区记录、冻结清单和分析绑定使用同一 SHA-256。移开原路径后，实际 GraphWorker 解码 `/t00000004/Polar` 的 x 分量，核对 4×3×2 网格、float32、坐标顺序和范围 100–169。错误预期摘要得到 `graph_error`，无输出载荷，文件记录与 Runtime 任务数保持一致。作者联跑 127 过、2 条件跳过，root 最终收集回归 7/7。证据 `root-delivery-20261109-93/claude51-root-final.xml` 和 `root-delivery-20261109-92/claude51/evidence/`。
+
 ## 2026-11-09 14:06 UTC · 已收集 HDF5 摘要与 Cocoa 暂停顺序
 
 `395e78fd8f8895aac9b43e7ff849da4865cac624` 让 `stk.source.mupro_hdf5@1` 接受可选的预期容器 SHA-256。规划在缓存查找前核对实际字节，匹配时复用同一内容键。合成测试在相同大小及 mtime 改写后拒绝旧摘要，省略约束的旧调用能读到当前值。独立真实本机 Runtime 收集对照在 View 核验后替换一个体素，旧图读到替换值，加入收集摘要后在冷缓存与已有替换文件缓存两种情况下均拒绝，恢复原字节可读，任务数和项目修订一致。源码 260 过、2 条件跳过，隔离 wheel 25/25。证据 `root-delivery-20261109-92/hdf5-pin-{red,source-final}.xml`、`hdf5-pin-wheel/installed.xml` 与 `root-delivery-20261109-91/hdf5-binding-pinned-independent/`。 [HDF5 契约](specs/mupro-hdf5-1.md)
