@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · Mac 定位前隐藏对照的提交验证
+
+- `0f341a07` 增加 `reports_pre_seek_hide_video_metal` 和 `reports_pre_seek_hide_html-video_metal`。两项从同一默认 a3 Reports/Python 和 Viewer 布局启动，使用冻结 MP4、新资源会话和真实原生 Play。首次隐藏时沿用原有 0.05 秒下限、0.10 秒保持变化上限、0.75 秒保持与重显检查。每项要求一轮、六张图、两次准备及两处撤销。实际点击、时序和终态由目标 Mac 记录。
+- 原 Mac 六项验收及 Windows 任务定义保留。新增对照在独立 Mac CI 步骤执行，保存原 `LastTest.log`，对照有独立 JUnit 和证据目录。Linux `stk-reports-native-window` 重建，文档资源、暂停探针、宿主等 42 项通过，零跳过。关闭探针宏语法通过，Linux 的对照测试注册数为 0。目标 Mac 尚待运行。
+- 前 [Desktop 42542944337](https://github.com/sijintech/stk/actions/runs/42542944337) 的整轮终态已记录。`757383af` 的路径过滤未触发 Desktop，[Runtime 42548838606](https://github.com/sijintech/stk/actions/runs/42548838606) 于 02:21:06Z 成功，同头文档发布与 Secret scan 也成功。未引入产品界面改动。
+
 ## 2026-11-09 UTC · 56 的整轮终态和 CP-0 证据
 
 [Desktop 42542944337](https://github.com/sijintech/stk/actions/runs/42542944337) 绑定 `56b432d0`，attempt 1 于 02:00:59Z 完成，整轮 failure。任务时间为 UTC。

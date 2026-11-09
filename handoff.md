@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · Mac 定位前隐藏对照
+
+root 提交 `0f341a07`，为 video 和 HTML-video 各增加一个 Mac 单轮对照。相同固定布局、媒体和隐藏/保持判据，控制会话没有定位动作。原 Mac 和 Windows 20 轮独立运行。Linux 驱动已重建，42 项 CPU 检查通过，关闭探针宏的语法检查通过。Claude 在 `claude/native-preseek-review-22` 独立复核，工作树干净。
+
+前 [Desktop 42542944337](https://github.com/sijintech/stk/actions/runs/42542944337) 终态已登记。`757383af` 未触发 Desktop，同头 [Runtime 42548838606](https://github.com/sijintech/stk/actions/runs/42548838606) 于 02:21:06Z 成功。新 Mac 实测待推送后的 Desktop。证据与实际头见 `root-delivery-20261109-47/closure.json`。
+
 ## 2026-11-09 UTC · CP-0 新回归和 56 的 Desktop 终态
 
 `a4a07a41` 集成 Claude 的两条热日志恢复回归，`bd49fd40` 集成文件索引授权与撤权回归。最新源码和隔离安装核心套件各 111 项通过。Claude 独立分支保留两份作者提交。Synthrix 只读观察原型已用真实合成 Runtime 任务验证，产品路由与授权待设计，R2/R3 待决定。
