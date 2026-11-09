@@ -626,6 +626,31 @@ class Exercise {
     }
     catch (...) { hidden_media_.reset(); }
   }
+#ifdef __APPLE__
+  std::shared_ptr<const document_preview::test::NativeCloseObservation> observe_native_close(
+      const std::string &session) noexcept
+  {
+    try {
+      return document_preview::test::observe_native_close(window_.native_window_handle(), session);
+    }
+    catch (...) { return {}; }
+  }
+  void record_hidden_native_close(const document_preview::test::NativeCloseObservation *close,
+                                  const std::string &session, Clock::time_point playing_returned) noexcept
+  {
+    try {
+      const bool recorded = close && !close->reason.empty();
+      result_["hidden_media_native_close"] = {
+          {"session_sha256", core::Sha256::hex(session)}, {"observer_attached", close != nullptr},
+          {"shutdown", recorded ? Json{{"reason", std::string(close->reason)},
+              {"elapsed_seconds", media_seconds(playing_returned, close->when)},
+              {"media_generation", close->media_generation},
+              {"navigation_generation", close->navigation_generation},
+              {"native_pause", native_pause_json(close->pause)}} : Json(nullptr)}};
+    }
+    catch (...) {} // Preserve the original test failure.
+  }
+#endif
   void hidden_media_checkpoint(const char *stage) noexcept
   {
     if (!hidden_media_) return;
@@ -1523,6 +1548,9 @@ raise SystemExit(main())
       const auto playing_returned = Clock::now();
       require(!playing.paused && playing.current_time < 2.5, "Hide must interrupt a playing early clip");
       ui.begin_hidden_media(cycle, session, playing, playing_returned);
+#ifdef __APPLE__
+      const auto close = ui.observe_native_close(session);
+#endif
       auto hidden = [&] {
         try {
           ui.hidden_media_checkpoint("tab-begin");
@@ -1535,11 +1563,18 @@ raise SystemExit(main())
           require(hidden.current_time < 2.9 && hidden.current_time >= playing.current_time - 0.05 && !hidden.ended,
               "Hidden pause must precede the color transition and natural ending");
           hidden = ui.held_media(cycle, "hidden-tab-pause", session, hidden, 0.75);
-          ui.finish_hidden_media(true); return hidden;
+          ui.finish_hidden_media(true);
+          ui.media_capture(cycle, "hidden-video-tab", 0, rectangle, hidden, session);
+          return hidden;
         }
-        catch (...) { ui.finish_hidden_media(false); throw; }
+        catch (...) {
+          ui.finish_hidden_media(false);
+#ifdef __APPLE__
+          ui.record_hidden_native_close(close.get(), session, playing_returned);
+#endif
+          throw;
+        }
       }();
-      ui.media_capture(cycle, "hidden-video-tab", 0, rectangle, hidden, session);
       require(area->tab(1).save_workspace_state() == draft_state, "Video hide preserves the Python draft");
       ui.tab(*area, 0); ui.wait(ready, "Paused video report shown again");
       auto reshown = ui.held_media(cycle, "reshown-no-autoresume", session, hidden, 0.50);

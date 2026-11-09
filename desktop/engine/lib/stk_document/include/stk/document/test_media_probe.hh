@@ -5,6 +5,9 @@
 
 #include "stk/wm/native_window.hh"
 
+#ifdef __APPLE__
+#  include <chrono>
+#endif
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -53,6 +56,16 @@ bool probe_media(wm::NativeWindowHandle parent, std::string_view session_id,
 std::shared_ptr<ResourceSession> resource_session(wm::NativeWindowHandle parent,
                                                  std::string_view session_id, std::string &error);
 #ifdef __APPLE__
+struct NativeCloseObservation {
+  std::string_view reason; // Empty until the exact observed view enters shutdown.
+  std::chrono::steady_clock::time_point when;
+  uint64_t media_generation = 0, navigation_generation = 0;
+  NativePauseSnapshot pause;
+};
+
+/** UI-thread only. The observation survives view destruction without owning the view or its resources. */
+std::shared_ptr<const NativeCloseObservation> observe_native_close(wm::NativeWindowHandle parent,
+                                                                 std::string_view session_id);
 /** UI-thread only: bind an input target to the unique ready session and its native navigation.
  * expected_view is compared with the real WKWebView; no native object is returned or sent over IPC.
  */

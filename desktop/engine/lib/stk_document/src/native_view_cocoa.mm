@@ -36,6 +36,7 @@ struct State {
   bool has_bounds = false;
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
   test::NativePauseSnapshot test_last_pause;
+  std::shared_ptr<test::NativeCloseObservation> test_close_observation;
 #endif
 };
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
@@ -114,6 +115,8 @@ static bool relinquish_focus(const std::shared_ptr<State> &state)
 }
 
 static void shutdown(const std::shared_ptr<State> &state, NativeViewStatus status, const char *message);
+static constexpr char kPauseWatchdogFailure[] = "Could not verify paused document media playback";
+static constexpr char kPauseReplyFailure[] = "Could not pause document media playback";
 
 struct PauseRequest {
   std::weak_ptr<State> state;
@@ -141,7 +144,7 @@ static void verify_pause(std::shared_ptr<PauseRequest> request)
   const auto pending = request->verification.expire(
       current->media_generation, current->result.navigation_generation, Check::Clock::now());
   if (pending == Check::Result::Failed) {
-    shutdown(current, NativeViewStatus::Failed, "Could not verify paused document media playback");
+    shutdown(current, NativeViewStatus::Failed, kPauseWatchdogFailure);
     return;
   }
   if (pending != Check::Result::Waiting) {
@@ -177,7 +180,7 @@ static void verify_pause(std::shared_ptr<PauseRequest> request)
     }
 #endif
     if (result == Check::Result::Failed) {
-      shutdown(completed, NativeViewStatus::Failed, "Could not pause document media playback");
+      shutdown(completed, NativeViewStatus::Failed, kPauseReplyFailure);
     }
   }];
 }
@@ -621,6 +624,20 @@ static void shutdown(const std::shared_ptr<State> &state, NativeViewStatus statu
   if (state->closed) {
     return;
   }
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+  if (state->test_close_observation) {
+    const std::string_view failure = message;
+    const char *reason = "other";
+    if (failure == kPauseWatchdogFailure) {
+      reason = "pause_watchdog";
+    }
+    else if (failure == kPauseReplyFailure) {
+      reason = "pause_reply_after_deadline";
+    }
+    *state->test_close_observation = {reason, detail::MediaPauseVerification::Clock::now(),
+        state->media_generation, state->result.navigation_generation, test_pause_snapshot(state)};
+  }
+#endif
   state->closed = true;
   state->focus_exit = {};
   ++state->focus_generation;
@@ -931,6 +948,20 @@ std::shared_ptr<ResourceSession> resource_session(wm::NativeWindowHandle parent,
   return state ? state->resources : nullptr;
 }
 
+std::shared_ptr<const NativeCloseObservation> observe_native_close(wm::NativeWindowHandle parent,
+                                                                 std::string_view session_id)
+{
+  std::string error;
+  const auto state = find_view(parent, session_id, error);
+  if (!state || !state->view || state->result.status != NativeViewStatus::Ready) {
+    return {};
+  }
+  if (!state->test_close_observation) {
+    state->test_close_observation = std::make_shared<NativeCloseObservation>();
+  }
+  return state->test_close_observation;
+}
+
 bool matches_native_view(wm::NativeWindowHandle parent, std::string_view session_id,
                          const void *expected_view, uint64_t navigation_generation)
 {
@@ -968,10 +999,10 @@ bool probe_media(wm::NativeWindowHandle parent, std::string_view session_id,
       // never include resource URLs, DOM values or project content in diagnostics.
       const char *reason = "other";
       if (!current) { reason = "state_released"; }
-      else if (current->result.message == "Could not pause document media playback") {
+      else if (current->result.message == cocoa::kPauseReplyFailure) {
         reason = "pause_failed";
       }
-      else if (current->result.message == "Could not verify paused document media playback") {
+      else if (current->result.message == cocoa::kPauseWatchdogFailure) {
         reason = "pause_verification_timeout";
       }
       else if (current->result.message == "The WebKit content process exited; reopen the document explicitly.") {
