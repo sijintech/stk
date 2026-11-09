@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · F14 真实 peer 协议验证
+
+本地 `1e7bebf2` 补齐共享回执字节越限在原生 WebRTC 协议上的错误及历史回执观察。已安装 Linux helper 和同头 wheel 运行通过，F14 仍属单机同库的现有契约。跨部署归属与云端写入按原门推进。
+
+Linux Desktop 和 Windows CPU 已通过，Mac 及 Windows 原生验收仍在运行。
+
 ## 2026-11-09 UTC · 可重定位包和 CP-0 共享配额
 
 Ubuntu 24.04 CI 包在 26.04 上用独立目录实测中文文献引用页、撤权和 Viewer 保留。固定布局各段点击为 8 和 5，证据补齐发布包入口。Mac/Windows 文献实窗仍待验证。

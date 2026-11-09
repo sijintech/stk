@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · F14 原生 peer 线路验证
+
+root 本地 `1e7bebf2` 增加同一 SQLite 项目经严格 Bridge 和已认证原生 WebRTC peer 的回执字节越限验收。实装 helper 四文件联跑 182 项通过、零跳过，同场景在 `49837655` wheel 安装态通过。旧回执可精确重放，失败 ID 查无回执。证据见 `root-delivery-20261109-55/closure.json`。Claude25 在独立分支整理 CP-0 证据矩阵，候选待交付。
+
+远端 `49837655` Runtime 13 项、Linux Desktop 三项和 Windows CPU 成功。Windows 原生与 Mac 原组运行中，整轮终态后推送本地候选。
+
 ## 2026-11-09 UTC · 发布包文献实窗与回执配额
 
 root 在 Ubuntu 26.04 用远端 `49837655` CI 产出的 24.04 可重定位包、同头 wheel 和独立桥目录，复跑中文文献引用页。8 次点击显示、5 次撤权，网格 Viewer 像素一致。包与内层压缩包均验 SHA256，字体、语言资源来自已解包前缀，桥来自 wheel。证据见 `root-delivery-20261109-54/closure.json`。目标 Mac/Windows 文献页待验。

@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · F14 同库的原生 peer 线路与 wheel
+
+本地 `1e7bebf2` 使用显式已安装的 Linux WebRTC helper。两个 PeerEndpoint 实际双向认证并以同机 UDP 交换协议消息。本地严格 Bridge 与远端 peer 入口指向同一合成项目，各先提交一个原操作。将项目回执字节额度缩为当前总量加 1，随后两个入口的新写入都得到 `invalid_params`，项目快照与历史一致。失败 ID 的查询均为 `not_found`，各自原 ID 的读取和精确重放返回同一回执。
+
+四个相关测试文件共 182 项通过，零跳过。以远端 `49837655` 同头 wheel 安装的 Bridge、PeerEndpoint 与编辑回执模块复跑新增用例，1 项通过。隔离导出把 peer 的 `ProjectError` 错映射为 `conflict`，新增用例在远端错误码断言失败。证据在 `root-delivery-20261109-55/closure.json`。范围为单 Linux 主机和缩小后的预算，未写满生产额度，未覆盖跨站或云端部署。
+
+截至 04:26Z，`49837655` 的 [Desktop 42558025291](https://github.com/sijintech/stk/actions/runs/42558025291) 整轮仍在运行。Ubuntu 26.04 GL/Vulkan CTest 2,118 项通过，Ubuntu 24.04 包和新环境安装冒烟成功，Windows CPU 1,460 项通过，macOS 和 Windows 原生在跑。同头 Runtime 13 项通过。
+
 ## 2026-11-09 UTC · 已安装中文文献实窗及共享回执配额
 
 桌面二进制取自 `4983765575ec708ceb52e195afe87ea3f6211396` 的 Ubuntu 24.04 CI 包，按 GitHub ZIP 摘要和压缩包自身 SHA256 校验后解到独立前缀。实际宿主为 Ubuntu 26.04.1，Xvfb X11、Mesa llvmpipe OpenGL。Python 桥由同头离线构建的 wheel 安装，观察器校验收到的显式 `state` 和 `cache`，并确认从独立安装目录导入。进程从无源码的工作目录启动，字体和语言文件来自发布包前缀。[CI 包 13647928060](https://github.com/sijintech/stk/actions/runs/42558025291/artifacts/13647928060)
