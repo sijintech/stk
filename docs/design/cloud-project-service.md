@@ -442,6 +442,8 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 
 **1i. F3/F11d 的真实线路。** `7017fb93` 让严格本机桥与已认证 UDP WebRTC 同时到达同一 SQLite 项目的写入口，然后释放预持有的写锁。恰有一次编辑、一份回执和一次修订推进。败方收到 `conflict`，其 ID 查不到回执。两入口后续用新 UUID 和旧修订首次写入也得到 `conflict`，项目内容、历史及回执字节一致。Linux 源码联跑 185 项全过，隔离 wheel 定向通过。分别移除 CAS 和改错 peer 冲突码的两个反例均失败。证据见 `root-delivery-20261109-63`。
 
+**1j. F15 的真实线路。** root 以 `718f3cdf` 集成 Claude29 的最终测试 `ba7a63a4`。严格本机桥和已认证 UDP WebRTC 读取同一合成格式 14 项目的目录与非空表页。两入口的回执写入及查询均返回 `unsupported`。随后复读一致，格式、schema、修订、项目状态和历史保持，回执表仍不存在。Linux 源码联跑 186 项全过，隔离 wheel 定向通过。作者的错误映射和隐式升级两个反例在预期断言处失败。证据见 `root-delivery-20261109-65/claude29` 与 `root-delivery-20261109-66`。
+
 **2. root 外部探针（仓库外，未提交）。** 证据记录在 `root-delivery-20261109-43/closure.json` 的 `cp0` 节：
 - 两个脚本：`cp0-parity-probe.py`（sha256 `23de877c…`）和 `cp0-hot-journal-probe.py`（sha256 `1d951c7c…`）；
 - 用合成项目，在 source 和同一份 Python 源码的中性隔离安装中运行；
@@ -463,7 +465,7 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 这些探针仍是有效的历史观察。F23 与 F5b/F5c 现在另有 1c 中的已提交测试，探针不再是这几行的唯一证据。
 
 **3. 仍待验证。**
-- **活 peer：** F3/F11d、F12、F14 和 F23 见 1d、1f、1h、1i。其余缺少真实通道证据的场景仍待 `PeerEndpoint` 与原生 helper 验收。
+- **活 peer：** F3/F11d、F12、F14、F15 和 F23 见 1d、1f、1h–1j。其余缺少真实通道证据的场景仍待 `PeerEndpoint` 与原生 helper 验收。
 - **平台：** Windows、macOS 上这些行的复验。
 - **F14 配额监控：** 实际上限及拒绝路径见 1e、1f，监控仍待验证。
 - **F5c：** 保留现行恢复行为还是改为拒绝，仍由 root 决定。

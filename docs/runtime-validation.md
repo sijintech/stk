@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · Cocoa 静默对照与 F15 实线
+
+`207beb8a503932a023873ed1b61cb9c68d09642d` 增加两个 macOS 定位前隐藏对照。相同固定素材经真实 Play 和切页，切页后等原生时限加 250 ms，期间只泵窗口事件、观察资源会话。若关闭则记录同会话原生关闭原因，隐藏阶段 DOM 样本为零。若仍存活，只取一次隐藏 DOM 样本，验证采样派发前同一导航恰有一次新暂停、已 ACK 且已核验。隐藏截图保留 OS 像素检查，随后保留重显、草稿及资源撤销。两项原采样对照继续以原名称运行。
+
+Linux 编译公共报告测试目标，探针与 AX CPU 共 8 项通过、零跳过。临时 CMake 生成四项 macOS 注册，核对了各自的参数、成功标志、精确 CI 名称和分开的 JUnit 与产物目录。静默组实际 Cocoa 行为待 macOS 运行。证据见本机 `root-delivery-20261109-66`。
+
+`718f3cdfe39d635a7adbd0873d0d1bea33e699fb` 集成 Claude 的 `ba7a63a4`。严格桥与已认证 UDP WebRTC 读取同一合成格式 14 项目的非空表，两项回执操作均获 `unsupported`，复读与 SQLite schema 未变。Linux 源码 186 项全过，隔离 `bb4cea9d` wheel 定向通过。 [CP-0 矩阵](design/cloud-project-service.md)
+
+远端 `bb4cea9d` 的 Docs 与 Secret scan 已通过，Desktop 和 Runtime 在本次核对时仍运行。 [Desktop](https://github.com/sijintech/stk/actions/runs/42576437438) [Runtime](https://github.com/sijintech/stk/actions/runs/42576437407)
+
 ## 2026-11-09 UTC · a8872719 Desktop 终态
 
 精确 `a88727199d25a5651789d79e2e6650547145e5ee` 的 Desktop 于 06:57:24Z 完成，结论为失败。Linux 三项、Windows CPU 和 Windows 原生成功。Windows 原生通过固定发布地址直连获取 Mesa 26.2.4，大小和 SHA-256 校验通过。WebView2 和生产 ReportsEditor 六项全部执行并通过，精确必跑检查通过。macOS CPU 1516/1516、Metal 254/254，原生 4/6，定位前隐藏对照 0/2。 [Desktop](https://github.com/sijintech/stk/actions/runs/42570072786) [Windows 原生证据](https://github.com/sijintech/stk/actions/runs/42570072786/artifacts/13655576418) [macOS 原生证据](https://github.com/sijintech/stk/actions/runs/42570072786/artifacts/13654776484)

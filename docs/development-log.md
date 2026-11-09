@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · 静默隐藏对照和格式 14 真实线路
+
+root 以 `207beb8a` 接入独立 Cocoa 对照，分别对独立视频和 HTML 视频保存同会话的静默窗口、暂停代次、ACK、验证结果和关闭。原有采样和生产报告验收仍各自执行。root 以 `718f3cdf` 集成 Claude29 `ba7a63a4`，两个真实入口均读取格式 14 并按发布契约拒绝回执操作。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · a8872719 Desktop 终态
 
 Windows WebView2 原生六项和证据门全过，Linux 三项与 Windows CPU 成功。macOS 的媒体两项及定位前隐藏对照失败，整轮于 06:57:24Z 终态。Claude28B 的宿主去重已在本地主线验证，Claude29 从 `8e3b5f8e` 在独立 worktree 接手 F15 的真实 WebRTC 验收。 [验收记录](runtime-validation.md)

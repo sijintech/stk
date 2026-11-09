@@ -1,5 +1,9 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · Cocoa 静默对照和 Claude29 集成
+
+本地 `207beb8a` 增加两项 macOS 静默隐藏对照。公共目标已在 Linux 构建，相关 8 项通过，实际 Cocoa 待新头。Claude29 最终 `ba7a63a4` 已集成为 `718f3cdf`，真实线路联跑 186 项和隔离安装定向通过。远端 `bb4cea9d` Desktop 正在运行，整轮终态后推送本地候选。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · Desktop 终态与 Claude29
 
 `a8872719` Desktop 整轮已结束。Windows 原生 6/6，Windows CPU 和 Linux 三项通过，macOS 原生 4/6、定位前隐藏 0/2。Windows 3.11 Runtime 同头重跑通过。本轮主线的宿主去重、MuPRO 布局核验和 D1 实线竞争已本地验收。 [验收记录](docs/runtime-validation.md)

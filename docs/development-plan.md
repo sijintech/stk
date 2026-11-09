@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · Cocoa 对照与 D1 F15
+
+新增 Cocoa 静默隐藏对照。每种素材复用既有 Play 和隐藏，直到原生核验时限结束才读取 DOM。比较在首次 DOM 采样前的原生状态和现有采样组，继续保留原失败关闭。D1 F15 已通过同一 Linux 项目上的真实 WebRTC 和本机桥验收，其他目标平台另验。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 桌面交付与 Cocoa 对照
 
 Windows 原生在 `a8872719` 完整通过。新头在 Cocoa 核对宿主去重后的显式暂停与隐藏期状态。若隐藏期仍报告 Playing，比较同一固定素材的独立会话，一组在隐藏后仅采原生回执，一组继续采样 DOM。上游公开探针入口带有用户手势标志，该对照用于验证探针是否影响结果。保留现有截止和关闭判据。 [上游入口](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/API/Cocoa/WKWebView.mm#L1192-L1205)
