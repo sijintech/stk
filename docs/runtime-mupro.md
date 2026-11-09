@@ -219,8 +219,10 @@ Runtime 取消任务时会终止启动器，`stk-mupro.json` 可能停留在 `ru
 
 ## 校验（stk-mupro-1）
 
-校验规则与分类对照 muprosdk `tools/mupro/mupro/worker.py` 的结果收集，所有检查都执行，
-按其顺序以第一个失败项分类：
+`run` 在求解器退出后重新读取有效案例布局，与启动前的网格、起始步、总步数和输出间隔比较。
+布局变化或无法重读时，`case_layout` 校验失败，分类为 `invalid_result`。独立的 `verify` 按当前案例目录核验。
+
+案例布局通过后，按 muprosdk `tools/mupro/mupro/worker.py` 的顺序执行全部输出检查，由第一个失败项分类：
 
 - `completion`：`mupro_completion.json` 必须恰为 `{"app": "muFerro", "completed_steps": 步数,
   "final_step": 起始步 + 步数}`；缺失或无法读取为 `invalid_result`，内容不符为 `incomplete_result`。

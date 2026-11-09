@@ -208,16 +208,17 @@ def _case_folder(work, case_dir):
     return case_dir, folder
 
 
-def verify_run(work_dir=".", case_dir="."):
+def verify_run(work_dir=".", case_dir=".", *, expected_case=None):
     """Check a finished run against MuPRO's output contract without parsing field values.
 
+    A launched run also requires its effective case layout to match preflight.
     Checks and classifications mirror collect_result in muprosdk
     tools/mupro/mupro/worker.py:17-52. A missing or unreadable completion manifest
     is invalid_result (contract.py:50-54), and so is any other read or parse error
     (worker.py:132). A wrong energy value count or a non-finite value is
     numerical_failure (worker.py:30-31). Instead of loading fields with NumPy
-    (worker.py:53-63), frames are checked by their header line. Every check runs,
-    and the first failure in worker order classifies the run.
+    (worker.py:53-63), frames are checked by their header line. Once the case is
+    accepted, every output check runs and the first failure in worker order classifies the run.
     """
     work = Path(work_dir).resolve()
     result = {"classification": None, "reason": "", "qoi": None, "frames": [],
@@ -225,8 +226,13 @@ def verify_run(work_dir=".", case_dir="."):
     try:
         case_dir, folder = _case_folder(work, case_dir)
         case = read_case(folder, work)
+        if expected_case is not None and case != expected_case:
+            raise MuproError("Effective MuFerro case layout changed after preflight")
     except MuproError as exc:
-        return {**result, "classification": "configuration", "reason": str(exc)}
+        if expected_case is None:
+            return {**result, "classification": "configuration", "reason": str(exc)}
+        result["verification"]["checks"].append({"id": "case_layout", "status": "fail", "message": str(exc)})
+        return {**result, "classification": "invalid_result", "reason": str(exc)}
     checks = result["verification"]["checks"]
     failures = []
 
@@ -455,7 +461,7 @@ def run(args):
         if record["exit_code"]:
             raise MuproError(f"muFerro exited with code {record['exit_code']}; inspect stdout.log and stderr.log",
                              "solver_failed")
-        record.update(verify_run(work, case_dir))
+        record.update(verify_run(work, case_dir, expected_case=case))
         record["state"] = "succeeded" if record["verification"]["status"] == "passed" else "failed"
     except MuproError as exc:
         record.update(state="failed", classification=exc.classification, reason=str(exc))

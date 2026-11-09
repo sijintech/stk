@@ -512,6 +512,32 @@ def test_run_nan_exit_zero_is_failure(node, tmp_path):
 
 
 @pytest.mark.server
+def test_run_rejects_valid_outputs_for_a_layout_changed_after_preflight(node, tmp_path):
+    work, _ = node
+    case = work / "case"
+    write_case(case, steps=3)
+    sdk = make_fake_sdk(tmp_path / "sdk")
+    program = sdk / "bin" / "muFerro"
+    program.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\nfrom pathlib import Path\n"
+        f"sys.path.insert(0, {str(Path(__file__).parent)!r})\n"
+        "from mupro_fake import fake_muferro\n"
+        "path = Path('input.toml')\n"
+        "path.write_text(path.read_text().replace('timestep_total = 3', 'timestep_total = 1'))\n"
+        "sys.exit(fake_muferro('ok'))\n", encoding="utf-8")
+
+    code, record = launch(sdk, "--case-dir", "case")
+    assert record["case"]["steps"] == 3 and record["exit_code"] == 0
+    offline = verify_run(work, "case")
+    assert offline["verification"]["status"] == "passed" and offline["qoi"]["step"] == 1
+    assert (code, record["state"], record["classification"]) == (3, "failed", "invalid_result")
+    assert record["qoi"] is None and record["verification"]["status"] == "failed"
+    assert [check["id"] for check in record["verification"]["checks"] if check["status"] == "fail"] == [
+        "case_layout"]
+
+
+@pytest.mark.server
 def test_solver_nonzero_exit_is_solver_failed(node, tmp_path):
     sdk = make_fake_sdk(tmp_path / "sdk", mode="fail")
     code, record = launch(sdk, "--example")
