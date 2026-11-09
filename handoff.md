@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · 实际表格字节、Runtime HDF5 和精确任务读取
+
+本地 `dd41ba5e` 绑定表格缓存键和实际解析字节，Runtime 用发布摘要，其他来源流式核对内容。 `c95a6f26` 让 MuPRO HDF5 发现、索引和字段读取核对 Runtime 发布摘要，拒绝暖缓存改写与下载清单漂移。隔离 wheel 的图与 HDF5 联跑 88 项通过。启动报告在规划后改变仍可影响 run-index，已独立复现，待核对实际报告字节的接线。
+
+本地 `49169e0e` 让桌面桥和 Python 显式请求精确任务读取。真实单机 CLI、桌面桥、Hub、节点和 Runtime 核对了窗口外任务、旧能力与断线。隔离定向六项、原生 schema 七项通过。Claude39 `af9addab` 的源码与隔离安装已取得 Hub 停机完成 13/13，默认丢回执 11/11。已安排收口提交入口计数和原动作请求摘要，再审阅集成。
+
+远端 `3d2fcea7` Runtime 13 项、Desktop 的 Linux 三项、macOS CPU 和 Metal 已过。macOS 原生和 Windows 原生待结果，本地批次待整轮终态。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · 节点离线完成和 HDF5 缓存边界
 
 本地 `3a7928f8` 集成 Claude38 的 `e31d1f29`、`58aebf21`。单机真实线路证实 NodeAgent 离线期间原任务自然完成，同配置重连后首答复读取到原任务成功及固定输出。源码 151 项、隔离安装取消 10/10 和离线完成 12/12。Claude39 在独立 worktree 的 `claude/d1-x7-hub-offline-completion-39` 接手 Hub 停机期间完成。

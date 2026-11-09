@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 图来源内容和 D2 精确读取
+
+`dd41ba5e0aaeaf7288233e294c6b0929b1701485` 按实际字节建立表格缓存键。普通及自定义来源有界流式散列，Runtime 绑定发布摘要。解析前用读到的字节核对，失配返回 `invalid_data`，无错误缓存。等长改写并恢复 mtime 的两条原始反例分别命中旧表和错误接受新值；自定义 memo 反例也复现。修后重新求值并按实际摘要写入来源。表格实现升为 3，源码联跑 89 项通过，1 项性能基准按条件跳过。 [图契约](specs/stk-graph-v1.md)
+
+`c95a6f26282aaf9ed0578442afe916aaaf38e26e` 核对 HDF5 实际流与 Runtime 已发布摘要。五个旧反例覆盖暖缓存等长改写后的发现、重开、索引与读字段，以及下载前清单改变。修复后返回 `invalid_data`，恢复原内容后可沿用原下载。源码相关 247 项通过、2 项条件跳过，Python 3.11 和 3.14 定向各 39 项。合并构建的隔离 wheel 中图和 HDF5 共 88 项通过。未改写共享 Runtime 缓存对象。 [HDF5 契约](specs/mupro-hdf5-1.md)
+
+`49169e0eb43065dca6b3f35036d47aba0b7c1cc4` 为桌面桥 `task.get` 增加可选 `require_live`。真实单机 Hub 中，桌面、Python 和 CLI 读取到已离开心跳窗口的原任务，断线返回 `unavailable`，旧能力返回 `unsupported`，普通调用保留有界快照。对不存在的原任务，Hub 沿用 `remote_error`，直连是 `not_found`。读取未新增任务、动作或动作事件。源码相关 132 项通过，隔离 wheel 定向六项及重新嵌入 schema 后的七项 C++ 测试通过。JSON 对照确认只增加一个可选布尔参数。 [桌面桥契约](specs/stk-desktop-bridge-v1.md)
+
+Claude39 `af9addab` 的源码相关 463 项通过，源码及隔离 wheel 的 Hub 停机完成各 13/13、默认丢回执各 11/11，清理通过。审阅复现两处验收缺口，失败的第二次提交未计入调用次数，缺失的动作请求可得到相同空摘要。已派发收口，集成待最终证据。远端 `3d2fcea7` Runtime 13 项、Desktop Linux 三项与 macOS CPU 和 Metal 已通过，原生验收未终态。证据见本机 `root-delivery-20261109-80`。 [Desktop](https://github.com/sijintech/stk/actions/runs/42593218935)
+
 ## 2026-11-09 UTC · X7 节点离线完成与 HDF5 索引
 
 `3a7928f828ad08d67990be4694441760a4ee7e32` 集成 Claude38 `e31d1f2954e3fef1c8cae4387c21e74013adbf73` 与 `58aebf21caa314db24fd0d09cc78cad011e3313e`。真实单机 Hub、NodeAgent 和 Runtime 验证原任务在节点退出期间完成，原程序和 worker 已退出，完成前后各两次精确读取均明确拒绝，同配置重连的首答复为同一任务成功。读取固定日志和唯一 `out.txt`，保留一次创建和一次提交的动作账本。root 补到期及逾期答复和四种缺失/非布尔状态的反例，旧六例失败，新源码 151 项通过。新隔离 wheel 以 `-I` 验证取消 10/10、离线完成 12/12，实测 26.96 与 28.82 秒，清理通过。证据限单机合成任务。 [D1 矩阵](planning/d1-compatibility-gates.md)

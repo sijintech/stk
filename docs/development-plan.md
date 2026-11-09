@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · 内容绑定及 D2 实时任务读取
+
+图表格和 MuPRO HDF5 进一步按实际解析字节核对来源。D2 桌面桥加可选实时任务读取，在真实 Hub 上与 CLI 共用精确查询。Claude39 的 Hub 停机完成候选已获单机证据，待补入口次数及动作请求绑定。macOS CPU 和 Metal 已过，下一步核原生隔离暂停结果。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 节点离线完成和 HDF5 图索引
 
 D1 X7 已补 NodeAgent 离线期间原任务自然完成的单机真实线路证据。Claude39 继续 Hub 停机的独立场景。MuPRO 图索引拒绝已计划摘要的容器执行时无法核对，恢复原内容后重新求值。macOS 隔离暂停对照已通过目标编译，运行证据待远端。 [验收记录](runtime-validation.md) [D1 矩阵](planning/d1-compatibility-gates.md)
