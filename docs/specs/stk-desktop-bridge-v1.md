@@ -357,8 +357,8 @@ on every state change and at most every 250 ms while bytes move.
   transfer is continued with `transfer.resume`, not by repeating `*.start`. Keys are remembered as
   long as the journal (finished journals are kept 7 days).
 - **Endpoint precondition.** `expected_connection_identity` is the 16-character lowercase hexadecimal
-  endpoint key stored by a prepared project run. `task.artifacts` and a new `download.start` check
-  the resolved backend before requesting artifacts or writing a transfer journal, respectively.
+  endpoint key stored by a prepared project run. `task.artifacts` and `task.logs` check the resolved
+  backend before issuing each read. A new `download.start` checks it before writing a transfer journal.
   A mismatch returns `conflict`. The key binds the configured endpoint and the Hub node where
   applicable. A credential change for the same endpoint keeps the existing identity.
   For a download without an explicit destination, the expected key determines the default cache
@@ -1673,8 +1673,9 @@ desktop binds these UI operations on its main loop, targeting the first installe
 Stale callbacks from an earlier bridge session cannot apply queued layout changes. A bridge without
 that executor (for example a protocol test harness) must attach its own implementation or return unavailable.
 
-`task.logs {connection, node?, task_id, stream?, offset?, limit?}` is an additive one-shot read for
-automation. Defaults: `stream: "stdout"`, `offset: 0`, `limit: 65536`; limit is 1–1048576 bytes.
+`task.logs {connection, node?, task_id, stream?, offset?, limit?, expected_connection_identity?}`
+is an additive one-shot read for automation. The optional endpoint precondition is checked for each
+request. Defaults: `stream: "stdout"`, `offset: 0`, `limit: 65536`; limit is 1–1048576 bytes.
 Result is `{data: base64, offset, next_offset, terminal}`. Both offsets count bytes, including partial
 UTF-8 characters. `terminal` describes task state, not whether this chunk exhausted the log; a caller
 continues from `next_offset` until an empty chunk. The bridge clamps older Hub responses to the limit

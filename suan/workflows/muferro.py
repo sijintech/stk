@@ -436,9 +436,12 @@ def native_action(stk, action, params):
         task = run["status"].get("task")
         if not task:
             raise ValueError("This run has not been accepted by the Runtime")
-        runtime = stk.runtime(run["plan"]["connection"], node=run["plan"]["node"])
+        plan = run["plan"]
+        runtime = stk.runtime(plan["connection"], node=plan["node"])
         for stream in ("stdout", "stderr"):
+            data = runtime.tasks.logs(task["id"], stream=stream,
+                                      expected_connection_identity=plan["connection_identity"])["data"]
             print(f"MuFerro {run['id']} — {stream} (first 64 KiB)", flush=True)
-            print(runtime.tasks.logs(task["id"], stream=stream)["data"].decode("utf-8", errors="replace"), flush=True)
+            print(data.decode("utf-8", errors="replace"), flush=True)
         return None
     raise ValueError("Unknown MuFerro workflow action")

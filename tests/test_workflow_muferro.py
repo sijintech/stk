@@ -10,10 +10,12 @@ import pytest
 
 from conftest import finish
 from mupro_fake import make_fake_sdk, write_case
+from suan.mupro import muferro_spec
 from suan.scripting import API
-from suan.workflows.muferro import TABLE_ID, FIELD_IDS, RESULT_TABLE_ID
+from suan.workflows.muferro import TABLE_ID, FIELD_IDS, LABEL, RESULT_TABLE_ID, native_action
+from suan.workflows.native import native_action as desktop_action
 from test_desktop_scripts import scripts, execute  # noqa: F401
-from test_desktop_bridge import bridge_env, BridgeCallError  # noqa: F401
+from test_desktop_bridge import bridge_env, inproc, BridgeCallError  # noqa: F401
 from test_desktop_bridge_runtime import add_profile
 
 
@@ -289,7 +291,6 @@ def test_edit_during_upload_cannot_freeze_new_row_with_old_inputs(project, scrip
 
 
 def test_native_action_rejects_a_switched_project(project, tmp_path):
-    from suan.workflows.muferro import native_action
     api, p = project
     source = tmp_path / 'case'
     write_case(source)
@@ -299,6 +300,79 @@ def test_native_action_rejects_a_switched_project(project, tmp_path):
     with pytest.raises(ValueError, match='selected project changed'):
         native_action(api, 'import', {'source': str(source), 'project_id': expected, 'expected_revision': 0})
     assert revision(p) == revision(other) == 0
+
+
+@pytest.mark.parametrize('switch_after', [None, 'project.runs.refresh', 'task.logs'],
+                         ids=['stable', 'after-refresh', 'between-streams'])
+@pytest.mark.parametrize('entry', ['desktop', 'legacy'])
+def test_native_logs_check_the_frozen_endpoint_for_each_stream(inproc, tmp_path, monkeypatch, capsys, switch_after,
+                                                              entry):
+    h = inproc()
+    profile, node, task = 'hub:fixture', 'b' * 32, 'c' * 32
+    observed = []
+
+    class Backend:
+        def __init__(self, name, server_key):
+            self.name, self.server_key = name, server_key
+
+        def task(self, task_id):
+            assert task_id == task
+            return {'task': {'id': task_id, 'state': 'succeeded'}}
+
+        def logs(self, task_id, stream, offset, limit):
+            assert task_id == task and offset == 0 and limit == 65536
+            observed.append((self.name, stream))
+            return {'data': f'{self.name} {stream} fixture'.encode(), 'offset': 0, 'terminal': True}
+
+    active = Backend('original', '1' * 16)
+    replacement = Backend('replacement', '2' * 16)
+
+    def backend(connection, selected_node=None):
+        assert (connection, selected_node) == (profile, node)
+        return active
+
+    def call(operation, params):
+        nonlocal active
+        response = h.call(operation, params)
+        if operation == switch_after:
+            active = replacement
+        return response
+
+    monkeypatch.setattr(h.bridge.connections, 'backend', backend)
+    api = API(call)
+    p = api.projects.create(tmp_path / 'fixture-project', 'MuFerro logs')
+    api._project_handle = p.handle
+    source = tmp_path / 'case'
+    write_case(source)
+    row = api.muferro.import_case(source, expected_revision=0)['record_id']
+    run = p.runs.prepare([{'table_id': TABLE_ID, 'record_id': row, 'label': LABEL + 'Fixture',
+                           'spec': muferro_spec('a' * 32, case_dir='case')}],
+                         connection=profile, node=node, expected_revision=revision(p))['run_ids'][0]
+    h.bridge.projects._stores[p.handle].runs.observe(run, {'task': {'id': task, 'state': 'succeeded'}})
+    params = {'project_id': p.snapshot()['project']['id'], 'run_id': run}
+
+    def show_logs():
+        if entry == 'desktop':
+            return desktop_action(api, 'muferro/1', 'logs', {**params, 'expected_revision': revision(p)})
+        return native_action(api, 'logs', params)
+
+    if switch_after is None:
+        result = show_logs()
+        assert observed == [('original', 'stdout'), ('original', 'stderr')]
+        if entry == 'desktop':
+            assert result == {'run_id': run, 'streams': {'stdout': 'original stdout fixture',
+                                                         'stderr': 'original stderr fixture'}}
+        else:
+            assert result is None
+    else:
+        with pytest.raises(BridgeCallError) as error:
+            show_logs()
+        assert error.value.code == 'conflict'
+        assert observed == ([('original', 'stdout')] if switch_after == 'task.logs' else [])
+    output = capsys.readouterr().out
+    assert ('original stdout fixture' in output) == (switch_after != 'project.runs.refresh')
+    assert ('original stderr fixture' in output) == (switch_after is None)
+    assert 'replacement' not in output
 
 
 @pytest.mark.server

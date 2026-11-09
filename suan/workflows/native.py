@@ -126,10 +126,12 @@ def native_action(stk, engine, action, params):
     task = run["status"].get("task")
     if not task:
         raise ValueError("This run has not been accepted by the Runtime")
-    runtime = stk.runtime(run["plan"]["connection"], node=run["plan"]["node"])
+    plan = run["plan"]
+    runtime = stk.runtime(plan["connection"], node=plan["node"])
     streams = {}
     for stream in ("stdout", "stderr"):
-        data = runtime.tasks.logs(task["id"], stream=stream, limit=65536)["data"]
+        data = runtime.tasks.logs(task["id"], stream=stream, limit=65536,
+                                  expected_connection_identity=plan["connection_identity"])["data"]
         streams[stream] = data.decode("utf-8", errors="replace")
         print(f"{module.NAME if module is lammps else 'MuFerro'} {run['id']} — {stream} (first 64 KiB)", flush=True)
         print(streams[stream], flush=True)

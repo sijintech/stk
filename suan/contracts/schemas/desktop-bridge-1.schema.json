@@ -4113,6 +4113,9 @@
             "connection": {
               "$ref": "#/$defs/connectionId"
             },
+            "expected_connection_identity": {
+              "$ref": "#/$defs/connectionIdentity"
+            },
             "node": {
               "$ref": "#/$defs/hex32"
             },

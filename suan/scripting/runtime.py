@@ -144,9 +144,12 @@ class Tasks:
         params = {} if expected_connection_identity is None else {"expected_connection_identity": expected_connection_identity}
         return self._runtime._request("task.artifacts", task_id=task_id, **params)["artifacts"]
 
-    def logs(self, task_id, *, stream="stdout", offset=0, limit=65536):
+    def logs(self, task_id, *, stream="stdout", offset=0, limit=65536, expected_connection_identity=None):
         """A bounded byte chunk. Decode after joining chunks, or use an incremental UTF-8 decoder."""
-        result = self._runtime._request("task.logs", task_id=task_id, stream=stream, offset=offset, limit=limit)
+        params = {"task_id": task_id, "stream": stream, "offset": offset, "limit": limit}
+        if expected_connection_identity is not None:
+            params["expected_connection_identity"] = expected_connection_identity
+        result = self._runtime._request("task.logs", **params)
         return {**result, "data": base64.b64decode(result["data"], validate=True)}
 
     def wait(self, task_id, *, timeout=300, interval=0.25):
