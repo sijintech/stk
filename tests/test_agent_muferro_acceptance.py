@@ -668,22 +668,26 @@ GATED_SOLVER = textwrap.dedent('''
 ''')
 
 
-def offline_finish_observed(s, runtime, monkeypatch, request):
-    """The offline-finish case below up to its observation-only checks; returns what later steps compare against."""
-    store, client, supervisor, server = s["store"], s["client"], s["supervisor"], runtime[2]
+def solver_alive(identity):
+    """Whether the held solver ``{pid, created_at}`` is still that exact live process (a reused PID is not)."""
+    try:
+        process = psutil.Process(identity["pid"])
+        return process.create_time() == identity["created_at"] and process.status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return False
+
+
+def held_solver_killed(s, runtime, monkeypatch, request):
+    """``first_dispatch_killed`` while the Runtime already runs the synthetic solver, held at a test-owned gate: the
+    held solver is this task's and outlived the bridge. Adds the gate, the held solver's identity, the Runtime task and
+    the killed process's stored run at the interruption."""
+    store, client, supervisor = s["store"], s["client"], s["supervisor"]
     gate = s["tmp"] / "solver-gate"
     gate.mkdir()
     marker, release = gate / "held.json", gate / "release"
     _script(s["tmp"] / "fake-sdk" / "bin" / "muFerro", GATED_SOLVER.format(
         held=str(marker), release=str(release), tests=str(Path(__file__).parent)))
     request.addfinalizer(release.touch)  # never leave the solver held, whatever fails
-
-    def solver_alive(identity):
-        try:
-            process = psutil.Process(identity["pid"])
-            return process.create_time() == identity["created_at"] and process.status() != psutil.STATUS_ZOMBIE
-        except psutil.NoSuchProcess:
-            return False
 
     def solver_running(task):
         """The Runtime runs the task and the held solver process is alive (the scheduler advances only here)."""
@@ -695,12 +699,11 @@ def offline_finish_observed(s, runtime, monkeypatch, request):
         return held if solver_alive(held) else None
 
     k = first_dispatch_killed(s, runtime, monkeypatch, request, solver_running)
-    first_pid, sid, item, run_id, identity = (k[key] for key in ("first_pid", "sid", "item", "run_id", "identity"))
-    envelope, started, run_events, held = k["envelope"], k["started"], k["run_events"], k["evidence"]
-    submissions, cancels = k["submissions"], k["cancels"]
+    first_pid, run_id, identity = k["first_pid"], k["run_id"], k["identity"]
+    envelope, started, held = k["envelope"], k["started"], k["evidence"]
     task_id = k["interrupted_tasks"][0]["id"]
     assert [(t["id"], t["state"]) for t in k["interrupted_tasks"]] == [(task_id, "running")]
-    work = (server.service.task_dir(task_id) / "work").resolve()
+    work = (runtime[2].service.task_dir(task_id) / "work").resolve()
     assert work in Path(held["cwd"]).resolve().parents  # the held solver is this task's, in its work directory
     # The bridge died; the Runtime task and its solver did not. The stored run is the killed process's.
     assert solver_alive(held) and client.task(task_id)["state"] == "running"
@@ -709,20 +712,17 @@ def offline_finish_observed(s, runtime, monkeypatch, request):
     assert stored["executor_id"] == identity["executor_id"] and started[0]["approval"] == envelope
     simulate = next(t for t in stored["tasks"] if t["step"] == "simulate")
     assert simulate["progress"]["task_id"] == task_id
+    return {**k, "gate": gate, "marker": marker, "release": release, "held": held, "task_id": task_id, "work": work,
+            "stored_run": stored, "simulate": simulate}
 
-    # Release the solver with no bridge process alive; the Runtime finishes the task on its own.
-    release.touch()
 
-    def terminal_task():
-        supervisor.tick()
-        task = client.task(task_id)
-        return task if task["state"] in TERMINAL else None
-
-    finished = until_true(terminal_task, 60, "the released solver's Runtime task")
-    assert finished["state"] == "succeeded" and finished["exit_code"] == 0, finished
-    assert not solver_alive(held)
+def fixed_outputs(s, k):
+    """The released solver's succeeded task: its frozen inputs, then its fixed manufactured outputs byte for byte in
+    the Runtime's artifact digests and in three downloads. Returns the artifacts, expected digests, case prefix and
+    downloaded digests."""
+    client, gate, held, task_id = s["client"], k["gate"], k["held"], k["task_id"]
     artifacts = {a["path"]: a for a in client.artifacts(task_id)}
-    case = Path(held["cwd"]).resolve().relative_to(work).as_posix()
+    case = Path(held["cwd"]).resolve().relative_to(k["work"]).as_posix()
     prefix = "" if case == "." else case + "/"
     inputs = gate / "inputs"
     client.download(task_id, prefix + "input.toml", inputs / "input.toml")
@@ -744,12 +744,18 @@ def offline_finish_observed(s, runtime, monkeypatch, request):
         downloaded[name] = hashlib.sha256(path.read_bytes()).hexdigest()
         assert downloaded[name] == expected[prefix + name]
     assert "stk-mupro.json" in artifacts
-    # Exactly one submission and no cancel; no other task; the stored run did not follow the task's completion.
-    assert len(submissions) == 1 and cancels == [] and [t["id"] for t in client.tasks()] == [task_id]
-    with store._connect() as db:
-        _, events = store.workflow_runs._read(db, run_id)
-    assert events == run_events and store.workflow_runs.get(run_id) == stored
+    return artifacts, expected, prefix, downloaded
 
+
+def observed_only(request, s, k, runtime_state):
+    """A fresh strict bridge process on the same state reopens the session and explicitly observes the original item
+    while the Runtime task is ``runtime_state``. It reads the historical start and the stored workflow state (still the
+    killed process's running run, never refreshed), not the actual Runtime state; nothing is decided, started,
+    recovered, cancelled, collected or submitted, and the process closes cleanly."""
+    store, client = s["store"], s["client"]
+    sid, item, run_id, task_id = k["sid"], k["item"], k["run_id"], k["task_id"]
+    identity, submissions, cancels = k["identity"], k["submissions"], k["cancels"]
+    artifacts = {a["path"]: a for a in client.artifacts(task_id)}
     fresh = probe_bridge(request, s, k["state"], "fresh")
     fresh_pid = fresh.process.pid
     handle = fresh.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
@@ -762,13 +768,13 @@ def offline_finish_observed(s, runtime, monkeypatch, request):
     runtime_task = client.task(task_id)
     # Historical start: the person's exact approval, executed by the killed process.
     assert receipt["outcome"] == "started" and receipt["ok"] is True and receipt["run_id"] == run_id
-    assert receipt["item_id"] == item["item_id"] and receipt["approval"] == envelope
+    assert receipt["item_id"] == item["item_id"] and receipt["approval"] == k["envelope"]
     assert receipt["executor_id"] == identity["executor_id"]
     # Stored workflow state: still the killed process's running run, never refreshed by observation or reopening.
-    assert receipt["run_status"] == current["status"] == "running" and current["owner"]["pid"] == first_pid
-    assert next(t for t in current["tasks"] if t["step"] == "simulate")["progress"] == simulate["progress"]
-    # Actual Runtime state: the task already succeeded. Only an explicit, separate person's action may follow it.
-    assert runtime_task["state"] == "succeeded" and runtime_task["id"] == task_id
+    assert receipt["run_status"] == current["status"] == "running" and current["owner"]["pid"] == k["first_pid"]
+    assert next(t for t in current["tasks"] if t["step"] == "simulate")["progress"] == k["simulate"]["progress"]
+    # Actual Runtime state. Only an explicit, separate person's action may follow it.
+    assert runtime_task["state"] == runtime_state and runtime_task["id"] == task_id
     assert fresh.call("project.agent.verify", params)["ok"]
     final_view = fresh.call("project.agent.get", params)
     assert [e["item_id"] for e in final_view["events"] if e["kind"] == "approval_decided"] == [item["item_id"]]
@@ -781,25 +787,58 @@ def offline_finish_observed(s, runtime, monkeypatch, request):
     assert fresh_identity["executor_id"] != identity["executor_id"]
     assert [r for r in fresh_records if r["name"] != "identity"] == []  # no decide/start/recover/cancel/analysis
     assert len(submissions) == 1 and cancels == []
-    assert [(t["id"], t["state"]) for t in client.tasks()] == [(task_id, "succeeded")]
+    assert [(t["id"], t["state"]) for t in client.tasks()] == [(task_id, runtime_state)]
     assert {a["path"]: a for a in client.artifacts(task_id)} == artifacts
     with store._connect() as db:
         _, after = store.workflow_runs._read(db, run_id)
-    assert after == run_events and started_events(store, run_id) == started
+    assert after == k["run_events"] and started_events(store, run_id) == k["started"]
+    return {"observe": receipt, "fresh_pid": fresh_pid, "fresh_identity": fresh_identity,
+            "stored_run_status": current["status"], "runtime_state_at_observe": runtime_task["state"],
+            "fresh_calls": [r["value"] for r in fresh_records if r["name"] == "call"]}
+
+
+def offline_finish_observed(s, runtime, monkeypatch, request):
+    """The offline-finish case below up to its observation-only checks; returns what later steps compare against."""
+    store, client, supervisor = s["store"], s["client"], s["supervisor"]
+    k = held_solver_killed(s, runtime, monkeypatch, request)
+    run_id, task_id, held, stored = k["run_id"], k["task_id"], k["held"], k["stored_run"]
+    submissions, cancels = k["submissions"], k["cancels"]
+
+    # Release the solver with no bridge process alive; the Runtime finishes the task on its own.
+    k["release"].touch()
+
+    def terminal_task():
+        supervisor.tick()
+        task = client.task(task_id)
+        return task if task["state"] in TERMINAL else None
+
+    finished = until_true(terminal_task, 60, "the released solver's Runtime task")
+    assert finished["state"] == "succeeded" and finished["exit_code"] == 0, finished
+    assert not solver_alive(held)
+    artifacts, expected, prefix, downloaded = fixed_outputs(s, k)
+    # Exactly one submission and no cancel; no other task; the stored run did not follow the task's completion.
+    assert len(submissions) == 1 and cancels == [] and [t["id"] for t in client.tasks()] == [task_id]
+    with store._connect() as db:
+        _, events = store.workflow_runs._read(db, run_id)
+    assert events == k["run_events"] and store.workflow_runs.get(run_id) == stored
+
+    f = observed_only(request, s, k, "succeeded")
+    identity = k["identity"]
     (s["tmp"] / "probe-summary.json").write_text(json.dumps({
-        "first_pid": k["first_pid"], "first_returncode": k["first"].process.returncode, "fresh_pid": fresh_pid,
-        "first_executor_id": identity["executor_id"], "fresh_executor_id": fresh_identity["executor_id"],
-        "run_id": run_id, "item_id": item["item_id"], "runtime_task": task_id, "held_solver": held,
+        "first_pid": k["first_pid"], "first_returncode": k["first"].process.returncode, "fresh_pid": f["fresh_pid"],
+        "first_executor_id": identity["executor_id"], "fresh_executor_id": f["fresh_identity"]["executor_id"],
+        "run_id": run_id, "item_id": k["item"]["item_id"], "runtime_task": task_id, "held_solver": held,
         "runtime_state_at_interruption": k["interrupted_tasks"][0]["state"],
         "run_status_at_interruption": k["at_interruption"], "runtime_terminal": {
             key: finished.get(key) for key in ("state", "exit_code", "reason", "finished_at")},
         "fixed_outputs_sha256": expected, "downloaded_outputs_sha256": downloaded,
         "withheld_reply_outcome": k["reply"]["result"]["receipt"]["outcome"],
-        "observe": receipt, "stored_run_status": current["status"], "runtime_state_at_observe": runtime_task["state"],
+        "observe": f["observe"], "stored_run_status": f["stored_run_status"],
+        "runtime_state_at_observe": f["runtime_state_at_observe"],
         "runtime_submissions": len(submissions), "runtime_cancels": len(cancels), "first_calls": k["first_calls"],
-        "fresh_calls": [r["value"] for r in fresh_records if r["name"] == "call"]}, indent=2), encoding="utf-8")
-    return {**k, "task_id": task_id, "artifacts": artifacts, "expected": expected, "prefix": prefix,
-            "offline_run": stored, "simulate": simulate, "observe": receipt, "fresh_identity": fresh_identity}
+        "fresh_calls": f["fresh_calls"]}, indent=2), encoding="utf-8")
+    return {**k, "artifacts": artifacts, "expected": expected, "prefix": prefix, "offline_run": stored,
+            "observe": f["observe"], "fresh_identity": f["fresh_identity"]}
 
 
 def test_killed_bridge_process_while_its_solver_runs_then_the_task_finishes_without_a_bridge(
@@ -819,91 +858,102 @@ def energy_trace_document():
             "outputs": {"energy": "run.energy"}}, "parameters": {}, "outputs": ["energy"]}
 
 
-def test_offline_finished_task_is_recovered_by_hand_then_adopted_by_an_explicit_workflow_start(
-        scan, runtime, monkeypatch, request):
-    """The offline-finish case above, with its observation-only checks unchanged, then the existing manual workflow
-    controls in a third strict bridge process that uses the stock graph worker (docs/project-workflows.md "按行运行",
-    "MuFerro 步骤"). An explicit ``recover`` without ``force`` marks the vanished executor's attempt interrupted and stops
-    the run; an explicit ``start`` adopts the original succeeded simulation run and Runtime task (no new submission),
-    collects and freezes its verified outputs, then runs the row's downstream analysis. The person's original approval
-    stays the only one: a repeat agent decision is refused before review and replays the historical receipt after it,
-    and neither recover, observation nor the repeat decision submits, cancels or starts anything."""
-    s = scan
-    store, client = s["store"], s["client"]
+def use_energy_trace(s):
+    """The workflow's saved analysis becomes the energy trace, before preparation freezes its content."""
+    store = s["store"]
     document = store.workflows.get(s["workflow"])["workflow"]["document"]
     analysis_id = next(step["ref"]["analysis"] for step in document["steps"] if step["kind"] == "analysis")
     store.analyses.update(analysis_id, "Energy", energy_trace_document(), expected_revision=store.info()["revision"])
-    o = offline_finish_observed(s, runtime, monkeypatch, request)
-    sid, item, run_id, task_id, envelope = (o[key] for key in ("sid", "item", "run_id", "task_id", "envelope"))
-    identity, submissions, cancels, artifacts = o["identity"], o["submissions"], o["cancels"], o["artifacts"]
-    original_run = o["simulate"]["progress"]["simulation_run_id"]
-    original_directory = f"results/muferro/{original_run}"
 
-    def no_collected_result():
-        assert not (store.directory / original_directory).exists()
-        assert all(table["id"] != muferro.RESULT_TABLE_ID for table in store.snapshot()["tables"])
-        assert not any(row["path"].startswith(original_directory + "/") for row in store.files.list()["records"])
-        assert store.analysis_runs.list()["runs"] == []
 
-    no_collected_result()
+def no_collected_result(store, directory):
+    """Nothing of the simulation run under ``directory`` was collected, indexed, tabulated or analysed."""
+    assert not (store.directory / directory).exists()
+    assert all(table["id"] != muferro.RESULT_TABLE_ID for table in store.snapshot()["tables"])
+    assert not any(row["path"].startswith(directory + "/") for row in store.files.list()["records"])
+    assert store.analysis_runs.list()["runs"] == []
+
+
+def manual_bridge(request, s, k):
+    """A third strict bridge process, with the stock graph worker, reopens the original session. A repeat agent
+    approval is not a workflow control: this desktop has not reviewed the plan, so it is refused and records nothing."""
+    bridge = probe_bridge(request, s, k["state"], "manual", real_analysis=True)
+    pid, item = bridge.process.pid, k["item"]
+    handle = bridge.call("project.open", {"directory": str(s["store"].directory)})["project"]["handle"]
+    params = {"handle": handle, "session_id": k["sid"]}
+    args = {**params, "item_id": item["item_id"]}
+    m = {"bridge": bridge, "pid": pid, "handle": handle, "params": params, "args": args,
+         "run_args": {"handle": handle, "run_id": k["run_id"]},
+         "decision": {**args, "decision": "start", "plan_sha256": item["plan_sha256"],
+                      "expected_revision": item["expected_revision"]},
+         "calls": lambda: [r["value"] for r in probe_records(s, pid) if r["name"] == "call"]}
+    m["refused"] = bridge.error("project.agent.run_decide", m["decision"])
+    assert m["refused"]["code"] == "conflict" and "Read the complete frozen run plan" in m["refused"]["message"]
+    assert m["calls"]() == [] and len(k["submissions"]) == 1 and k["cancels"] == []
+    return m
+
+
+def recovered_by_hand(s, k, m, runtime_state):
+    """Manual recover, without force: the vanished executor's attempt becomes interrupted and the run stops, with the
+    original remote work still recorded. Observation then reads the original approval on the stopped run. Neither
+    contacts the Runtime for a new action; its task stays ``runtime_state`` and nothing is collected."""
+    store, client, manual, calls = s["store"], s["client"], m["bridge"], m["calls"]
+    run_id, task_id, original_run = k["run_id"], k["task_id"], k["simulate"]["progress"]["simulation_run_id"]
+    artifacts = {a["path"]: a for a in client.artifacts(task_id)}
     with store._connect() as db:
-        _, offline_events = store.workflow_runs._read(db, run_id)
-
-    manual = probe_bridge(request, s, o["state"], "manual", real_analysis=True)
-    manual_pid = manual.process.pid
-    handle = manual.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
-    params = {"handle": handle, "session_id": sid}
-    args, run_args = {**params, "item_id": item["item_id"]}, {"handle": handle, "run_id": run_id}
-    decision = {**args, "decision": "start", "plan_sha256": item["plan_sha256"],
-                "expected_revision": item["expected_revision"]}
-
-    def calls():
-        return [r["value"] for r in probe_records(s, manual_pid) if r["name"] == "call"]
-
-    # A repeat agent approval is not a workflow control: this desktop has not reviewed the plan, so it is refused.
-    refused = manual.error("project.agent.run_decide", decision)
-    assert refused["code"] == "conflict" and "Read the complete frozen run plan" in refused["message"]
-    assert calls() == [] and len(submissions) == 1 and cancels == []
-
-    # Manual recover, without force: the vanished executor's attempt becomes interrupted and the run stops.
-    assert not psutil.pid_exists(o["first_pid"])
-    recovered = manual.call("project.workflow_runs.recover", run_args)["run"]
+        _, before = store.workflow_runs._read(db, run_id)
+    assert before == k["run_events"]  # neither the fresh observation, reopening nor the refusal changed the run
+    assert not psutil.pid_exists(k["first_pid"])
+    recovered = manual.call("project.workflow_runs.recover", m["run_args"])["run"]
     assert calls() == ["WorkflowRunExecutor.recover", "WorkflowRuns.interrupt"]
     assert recovered["status"] == "stopped" and recovered["executor_id"] is None  # no executor owns a stopped run
     by_step = {t["step"]: t for t in recovered["tasks"]}
     assert by_step["simulate"]["status"] == "interrupted" and by_step["simulate"]["attempt"] == 1
     assert by_step["simulate"]["error"]["code"] == "interrupted"
-    assert by_step["simulate"]["progress"] == o["simulate"]["progress"]  # the original remote work, still recorded
+    assert by_step["simulate"]["progress"] == k["simulate"]["progress"]  # the original remote work, still recorded
     assert by_step["energy"]["status"] == "pending" and by_step["energy"]["attempt"] == 0
     with store._connect() as db:
         _, recover_events = store.workflow_runs._read(db, run_id)
-    added = recover_events[len(offline_events):]
-    assert recover_events[:len(offline_events)] == offline_events
+    added = recover_events[len(before):]
+    assert recover_events[:len(before)] == before
     assert [(e["step"], e["attempt"], e["status"]) for e in added] == [("simulate", 1, "interrupted"), ("", 0, "stopped")]
-    assert added[1]["executor_id"] == identity["executor_id"]
-    observed = manual.call("project.agent.run_observe", args)["receipt"]
-    assert observed["outcome"] == "started" and observed["approval"] == envelope and observed["run_status"] == "stopped"
-    assert observed["executor_id"] == identity["executor_id"]
-    # Neither recover nor observation contacted the Runtime for a new action.
-    assert len(submissions) == 1 and cancels == [] and calls() == ["WorkflowRunExecutor.recover", "WorkflowRuns.interrupt"]
-    assert [(t["id"], t["state"]) for t in client.tasks()] == [(task_id, "succeeded")]
+    assert added[1]["executor_id"] == k["identity"]["executor_id"]
+    observed = manual.call("project.agent.run_observe", m["args"])["receipt"]
+    assert observed["outcome"] == "started" and observed["approval"] == k["envelope"]
+    assert observed["run_status"] == "stopped" and observed["executor_id"] == k["identity"]["executor_id"]
+    assert len(k["submissions"]) == 1 and k["cancels"] == []
+    assert calls() == ["WorkflowRunExecutor.recover", "WorkflowRuns.interrupt"]
+    assert [(t["id"], t["state"]) for t in client.tasks()] == [(task_id, runtime_state)]
     assert {a["path"]: a for a in client.artifacts(task_id)} == artifacts
     assert store.runs.get(original_run)["status"]["task"]["id"] == task_id
-    no_collected_result()
+    no_collected_result(store, f"results/muferro/{original_run}")
+    return {"recovered": {"status": recovered["status"], "tasks": [{key: t[key] for key in (
+                "step", "status", "attempt", "error", "progress")} for t in recovered["tasks"]]},
+            "recover_events": [{key: e.get(key) for key in ("step", "attempt", "status", "executor_id")} for e in added],
+            "observe_after_recover": observed}
 
-    # An explicit manual start (no approval) adopts the original simulation run and its succeeded Runtime task.
-    manual.call("project.workflow_runs.start", run_args)
 
-    def finished():
-        run = manual.call("project.workflow_runs.get", run_args)["run"]
+def until_complete(s, m, timeout, what):
+    """The stopped, complete workflow run; the Runtime scheduler advances only here (no bridge ticks it)."""
+    def complete():
+        s["supervisor"].tick()
+        run = m["bridge"].call("project.workflow_runs.get", m["run_args"])["run"]
         return run if run["status"] == "stopped" and run["complete"] else None
+    return until_true(complete, timeout, what)
 
-    done = until_true(finished, 120, "the adopted run to collect and analyse")
-    manual_identity = next(r["value"] for r in probe_records(s, manual_pid) if r["name"] == "identity")
+
+def adopted_and_analysed(s, k, m, done, stages, artifacts, expected, prefix):
+    """The manual start's attempt 2 adopted the original simulation run and Runtime task (its progress ``stages``),
+    froze the Runtime's verified result bytes as the row's snapshot and ran the row's analysis on that snapshot in the
+    stock graph worker. The person's approved start stays first; the manual start is a separate, unapproved one."""
+    store, client, manual = s["store"], s["client"], m["bridge"]
+    run_id, task_id = k["run_id"], k["task_id"]
+    original_run = k["simulate"]["progress"]["simulation_run_id"]
+    manual_identity = next(r["value"] for r in probe_records(s, m["pid"]) if r["name"] == "identity")
     started = started_events(store, run_id)
-    assert len(started) == 2 and started[0] == o["started"][0] and started[0]["approval"] == envelope
+    assert len(started) == 2 and started[0] == k["started"][0] and started[0]["approval"] == k["envelope"]
     assert "approval" not in started[1] and started[1]["executor_id"] == manual_identity["executor_id"]
-    assert started[1]["owner"]["pid"] == manual_pid and manual_identity["executor_id"] != identity["executor_id"]
+    assert started[1]["owner"]["pid"] == m["pid"] and manual_identity["executor_id"] != k["identity"]["executor_id"]
     by_step = {t["step"]: t for t in done["tasks"]}
     simulate, energy = by_step["simulate"], by_step["energy"]
     assert simulate["status"] == "succeeded" and simulate["attempt"] == 2 and energy["status"] == "succeeded"
@@ -913,14 +963,13 @@ def test_offline_finished_task_is_recovered_by_hand_then_adopted_by_an_explicit_
         _, final_events = store.workflow_runs._read(db, run_id)
     adopted = [e for e in final_events if e["step"] == "simulate" and e["attempt"] == 2 and "progress" in e]
     assert adopted[0]["progress"] == {"stage": "adopted", "simulation_run_id": original_run, "adopted_from": 1}
-    assert [e["progress"]["stage"] for e in adopted] == ["adopted", "collecting"]
-    assert len(submissions) == 1 and cancels == [] and [(t["id"], t["state"]) for t in client.tasks()] == [
+    assert [e["progress"]["stage"] for e in adopted] == stages
+    assert len(k["submissions"]) == 1 and k["cancels"] == [] and [(t["id"], t["state"]) for t in client.tasks()] == [
         (task_id, "succeeded")]
 
     # The collected result files are the Runtime's verified bytes, frozen as the row's snapshot.
-    expected, prefix = o["expected"], o["prefix"]
     directory = store.directory / produced["directory"]
-    assert produced["directory"] == original_directory
+    assert produced["directory"] == f"results/muferro/{original_run}"
     on_disk = {name: hashlib.sha256((directory / name).read_bytes()).hexdigest() for name in produced["files"]}
     assert {name: artifacts[name]["sha256"] for name in on_disk} == on_disk  # the Runtime's own digests
     fixed = {path[len(prefix):]: digest for path, digest in expected.items()}
@@ -932,55 +981,187 @@ def test_offline_finished_task_is_recovered_by_hand_then_adopted_by_an_explicit_
     assert {f["path"]: (f["record_id"], f["sha256"]) for f in snapshot["manifest"]["files"]} == {
         f"{produced['directory']}/{name}": (produced["files"][name], on_disk[name]) for name in produced["files"]}
     assert energy["produced"]["snapshot_id"] == produced["snapshot_id"]
-    analysis = manual.call("project.analysis_runs.get", {"handle": handle,
+    analysis = manual.call("project.analysis_runs.get", {"handle": m["handle"],
                                                          "run_id": energy["produced"]["analysis_run_id"]})["run"]
     assert analysis["status"] == "succeeded", analysis
     assert analysis["snapshot_id"] == produced["snapshot_id"] and analysis["snapshot_sha256"] == snapshot["sha256"]
-    result = manual.call("project.analysis_runs.result", {"handle": handle, "run_id": analysis["id"]})["result"]
+    result = manual.call("project.analysis_runs.result", {"handle": m["handle"], "run_id": analysis["id"]})["result"]
     trace = result["outputs"]["energy"]
     assert trace["type"] == "table" and trace["columns"]["step"] == [1, 2, 3] and result["warnings"] == []
     assert trace["columns"]["Total Energy"] == [-1.125, -2.25, -3.375]
-    workers = [r["value"] for r in probe_records(s, manual_pid) if r["name"] == "graph_worker"]
+    workers = [r["value"] for r in probe_records(s, m["pid"]) if r["name"] == "graph_worker"]
     assert [(w["command"], w["parent"]) for w in workers] == [(["-m", "suan.desktop_bridge.graph_worker_main"],
-                                                               manual_pid)]  # the stock worker, this bridge's child
-    assert calls() == ["WorkflowRunExecutor.recover", "WorkflowRuns.interrupt", "WorkflowRunExecutor.start",
-                       "WorkflowRuns.start", "analysis"]
+                                                               m["pid"])]  # the stock worker, this bridge's child
+    return {"manual_identity": manual_identity, "started": started, "adopted_progress": [e["progress"] for e in adopted],
+            "simulate": {key: simulate[key] for key in ("status", "attempt", "produced")},
+            "energy": {key: energy[key] for key in ("status", "attempt", "produced")},
+            "snapshot": {"id": snapshot["id"], "sha256": snapshot["sha256"], "files": len(snapshot["manifest"]["files"])},
+            "result_files_sha256": on_disk, "analysis_run": {key: analysis.get(key) for key in (
+                "id", "status", "snapshot_id", "snapshot_sha256", "result", "error")},
+            "analysis_energy_output": trace, "graph_workers": workers}
 
-    # The original approval still accounts for the run; the manual start is a separate, unapproved start.
-    receipt = manual.call("project.agent.run_observe", args)["receipt"]
-    assert receipt["outcome"] == "started" and receipt["approval"] == envelope
-    assert receipt["executor_id"] == identity["executor_id"] and receipt["run_status"] == "stopped"
-    assert manual.call("project.agent.run_plan", args)["item"] == item
-    replay = manual.call("project.agent.run_decide", decision)["receipt"]
+
+def closed_with_original_approval(s, k, m, a):
+    """The original approval still accounts for the run: observation reads it and a reviewed repeat agent decision
+    replays that historical receipt without dispatching. The manual bridge then closes cleanly and reaps its worker."""
+    manual, calls, item = m["bridge"], m["calls"], k["item"]
+    receipt = manual.call("project.agent.run_observe", m["args"])["receipt"]
+    assert receipt["outcome"] == "started" and receipt["approval"] == k["envelope"]
+    assert receipt["executor_id"] == k["identity"]["executor_id"] and receipt["run_status"] == "stopped"
+    assert manual.call("project.agent.run_plan", m["args"])["item"] == item
+    replay = manual.call("project.agent.run_decide", m["decision"])["receipt"]
     assert replay == receipt  # a reviewed repeat decision replays the historical receipt; nothing is dispatched
     assert calls()[-1] == "AgentExecutor.decide_run" and calls().count("WorkflowRuns.start") == 1
-    view = manual.call("project.agent.get", params)
+    view = manual.call("project.agent.get", m["params"])
     assert [e["item_id"] for e in view["events"] if e["kind"] == "approval_decided"] == [item["item_id"]]
-    assert manual.call("project.agent.verify", params)["ok"]
-    assert started_events(store, run_id) == started and len(submissions) == 1 and cancels == []
+    assert manual.call("project.agent.verify", m["params"])["ok"]
+    assert started_events(s["store"], k["run_id"]) == a["started"]
+    assert len(k["submissions"]) == 1 and k["cancels"] == []
     assert manual.close() == 0
     assert not manual.violations, manual.violations
+    worker = a["graph_workers"][0]
     try:
-        worker_birth = psutil.Process(workers[0]["pid"]).create_time()
+        worker_birth = psutil.Process(worker["pid"]).create_time()
     except psutil.NoSuchProcess:
         worker_birth = None
-    assert worker_birth != workers[0]["created_at"]
+    assert worker_birth != worker["created_at"]
+    return {"observe_after_start": receipt, "repeat_decision_replay": replay, "manual_calls": calls()}
+
+
+def test_offline_finished_task_is_recovered_by_hand_then_adopted_by_an_explicit_workflow_start(
+        scan, runtime, monkeypatch, request):
+    """The offline-finish case above, with its observation-only checks unchanged, then the existing manual workflow
+    controls in a third strict bridge process that uses the stock graph worker (docs/project-workflows.md "按行运行",
+    "MuFerro 步骤"). An explicit ``recover`` without ``force`` marks the vanished executor's attempt interrupted and stops
+    the run; an explicit ``start`` adopts the original succeeded simulation run and Runtime task (no new submission),
+    collects and freezes its verified outputs, then runs the row's downstream analysis. The person's original approval
+    stays the only one: a repeat agent decision is refused before review and replays the historical receipt after it,
+    and neither recover, observation nor the repeat decision submits, cancels or starts anything."""
+    s = scan
+    use_energy_trace(s)
+    o = offline_finish_observed(s, runtime, monkeypatch, request)
+    no_collected_result(s["store"], f"results/muferro/{o['simulate']['progress']['simulation_run_id']}")
+    m = manual_bridge(request, s, o)
+    r = recovered_by_hand(s, o, m, "succeeded")
+
+    # An explicit manual start (no approval) adopts the original simulation run and its succeeded Runtime task.
+    m["bridge"].call("project.workflow_runs.start", m["run_args"])
+    done = until_complete(s, m, 120, "the adopted run to collect and analyse")
+    a = adopted_and_analysed(s, o, m, done, ["adopted", "collecting"], o["artifacts"], o["expected"], o["prefix"])
+    assert m["calls"]() == ["WorkflowRunExecutor.recover", "WorkflowRuns.interrupt", "WorkflowRunExecutor.start",
+                            "WorkflowRuns.start", "analysis"]
+    c = closed_with_original_approval(s, o, m, a)
     (s["tmp"] / "adopt-summary.json").write_text(json.dumps({
-        "manual_pid": manual_pid, "manual_executor_id": manual_identity["executor_id"],
-        "first_executor_id": identity["executor_id"], "run_id": run_id, "item_id": item["item_id"],
-        "runtime_task": task_id, "simulation_run_id": original_run, "refused_repeat_before_review": refused,
-        "recovered": {"status": recovered["status"], "tasks": [{k: t[k] for k in (
-            "step", "status", "attempt", "error", "progress")} for t in recovered["tasks"]]},
-        "recover_events": [{k: e.get(k) for k in ("step", "attempt", "status", "executor_id")} for e in added],
-        "observe_after_recover": observed, "started_events": started,
-        "adopted_progress": [e["progress"] for e in adopted], "simulate": {k: simulate[k] for k in (
-            "status", "attempt", "produced")}, "energy": {k: energy[k] for k in ("status", "attempt", "produced")},
-        "snapshot": {"id": snapshot["id"], "sha256": snapshot["sha256"], "files": len(snapshot["manifest"]["files"])},
-        "result_files_sha256": on_disk, "analysis_run": {k: analysis.get(k) for k in (
-            "id", "status", "snapshot_id", "snapshot_sha256", "result", "error")},
-        "analysis_energy_output": trace, "graph_workers": workers, "observe_after_start": receipt, "repeat_decision_replay": replay,
-        "runtime_submissions": len(submissions), "runtime_cancels": len(cancels), "manual_calls": calls()},
+        "manual_pid": m["pid"], "manual_executor_id": a["manual_identity"]["executor_id"],
+        "first_executor_id": o["identity"]["executor_id"], "run_id": o["run_id"], "item_id": o["item"]["item_id"],
+        "runtime_task": o["task_id"], "simulation_run_id": o["simulate"]["progress"]["simulation_run_id"],
+        "refused_repeat_before_review": m["refused"], **r, "started_events": a["started"],
+        **{key: a[key] for key in ("adopted_progress", "simulate", "energy", "snapshot", "result_files_sha256",
+                                   "analysis_run", "analysis_energy_output", "graph_workers")}, **c,
+        "runtime_submissions": len(o["submissions"]), "runtime_cancels": len(o["cancels"])},
         indent=2, default=str), encoding="utf-8")
+
+
+def test_running_task_is_recovered_by_hand_then_followed_live_by_an_explicit_workflow_start(
+        scan, runtime, monkeypatch, request):
+    """The live counterpart of the offline case above: the strict bridge process is killed after the person's approval
+    is durable and the Runtime runs the gated synthetic solver, which stays held throughout. A fresh bridge only
+    observes. In a third bridge, a non-forced ``recover`` and an explicit ``start`` make attempt 2 follow the same
+    running Runtime task, simulation run and solver process (exact PID and birth) without submitting, cancelling or
+    collecting; a repeated manual start while it follows claims nothing. Only after the desktop observed the running
+    phase is the gate opened: the run collects once and binds output, snapshot and analysis to the original task, with
+    one Runtime submission in total and the original approval envelope."""
+    s = scan
+    store, client = s["store"], s["client"]
+    use_energy_trace(s)
+    k = held_solver_killed(s, runtime, monkeypatch, request)
+    run_id, task_id, held, envelope = k["run_id"], k["task_id"], k["held"], k["envelope"]
+    submissions, cancels = k["submissions"], k["cancels"]
+    original_run = k["simulate"]["progress"]["simulation_run_id"]
+
+    def still_held():
+        """The original solver process, unreleased and unreplaced; its Runtime task running; nothing new submitted,
+        cancelled or collected."""
+        assert solver_alive(held) and not k["release"].exists()
+        assert json.loads(k["marker"].read_text(encoding="utf-8")) == held
+        assert [(t["id"], t["state"]) for t in client.tasks()] == [(task_id, "running")]
+        assert len(submissions) == 1 and cancels == []
+        no_collected_result(store, f"results/muferro/{original_run}")
+
+    still_held()
+    f = observed_only(request, s, k, "running")
+    still_held()
+    m = manual_bridge(request, s, k)
+    r = recovered_by_hand(s, k, m, "running")
+    still_held()
+
+    # An explicit manual start (no approval): attempt 2 adopts the original simulation run and follows its task.
+    manual, calls = m["bridge"], m["calls"]
+    manual.call("project.workflow_runs.start", m["run_args"])
+
+    def following():
+        """Attempt 2's own running progress (until it records one, the task shows attempt 1's last progress)."""
+        run = manual.call("project.workflow_runs.get", m["run_args"])["run"]
+        progress = next(t for t in run["tasks"] if t["step"] == "simulate")["progress"] or {}
+        return run if (progress.get("attempt"), progress.get("stage")) == (2, "running") else None
+
+    running = until_true(following, 60, "attempt 2 to follow the running Runtime task")
+    manual_identity = next(r["value"] for r in probe_records(s, m["pid"]) if r["name"] == "identity")
+    assert running["status"] == "running" and running["executor_id"] == manual_identity["executor_id"]
+    assert running["owner"]["pid"] == m["pid"]
+    by_step = {t["step"]: t for t in running["tasks"]}
+    following_progress = {"stage": "running", "simulation_run_id": original_run, "state": "running", "task_id": task_id}
+    assert by_step["simulate"]["status"] == "running" and by_step["simulate"]["attempt"] == 2
+    assert by_step["simulate"]["progress"] == {"attempt": 2, **following_progress}
+    assert by_step["energy"]["status"] == "pending" and by_step["energy"]["attempt"] == 0
+    with store._connect() as db:
+        _, events = store.workflow_runs._read(db, run_id)
+    live = [e["progress"] for e in events if e["step"] == "simulate" and e["attempt"] == 2 and "progress" in e]
+    assert live == [{"stage": "adopted", "simulation_run_id": original_run, "adopted_from": 1}, following_progress]
+    started = started_events(store, run_id)
+    assert len(started) == 2 and started[0] == k["started"][0] and "approval" not in started[1]
+    assert started[1]["executor_id"] == manual_identity["executor_id"]
+    assert store.runs.get(original_run)["status"]["task"]["id"] == task_id
+    assert calls() == ["WorkflowRunExecutor.recover", "WorkflowRuns.interrupt", "WorkflowRunExecutor.start",
+                       "WorkflowRuns.start"]
+    observed = manual.call("project.agent.run_observe", m["args"])["receipt"]
+    assert observed["outcome"] == "started" and observed["approval"] == envelope
+    assert observed["run_status"] == "running" and observed["executor_id"] == k["identity"]["executor_id"]
+    # A repeated manual start while attempt 2 follows the task returns the executing run and claims nothing.
+    again = manual.call("project.workflow_runs.start", m["run_args"])["run"]
+    assert again["status"] == "running" and again["executor_id"] == manual_identity["executor_id"]
+    assert calls()[-1] == "WorkflowRunExecutor.start" and calls().count("WorkflowRuns.start") == 1
+    assert started_events(store, run_id) == started
+    still_held()
+
+    # Only now is the gate opened: the Runtime finishes the same task and this bridge collects it once.
+    k["release"].touch()
+    done = until_complete(s, m, 120, "the followed run to collect and analyse")
+    assert not solver_alive(held)
+    finished = client.task(task_id)
+    assert finished["state"] == "succeeded" and finished["exit_code"] == 0, finished
+    artifacts, expected, prefix, downloaded = fixed_outputs(s, k)
+    a = adopted_and_analysed(s, k, m, done, ["adopted", "running", "collecting"], artifacts, expected, prefix)
+    assert a["started"] == started
+    assert calls() == ["WorkflowRunExecutor.recover", "WorkflowRuns.interrupt", "WorkflowRunExecutor.start",
+                       "WorkflowRuns.start", "WorkflowRunExecutor.start", "analysis"]
+    c = closed_with_original_approval(s, k, m, a)
+    (s["tmp"] / "live-adopt-summary.json").write_text(json.dumps({
+        "first_pid": k["first_pid"], "first_returncode": k["first"].process.returncode, "fresh_pid": f["fresh_pid"],
+        "manual_pid": m["pid"], "first_executor_id": k["identity"]["executor_id"],
+        "fresh_executor_id": f["fresh_identity"]["executor_id"], "manual_executor_id": manual_identity["executor_id"],
+        "run_id": run_id, "item_id": k["item"]["item_id"], "runtime_task": task_id, "simulation_run_id": original_run,
+        "held_solver": held, "withheld_reply_outcome": k["reply"]["result"]["receipt"]["outcome"],
+        "fresh_observe": f["observe"], "fresh_calls": f["fresh_calls"],
+        "refused_repeat_before_review": m["refused"], **r, "following_progress": live,
+        "observe_while_following": observed, "repeat_start_while_following": {
+            key: again[key] for key in ("status", "executor_id")},
+        "runtime_terminal": {key: finished.get(key) for key in ("state", "exit_code", "reason", "finished_at")},
+        "fixed_outputs_sha256": expected, "downloaded_outputs_sha256": downloaded, "started_events": started,
+        **{key: a[key] for key in ("adopted_progress", "simulate", "energy", "snapshot", "result_files_sha256",
+                                   "analysis_run", "analysis_energy_output", "graph_workers")}, **c,
+        "runtime_submissions": len(submissions), "runtime_cancels": len(cancels)}, indent=2, default=str),
+        encoding="utf-8")
 
 
 def test_the_agent_proposes_a_scan_a_person_runs_it_and_the_agent_analyses_the_results(scan, monitor):
