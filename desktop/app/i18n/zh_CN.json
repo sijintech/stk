@@ -892,7 +892,7 @@
   "transfers.none": "暂无传输",
   "transfers.remote": "远端路径：{path}",
   "transfers.resume": "继续",
-  "transfers.resume.tip": "从中断处继续传输",
+  "transfers.resume.tip": "继续已中断、失败或取消的传输",
   "transfers.review": "已上传；导入操作 {id} 等待控制服务审核",
   "transfers.review_body": "所有数据已传到控制服务。导入工作区需要审核（会写入工作区）；请在任务编辑器的审核面板中批准，或请控制服务所有者批准。",
   "transfers.review_hint": "等待审核",

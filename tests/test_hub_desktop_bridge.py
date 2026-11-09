@@ -236,20 +236,74 @@ def test_upload_through_the_hub_resumes_waits_for_review_and_imports(live, inpro
     restarted.close()
 
 
-def test_cancelling_an_upload_rejects_its_pending_import(live, inproc, tmp_path):  # noqa: F811
+@pytest.mark.parametrize("receipt", ["rejected", "lost", "approval_won", "older_attempt"])
+def test_cancelled_upload_resumes_using_the_original_import_receipt(  # noqa: F811
+        live, inproc, tmp_path, monkeypatch, receipt):
+    from suan.desktop_bridge.backends import action_id
+
     source = tmp_path / "a.txt"
     source.write_bytes(b"abc")
     harness = inproc()
     hub_id, target = pair(harness, live)
     workspace = harness.call("workspace.create", {**target, "name": "取消", "idempotency_key": "c"})["workspace"]["id"]
     transfer = harness.call("upload.start", {**target, "workspace_id": workspace, "source": str(source)})["transfer"]
-    harness.wait_event(lambda e: e["event"] == "transfer.updated" and e["data"]["transfer"]["id"] == transfer["id"]
-                       and e["data"]["transfer"].get("action", {}).get("state") == "review")
-    cancelled = harness.call("transfer.cancel", {"id": transfer["id"]})["transfer"]
-    assert cancelled["state"] == "cancelled" and cancelled["action"]["state"] == "rejected"
-    assert [a["state"] for a in live.actions("workspace.import")] == ["rejected"]
-    assert live.client.files(workspace) == []
-    harness.close()
+    identity = {"id": transfer["id"]}
+
+    def waiting_for_review(event):
+        return (event["event"] == "transfer.updated" and event["data"]["transfer"]["id"] == transfer["id"]
+                and event["data"]["transfer"].get("action", {}).get("state") == "review")
+
+    review = harness.wait_event(waiting_for_review)["data"]["transfer"]["action"]
+    original_review = HubClient.review
+
+    def resolve_before_reply(self, aid, approved):
+        if receipt == "approval_won" and aid == review["id"] and not approved:
+            original_review(self, aid, True)
+        result = original_review(self, aid, approved)
+        if receipt == "lost" and aid == review["id"] and not approved:
+            raise ConnectionResetError("simulated reply loss after rejection")
+        return result
+
+    monkeypatch.setattr(HubClient, "review", resolve_before_reply)
+    try:
+        cancelled = harness.call("transfer.cancel", identity)["transfer"]
+        assert cancelled["state"] == "cancelled" and cancelled["action"]["id"] == review["id"]
+        if receipt == "approval_won":
+            assert cancelled["action"]["state"] in ("queued", "succeeded")
+        else:
+            assert cancelled["action"]["state"] == ("review" if receipt == "lost" else "rejected")
+            assert live.store.action(review["id"])["state"] == "rejected"
+            assert live.client.files(workspace) == []
+        if receipt == "older_attempt":
+            manager = harness.bridge.transfers
+            journal = manager.load(transfer["id"])
+            journal["import_attempt"] = 1  # An older journal can retain the previous rejection summary.
+            manager.save(journal)
+        harness.close()
+        harness = inproc()
+        assert harness.call("hello", {"protocol": 1})["resumed_transfers"] == []
+        assert harness.call("transfer.get", identity)["transfer"]["state"] == "cancelled"
+        mark = harness.mark()
+        assert harness.call("transfer.resume", identity)["transfer"]["id"] == transfer["id"]
+        if receipt == "approval_won":
+            expected = review["id"]
+        else:
+            expected = action_id("workspace.import", review["node_id"], transfer["id"], 1)
+            harness.wait_event(lambda event: waiting_for_review(event)
+                               and event["data"]["transfer"]["action"]["id"] == expected,
+                               start=mark, timeout=5)
+            assert harness.call("transfer.resume", identity)["transfer"]["action"]["id"] == expected
+            assert {a["id"]: a["state"] for a in live.actions("workspace.import")} == {
+                review["id"]: "rejected", expected: "review"}
+            assert live.client.files(workspace) == []
+            harness.call("hub.action", {"connection": hub_id, "action_id": expected})
+            harness.call("hub.review", {"connection": hub_id, "action_id": expected, "approved": True})
+        done = harness.wait_transfer(transfer["id"], start=mark)
+        assert done["state"] == "completed" and done["action"]["id"] == expected
+        assert {a["id"] for a in live.actions("workspace.import")} == {review["id"], expected}
+        assert [entry["path"] for entry in live.client.files(workspace)] == [source.name]
+    finally:
+        harness.close()
 
 
 # ---------------------------------------------------------------------------

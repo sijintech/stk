@@ -235,7 +235,8 @@ def journal_shape(record, transfer_id):
         number = record.get(key)
         if number is not None and (isinstance(number, bool) or not isinstance(number, int)):
             return False
-    return all(isinstance(record.get(key), optional_text) for key in ("workspace_id", "node", "remote"))
+    return all(isinstance(record.get(key), optional_text)
+               for key in ("workspace_id", "node", "remote", "cancelled_import_id"))
 
 
 MANIFEST_KEYS = {"path", "size", "sha256"}
@@ -525,6 +526,7 @@ def require_readable_identity(sidecar, items, source, remote, transfer_id):
                "local": str(source), "remote": remote, "connection_identity": sidecar["server_key"],
                "idempotency_key": sidecar["idempotency_key"], "request": sidecar["request"],
                "files_total": largest, "bytes_total": largest, "import_attempt": MAX_ATTEMPTS,
+               "cancelled_import_id": INTENT_RESERVE["action_id"],
                "current": max((name for _, name in items), key=len),
                "items": [{"local": str(path), "remote": entry["path"], "size": entry["size"], "mtime_ns": largest,
                           "sha256": entry["sha256"], "done": False, "upload_id": "f" * 32}

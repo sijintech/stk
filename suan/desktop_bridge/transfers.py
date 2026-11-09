@@ -13,7 +13,8 @@ during the work, so a bridge that crashed or was closed resumes where it stopped
   action). Imports are always reviewed: the transfer stays ``running`` with ``action.state:
   "review"`` until the owner decides, without holding a transfer slot. A rejected or failed import
   fails the transfer; ``transfer.resume`` then asks again with a new action. ``transfer.cancel``
-  rejects an import still in review.
+  rejects an import still in review. Resuming a cancelled transfer asks again once the original
+  import's rejection is confirmed.
 * **Downloads** append to ``<dest>.part`` next to the destination (its expected ``{path, size,
   sha256}`` in ``<dest>.part.json``), resume from the part's size, and move the file into place
   only after its sha256 matched the Runtime's listing (``checksum_mismatch`` otherwise; the part
@@ -331,6 +332,11 @@ class TransferManager:
                     return self.public(record)
                 if running is None or not running.is_alive():
                     self.cancelled.discard(transfer_id)
+                    action = record.get("action") or {}
+                    if (record["state"] == "cancelled" and record["kind"] == "upload"
+                            and action.get("kind") == "workspace.import"
+                            and action.get("state") in ("review", "rejected")):
+                        record["cancelled_import_id"] = action["id"]
                     record.update(state="queued", error=None)
                     self.save(record)
                     self._launch(transfer_id)
@@ -626,6 +632,23 @@ class TransferManager:
         files = [{"path": item["remote"], "sha256": item["sha256"], "size": item["size"]} for item in record["items"]]
         record["current"] = None
         self._check(transfer_id)
+        cancelled_import = record.get("cancelled_import_id")
+        if cancelled_import is not None:
+            if cancelled_import == identity:
+                previous = record.get("action") or {}
+                if previous.get("state") != "rejected":
+                    # The hub may have recorded the rejection before its reply was lost.
+                    previous = summary(backend.action_record(identity))
+                if (previous.get("id"), previous.get("node_id"), previous.get("kind"), previous.get("state")) == (
+                        identity, backend.node_id, "workspace.import", "rejected"):
+                    attempt += 1
+                    record["import_attempt"] = attempt
+                    identity = action_id("workspace.import", backend.node_id, transfer_id, attempt)
+                    record.pop("action", None)
+            # Persist the choice before POST so interruption reuses the same successor.
+            record.pop("cancelled_import_id")
+            self.save(record)
+            self._check(transfer_id)
         try:
             action = backend.post_import(record["workspace_id"], files, identity)
         except BridgeError as exc:

@@ -911,16 +911,22 @@ bool handle(const Json &id, const std::string &method, const Json &p)
       error(id, "not_found", "Transfer not found");
       return true;
     }
-    if (method == "transfer.cancel" && (*t)["state"] != "completed") {
+    const std::string state = t->value("state", std::string());
+    if (method == "transfer.cancel" && state != "completed" && state != "failed" && state != "cancelled") {
       (*t)["state"] = "cancelled";
       if ((*t)["action"].is_object()) {
-        if (Json *a = find_by_id(g_model["actions"], (*t)["action"]["id"].get<std::string>())) {
+        Json *a = find_by_id(g_model["actions"], (*t)["action"]["id"].get<std::string>());
+        if (a && (*a)["state"] == "review") {
           (*a)["state"] = "rejected";
+          (*t)["action"] = action_summary(*a);
           hub_changed_locked();
         }
       }
     }
-    if (method == "transfer.resume" && ((*t)["state"] == "interrupted" || (*t)["state"] == "failed")) {
+    if (method == "transfer.resume" && (state == "interrupted" || state == "failed" || state == "cancelled")) {
+      if ((*t)["action"].is_object() && (*t)["action"]["state"] == "rejected") {
+        t->erase("action");
+      }
       (*t)["state"] = "running";
       (*t)["error"] = nullptr;
       (*t)["steps"] = 1;

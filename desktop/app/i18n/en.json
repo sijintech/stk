@@ -892,7 +892,7 @@
   "transfers.none": "No transfers yet",
   "transfers.remote": "Remote: {path}",
   "transfers.resume": "Resume",
-  "transfers.resume.tip": "Continue an interrupted or failed transfer from where it stopped",
+  "transfers.resume.tip": "Continue an interrupted, failed, or cancelled transfer",
   "transfers.review": "Uploaded; the import {id} waits for review on the hub",
   "transfers.review_body": "All bytes are on the hub. The workspace import needs review (it writes into the workspace); approve it in the Jobs editor's review panel or ask the hub owner.",
   "transfers.review_hint": "waiting for review",

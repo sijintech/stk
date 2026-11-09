@@ -48,7 +48,7 @@ class TransfersEditor final : public Editor {
     }
     ui::Layout &row = l.row(false);
     const std::string id = sel ? sel->id : std::string();
-    const bool resumable = sel && (sel->state == "interrupted" || sel->state == "failed");
+    const bool resumable = sel && (sel->state == "interrupted" || sel->state == "failed" || sel->state == "cancelled");
     row.button("resume", ctx.tr("transfers.resume"), [&jobs, id]() { jobs.resume_transfer(id); })
         .disable(!jobs.ready() || !resumable)
         .tip(ctx.tr("transfers.resume.tip"));
@@ -149,7 +149,7 @@ class TransfersEditor final : public Editor {
       if (sel->action) {
         l.label(store.catalog().format("transfers.action",
                                        {{"id", sel->action->id.substr(0, 12)}, {"state", sel->action->state}}));
-        if (sel->action->in_review()) {
+        if (sel->action->in_review() && !sel->finished()) {
           l.paragraph(store.tr("transfers.review_body"));
         }
       }

@@ -410,9 +410,18 @@ TEST(JobsLayout, TransfersEditorResumesAndCancels)
     u.f.drv->frame();
   }
   ASSERT_TRUE(u.find("a4/main/resume")->enabled);
+  const std::string transfer_id = jobs.transfers()[0].id;
+  ASSERT_TRUE(u.find("a4/main/cancel")->enabled);
+  u.click("a4/main/cancel");
+  ASSERT_TRUE(u.pump([&] { return jobs.transfers()[0].state == "cancelled"; }));
+  EXPECT_FALSE(u.find("a4/main/cancel")->enabled);
+  ASSERT_TRUE(u.find("a4/main/resume")->enabled);
   u.click("a4/main/resume");
   ASSERT_TRUE(u.pump([&] { return jobs.transfers()[0].state == "completed"; }));
+  ASSERT_EQ(jobs.transfers().size(), 1u);
+  EXPECT_EQ(jobs.transfers()[0].id, transfer_id);
   EXPECT_EQ(u.find("a4/main/transfers")->table->cell(0, 2), "100");
+  EXPECT_FALSE(u.find("a4/main/resume")->enabled);
   EXPECT_FALSE(u.find("a4/main/cancel")->enabled); /* finished */
 }
 
