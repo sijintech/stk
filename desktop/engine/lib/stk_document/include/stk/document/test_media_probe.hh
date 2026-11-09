@@ -125,6 +125,14 @@ std::shared_ptr<const VisiblePauseObservation> begin_visible_pause_control(
 bool visible_pause_target(wm::NativeWindowHandle parent, std::string_view session_id,
                           const VisiblePauseObservation &observation);
 
+/** Test only: keep this verified visible pause through the next ordinary hide request. */
+bool retain_visible_pause_on_hide(wm::NativeWindowHandle parent, std::string_view session_id,
+                                  const VisiblePauseObservation &observation);
+/** Sample WebKit on the exact hidden view. The reply is independent of pause verification. */
+bool probe_hidden_playback(wm::NativeWindowHandle parent, std::string_view session_id,
+                           const NativeHidePauseTrace &observation,
+                           std::function<void(std::optional<int>)> callback);
+
 /** UI-thread only: bind an input target to the unique ready session and its native navigation.
  * expected_view is compared with the real WKWebView; no native object is returned or sent over IPC.
  */

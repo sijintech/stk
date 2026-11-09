@@ -41,6 +41,7 @@ struct State {
   test::NativePauseSnapshot test_last_pause;
   std::shared_ptr<test::NativeCloseObservation> test_close_observation;
   std::weak_ptr<test::VisiblePauseObservation> test_visible_pause;
+  uint64_t test_retain_visible_pause_generation = 0;
   uint64_t test_isolated_pause_navigation = 0;
 #endif
 };
@@ -837,6 +838,17 @@ class CocoaDocumentView final : public NativeDocumentView {
       return false;
     }
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+    if (!visible_control && state->test_retain_visible_pause_generation) {
+      const auto retained = std::exchange(state->test_retain_visible_pause_generation, 0);
+      const auto pause = cocoa::test_pause_snapshot(state);
+      const auto visible = state->test_visible_pause.lock();
+      if (visible && !visible->visibility_lost && pause.media_generation == retained && pause.acknowledged && pause.verified &&
+          cocoa::visible_for_pause_control(state)) {
+        // The diagnostic lets the real host hide the view without issuing another actuator command.
+        cocoa::observe_hide_pause(state, "repeat-pause-suppressed", detail::MediaPauseVerification::Clock::now());
+        return true;
+      }
+    }
     cocoa::observe_hide_pause(state, "superseded", detail::MediaPauseVerification::Clock::now());
 #endif
     const auto generation = ++state->media_generation;
@@ -1102,6 +1114,16 @@ std::shared_ptr<cocoa::State> find_view(wm::NativeWindowHandle parent, std::stri
   if (!found) { error = "Media test probe session is no longer attached to this window"; }
   return found;
 }
+
+bool matches_hidden_pause(const std::shared_ptr<cocoa::State> &state, const NativeHidePauseTrace &observation)
+{
+  return cocoa::live(state) && state->view && state->result.status == NativeViewStatus::Ready &&
+         state->test_close_observation && state->test_close_observation->hide_pause &&
+         &*state->test_close_observation->hide_pause == &observation &&
+         !state->visible && state->view.hidden && !cocoa::visible_for_pause_control(state) &&
+         !cocoa::owns_focus(state) && state->media_generation == observation.media_generation &&
+         state->result.navigation_generation == observation.navigation_generation;
+}
 }
 
 std::shared_ptr<ResourceSession> resource_session(wm::NativeWindowHandle parent,
@@ -1138,12 +1160,7 @@ std::optional<NativePauseSnapshot> hidden_pause_target(wm::NativeWindowHandle pa
 {
   std::string error;
   const auto state = find_view(parent, session_id, error);
-  if (!state || !state->view || state->result.status != NativeViewStatus::Ready ||
-      !state->test_close_observation || !state->test_close_observation->hide_pause ||
-      &*state->test_close_observation->hide_pause != &observation ||
-      state->visible || !state->view.hidden || cocoa::visible_for_pause_control(state) ||
-      cocoa::owns_focus(state) || state->media_generation != observation.media_generation ||
-      state->result.navigation_generation != observation.navigation_generation) {
+  if (!matches_hidden_pause(state, observation)) {
     return std::nullopt;
   }
   const auto pause = cocoa::test_pause_snapshot(state);
@@ -1187,6 +1204,53 @@ bool visible_pause_target(wm::NativeWindowHandle parent, std::string_view sessio
          state->test_visible_pause.lock().get() == &observation &&
          state->result.navigation_generation == observation.navigation_generation &&
          state->media_generation == observation.media_generation && cocoa::visible_for_pause_control(state);
+}
+
+bool retain_visible_pause_on_hide(wm::NativeWindowHandle parent, std::string_view session_id,
+                                  const VisiblePauseObservation &observation)
+{
+  std::string error;
+  const auto state = find_view(parent, session_id, error);
+  if (!state || !state->test_close_observation || !state->test_close_observation->hide_pause ||
+      state->test_isolated_pause_navigation || state->test_retain_visible_pause_generation) {
+    return false;
+  }
+  const auto visible = state->test_visible_pause.lock();
+  const auto &trace = *state->test_close_observation->hide_pause;
+  const auto pause = cocoa::test_pause_snapshot(state);
+  if (visible.get() != &observation || !observation.verified || observation.visibility_lost || observation.overflow ||
+      trace.overflow || trace.media_generation != observation.media_generation ||
+      trace.navigation_generation != observation.navigation_generation ||
+      !pause.acknowledged || !pause.verified || pause.media_generation != observation.media_generation ||
+      pause.navigation_generation != observation.navigation_generation ||
+      state->result.status != NativeViewStatus::Ready || !cocoa::visible_for_pause_control(state)) {
+    return false;
+  }
+  state->test_retain_visible_pause_generation = observation.media_generation;
+  return true;
+}
+
+bool probe_hidden_playback(wm::NativeWindowHandle parent, std::string_view session_id,
+                           const NativeHidePauseTrace &observation,
+                           std::function<void(std::optional<int>)> callback)
+{
+  std::string error;
+  const auto state = find_view(parent, session_id, error);
+  if (!callback || !matches_hidden_pause(state, observation)) { return false; }
+  const auto close = state->test_close_observation;
+  const std::weak_ptr<cocoa::State> weak = state;
+  __weak WKWebView *expected_view = state->view;
+  cocoa::observe_hide_pause(state, "passive-query", detail::MediaPauseVerification::Clock::now());
+  [state->view requestMediaPlaybackStateWithCompletionHandler:^(WKMediaPlaybackState playback) {
+    const auto current = weak.lock();
+    if (!matches_hidden_pause(current, *close->hide_pause) || current->view != expected_view) {
+      callback(std::nullopt);
+      return;
+    }
+    cocoa::observe_hide_pause(current, "passive-reply", detail::MediaPauseVerification::Clock::now(), int(playback));
+    callback(int(playback));
+  }];
+  return true;
 }
 
 bool matches_native_view(wm::NativeWindowHandle parent, std::string_view session_id,
