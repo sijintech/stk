@@ -80,16 +80,37 @@ class NotRegularFile(OSError):
     """``open_regular``: the path names a FIFO, device, socket or directory, not a regular file."""
 
 
-def open_regular(path):
+def _is_reparse(info):
+    return bool(getattr(info, "st_file_attributes", 0) & _stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _unlinked_regular(path):
+    info = os.lstat(path)
+    if not _stat.S_ISREG(info.st_mode) or _is_reparse(info):
+        raise NotRegularFile(f"Not a regular file or is a symbolic link or reparse point: {path}")
+    return info
+
+
+def open_regular(path, *, follow_symlinks=True):
     """Open a regular file for binary reading; never blocks on a FIFO (``O_NONBLOCK`` + ``fstat``).
 
+    ``follow_symlinks=False`` also rejects symbolic links and reparse points at the last path component.
+    The caller supplies the parent path.
     Raises ``FileNotFoundError`` or :class:`NotRegularFile` (an ``OSError``).
     """
     nonblock = getattr(os, "O_NONBLOCK", 0)
-    descriptor = os.open(path, os.O_RDONLY | nonblock | getattr(os, "O_BINARY", 0))
+    flags = os.O_RDONLY | nonblock | getattr(os, "O_BINARY", 0)
+    before = None if follow_symlinks else _unlinked_regular(path)
+    if before is not None:
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
     try:
-        if not _stat.S_ISREG(os.fstat(descriptor).st_mode):
+        opened = os.fstat(descriptor)
+        if not _stat.S_ISREG(opened.st_mode):
             raise NotRegularFile(f"Not a regular file: {path}")
+        if before is not None and (_is_reparse(opened) or not os.path.samestat(before, opened) or
+                                   not os.path.samestat(_unlinked_regular(path), opened)):
+            raise NotRegularFile(f"File changed while opening: {path}")
         if nonblock:
             import fcntl
             fcntl.fcntl(descriptor, fcntl.F_SETFL, fcntl.fcntl(descriptor, fcntl.F_GETFL) & ~nonblock)

@@ -19,6 +19,8 @@ import stat
 import sys
 import threading
 
+from suan.connectors.files import NotRegularFile, open_regular
+
 MAX_TAIL_LINE = 1024 * 1024  # longer native lines are skipped
 POLL_BYTES = 8 * 1024 * 1024  # bytes read per poll; the rest waits for the next poll
 
@@ -46,9 +48,10 @@ class LineTail:
     lines returned so far (0-based index of the next line).
     """
 
-    def __init__(self, path, max_line=MAX_TAIL_LINE):
+    def __init__(self, path, max_line=MAX_TAIL_LINE, *, follow_symlinks=True):
         self.path = Path(path)
         self.max_line = max_line
+        self.follow_symlinks = follow_symlinks
         self.offset = 0
         self.line_number = 0
         self.restarts = 0
@@ -56,13 +59,11 @@ class LineTail:
 
     def poll(self, max_bytes=POLL_BYTES):
         try:
-            stream = open(self.path, "rb")
-        except FileNotFoundError:
+            stream = open_regular(self.path, follow_symlinks=self.follow_symlinks)
+        except (FileNotFoundError, NotRegularFile):
             return []
         with stream:
             info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode):
-                return []
             if info.st_size < self.offset:
                 self.offset, self.line_number, self._skipping = 0, 0, False
                 self.restarts += 1

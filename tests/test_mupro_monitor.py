@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 import math
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -208,6 +209,28 @@ def test_replay_of_a_finished_directory(tmp_path):
     assert events[-2]["data"] == {"verifier": "stk-mupro-1", "status": "passed", "failed_checks": []}
     assert events[-1]["data"] == {"status": "succeeded"} and {e["src"] for e in events} == {"adapter"}
     assert len(frames(events)) == 30 and [e["seq"] for e in events] == list(range(len(events)))
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="Named pipes are tested on POSIX")
+def test_replay_finishes_with_non_regular_solver_logs(tmp_path):
+    work = tmp_path / "work"
+    write_case(work)
+    write_outputs(work)
+    for name in ("energy_out.dat", "mupro_progress.jsonl"):
+        output = work / name
+        output.unlink()
+        os.mkfifo(output)
+    path = tmp_path / "events.jsonl"
+    program = ("import sys\n"
+               "from suan.monitor.emit import Emitter\n"
+               "from suan.mupro.monitor import replay\n"
+               "print(replay(Emitter(sys.argv[2], src='adapter', environ={}), sys.argv[1])['classification'])\n")
+    result = subprocess.run([sys.executable, "-c", program, str(work), str(path)], capture_output=True,
+                            text=True, timeout=8, check=False)
+    assert result.returncode == 0 and result.stdout.strip() == "invalid_result", result.stderr
+    events = events_of(path)
+    assert "metrics" not in kinds(events) and "progress" not in kinds(events)
+    assert events[-1]["type"] == "run.completed" and events[-1]["data"]["status"] == "failed"
 
 
 def test_disabled_monitor_is_inert(tmp_path):

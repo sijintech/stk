@@ -350,6 +350,43 @@ def test_verify_classifies_outputs(tmp_path):
     assert report["classification"] == "invalid_result" and "component" in report["reason"]
 
 
+@pytest.mark.parametrize("name, check_id", [
+    ("mupro_completion.json", "completion"), ("energy_out.dat", "energy"),
+    ("mupro_progress.jsonl", "progress"), ("Polar.00000000.dat", "frames"),
+])
+def test_verify_rejects_linked_outputs(tmp_path, name, check_id):
+    case = tmp_path / "case"
+    write_case(case)
+    write_outputs(case)
+    output = case / name
+    separate = output.replace(tmp_path / name)
+    try:
+        output.symlink_to(separate)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"Cannot create a test symbolic link: {exc}")
+
+    report = verify_run(case)
+    assert report["verification"]["status"] == "failed"
+    assert report["classification"] == "invalid_result" and name in report["reason"]
+    assert [check["id"] for check in report["verification"]["checks"] if check["status"] == "fail"] == [check_id]
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="Named pipes are tested on POSIX")
+def test_verify_cli_returns_for_a_non_regular_result(tmp_path):
+    write_case(tmp_path)
+    write_outputs(tmp_path)
+    output = tmp_path / "energy_out.dat"
+    output.unlink()
+    os.mkfifo(output)
+
+    result = subprocess.run([sys.executable, "-m", "suan.mupro", "verify", "--work", str(tmp_path), "--json"],
+                            capture_output=True, text=True, timeout=8, check=False)
+    assert result.returncode == 3, result.stderr
+    report = json.loads(result.stdout)
+    assert report["classification"] == "invalid_result" and output.name in report["reason"]
+    assert [check["id"] for check in report["verification"]["checks"] if check["status"] == "fail"] == ["energy"]
+
+
 def _replace(name, old, new):
     def edit(case):
         path = case / name

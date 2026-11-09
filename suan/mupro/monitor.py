@@ -31,6 +31,7 @@ import math
 import os
 import platform
 
+from suan.connectors.files import NotRegularFile, open_regular
 from suan.monitor.emit import Emitter
 from suan.monitor.events import VERIFICATION_STATUSES
 from suan.monitor.tail import LineTail, PollThread, StableFiles, report, safe_call
@@ -106,8 +107,8 @@ class MuferroAdapter:
         self.emitter = emitter
         self.folder = Path(folder)
         self.prefix = "" if case_dir in ("", ".") else case_dir.rstrip("/") + "/"
-        self.progress = LineTail(self.folder / "mupro_progress.jsonl")
-        self.energy = LineTail(self.folder / "energy_out.dat")
+        self.progress = LineTail(self.folder / "mupro_progress.jsonl", follow_symlinks=False)
+        self.energy = LineTail(self.folder / "energy_out.dat", follow_symlinks=False)
         self.frames = StableFiles(self.folder, FRAME, stable_polls)
         self.progress_step = None
         self.declared = False
@@ -191,15 +192,17 @@ class MuferroAdapter:
 
     def _poll_completion(self, final):
         path = self.folder / "mupro_completion.json"
-        if self.completion_seen or not path.is_file():
+        if self.completion_seen:
             return
         try:
-            with open(path, "rb") as stream:
+            with open_regular(path, follow_symlinks=False) as stream:
                 data = json.loads(stream.read(65536))
             if not isinstance(data, dict):
                 raise ValueError("not an object")
             details = ", ".join(f"{key}={data[key]}" for key in ("completed_steps", "final_step") if key in data)
             text = "muFerro wrote mupro_completion.json" + (f": {details}" if details else "")
+        except (FileNotFoundError, NotRegularFile):
+            return
         except (OSError, ValueError, RecursionError):
             if not final:
                 return  # it may still be being written

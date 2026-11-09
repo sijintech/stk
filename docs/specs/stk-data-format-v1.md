@@ -359,7 +359,9 @@ Registration: when two connectors claim one id the higher `priority` wins (priva
   `Total Energy`; the same names without a header or before the first row), float64,
   `unit: "normalized"`, quantity `energy`.
 - `mupro_progress.jsonl` → table `progress` (`step`, `completed_steps`, `total_steps`).
-- `verify` wraps `suan.mupro.run.verify_run` (`stk-mupro-1`).
+- `verify` wraps `suan.mupro.run.verify_run` (`stk-mupro-1`). The verifier requires regular
+  completion, energy, progress and DAT frame files. It refuses symbolic links or reparse points at
+  the output filename and does not wait for a non-regular output to produce data.
 - Connector 0.2.0 also discovers the selected case's `run.h5` as separately qualified
   `hdf5:<field>` datasets with native dtype, selector and container SHA. Discovery and the optional
   sidecar collection rules are defined in [MuPRO HDF5/1](mupro-hdf5-1.md); they do not replace the

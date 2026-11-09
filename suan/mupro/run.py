@@ -22,6 +22,7 @@ the same either way.
 
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import argparse
+from io import TextIOWrapper
 from itertools import islice
 import json
 import math
@@ -34,6 +35,7 @@ import sys
 from tempfile import TemporaryDirectory
 import tomllib
 
+from suan.connectors.files import open_regular
 from suan.monitor.events import ENV_PATH as MONITOR_ENV
 from suan.runtime.common import atomic_json, now, sha256
 from suan.runtime.launch import mpi_command
@@ -229,7 +231,7 @@ def expected_frames(case):
 def _header(path):
     """Grid and component count from a DAT file's first line; values are never parsed."""
     try:
-        with open(path, "rb") as stream:
+        with open_regular(path, follow_symlinks=False) as stream:
             values = [int(v) for v in stream.readline(4096).split()]
     except (OSError, ValueError):
         return None
@@ -280,8 +282,9 @@ def verify_run(work_dir=".", case_dir=".", *, expected_case=None):
     is invalid_result (contract.py:50-54), and so is any other read or parse error
     (worker.py:132). A wrong energy value count or a non-finite value is
     numerical_failure (worker.py:30-31). Instead of loading fields with NumPy
-    (worker.py:53-63), frames are checked by their header line. Once the case is
-    accepted, every output check runs and the first failure in worker order classifies the run.
+    (worker.py:53-63), frames are checked by their header line. The verifier reads
+    regular result files without following final-component links. Once the case
+    is accepted, every output check runs and the first failure in worker order classifies the run.
     """
     work = Path(work_dir).resolve()
     result = {"classification": None, "reason": "", "qoi": None, "frames": [],
@@ -306,7 +309,9 @@ def verify_run(work_dir=".", case_dir=".", *, expected_case=None):
 
     final = case["start_step"] + case["steps"]
     try:
-        completion = _native_result_json((folder / "mupro_completion.json").read_text(encoding="utf-8"))
+        with TextIOWrapper(open_regular(folder / "mupro_completion.json", follow_symlinks=False),
+                           encoding="utf-8") as stream:
+            completion = _native_result_json(stream.read())
         if _same_native_record(completion, {"app": "muFerro", "completed_steps": case["steps"], "final_step": final}):
             add("completion", f"muFerro completed {case['steps']} steps")
         else:
@@ -317,7 +322,8 @@ def verify_run(work_dir=".", case_dir=".", *, expected_case=None):
     total_energy = None
     try:
         count, steps_match = 0, True
-        with (folder / "energy_out.dat").open(encoding="utf-8") as stream:
+        with TextIOWrapper(open_regular(folder / "energy_out.dat", follow_symlinks=False),
+                           encoding="utf-8") as stream:
             next(stream, None)  # Header.
             for count, line in enumerate(stream, 1):
                 match = ENERGY_ROW.fullmatch(line)
@@ -338,7 +344,8 @@ def verify_run(work_dir=".", case_dir=".", *, expected_case=None):
 
     try:
         count, steps_match = 0, True
-        with (folder / "mupro_progress.jsonl").open(encoding="utf-8") as stream:
+        with TextIOWrapper(open_regular(folder / "mupro_progress.jsonl", follow_symlinks=False),
+                           encoding="utf-8") as stream:
             for count, line in enumerate(stream, 1):
                 expected = {"step": case["start_step"] + count, "completed_steps": count, "total_steps": case["steps"]}
                 steps_match &= _same_native_record(_native_result_json(line), expected)
