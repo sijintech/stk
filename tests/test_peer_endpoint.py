@@ -25,7 +25,7 @@ from suan.peer.protocol import (FORMAT, METHODS, PeerProtocolError, decode_messa
 from suan.peer.transport import NativeTransport, TransportError
 from suan.project import ProjectStore
 from suan.project import edit_operations
-from test_desktop_bridge import bridge_env, inproc  # noqa: F401
+from test_desktop_bridge import BridgeCallError, bridge_env, inproc  # noqa: F401
 
 
 def uuid():
@@ -298,6 +298,95 @@ def test_real_cas_same_operation_changed_request_and_unknown_receipt(connected, 
         a.request("project.table.read", {**target, "table_id": uuid(), "expected_revision": 1})
     assert error.value.code == "not_found"
     assert sides[1].store.info()["revision"] == 1
+
+
+def test_real_peer_and_bridge_race_project_edits_at_one_revision(connected, sides, inproc, monkeypatch, request):
+    """CP-0 F3/F11d: a strict local bridge and an authenticated UDP peer share one SQLite writer."""
+    client, _ = connected()
+    store, target = sides[1].store, sides[1].target
+    bridge = inproc()
+    handle = bridge.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    apply, get = "project.edit_operations.apply_once", "project.edit_operations.get"
+    scopes = {"bridge": {"handle": handle}, "peer": target}
+    callers = {"bridge": bridge.call, "peer": client.request}
+    prefixes = {"bridge": f"stk-bridge-{apply}", "peer": "stk-peer-call"}
+    arrived = {entry: threading.Event() for entry in scopes}
+    names = {"bridge": "Bridge race table", "peer": "Peer race table"}
+
+    def invoke(entry, method, params):
+        try:
+            return callers[entry](method, params, timeout=20), None
+        except (BridgeCallError, PeerProtocolError) as error:
+            return None, error.code
+
+    def edit(entry, name):
+        return {**scopes[entry], "operation_id": uuid(), "expected_revision": 0,
+                "commands": [{"op": "create_table", "name": name}]}
+
+    def lookup(entry, operation_id):
+        return invoke(entry, get, {**scopes[entry], "operation_id": operation_id})
+
+    def stored_receipts():
+        with closing(sqlite3.connect(store.path.as_uri() + "?mode=ro", uri=True)) as db:
+            return db.execute("SELECT scope, operation_id, request, receipt FROM project_edit_operations").fetchall()
+
+    assert store.info()["revision"] == 0 and stored_receipts() == []
+    edits = {entry: edit(entry, name) for entry, name in names.items()}
+    connect = ProjectStore._connect
+
+    def observe_write_entry(self, *, write=False):
+        if write and self.path == store.path:
+            thread_name = threading.current_thread().name
+            for entry, prefix in prefixes.items():
+                if thread_name.startswith(prefix):
+                    arrived[entry].set()
+        return connect(self, write=write)
+
+    # Hold a real SQLite write lock until both requests reach the write entry.
+    # The observer does not select the winner or assert that a worker is already waiting in SQLite.
+    with monkeypatch.context() as patch, ThreadPoolExecutor(max_workers=2) as pool:
+        patch.setattr(ProjectStore, "_connect", observe_write_entry)
+        with closing(sqlite3.connect(store.path, isolation_level=None)) as holder:
+            holder.execute("BEGIN IMMEDIATE")
+            try:
+                futures = {entry: pool.submit(invoke, entry, apply, params) for entry, params in edits.items()}
+                deadline = time.monotonic() + 8
+                for entry, event in arrived.items():
+                    assert event.wait(max(0, deadline - time.monotonic())), f"{entry} did not reach the write entry"
+            finally:
+                holder.execute("ROLLBACK")
+        outcomes = {entry: future.result(timeout=20) for entry, future in futures.items()}
+
+    winners = [entry for entry, (result, _) in outcomes.items() if result is not None]
+    assert len(winners) == 1, outcomes
+    winner, = winners
+    loser, = set(scopes) - {winner}
+    request.node.user_properties.append(("race_winner", winner))
+    assert outcomes[loser] == (None, "conflict")
+    result, error = outcomes[winner]
+    assert error is None and result["replayed"] is False
+    receipt = result["receipt"]
+    won_id, lost_id = (edits[entry]["operation_id"] for entry in (winner, loser))
+    assert receipt["operation_id"] == won_id
+    assert (receipt["base_revision"], receipt["applied_revision"]) == (0, 1)
+    assert (receipt["scope"] == "local") == (winner == "bridge")
+
+    snapshot, history, receipts = store.snapshot(), store.history(), stored_receipts()
+    assert snapshot["project"]["revision"] == 1 and len(history) == 1
+    assert [(table["id"], table["name"]) for table in snapshot["tables"]] == [
+        (receipt["commands"][0]["id"], names[winner])]
+    assert [row[:2] for row in receipts] == [(receipt["scope"], won_id)]
+    assert lookup(winner, won_id) == ({"receipt": receipt}, None)
+    assert lookup(loser, won_id) == (None, "not_found")
+    assert lookup(loser, lost_id) == (None, "not_found")
+    assert invoke(winner, apply, edits[winner]) == ({"receipt": receipt, "replayed": True}, None)
+
+    for entry in scopes:
+        stale = edit(entry, f"Stale {entry} table")
+        assert invoke(entry, apply, stale) == (None, "conflict")
+        assert lookup(entry, stale["operation_id"]) == (None, "not_found")
+    assert (store.snapshot(), store.history(), stored_receipts()) == (snapshot, history, receipts)
+    bridge.assert_clean()
 
 
 def test_real_peer_and_bridge_reject_stale_project_page_continuations(connected, sides, inproc):
