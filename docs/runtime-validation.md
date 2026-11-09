@@ -1,5 +1,19 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · Linux 文献入口实窗与 GUI 桥目录
+
+`2bf4bd50` 将 GUI 的 `--state-dir` 传给桥，使用所给根下的 `state` 和 `cache`。首轮未隔离的试验因 GUI 沿用了默认目录而撤出验收。旧二进制用守卫解释器复测时两个参数均缺失，守卫拒绝启动真实桥，测试外壳超时后清理自己的进程。新二进制每次都精确传入两个参数，真实桥 Ready，四次桌面正常退出。
+
+| 固定起点 | 点击 | 滚轮 | 结果 |
+|---|---:|---:|---|
+| en 1600×1100，scale 1，默认布局，公开合成网格在 Viewer | 1 | 0 | 顶栏打开文献阅读，Viewer 区域像素逐点相等，Python 标签仍在原区域 |
+| zh_CN 1000×1200，同布局和公开合成网格 | 1 | 0 | 同上 |
+| 两种原尺寸，改用含体渲染的公开合成包 | 各 1 | 各 0 | 同样进入文献。Viewer 中心 36,260 和 42,680 像素有差异，分别最大通道差 30 和 26 |
+
+Xvfb X11 / Mesa llvmpipe OpenGL，两个语言各自全新的桥状态和缓存。四例均无 SQLite 文件生成。本次实窗范围为默认入口，稿件内容、文献检索和引用页 GPU 交付另验。X11/Wayland 窗口冒烟、OpenGL/Vulkan 无头端到端、33 项文献 CPU 检查共 37 项通过，零跳过。截图、布局、目录参数和 JUnit 见 `root-delivery-20261109-49/closure.json`。
+
+远端 `fbe4b0cc` 的 [Desktop 42551958437](https://github.com/sijintech/stk/actions/runs/42551958437) 成文时仍运行。[Ubuntu 24.04 打包](https://github.com/sijintech/stk/actions/runs/42551958437/job/128949277197#step:4:1)和 [Ubuntu 26.04 GL/Vulkan](https://github.com/sijintech/stk/actions/runs/42551958437/job/128949277278#step:4:1)均在安装依赖时连接镜像超时，APT 退出 100。包 smoke 跳过。Mac 和 Windows 尚在构建，同头 Runtime 9 项成功、4 项运行中。
+
 ## 2026-11-09 UTC · Mac 定位前隐藏对照的提交验证
 
 - `0f341a07` 增加 `reports_pre_seek_hide_video_metal` 和 `reports_pre_seek_hide_html-video_metal`。两项从同一默认 a3 Reports/Python 和 Viewer 布局启动，使用冻结 MP4、新资源会话和真实原生 Play。首次隐藏时沿用原有 0.05 秒下限、0.10 秒保持变化上限、0.75 秒保持与重显检查。每项要求一轮、六张图、两次准备及两处撤销。实际点击、时序和终态由目标 Mac 记录。

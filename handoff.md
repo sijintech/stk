@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · GUI 桥目录修复和 Linux 文献入口实窗
+
+root 在 `2bf4bd50` 修复 GUI 忽略 `--state-dir`。默认工作台从顶栏进入文献，Linux X11 软件 OpenGL 中英文均实测 1 点击、0 滚轮，桥各用独立目录。37 项 CTest 通过。证据见 `root-delivery-20261109-49/closure.json`。真实引用页的 GPU 呈现及 Mac/Windows 仍待验。
+
+远端仍为 `fbe4b0cc`。[Desktop 42551958437](https://github.com/sijintech/stk/actions/runs/42551958437) 尚在运行。Linux 两个任务均因 Ubuntu 镜像下载超时失败，包 smoke 跳过，Mac 和 Windows 仍构建。整轮终态登记后处理复验和后续推送。Claude 在独立 `claude/cp0-cross-entry-23` 验证 D1 双入口的竞争、分页边界与格式 14，候选待交付。
+
 ## 2026-11-09 UTC · Mac 定位前隐藏对照
 
 root 提交 `0f341a07`，为 video 和 HTML-video 各增加一个 Mac 单轮对照。相同固定布局、媒体和隐藏/保持判据，控制会话没有定位动作。原 Mac 和 Windows 20 轮独立运行。Linux 驱动已重建，42 项 CPU 检查通过，关闭探针宏的语法检查通过。Claude 在 `claude/native-preseek-review-22` 独立复核，工作树干净。
