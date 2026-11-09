@@ -4,6 +4,7 @@ No key is serialized. Native tests require an explicit optional helper and fail,
 rather than skip, if that configured helper is unusable.
 """
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from dataclasses import dataclass
 import json
 import importlib
@@ -23,6 +24,8 @@ from suan.peer.protocol import (FORMAT, METHODS, PeerProtocolError, decode_messa
                                 encode_message, negotiate_hello)
 from suan.peer.transport import NativeTransport, TransportError
 from suan.project import ProjectStore
+from suan.project import edit_operations
+from test_desktop_bridge import bridge_env, inproc  # noqa: F401
 
 
 def uuid():
@@ -295,6 +298,49 @@ def test_real_cas_same_operation_changed_request_and_unknown_receipt(connected, 
         a.request("project.table.read", {**target, "table_id": uuid(), "expected_revision": 1})
     assert error.value.code == "not_found"
     assert sides[1].store.info()["revision"] == 1
+
+
+def test_real_peer_and_bridge_share_receipt_byte_limit_on_the_same_project(connected, sides, inproc, monkeypatch):
+    client, _ = connected()
+    store, target = sides[1].store, sides[1].target
+    bridge = inproc()
+    handle = bridge.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    apply, get = "project.edit_operations.apply_once", "project.edit_operations.get"
+
+    def request(scope, revision, name):
+        return {**scope, "operation_id": uuid(), "expected_revision": revision,
+                "commands": [{"op": "create_table", "name": name}]}
+
+    local = request({"handle": handle}, 0, "Bridge original")
+    remote = request(target, 1, "Peer original")
+    local_receipt = bridge.call(apply, local)["receipt"]
+    remote_receipt = client.request(apply, remote)["receipt"]
+    assert local_receipt["scope"] == "local" and remote_receipt["scope"] != "local"
+
+    with closing(sqlite3.connect(store.path.as_uri() + "?mode=ro", uri=True)) as db:
+        total, = db.execute("SELECT sum(length(CAST(request AS BLOB)) + length(CAST(receipt AS BLOB))) "
+                            "FROM project_edit_operations").fetchone()
+    # The existing receipts fit; publishing any new successful edit would cross the byte limit.
+    monkeypatch.setattr(edit_operations, "MAX_TOTAL_BYTES", total + 1)
+    before = store.snapshot(), store.history()
+    local_rejected = request({"handle": handle}, 2, "Bridge over quota")
+    remote_rejected = request(target, 2, "Peer over quota")
+    assert bridge.error(apply, local_rejected)["code"] == "invalid_params"
+    with pytest.raises(PeerProtocolError) as rejected:
+        client.request(apply, remote_rejected)
+    assert rejected.value.code == "invalid_params"
+    assert (store.snapshot(), store.history()) == before
+
+    assert bridge.error(get, {"handle": handle, "operation_id": local_rejected["operation_id"]})["code"] == "not_found"
+    with pytest.raises(PeerProtocolError) as missing:
+        client.request(get, {**target, "operation_id": remote_rejected["operation_id"]})
+    assert missing.value.code == "not_found"
+    assert bridge.call(get, {"handle": handle, "operation_id": local["operation_id"]}) == {"receipt": local_receipt}
+    assert client.request(get, {**target, "operation_id": remote["operation_id"]}) == {"receipt": remote_receipt}
+    assert bridge.call(apply, local) == {"receipt": local_receipt, "replayed": True}
+    assert client.request(apply, remote) == {"receipt": remote_receipt, "replayed": True}
+    assert (store.snapshot(), store.history()) == before
+    bridge.assert_clean()
 
 
 def test_real_native_endpoint_retains_existing_large_shared_read_page_budget(connected, sides):
