@@ -839,6 +839,104 @@ def test_real_grant_revocation_generation_and_peer_revocation_are_checked_each_r
     assert error.value.code == "forbidden"
 
 
+def test_real_grant_revocation_waits_for_an_admitted_peer_edit_then_forbids_the_old_grant(
+        connected, sides, monkeypatch):
+    """CP-0 F10 live, CURRENT behavior only: an authenticated UDP edit admitted under the owner's
+    project_access lease holds the authority transaction until its whole SQLite apply_once finishes, so a
+    concurrent owner revoke_grant on the same authority cannot acknowledge in between. Afterwards the old
+    grant cannot read, look up, replay or write. No reply ordering, cloud or multi-node policy is chosen."""
+    client, _ = connected()
+    caller, owner = sides
+    store, target, authority = owner.store, owner.target, owner.authority
+    apply, get = "project.edit_operations.apply_once", "project.edit_operations.get"
+    operation = uuid()
+    params = {**target, "operation_id": operation, "expected_revision": 0,
+              "commands": [{"op": "create_table", "name": "Admitted before revocation"}]}
+    entered, release, revoking, revoked = (threading.Event() for _ in range(4))
+    paused_at, acknowledged_with = [], []
+
+    def stored_receipts():
+        with closing(sqlite3.connect(store.path.as_uri() + "?mode=ro", uri=True)) as db:
+            return db.execute("SELECT scope, operation_id, request, receipt FROM project_edit_operations").fetchall()
+
+    def grant_active():
+        with closing(sqlite3.connect(authority.path.as_uri() + "?mode=ro", uri=True)) as db:
+            return db.execute("SELECT active FROM grants WHERE grant_id=? AND peer_id=?",
+                              (target["grant_id"], caller.peer_id)).fetchall()
+
+    def invoke(method, values):
+        try:
+            return client.request(method, values, timeout=20), None
+        except PeerProtocolError as error:
+            return None, error.code
+
+    original_apply = edit_operations.EditOperations.apply_once
+
+    def paused(self, commands, *, operation_id, **kwargs):
+        # The shared-store entry, reached only inside the owner's PeerProjects/_access lease.
+        if self.store.path == store.path and operation_id == operation and not entered.is_set():
+            paused_at.append((threading.current_thread().name, kwargs.get("scope")))
+            entered.set()
+            assert release.wait(10), "Timed out releasing the admitted SQLite edit"
+        return original_apply(self, commands, operation_id=operation_id, **kwargs)
+
+    original_transaction = authority._transaction
+
+    def observed_transaction():
+        if threading.current_thread().name.startswith("stk-test-f10-revoke"):
+            revoking.set()  # entry to the authority transaction, before its lock and BEGIN IMMEDIATE
+        return original_transaction()
+
+    def revoke():
+        authority.revoke_grant(target["grant_id"])
+        acknowledged_with.append(stored_receipts())  # what was durable when revocation acknowledged
+        revoked.set()
+
+    assert store.info()["revision"] == 0 and stored_receipts() == [] and grant_active() == [(1,)]
+    with monkeypatch.context() as patch, \
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix="stk-test-f10-edit") as editor, \
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix="stk-test-f10-revoke") as revoker:
+        patch.setattr(edit_operations.EditOperations, "apply_once", paused)
+        patch.setattr(authority, "_transaction", observed_transaction)
+        editing = editor.submit(invoke, apply, params)
+        try:
+            assert entered.wait(8), "the peer edit did not reach the authorized SQLite apply_once"
+            revocation = revoker.submit(revoke)
+            assert revoking.wait(5), "owner revocation did not reach the authority transaction"
+            # While the admitted edit is held, the revocation is in progress but cannot acknowledge.
+            assert not revoked.wait(0.5) and not revocation.done() and not editing.done()
+        finally:
+            release.set()
+        revocation.result(timeout=20)
+        edited = editing.result(timeout=25)
+    (thread_name, scope), = paused_at
+    assert thread_name.startswith("stk-peer-call") and scope.startswith("peer/1/")
+    assert grant_active() == [(0,)]
+
+    result, error = edited
+    assert error is None and result["replayed"] is False
+    receipt = result["receipt"]
+    assert receipt["operation_id"] == operation and receipt["scope"] == scope
+    assert (receipt["base_revision"], receipt["applied_revision"]) == (0, 1)
+    snapshot, history, rows = store.snapshot(), store.history(), stored_receipts()
+    assert snapshot["project"]["revision"] == 1 and len(history) == 1
+    assert [(table["id"], table["name"]) for table in snapshot["tables"]] == [
+        (receipt["commands"][0]["id"], "Admitted before revocation")]
+    assert [(row[0], row[1], json.loads(row[3])) for row in rows] == [(scope, operation, receipt)]
+    assert acknowledged_with == [rows]  # the receipt was already committed when revoke_grant returned
+
+    table_id = receipt["commands"][0]["id"]
+    for method, values in (("project.catalog", target),
+                           ("project.table.read", {**target, "table_id": table_id, "expected_revision": 1}),
+                           (get, {**target, "operation_id": operation}),
+                           (apply, params),
+                           (apply, {**target, "operation_id": uuid(), "expected_revision": 1,
+                                    "commands": [{"op": "create_table", "name": "After revocation"}]})):
+        assert invoke(method, values) == (None, "forbidden"), method
+    assert (store.snapshot(), store.history(), stored_receipts()) == (snapshot, history, rows)
+    assert store.info()["revision"] == 1 and grant_active() == [(0,)]
+
+
 def test_real_lost_reply_disconnect_does_not_replay_and_reconnect_get_retains_generated_uuid(connected, sides, monkeypatch):
     a, b = connected()
     committed = threading.Event()
