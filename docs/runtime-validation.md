@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 原生 JSON 解码、F11b 与 Synthrix 观察
+
+`d9bfc7e1d502ea5e4b8a4ba3d6c21dac93bf4bc1` 修正 MuPRO 完成文件及进度 JSONL 触发解码器嵌套上限时的错误出口。Linux Python 3.11 真实解码反例在旧代码仅有文本错误并退出 1，修复后返回结构化 `invalid_result`、退出 3，QoI 为空且对应校验失败。版本无关的注入回归也在旧代码两项失败、修复后通过。Linux 源码联合 109 项通过，3 项为 Windows junction 和两个真实许可用例。隔离 wheel 启动器 61 项通过，2 项按平台或许可条件跳过。Linux Python 3.11、3.12、3.14 客户端各 39 项通过，各跳过 Windows junction 一项。junction 夹具使用真实目录连接，验证拒绝先于案例内容读取与连接，待 Windows 矩阵执行。
+
+`b27375f2e45cc88c4e6d51cbfeee0a340ca6ac68` 集成 Claude31 `bcfff105d433d6736414a46257ffc081979bd150`。同一操作 UUID 在本机桥和真实 UDP peer 各写一次，固定各自 scope、CAS 和原回执，两次重放不增加写入。Linux 源码 169 项和隔离 wheel 定向一项通过，零跳过。隔离反例把 peer scope 改为 `local` 后，在首次 peer 查询失败。 [CP-0 矩阵](design/cloud-project-service.md)
+
+使用 STK `d9bfc7e1` 源码和 Synthrix `caec2b9` 类型，在 Linux 环回隔离 Runtime 两次复现 worker 丢失但程序仍存活。TypeScript 观察器对原任务只发一次 GET，保留 `unknown` 与原始原因，核对 41 个状态和工作区文件的字节摘要前后一致，排除 SQLite 共享内存文件。之后显式取消同一任务，读到取消终态，程序回收且未发布输出。合成任务成功、失败、取消、真实 404 和服务不可达也通过。证据在本机 `root-delivery-20261109-68/synthrix-live-unknown`。覆盖隔离适配器和一台本地 Runtime，产品路由、UI 和授权接线仍待验证。
+
+远端 `bb4cea9d` 的 Runtime 13 个任务已过，Desktop 的三个 Linux 任务已过，Windows 和 macOS 核对时仍运行。本地提交待上一轮 Desktop 整轮终态后推送。 [Runtime](https://github.com/sijintech/stk/actions/runs/42576437407) [Desktop](https://github.com/sijintech/stk/actions/runs/42576437438)
+
 ## 2026-11-09 UTC · MuPRO 严格证据、完整清单和 F13
 
 `207902bb883be2b06a0b286c6e9d1d52b990a003` 要求 MuPRO 原生终态记录中的步数和值使用精确类型，JSON 重复键或非标准数值归为 `invalid_result`，数值类型与预期不符归为 `incomplete_result`。旧源码接受六种反例并产生 QoI。修复后终态与实时监视联合 65 项通过，真实许可用例条件跳过一项。

@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · MuPRO 失败报告和 D1 观察
+
+root 提交 `d9bfc7e1`，复现两个原生终态文件的解码器嵌套失败并恢复结构化错误，同时加入 Windows 原生 junction 回归。root 以 `b27375f2` 集成 Claude31 `bcfff105`。另用隔离 Synthrix 类型与 STK 源码跑两次真实 worker 丢失和只读观察。Claude32 已在独立分支开始 F5c。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · MuPRO 输入边界和 D1 真实上限
 
 root 提交 `207902bb` 和 `b7272392`。终态证据拒绝布尔值、等值浮点数和重复键。直接上传先核对完整本地清单和合成远端相对路径，再读取输入 TOML 和连接。分别用六个失败反例确认旧缺陷。Claude30 的 `957dc0a2` 经 root 复验，以 `e03a955a` 集成。Claude31 已在独立 worktree 接手 F11b。 [验收记录](runtime-validation.md)

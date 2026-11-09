@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · D1 scope 隔离和真实未知状态
+
+D1 F11a/F11b 已有 Linux 真实线路和安装态回归。Claude32 接手 F5c，记录现行 peer 项目读取的物理恢复行为。Synthrix 只读观察对同一 Runtime 的真实 `unknown` 与取消终态已实测，前端和产品授权接线仍待实施。MuPRO 解码失败报告已本地通过，下一轮 Windows CI 增加真实 junction 拒绝证据。 [CP-0 矩阵](design/cloud-project-service.md) [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · MuPRO 证据边界与 D1 F13
 
 MuPRO 启动链已在 Linux 验证终态精确步数和连接前完整清单检查。Windows junction 和真实许可小算例仍待对应环境。D1 F13 的真实 8 MiB 预算已有单机 Linux 源码与安装态证据。Claude 接手 F11b，验收同一操作 UUID 在本机桥和已认证 peer 上各自持久和重放。 [验收记录](runtime-validation.md) [CP-0 矩阵](design/cloud-project-service.md)

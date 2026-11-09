@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · MuPRO 解码边界、D1 同 UUID 与 Synthrix 实测
+
+本地 `d9bfc7e1` 把终态 JSON 解码器的嵌套失败归入 `invalid_result`，保留结构化校验结果。MuPRO Linux 源码 109 项通过，隔离 wheel 61 项通过。新增的真 junction 用例由现有 Windows 客户端矩阵执行，真实许可用例仍需资产。
+
+Claude31 的 `bcfff105` 已集成为 `b27375f2`。同一 UUID 经严格桥和已认证 UDP 写入不同 scope，两份原回执各自查询、重放，Linux 源码 169 项和隔离 wheel 定向一项均通过。Claude32 在独立 worktree 接手 F5c 的真实线路物理恢复观察。
+
+Synthrix `caec2b9` 的类型与 STK `d9bfc7e1` 的本地合成 Runtime 已双跑。真实 `unknown` 观察保留原因且只读，显式取消后程序已回收。产品接线、授权及 R2/R3 仍待后续。远端 `bb4cea9d` 的 Linux Desktop 三项已过，Windows 和 macOS 尚在运行。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · MuPRO 终态与上传预检、Claude30 集成
 
 本地 `207902bb` 要求 MuPRO 终态步数证据使用精确整数并拒绝有歧义的 JSON。 `b7272392` 在连接前检查完整输入清单，保留合法的 HDF5 和 `Polar.in`。Linux 源码 95 项通过，隔离 wheel 59 项通过，真实许可用例按条件跳过。Windows junction 拒绝路径仍待目标平台验证。
