@@ -255,14 +255,13 @@ class _BrokenFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
 
 
 def test_only_missing_builtin_modules_are_skipped(monkeypatch):
-    for name in nodes.BUILTIN_MODULES:
-        monkeypatch.delitem(sys.modules, f"suan.graph.nodes.{name}", raising=False)
     finder = _BrokenFinder()
-    monkeypatch.setattr(sys, "meta_path", [finder, *sys.meta_path])
-    with pytest.raises(ModuleNotFoundError) as info:
-        nodes.builtin_modules()
+    with monkeypatch.context() as broken:
+        broken.delitem(sys.modules, finder.name, raising=False)
+        broken.setattr(sys, "meta_path", [finder, *sys.meta_path])
+        with pytest.raises(ModuleNotFoundError) as info:
+            nodes.builtin_modules()
     assert info.value.name == "a_missing_dependency"
-    monkeypatch.setattr(sys, "meta_path", [m for m in sys.meta_path if m is not finder])
     for name in nodes.missing_modules():
         assert importlib.util.find_spec(f"suan.graph.nodes.{name}") is None
 
