@@ -5,10 +5,14 @@ The agent proposes a sweep as a draft and stops; a person applies it on the sess
 agent then analyses the results. The agent's thread never applies, prepares, starts, submits or labels anything.
 """
 import json
+import signal
+import sys
+import textwrap
 import threading
 import time
 from uuid import uuid4
 
+import psutil
 import pytest
 
 from suan.agent import tools, wire
@@ -21,7 +25,7 @@ from suan.project.workflow_runs import WorkflowRuns
 from suan.runtime.client import RuntimeClient
 from suan.workflows import muferro
 from test_bridge_workflow_muferro import scan, settled  # noqa: F401
-from test_desktop_bridge import _strict, bridge_env, inproc, second_opinion  # noqa: F401
+from test_desktop_bridge import ProcessBridge, _strict, bridge_env, inproc, second_opinion  # noqa: F401
 
 ADAPTER = "openai-compatible/1:laptop"
 TEMPERATURE = muferro.FIELD_IDS["temperature"]
@@ -304,6 +308,291 @@ def test_lost_first_start_reply_is_observed_from_a_fresh_bridge_without_another_
     assert final_view["run_approvals"][0]["receipt"]["run_status"] == "stopped"  # the observation is saved
     assert h.call("project.agent.verify", params)["ok"]
     assert monitor == ["WorkflowRuns.prepare"] and not h.violations
+
+
+# The stock strict stdio bridge (``python -m suan.desktop_bridge --stdio --strict``) with test-only hooks, run as its
+# own Python process: an optional scripted planner on "this computer", a refusing analysis worker, an append-only record
+# of this process's identity and of every start/recover/cancel/decide entry point, and optionally one withheld reply.
+PROBE_BRIDGE = textwrap.dedent('''
+    import json, os, sys, threading
+    from pathlib import Path
+
+    control = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    record_lock = threading.Lock()
+
+    def record(name, value=None):
+        with record_lock, open(control["record"], "a", encoding="utf-8") as out:
+            out.write(json.dumps({"pid": os.getpid(), "name": name, "value": value}) + "\\n")
+            out.flush()
+            os.fsync(out.fileno())
+
+    from suan.agent import wire
+    from suan.agent.executor import AgentExecutor
+    from suan.desktop_bridge import __main__ as entry, server
+    from suan.desktop_bridge.workflow_runs import WorkflowRunExecutor
+    from suan.project.workflow_runs import WorkflowRuns
+
+    for owner, name in ((AgentExecutor, "decide_run"), (AgentExecutor, "recover"), (WorkflowRunExecutor, "start"),
+                        (WorkflowRunExecutor, "recover"), (WorkflowRunExecutor, "cancel"), (WorkflowRuns, "start"),
+                        (WorkflowRuns, "interrupt"), (WorkflowRuns, "request_cancel")):
+        def watched(*args, _original=getattr(owner, name), _name=owner.__name__ + "." + name, **kwargs):
+            record("call", _name)
+            return _original(*args, **kwargs)
+        setattr(owner, name, watched)
+
+    class Planner:
+        """Scripted planner turns; the probe makes no model requests."""
+        def __init__(self, turns):
+            self.turns = turns
+
+        def prepare_turn(self, value):
+            planner = self
+
+            class Prepared:
+                def send(self, frozen, cancel):
+                    record("planner_turn")
+                    return planner.turns.pop(0)
+            return Prepared()
+
+        def send(self, frozen, cancel):
+            raise AssertionError("the probe sends no model request")
+
+    class NoAnalysis:
+        def evaluate(self, identity, work, cancel, events):
+            record("call", "analysis")
+            raise AssertionError("the probe runs no analysis")
+
+    local = threading.local()
+
+    class Withholding:
+        """Drops the one line written while this thread withholds; every other line is written unchanged."""
+        def __init__(self, writer):
+            self.writer = writer
+
+        def write(self, data):
+            if getattr(local, "withhold", False):
+                local.line = bytes(data)
+                return len(data)
+            return self.writer.write(data)
+
+        def flush(self):
+            if not getattr(local, "withhold", False):
+                self.writer.flush()
+
+    class ProbeBridge(server.Bridge):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.workflow_executor.poll_seconds = 0.02
+            self.analysis_executor.worker = NoAnalysis()
+            self.withheld = threading.Event()
+            if control["prepare"] is not None:
+                usage = {"input_tokens": 100, "output_tokens": 20}
+                arguments = control["prepare"]
+                gateway = self.projects.models
+                gateway.endpoints.add("laptop", "Laptop", "http://127.0.0.1:9/v1", ["qwen"])
+                gateway[control["adapter"]] = Planner([
+                    wire.ModelTurn(None, {"id": None, "name": "prepare_muferro_run", "arguments": arguments,
+                                          "raw_arguments": json.dumps(arguments)}, "tool_calls", usage),
+                    wire.ModelTurn("Read the complete plan before approving.", None, "stop", usage)])
+            if control["withhold"]:
+                self.writer = Withholding(self.writer)
+            record("identity", {"executor_id": self.workflow_executor.executor_id})
+
+        def send(self, message, method=None):
+            if not (control["withhold"] and method == "project.agent.run_decide" and "result" in message
+                    and not self.withheld.is_set()):
+                return super().send(message, method)
+            self.withheld.set()
+            local.withhold = True
+            try:
+                written = super().send(message, method)  # still validated strictly, never reaches stdout
+            finally:
+                local.withhold = False
+            record("withheld", {"id": message["id"], "written": written, "line": json.loads(local.line)})
+            return written
+
+    server.Bridge = ProbeBridge
+    entry.main(sys.argv[2:])
+''')
+
+
+def reap(bridge):
+    """Force-reap a probe process that is still alive and close its pipes (idempotent; runs after any failure)."""
+    if bridge.process.poll() is None:
+        bridge.process.kill()
+    bridge.process.wait(timeout=30)
+    bridge.reader.join(timeout=5)
+    for pipe in (bridge.process.stdin, bridge.process.stdout, bridge.stderr):
+        try:
+            pipe.close()
+        except OSError:
+            pass
+
+
+def probe_bridge(request, s, state, name, *, prepare=None, withhold=False):
+    """A strict desktop bridge in its own Python process (see ``PROBE_BRIDGE``) on ``state``, reaped at teardown,
+    after a strict ``hello`` from the real child that resumed no transfers."""
+    script, control = s["tmp"] / "probe_bridge.py", s["tmp"] / f"{name}.json"
+    script.write_text(PROBE_BRIDGE, encoding="utf-8")
+    control.write_text(json.dumps({"record": str(s["tmp"] / "probe-records.jsonl"), "adapter": ADAPTER,
+                                   "prepare": prepare, "withhold": withhold}), encoding="utf-8")
+    bridge = ProcessBridge(state, argv=[sys.executable, str(script), str(control), "--stdio", "--strict",
+                                        "--state-dir", str(state)], stderr_path=s["tmp"] / f"{name}.err")
+    request.addfinalizer(lambda: reap(bridge))
+    hello = bridge.call("hello", {"protocol": 1})
+    assert hello["protocol"] == 1 and hello["server"]["pid"] == bridge.process.pid
+    assert "project.agent.run_observe" in hello["methods"] and hello["resumed_transfers"] == []
+    return bridge
+
+
+def probe_records(s, pid):
+    """The complete records of process ``pid``; a line still being appended is not read."""
+    path = s["tmp"] / "probe-records.jsonl"
+    data = path.read_bytes() if path.exists() else b""
+    lines = data[:data.rfind(b"\n") + 1].decode("utf-8").splitlines()
+    return [r for r in map(json.loads, lines) if r["pid"] == pid]
+
+
+def until_true(condition, timeout, what):
+    deadline = time.monotonic() + timeout
+    while True:
+        value = condition()
+        if value:
+            return value
+        assert time.monotonic() < deadline, f"timed out waiting for {what}"
+        time.sleep(0.05)
+
+
+def test_killed_bridge_process_after_first_dispatch_is_only_observed_by_a_fresh_process(
+        scan, runtime, monkeypatch, request):
+    """A genuine first human start in a strict bridge process, which is killed (SIGKILL) once its single Runtime task
+    is queued and the start's approval is durable, before the desktop receives the decision reply (spec "Review,
+    consumption and dispatch"). The Runtime scheduler is held and no worker starts, so at the interruption the task
+    is queued in the Runtime and the workflow run is running. A fresh bridge process on the same state directory
+    reopens the project; an explicit ``run_observe`` reads the original approval, run and executor and the current
+    workflow status, and nothing decides, starts, recovers, cancels or submits again."""
+    s = scan
+    monkeypatch.setenv("STK_TOKEN_PLAN_API_KEY", "")
+    monkeypatch.delenv("STK_TOKEN_PLAN_MODEL", raising=False)
+    store, client, server = s["store"], s["client"], runtime[2]
+    # The in-process bridge only built the project and the Runtime profile; the desktop processes use them from here.
+    assert s["h"].call("project.close", {"handle": s["handle"]})["closed"] is True
+    s["h"].close()
+    submissions, cancels = [], []
+    submit, cancel = server.service.submit, server.service.cancel
+
+    def record_submit(spec, key):
+        submissions.append(key)
+        return submit(spec, key)
+
+    def record_cancel(task_id):
+        cancels.append(task_id)
+        return cancel(task_id)
+    monkeypatch.setattr(server.service, "submit", record_submit)
+    monkeypatch.setattr(server.service, "cancel", record_cancel)
+    state = s["tmp"] / "desktop-state"
+    prepare = {"workflow_id": s["workflow"], "rows": [s["rows"][0]], "expected_revision": store.info()["revision"]}
+
+    first = probe_bridge(request, s, state, "first", prepare=prepare, withhold=True)
+    first_pid = first.process.pid
+    handle = first.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    sid = str(uuid4())
+    params = {"handle": handle, "session_id": sid}
+    first.call("project.agent.create", {**params, "turn_id": str(uuid4()), "text": "运行已保存的第一个 MuFerro 算例。",
+                                        "configuration": {"adapter": ADAPTER, "model": "qwen"}})
+    first.call("project.agent.run_target", {**params, "simulation": {"connection": s["connection"],
+                                                                   "options": {"launcher": "none"}}})
+    first.call("project.agent.start", params)
+    view = wait(first, handle, sid)
+    assert len(view["run_approvals"]) == 1 and len(view["awaiting"]) == 1
+    item = view["run_approvals"][0]["item"]
+    run_id = item["run_id"]
+    envelope = {key: item[key] for key in ("plan_sha256", "request_sha256", "expected_revision")}
+    envelope["approval_id"] = item["item_id"]
+    args = {**params, "item_id": item["item_id"]}
+    assert first.call("project.agent.run_plan", args)["run"]["plan_sha256"] == item["plan_sha256"]
+    assert client.tasks() == [] and submissions == [] and started_events(store, run_id) == []
+    sent = first.request("project.agent.run_decide", {**args, "decision": "start", "plan_sha256": item["plan_sha256"],
+                                                      "expected_revision": item["expected_revision"]})
+
+    def boundary():
+        """Exactly one queued Runtime task, recorded on the run, and one durable started event; the reply withheld."""
+        withheld = [r["value"] for r in probe_records(s, first_pid) if r["name"] == "withheld"]
+        current = client.tasks()
+        run = store.workflow_runs.get(run_id)
+        progress = next(t for t in run["tasks"] if t["step"] == "simulate")["progress"]
+        if not (withheld and len(current) == 1 and current[0]["state"] == "queued" and progress
+                and progress.get("task_id") == current[0]["id"]):
+            return None
+        return withheld, current, run, started_events(store, run_id)
+
+    withheld, interrupted_tasks, run, started = until_true(boundary, 60, "the first dispatch and its Runtime task")
+    with first.cond:
+        assert sent not in first.responses  # the desktop never received the decision reply
+    first.kill()  # SIGKILL: no orderly close, shutdown or flush
+    assert first.process.returncode == -signal.SIGKILL and not psutil.pid_exists(first_pid)
+    with first.cond:
+        assert sent not in first.responses
+    assert not first.violations, first.violations
+    identity = next(r["value"] for r in probe_records(s, first_pid) if r["name"] == "identity")
+    first_calls = [r["value"] for r in probe_records(s, first_pid) if r["name"] == "call"]
+    assert first_calls.count("AgentExecutor.decide_run") == 1 and first_calls.count("WorkflowRuns.start") == 1
+    assert "analysis" not in first_calls
+    assert not any(c.endswith(("recover", "cancel", "interrupt")) for c in first_calls)
+    reply = withheld[0]["line"]
+    assert withheld[0]["id"] == sent and withheld[0]["written"] is True and len(withheld) == 1
+    assert reply["result"]["receipt"]["outcome"] == "started" and reply["result"]["receipt"]["run_id"] == run_id
+    assert reply["result"]["receipt"]["executor_id"] == identity["executor_id"]
+    # The durable identity at the interruption: one start by the killed process, with the person's exact approval.
+    assert len(started) == 1 and started[0]["approval"] == envelope
+    assert started[0]["executor_id"] == identity["executor_id"] == run["executor_id"]
+    assert run["owner"]["pid"] == first_pid and run["status"] == "running"
+    assert len(submissions) == 1 and submissions[0] and cancels == []
+    with store._connect() as db:
+        _, run_events = store.workflow_runs._read(db, run_id)
+    at_interruption = store.workflow_runs.get(run_id)["status"]
+
+    fresh = probe_bridge(request, s, state, "fresh")
+    fresh_pid = fresh.process.pid
+    assert fresh_pid != first_pid
+    handle = fresh.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    params = {"handle": handle, "session_id": sid}
+    args = {**params, "item_id": item["item_id"]}
+    reopened = fresh.call("project.agent.get", params)
+    assert [card["item"] for card in reopened["run_approvals"]] == [item] and reopened["awaiting"] == []
+    assert reopened["run_approvals"][0]["decision"]["decision"] == "start"
+    receipt = fresh.call("project.agent.run_observe", args)["receipt"]
+    current = fresh.call("project.workflow_runs.get", {"handle": handle, "run_id": run_id})["run"]
+    assert receipt["outcome"] == "started" and receipt["ok"] is True
+    assert receipt["item_id"] == item["item_id"] and receipt["run_id"] == run_id
+    assert receipt["approval"] == envelope and receipt["executor_id"] == identity["executor_id"]
+    assert receipt["run_status"] == current["status"] == at_interruption  # current state, not a historical one
+    assert current["executor_id"] == identity["executor_id"] and current["owner"]["pid"] == first_pid
+    assert fresh.call("project.agent.verify", params)["ok"]
+    final_view = fresh.call("project.agent.get", params)
+    assert [e["item_id"] for e in final_view["events"] if e["kind"] == "approval_decided"] == [item["item_id"]]
+    saved = final_view["run_approvals"][0]["receipt"]  # the observation is saved; no other execution evidence
+    assert saved["outcome"] == "started" and saved["run_status"] == receipt["run_status"]
+    assert fresh.close() == 0  # orderly close of the fresh process, strict messages clean
+
+    fresh_records = probe_records(s, fresh_pid)
+    fresh_identity = next(r["value"] for r in fresh_records if r["name"] == "identity")
+    assert fresh_identity["executor_id"] != identity["executor_id"]
+    assert [r for r in fresh_records if r["name"] != "identity"] == []  # nothing decided, started, recovered, cancelled
+    # The Runtime saw exactly one submission and no cancel; its task is unchanged; the run's history is unchanged.
+    assert len(submissions) == 1 and cancels == []
+    assert [(t["id"], t["state"]) for t in client.tasks()] == [(interrupted_tasks[0]["id"], "queued")]
+    with store._connect() as db:
+        _, after = store.workflow_runs._read(db, run_id)
+    assert after == run_events and started_events(store, run_id) == started
+    (s["tmp"] / "probe-summary.json").write_text(json.dumps({
+        "first_pid": first_pid, "first_returncode": first.process.returncode, "fresh_pid": fresh_pid,
+        "first_executor_id": identity["executor_id"], "fresh_executor_id": fresh_identity["executor_id"],
+        "run_id": run_id, "item_id": item["item_id"], "runtime_task": interrupted_tasks[0]["id"],
+        "runtime_state_at_interruption": interrupted_tasks[0]["state"], "run_status_at_interruption": at_interruption,
+        "withheld_reply_outcome": reply["result"]["receipt"]["outcome"], "observe": receipt,
+        "runtime_submissions": len(submissions), "runtime_cancels": len(cancels), "first_calls": first_calls,
+        "fresh_calls": [r["value"] for r in fresh_records if r["name"] == "call"]}, indent=2), encoding="utf-8")
 
 
 def test_the_agent_proposes_a_scan_a_person_runs_it_and_the_agent_analyses_the_results(scan, monitor):
