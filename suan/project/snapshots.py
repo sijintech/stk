@@ -122,7 +122,7 @@ class Snapshots:
         if _signature(path.stat())[:4] != _signature(after)[:4]:
             raise ProjectError("Snapshot object changed while being verified")
 
-    def _copy(self, source, remaining):
+    def _copy(self, source, remaining, *, expected_sha256=None):
         temporary = self._directory((".stk", "tmp"), create=True) / (uuid4().hex + ".part")
         try:
             with _reader(source) as reader, temporary.open("xb") as writer:
@@ -149,6 +149,8 @@ class Snapshots:
                 writer.flush()
                 os.fsync(writer.fileno())
             digest = checksum.hexdigest()
+            if expected_sha256 is not None and digest != expected_sha256:
+                raise ProjectError(f"Snapshot source does not match its expected SHA-256: {source.name}")
             target = self._object(digest, create=True)
             try:
                 # Atomic no-replace publication. Concurrent identical captures share the object;
@@ -261,12 +263,17 @@ class Snapshots:
             self._require(db)
             return self._decode(db.execute("SELECT * FROM project_snapshots WHERE id=?", (snapshot_id,)).fetchone())
 
-    def capture(self, record_ids, *, expected_revision, max_bytes=DEFAULT_MAX_BYTES):
+    def capture(self, record_ids, *, expected_revision, max_bytes=DEFAULT_MAX_BYTES, _expected_sha256=None):
         _expected_revision(expected_revision)
         if not isinstance(record_ids, list) or not 1 <= len(record_ids) <= 100:
             raise ProjectError("Capture between 1 and 100 explicit file record IDs")
         for identity in record_ids:
             _id(identity)
+        if _expected_sha256 is not None:
+            if (not isinstance(_expected_sha256, dict) or set(_expected_sha256) != set(record_ids)
+                    or any(not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                           for digest in _expected_sha256.values())):
+                raise ProjectError("Expected SHA-256 digests must describe exactly the selected file records")
         if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_BYTES:
             raise ProjectError("max_bytes must be an integer between 1 and 1 TiB")
         model = self.store.files._read(expected_revision)
@@ -289,7 +296,8 @@ class Snapshots:
             selected.append((identity, values, source))
         files, signatures, total = [], [], 0
         for identity, values, source in selected:
-            digest, size, signature = self._copy(source, max_bytes - total)
+            digest_options = {} if _expected_sha256 is None else {"expected_sha256": _expected_sha256[identity]}
+            digest, size, signature = self._copy(source, max_bytes - total, **digest_options)
             total += size
             files.append({"record_id": identity, "name": source.name, "path": values["path"],
                           "location": values["location"], "sha256": digest, "size": size})

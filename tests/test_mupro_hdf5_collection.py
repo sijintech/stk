@@ -1,5 +1,8 @@
 """A real Runtime collects an explicitly synthetic HDF5 sidecar under the original task."""
+import hashlib
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
@@ -10,6 +13,8 @@ from conftest import finish  # noqa: E402
 from mupro_fake import make_fake_sdk  # noqa: E402
 from suan.connectors.files import LocalFiles  # noqa: E402
 from suan.connectors.mupro import MuFerroConnector  # noqa: E402
+from suan.desktop_bridge.workflow_runs import WorkflowRunExecutor, _Job  # noqa: E402
+from suan.project import ProjectError, ProjectStore  # noqa: E402
 from suan.workflows.muferro import RESULT_TABLE_ID  # noqa: E402
 from test_desktop_bridge_runtime import add_profile  # noqa: E402
 from test_workflow_muferro import project, scripts, bridge_env, revision  # noqa: E402,F401
@@ -68,3 +73,52 @@ def test_collect_hdf5_sidecar_is_verified_registered_and_not_resubmitted(project
     with pytest.raises(ValueError, match="changed locally"):
         api.muferro.collect(run["id"])
     assert len(client.tasks()) == 1
+
+
+def test_workflow_snapshot_refuses_changed_hdf5_after_collection(tmp_path, monkeypatch):
+    store = ProjectStore.create(tmp_path / "project", "Collected HDF5 snapshot")
+    simulation_id, workflow_id, row_id, result_id = (str(uuid4()) for _ in range(4))
+    relative = f"results/muferro/{simulation_id}/case/run.h5"
+    output = store.directory / relative
+    output.parent.mkdir(parents=True)
+    selector = "t00000001/Polar"
+    with h5py.File(output, "w") as file:
+        file.create_dataset(selector, data=np.ones((2, 2, 2, 3), dtype=np.float32))
+    verified = output.read_bytes()
+    digest = hashlib.sha256(verified).hexdigest()
+
+    def collect(run_id, *, project):
+        assert run_id == simulation_id and project is store
+        return {"record_id": result_id, "files": [{"path": relative, "sha256": digest}]}
+
+    replaced = False
+
+    def after_index(_project):
+        nonlocal replaced
+        if not replaced:
+            replaced = True
+            with h5py.File(output, "r+") as file:
+                file[selector][...] = 9.0
+
+    api = SimpleNamespace(project=store, muferro=SimpleNamespace(collect=collect))
+    executor = WorkflowRunExecutor(None, scripting=lambda *_: api, changed=after_index)
+    monkeypatch.setattr(executor, "_progress", lambda *args, **kwargs: None)
+    job = _Job(store, workflow_id)
+    plan = {"steps": {"simulation": {"template": "muferro/1"}}}
+    row = {"id": row_id}
+    run = {"id": simulation_id, "status": {"task": {"id": "c" * 32}}}
+
+    with pytest.raises(ProjectError, match="expected SHA-256"):
+        executor._collect(job, plan, "simulation", row, 1, run)
+    assert replaced and store.snapshots.list()["snapshots"] == []
+    assert store.info()["revision"] == 1  # Only the file index was saved.
+    assert not list((store.directory / ".stk/objects/sha256").glob("*/*"))
+    assert not list((store.directory / ".stk/tmp").iterdir())
+
+    output.write_bytes(verified)
+    produced = executor._collect(job, plan, "simulation", row, 1, run)
+    file_id = produced["files"]["case/run.h5"]
+    frozen = store.snapshots.resolve(produced["snapshot_id"], file_id)
+    assert produced["result_record_id"] == result_id
+    assert Path(frozen["path"]).read_bytes() == verified
+    assert len(store.snapshots.list()["snapshots"]) == 1

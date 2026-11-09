@@ -460,18 +460,23 @@ class WorkflowRunExecutor:
         self._progress(job, step, row, attempt, stage="collecting", simulation_run_id=run["id"])
         collected = self._console(job, lambda revision: template.collect(api, api.project, run["id"]))
         prefix = template.results_prefix(run["id"])
-        names = {item["path"][len(prefix):]: item["path"] for item in collected["files"] if item["path"].startswith(prefix)}
+        names = {item["path"][len(prefix):]: item for item in collected["files"] if item["path"].startswith(prefix)}
         chosen = template.final_state(sorted(names))
         if not 1 <= len(chosen) <= 100:
             raise ProjectError(f"The final state of this {template.name} run has {len(chosen)} files; analyses take 1 to 100")
-        paths = [str(job.store.directory / names[name]) for name in chosen]
+        paths = [str(job.store.directory / names[name]["path"]) for name in chosen]
         indexed = self._edit(job, lambda revision: job.store.files.index(paths, expected_revision=revision))
         self.changed(job.store)
-        captured = self._edit(job, lambda revision: job.store.snapshots.capture(indexed["record_ids"], expected_revision=revision))
+        record_ids = indexed["record_ids"]
+        if len(record_ids) != len(chosen):
+            raise ProjectError("Collected result paths do not identify distinct project files")
+        expected_sha256 = {record_id: names[name]["sha256"] for name, record_id in zip(chosen, record_ids)}
+        captured = self._edit(job, lambda revision: job.store.snapshots.capture(
+            record_ids, expected_revision=revision, _expected_sha256=expected_sha256))
         self.changed(job.store)
         return {"simulation_run_id": run["id"], "task_id": (run["status"].get("task") or {}).get("id"),
                 "result_record_id": collected["record_id"], "directory": prefix.rstrip("/"),
-                "snapshot_id": captured["snapshot"]["id"], "files": dict(zip(chosen, indexed["record_ids"]))}
+                "snapshot_id": captured["snapshot"]["id"], "files": dict(zip(chosen, record_ids))}
 
     def _release(self, job):
         """When the executor stops: a cancelled run cancels its Runtime tasks; otherwise (closing, restart)

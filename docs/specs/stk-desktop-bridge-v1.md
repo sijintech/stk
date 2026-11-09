@@ -828,7 +828,8 @@ A `muferro/1` step (W5) prepares the row's MuFerro plan, refused with `row_chang
 frozen values, submits it to the frozen connection and moves on, so every row's task is queued at once; the run then reads
 the tasks (every 15 s) and, as each succeeds, collects it (MuFerro results table) and freezes its final state (inputs,
 `stk-mupro.json`, energy/progress/completion records, the last frame of each dataset) as the row's snapshot for
-downstream analyses. `progress` is `{attempt, stage, simulation_run_id?, task_id?, state?, adopted_from?}` of the latest
+downstream analyses. Capture checks the selected files against the collection digests before publishing the snapshot.
+A changed file fails the attempt. `progress` is `{attempt, stage, simulation_run_id?, task_id?, state?, adopted_from?}` of the latest
 attempt that recorded remote work (stages `prepared`, `submitted`, `queued`, `running`, `collecting`, `adopted`); it is
 stored as a further `running` event of that attempt. When the service stops following a remote attempt (project closed,
 service stopped; `recover` after a restart) the attempt becomes `interrupted` (`detached`) while the Runtime task keeps
