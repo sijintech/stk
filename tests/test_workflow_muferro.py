@@ -1,5 +1,9 @@
 """Real project/bridge/Runtime workflow; the CI solver fixture is explicitly synthetic."""
 from pathlib import Path
+import os
+import stat
+import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -60,6 +64,46 @@ def test_import_refuses_outputs_and_licences_before_reading(project, tmp_path, n
         api.muferro.import_case(source, expected_revision=0)
     assert revision(p) == 0
     assert not (tmp_path / '项目 project' / 'inputs').exists()
+
+
+def test_import_refuses_project_input_junction_before_writing(project, tmp_path, monkeypatch):
+    api, p = project
+    source = tmp_path / 'case'
+    write_case(source)
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    sentinel = outside / 'keep.txt'
+    sentinel.write_text('synthetic fixture', encoding='utf-8')
+    junction = (tmp_path / '项目 project').resolve() / 'inputs' / 'muferro'
+    junction.parent.mkdir()
+    if os.name == 'nt':
+        created = subprocess.run(['cmd', '/c', 'mklink', '/J', str(junction), str(outside)],
+                                 capture_output=True, check=False, timeout=10)
+        assert created.returncode == 0, created.stderr
+    else:
+        junction.symlink_to(outside, target_is_directory=True)
+        is_symlink, lstat = Path.is_symlink, Path.lstat
+
+        def junction_stat(path, *args, **kwargs):
+            if path == junction:
+                return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT)
+            return lstat(path, *args, **kwargs)
+
+        # Exercise the Windows metadata distinction on hosts without native junctions.
+        monkeypatch.setattr(Path, 'is_symlink', lambda path: path != junction and is_symlink(path))
+        monkeypatch.setattr(Path, 'lstat', junction_stat)
+
+    try:
+        with pytest.raises(ValueError, match='symbolic links or reparse points'):
+            api.muferro.import_case(source, expected_revision=0)
+        assert list(outside.iterdir()) == [sentinel]
+        assert sentinel.read_text(encoding='utf-8') == 'synthetic fixture'
+        assert revision(p) == 0 and p.snapshot()['tables'] == []
+    finally:
+        if os.name == 'nt':
+            junction.rmdir()
+        else:
+            junction.unlink()
 
 
 def test_prepare_collect_retry_and_reopen(project, scripts, runtime, tmp_path, monkeypatch):

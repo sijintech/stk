@@ -89,11 +89,17 @@ def _directory(stk, project):
 
 
 def _folder(root, *parts):
-    """Owned project output directories cannot redirect writes outside the project."""
+    """Create or reuse ordinary directories beneath the workflow's root."""
     path = root
     for part in parts:
         path = path / part
-        if path.is_symlink():
-            raise ValueError("Workflow directories must not be symbolic links")
-        path.mkdir(exist_ok=True)
+        try:
+            path.mkdir()
+        except FileExistsError:
+            info = path.lstat()
+            reparse = getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            if stat.S_ISLNK(info.st_mode) or reparse:
+                raise ValueError("Workflow directories must not be symbolic links or reparse points")
+            if not stat.S_ISDIR(info.st_mode):
+                raise
     return path
