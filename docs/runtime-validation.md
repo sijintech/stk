@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 冻结子任务准备及 WGC 空捕获
+
+`862208e6986845bc3fedf098aaa57e7906609a89` 在每次子任务准备与修订重试中，用传给引擎的同一项目修订核对冻结行。真实 loopback Runtime 和合成 MuFerro 的两条反例分别在早期检查之后、引擎首次准备入口编辑温度。旧版两例均创建任务，修复后均返回 `row_changed`，无新工作区、子计划或任务，下游分析仍待处理。源码工作流和智能体相关 109 项通过，1 项为真实许可条件跳过。root 源码定向 3 项和隔离 wheel 48 项通过。隔离夹具从 wheel 复制纯数据的 volume preset，以支持测试原有的相对路径。已有接管、取消和 LAMMPS 回归通过。
+
+`10ecf59bea890e7baa72b92bc657e8c75a3565cd` 处理 Windows 非媒体报告截图阶段持续空轮询的情况。连续两秒无样本时关闭原采集会话及帧池，再在同一窗口启动新会话。每阶段最多放弃两次空会话，维持 45 秒截止和两次独立采样的像素判据。失败证据记录启动及轮询次数、空轮询、实际宿主帧、阶段和视口状态。Linux 相关 45 项及独立 C++ 边界检查通过，实际 WGC 恢复待目标验证。
+
+完整 `bc25f579` Windows 工件显示 PDF 第五轮重新准备已取得第六个桥会话，并绑定同一冻结 PDF。前四次重准备的首页截图字节相同。失败轮最后保存关闭态，重准备阶段既无通过图也无等待图。适配器源码与此前同类失败的头一致，夹具已有 50 毫秒宿主重绘。已证据化无可保存的截图样本，具体空会话或同步等待机制仍待带新计数的实测。证据见本机 `root-delivery-20261109-76/windows-bc25-review` 和 `root-delivery-20261109-78`。 [Windows 工件](https://github.com/sijintech/stk/actions/runs/42584441296/artifacts/13661772980)
+
+远端 `3d2fcea7` Desktop 和 Runtime 仍运行。Linux 包和干净机、Docs 与 Secret scan 已通过。当前本地批次待该 Desktop 整轮终态。 [Desktop](https://github.com/sijintech/stk/actions/runs/42593218935) [Runtime](https://github.com/sijintech/stk/actions/runs/42593219053)
+
 ## 2026-11-09 UTC · bc25f579 Desktop 终态
 
 精确 `bc25f579b9c4ddd645145f7c7d29963dbb6ea7f6` 的 Desktop 于 09:22:41Z 终态失败。Windows 原生作业于 09:22:40Z 结束，六项均执行且五项通过，`reports_native_pdf_opengl` 在重新准备后等待 `reprepared-page1` 的 OS 像素超时。Windows CPU 1460/1460，Linux 三项通过。macOS 原生 4/6，定位前采样和静默隐藏各 0/2。Runtime 13 项通过。整轮终态满足下一批推送门，目标平台结果继续逐项验收。 [Desktop](https://github.com/sijintech/stk/actions/runs/42584441296) [Windows 原生作业](https://github.com/sijintech/stk/actions/runs/42584441296/job/129068743682) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42584441296/artifacts/13661772980)

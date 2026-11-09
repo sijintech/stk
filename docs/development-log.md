@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · 精确修订和空 WGC 会话
+
+root 提交 `862208e6`，覆盖早期检查之后的参数编辑及原生准备重试。root 以 `10ecf59b` 在 Windows 验收捕获器中有限替换空会话，保留原始截止和画面证据门。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 核对整轮终态
 
 root 核对 `bc25f579` 的 Windows PDF 重新准备和 macOS 隐藏验收失败，确认上轮所有作业已终态，进入含 Cocoa 新对照的下一批。 [验收记录](runtime-validation.md)

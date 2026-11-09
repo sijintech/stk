@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · 冻结准备与 Windows 捕获
+
+工作流首次及重试准备按实际项目修订复核冻结参数。Windows 原生 PDF 对已准备新会话但没有截图样本的阶段启用有界 WGC 会话替换，继续验证两张独立的 OS 像素。macOS 隔离暂停对照随远端 `3d2fcea7` 执行。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 目标平台接续
 
 下一轮 macOS 对比固定隔离暂停动作与现有静默隐藏。Windows 保留 PDF 重准备的画面判据，`bc25f579` 本轮超时后核对会话与画面阶段。 [验收记录](runtime-validation.md)

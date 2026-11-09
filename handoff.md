@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · 冻结行重试和 Windows 空捕获
+
+本地 `862208e6` 把每次子任务准备的行校验绑定到同一项目修订。旧实现的两条竞态均创建本地 Runtime 任务，修复后返回 `row_changed`，无新工作区、子计划或任务。源码相关 109 项、隔离 wheel 48 项通过。
+
+本地 `10ecf59b` 对 Windows 报告截图的连续空轮询启用每阶段最多两次会话替换，并记录启动、取帧、宿主绘制和视口状态。旧轮 PDF 第五次重开已获得新桥会话，超时阶段无可保存帧。Linux 联跑 45 项通过，实际 WGC 待目标 CI。
+
+远端 `3d2fcea7` Desktop 仍运行，Linux 包和干净机通过。Runtime 已完成八项，Docs 与 Secret scan 通过。Claude38 在独立 worktree 收口实时首答复及产物清单，待精确候选。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · 上轮 Desktop 终态
 
 `bc25f579` Desktop 于 09:22:41Z 整轮结束。Windows 原生 5/6，PDF 重新准备后等待第一页像素超时。macOS 原生 4/6，两组隐藏对照各 0/2。Windows CPU 1460/1460、Linux 三项和 Runtime 13 项通过。下一批含隔离暂停对照和结果快照核验，平台失败继续独立验收。 [验收记录](docs/runtime-validation.md)
