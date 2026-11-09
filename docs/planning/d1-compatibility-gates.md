@@ -234,7 +234,7 @@ root 描述的链条是：软件发现 → 能力预检 → 冻结输入 → 显
 | F-2 | MuPRO 的 HDF5 由插件读取，与 VTKHDF + STK profile 分开，不强制转换 | 已发布 `mupro.hdf5@1` / `stk.source.mupro_hdf5@1`；连接器 0.2.0 从选定案例的 `run.h5` 发现 `hdf5:<field>`，保留 selector、原 dtype 和容器 SHA。见 [MuPRO HDF5/1](../specs/mupro-hdf5-1.md) | 合成读取/发现/CLI 原值回归已记录；真实 MuPRO 输出仍待资产。单位、六分量意义和求解成功不推断 |
 | F-3 | 旧的 `.dat` 运行和已有项目保持可读 | 现行实现：帧文件规则 `FRAME`（`suan/mupro/run.py:48`）和 `mupro.dat@1` 读取器 | 旧结果表、旧运行目录的回归读取 |
 | F-4 | 陈旧输出预检与最终状态输入覆盖 HDF5 | root 已复现 CLI 和计算侧均会接受遗留 `run.h5`，本轮把该已发布输出名加入可选产物预检；不把它加入 DAT 必需完成文件。最终状态保留完整 HDF5 容器；工作流收集/下游快照按 100 文件/256 MiB 拒绝超限，不自动裁剪 | 两条旧输出反例及其他 HDF5 输入名仍可用的对照；最终联合结果见运行验收。HDF5-only 完成仍未实现 |
-| F-5 | 读取 HDF5 的节点必须真的装了 h5py；缺依赖时声明读取器不可用，而不是运行到一半才失败 | **缺口：** h5py 是可选依赖（`pyproject.toml:61`），只在 `science`、`desktop`、`visualization` extras 中；`server` extra 为空（`pyproject.toml:86-94`） | 在只装 `.[server]` 的节点上检查能力声明 |
+| F-5 | 读取 MuPRO HDF5 需要 NumPy 和 h5py，执行前能力仍待声明 | `server` extra 为空。连接器元数据和图目录仍可列出，目录条目与 Runtime 或节点能力列表都未按实际依赖区分。缺少 h5py 时，可选 `run.h5` 发现返回 `extensions.mupro.hdf5_error`，显式 `hdf5:` 打开及 HDF5 图读取返回 `unavailable`。连接器发现会先读取容器，图读取到节点执行时才检查依赖。 | 干净 wheel 对照了 `[server]`、单装 NumPy 和 `[science]`。单装 NumPy 时 DAT 及运行索引可用，HDF5 返回上述诊断。两者都缺时，DAT 帧读取和含能量表的描述触发 `ModuleNotFoundError`，图运行索引报告 `node_failed`。承担 HDF5 读取的节点需装 `[science]` 或两个依赖。NumPy 缺失的错误分类与 P-1 的能力声明仍待处理。 |
 | F-6 | HDF5 库版本兼容 | unknown：实际求解器使用的 HDF5 版本和输出特性尚未核实，不能从目录名推断 ABI 或可读性 | 记录求解器及读取端版本，用固定版本的 h5py 读取一份真实 MuPRO 输出 |
 | F-7 | 核验合同 | 已发布 HDF5/1 读取与附加收集，仍要求 `stk-mupro-1` 的 DAT 完成核验；读取 HDF5 不代表求解成功。新增 `run.h5` 陈旧产物预检不改变必需完成文件 | HDF5-only 求解完成须取得真实输出和版本化核验合同后另验，不能据读取通过宣称实现 |
 | F-8 | 电场扫描参数 | **依赖决定：** 由插件显式声明扫描参数，STK 不提供默认值；具体数值由研究任务给定，尚未确定 | 声明缺参数时拒绝准备运行；参数随冻结计划保存 |
