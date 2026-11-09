@@ -1,5 +1,15 @@
 # STK 开发计划
 
+## 2026-11-09 19:42 UTC · 切换任务后的制品打开复核
+
+`91b9d860` 保留派发时的制品条目。用户切换任务后，迟到回执仍可履行原来的显式打开，并在打开前使用原制品摘要复核本地文件。缺少原摘要时使用同一传输回执，两份摘要冲突时拒绝打开。复核沿用 256 MiB 本地检查上限，读取固定长度的普通文件。 [验收记录](runtime-validation.md)
+
+Jobs 定向 50/50，零跳过。新增的回执倒序与打开复核用例各连续通过 5 轮。精确文件读取的两个核心测试通过，覆盖拥有字节、链接和 FIFO。
+
+Claude62 已在独立 worktree 完成初始派发回执探针及审阅报告。Claude63 已启动，负责在独立 `claude/mupro-pilot-doc-63` 更新一份 MuPRO 试点说明，对齐已发布的 HDF5 原生流程和真实许可验收边界。
+
+远端 `fa2ff5e2` Desktop `42679509572` 仍在运行，3 个 Linux 作业通过。macOS CPU 和 Metal 通过后继续原生阶段，Windows 在执行 CPU 测试。同头 Runtime `42679509438` 终态 13/13。Linux Python 3.11、3.12、3.14 分别通过 6493、6510、6493 项，两个 Windows 客户端各通过 5250 项。本地提交等待 Desktop 整轮终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42679509572) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42679509438)
+
 ## 2026-11-09 19:27 UTC · 初始传输回执与 Cocoa 可见对照
 
 `74ba6ff5` 将同一传输的后续观测用于迟到的上传和下载开始回执。回执仍绑定原用户操作，完成状态保留。上传文件列表刷新按原尝试去重，下载保留一次已授权的打开或制品校验。制品行按详情代次和最新请求标识绑定。 [验收记录](runtime-validation.md)
