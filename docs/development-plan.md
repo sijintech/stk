@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · CP-0 实际配额和隔离反例
+
+F14 本机桥与真实 WebRTC 的实际配额已验，后续按配额监控、目标 OS、跨部署和 R2/R3 分开推进。Claude26 补齐 F5b/F5c/F23 的隔离反例及 F5c 无热日志对照。Claude27 接续 F23 真实线路验收，覆盖授权内容与撤权。 [CP-0 矩阵](design/cloud-project-service.md)
+
+`39780e6d` 的 macOS 已完成构建、CPU 和 Metal 测试，原生媒体组仍待结果。 [Desktop 42564398378](https://github.com/sijintech/stk/actions/runs/42564398378)
+
 ## 2026-11-09 UTC · F12 真实续页与 F14 本机实额
 
 F12 结构页、记录页的陈旧续页在本机桥与真实 WebRTC 上均获 `conflict`。F14 的两个实际配额已用本机安装 store 填满，分别核对拒绝、回滚、原回执读取和重放。后续区分实际配额线路验证、目标平台和跨部署。 [CP-0 证据矩阵](design/cloud-project-service.md)

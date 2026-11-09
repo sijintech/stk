@@ -1,5 +1,21 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · F14 真实配额线路、F5b/F5c/F23 反例
+
+F14 使用 `49837655` wheel、Python 3.14.4 / SQLite 3.46.1 与已安装 Linux 原生 helper。每个合成项目由严格 NDJSON 桥与已认证 UDP WebRTC 各提交一份原回执，其余成功编辑通过正常 store API 填入。六个相关 Python 模块的安装字节与 wheel 及当前主线一致。
+
+| 检查点 | 已存回执 | 请求与回执合计字节 |
+|---|---:|---:|
+| 条数满额 | 10,000 | 9,514,154 |
+| 新写入将越过字节上限 | 141 | 66,852,607 |
+| 字节满额 | 142 | 67,108,864 |
+
+三个检查点两端均返回 `invalid_params`，各失败 ID 为 `not_found`，SQLite 文件及逻辑状态摘要一致。各 scope 的原回执按原 CAS 0 或 1 精确重放，跨 scope 查询返回 `not_found`。这是单 Linux 主机、同库的实额线路证据。配额监控、其他部署与平台单独验收。证据见 `root-delivery-20261109-58/f14-wire/closure.json`。
+
+Claude26 在未改动 `db9a7ed8` 的源码导出上通过 4 项。四份单行为改动在对应断言处触发 5 个预期失败。F5c 补充对照证明普通库仍可读，真实热日志下目录入口被拒、字节保留。root 核验 SHA256、JUnit 和失败点。证据见 `root-delivery-20261109-58/claude26-review.json`。 [CP-0 矩阵](design/cloud-project-service.md)
+
+远端 `39780e6d` 的 Desktop 尚在运行。macOS 的新取证仍待原生媒体组。 [Desktop 42564398378](https://github.com/sijintech/stk/actions/runs/42564398378)
+
 ## 2026-11-09 UTC · F12 真实续页与 F14 实额
 
 - **F12**。提交 `b326baef` 使用显式安装的 Linux helper 建立已认证 UDP WebRTC，与本机桥读取同一 SQLite 项目。结构页与记录页各读两页，末页 `next_offset=null`。本地删除一条记录推进修订后，旧的两个续页在两端均返回 `conflict`，peer 随后读取新修订成功。
