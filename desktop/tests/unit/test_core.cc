@@ -15,6 +15,10 @@
 #include <fstream>
 #include <numeric>
 
+#ifndef _WIN32
+#  include <sys/stat.h>
+#endif
+
 using namespace stk;
 namespace utf8 = stk::core::utf8;
 
@@ -115,6 +119,47 @@ TEST(Mmap, MapsFilesSlicesAndEmptyFiles)
   EXPECT_EQ(core::SharedBytes::from_file(cjk).size(), 4u);
   EXPECT_EQ(core::path_to_utf8(cjk.filename()), "数据.bin");
 }
+
+TEST(Mmap, ExactFileKeepsAnOwnedSnapshot)
+{
+  const auto dir = test::scratch_dir("exact-file");
+  const auto path = dir / core::path_from_utf8("数据.bin");
+  const std::string original(1024 * 1024 + 1, 'a');
+  const std::string replacement(original.size(), 'b');
+  { std::ofstream(path, std::ios::binary) << original; }
+
+  const auto bytes = core::SharedBytes::read_exact_file(path, original.size());
+  EXPECT_FALSE(bytes.mapped());
+  ASSERT_EQ(bytes.size(), original.size());
+  EXPECT_EQ(core::Sha256::hex(bytes.span()), core::Sha256::hex(original));
+  { std::ofstream(path, std::ios::binary) << replacement; }
+  EXPECT_EQ(core::read_text_file(path), replacement);
+  EXPECT_EQ(core::Sha256::hex(bytes.span()), core::Sha256::hex(original));
+  EXPECT_THROW(core::SharedBytes::read_exact_file(path, original.size() - 1), core::FileError);
+  EXPECT_THROW(core::SharedBytes::read_exact_file(path, original.size() + 1), core::FileError);
+
+  const auto empty = dir / "empty.bin";
+  std::ofstream(empty, std::ios::binary).close();
+  EXPECT_TRUE(core::SharedBytes::read_exact_file(empty, 0).empty());
+  EXPECT_THROW(core::SharedBytes::read_exact_file(dir, 0), core::FileError);
+  EXPECT_THROW(core::SharedBytes::read_exact_file(dir / "missing", 0), core::FileError);
+}
+
+#ifndef _WIN32
+TEST(Mmap, ExactFileRejectsLinksAndFifos)
+{
+  const auto dir = test::scratch_dir("exact-file-special");
+  const auto target = dir / "target";
+  std::ofstream(target, std::ios::binary).close();
+  const auto link = dir / "link";
+  std::filesystem::create_symlink(target, link);
+  EXPECT_THROW(core::SharedBytes::read_exact_file(link, 0), core::FileError);
+
+  const auto fifo = dir / "fifo";
+  ASSERT_EQ(::mkfifo(fifo.c_str(), 0600), 0);
+  EXPECT_THROW(core::SharedBytes::read_exact_file(fifo, 0), core::FileError);
+}
+#endif
 
 TEST(Paths, SafeRelativePathsFollowTheGraphRule)
 {

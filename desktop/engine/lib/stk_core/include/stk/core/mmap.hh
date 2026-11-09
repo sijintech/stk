@@ -60,6 +60,9 @@ class SharedBytes {
   static SharedBytes copy_of(std::span<const uint8_t> data);
   /** Map a file (use_mmap) or read it into memory. Throws FileError. */
   static SharedBytes from_file(const std::filesystem::path &path, bool use_mmap = true);
+  /** Read exactly size bytes from one regular file into owned storage. Rejects a final link or
+   * reparse point and throws FileError on an open, size or read failure. */
+  static SharedBytes read_exact_file(const std::filesystem::path &path, size_t size);
 
   const uint8_t *data() const
   {

@@ -6,6 +6,7 @@
 #include "stk/app/jobs_spec.hh"
 #include "stk/app/project_state.hh"
 #include "stk/core/paths.hh"
+#include "stk/core/sha256.hh"
 #include "stk/io/blob_cache.hh"
 #include "stk/io/graph.hh"
 #include "stk/io/payload.hh"
@@ -13,11 +14,14 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <stdexcept>
 
 namespace stk::app {
 using io::Json;
 namespace {
+constexpr int64_t kArchiveByteLimit = 256 * 1024 * 1024;
+
 bool active(const Json &run)
 {
   const auto status = io::get_string(run, "status");
@@ -373,7 +377,7 @@ bool ProjectAnalysisRuns::read_result(std::function<void()> verified)
       const auto &budget = candidate->at("budget");
       if (!budget.is_object() || budget.size() != 2 || !budget.contains("max_seconds") || !budget.contains("max_output_bytes") ||
           !budget.at("max_seconds").is_number_integer() || !budget.at("max_output_bytes").is_number_integer() ||
-          budget.at("max_seconds") != 300 || budget.at("max_output_bytes") != 268435456) {
+          budget.at("max_seconds") != 300 || budget.at("max_output_bytes") != kArchiveByteLimit) {
         throw std::runtime_error("Invalid frozen analysis budget");
       }
     }
@@ -385,6 +389,7 @@ bool ProjectAnalysisRuns::read_result(std::function<void()> verified)
     const auto &receipt = run.at("result");
     auto blob_dir = response.at("blob_dir").get<std::string>();
     const auto graph_hash = io::graph_hash(run.at("document").at("graph"));
+    const auto archive_size = io::get_int(receipt, "size_bytes", -1);
     const bool has_errors = document.contains("errors") && !document.at("errors").is_null() && !document.at("errors").empty();
     bool has_payload = false;
     for (const auto &output : inspector->outputs()) { has_payload |= output.delivered && output.delivery_type == "payload"; }
@@ -394,7 +399,7 @@ bool ProjectAnalysisRuns::read_result(std::function<void()> verified)
         io::get_string(receipt, "graph_hash") != graph_hash.substr(7) ||
         io::get_string(receipt, "manifest_sha256") != inspector->encoded_sha256() ||
         io::get_int(receipt, "output_count", -1) != int64_t(document.at("outputs").size()) ||
-        io::get_int(receipt, "size_bytes", -1) < int64_t(inspector->encoded_bytes()) ||
+        archive_size < int64_t(inspector->encoded_bytes()) || archive_size > kArchiveByteLimit ||
         receipt.at("has_payload") != has_payload || receipt.at("has_errors") != has_errors) {
       throw std::runtime_error("The archived result does not match its verified receipt");
     }
@@ -422,8 +427,31 @@ std::shared_ptr<const io::Payload> ProjectAnalysisRuns::decode_payload(const std
   try {
     const auto &selected = result().at("outputs").at(output);
     if (io::get_string(selected, "type") != "payload") { throw std::runtime_error("Select a payload output"); }
+    const auto &manifest = selected.at("manifest");
+    const auto &buffers = manifest.at("buffers");
+    if (!buffers.is_array()) { throw std::runtime_error("Invalid archived payload buffers"); }
+    auto remaining = io::get_int(run_.at("result"), "size_bytes", -1) - int64_t(result_inspection_->encoded_bytes());
+    std::map<std::string, int64_t, std::less<>> sizes;
+    for (const auto &buffer : buffers) {
+      const auto sha = io::get_string(buffer, "sha256");
+      const auto length = io::get_int(buffer, "byteLength", -1);
+      if (!core::is_sha256_hex(sha) || length < 0) { throw std::runtime_error("Invalid archived payload buffer"); }
+      const auto [entry, inserted] = sizes.try_emplace(sha, length);
+      if (!inserted) {
+        if (entry->second != length) { throw std::runtime_error("Archived payload buffer lengths disagree"); }
+        continue;
+      }
+      if (length > remaining) { throw std::runtime_error("Archived payload exceeds its verified size"); }
+      remaining -= length;
+    }
     const io::BlobCache blobs(core::path_from_utf8(blob_dir_));
-    return std::make_shared<const io::Payload>(io::decode_manifest(selected.at("manifest"), blobs.provider(false)));
+    // Decode checks each digest over the same owned bytes that will be kept by the Viewer.
+    return std::make_shared<const io::Payload>(io::decode_manifest(manifest, [&](const std::string_view sha)
+        -> std::optional<core::SharedBytes> {
+      const auto size = sizes.find(sha);
+      if (size == sizes.end()) { return std::nullopt; }
+      return core::SharedBytes::read_exact_file(blobs.path_for(sha), static_cast<size_t>(size->second));
+    }));
   }
   catch (const std::exception &error) { error_ = error.what(); changed(); return nullptr; }
 }

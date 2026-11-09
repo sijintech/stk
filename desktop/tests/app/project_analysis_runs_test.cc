@@ -6,6 +6,7 @@
 #include "stk/app/viewer_state.hh"
 #include "stk/bridge/process.hh"
 #include "stk/core/paths.hh"
+#include "stk/core/sha256.hh"
 #include "stk/io/payload.hh"
 #include "../bridge/support.hh"
 #include "../wm/support.hh"
@@ -336,6 +337,38 @@ TEST_F(ProjectAnalysisRunsPython, ExplicitExecutionUsesSnapshotAfterOriginalChan
   EXPECT_EQ(runs->payload_outputs(), std::vector<std::string>{"view"});
   EXPECT_EQ(viewer().source().kind, SourceKind::None); EXPECT_FALSE(viewer().payload());
   EXPECT_EQ(project().project()->revision, revision);
+}
+
+TEST_F(ProjectAnalysisRunsPython, DecodedArchiveKeepsVerifiedBytesWhenItsBlobChanges)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare());
+  ASSERT_NO_FATAL_FAILURE(execute());
+  const auto payload = result_payload();
+  ASSERT_NE(payload, nullptr); ASSERT_FALSE(payload->buffers.empty());
+  const auto &buffer = payload->buffers.front();
+  ASSERT_FALSE(buffer.bytes.empty());
+  EXPECT_FALSE(buffer.bytes.mapped());
+  ASSERT_EQ(core::Sha256::hex(buffer.bytes.span()), buffer.sha256);
+  const auto relative = core::path_from_utf8(io::get_string(runs->run().at("result"), "directory"));
+  const auto file = directory.path() / "project" / relative / "blobs" / buffer.sha256.substr(0, 2) / buffer.sha256;
+  {
+    std::fstream changed(file, std::ios::in | std::ios::out | std::ios::binary);
+    ASSERT_TRUE(changed.good());
+    changed.put(static_cast<char>(buffer.bytes.span().front() ^ 1));
+    changed.close(); ASSERT_TRUE(changed.good());
+  }
+  EXPECT_EQ(core::Sha256::hex(buffer.bytes.span()), buffer.sha256);
+  EXPECT_EQ(runs->decode_payload("view"), nullptr);
+  EXPECT_NE(runs->error().find("buffer bytes do not hash"), std::string::npos);
+  EXPECT_EQ(fs::file_size(file), buffer.bytes.size());
+  {
+    std::ofstream enlarged(file, std::ios::binary | std::ios::app);
+    enlarged.put('!');
+    enlarged.close(); ASSERT_TRUE(enlarged.good());
+  }
+  EXPECT_EQ(runs->decode_payload("view"), nullptr);
+  EXPECT_EQ(fs::file_size(file), buffer.bytes.size() + 1);
+  EXPECT_EQ(core::Sha256::hex(buffer.bytes.span()), buffer.sha256);
 }
 
 TEST_F(ProjectAnalysisRunsPython, EmptyOutputSelectionDoesNotExpandToAllGraphOutputs)

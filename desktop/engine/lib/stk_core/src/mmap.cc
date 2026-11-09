@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/core/mmap.hh"
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstdio>
@@ -154,6 +155,93 @@ SharedBytes SharedBytes::from_file(const std::filesystem::path &path, bool use_m
   bytes.mapped_ = true;
   bytes.owner_ = std::move(mapping);
   return bytes;
+}
+
+SharedBytes SharedBytes::read_exact_file(const std::filesystem::path &path, const size_t size)
+{
+#ifdef _WIN32
+  const HANDLE file = CreateFileW(path.c_str(),
+                                  GENERIC_READ,
+                                  FILE_SHARE_READ | FILE_SHARE_DELETE,
+                                  nullptr,
+                                  OPEN_EXISTING,
+                                  FILE_FLAG_OPEN_REPARSE_POINT,
+                                  nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    const DWORD error = GetLastError();
+    throw FileError("cannot open " + describe(path) + ": " +
+                    std::system_category().message(int(error)));
+  }
+  const std::unique_ptr<void, decltype(&CloseHandle)> opened(file, CloseHandle);
+  const auto require_size = [&] {
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (GetFileType(file) != FILE_TYPE_DISK || !GetFileInformationByHandle(file, &info) ||
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) {
+      throw FileError(describe(path) + " is not a regular file");
+    }
+    const uint64_t actual = (uint64_t(info.nFileSizeHigh) << 32) | info.nFileSizeLow;
+    if (actual != size) {
+      throw FileError(describe(path) + " does not have the expected size");
+    }
+  };
+  const auto read_chunk = [&](std::span<uint8_t> destination) -> size_t {
+    DWORD count = 0;
+    if (!ReadFile(file, destination.data(), static_cast<DWORD>(destination.size()), &count, nullptr)) {
+      const DWORD error = GetLastError();
+      throw FileError("cannot read " + describe(path) + ": " +
+                      std::system_category().message(int(error)));
+    }
+    return count;
+  };
+#else
+  // A swapped-in FIFO must not wait for a writer before we can check the open file.
+  const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK | O_NOFOLLOW);
+  if (fd < 0) {
+    const int error = errno;
+    throw FileError("cannot open " + describe(path) + ": " + std::strerror(error));
+  }
+  struct OpenFile {
+    int descriptor;
+    ~OpenFile() { ::close(descriptor); }
+  };
+  const OpenFile opened{fd};
+  const auto require_size = [&] {
+    struct stat info{};
+    if (::fstat(fd, &info) != 0) {
+      const int error = errno;
+      throw FileError("cannot stat " + describe(path) + ": " + std::strerror(error));
+    }
+    if (!S_ISREG(info.st_mode)) {
+      throw FileError(describe(path) + " is not a regular file");
+    }
+    if (info.st_size < 0 || uintmax_t(info.st_size) != size) {
+      throw FileError(describe(path) + " does not have the expected size");
+    }
+  };
+  const auto read_chunk = [&](std::span<uint8_t> destination) -> size_t {
+    ssize_t count;
+    do {
+      count = ::read(fd, destination.data(), destination.size());
+    } while (count < 0 && errno == EINTR);
+    if (count < 0) {
+      const int error = errno;
+      throw FileError("cannot read " + describe(path) + ": " + std::strerror(error));
+    }
+    return static_cast<size_t>(count);
+  };
+#endif
+  require_size();
+  std::vector<uint8_t> bytes(size);
+  for (size_t done = 0; done < size;) {
+    const size_t chunk = std::min<size_t>(size - done, 1024 * 1024);
+    const size_t count = read_chunk(std::span(bytes).subspan(done, chunk));
+    if (count == 0) {
+      throw FileError("unexpected end of " + describe(path));
+    }
+    done += count;
+  }
+  require_size();
+  return from_vector(std::move(bytes));
 }
 
 SharedBytes SharedBytes::slice(size_t offset, size_t length) const
