@@ -120,6 +120,7 @@ void print_help(FILE *f)
           "                           rendered screen; GUI: on exit).\n"
           "  --no-save-layout         GUI: do not save the layout on exit.\n"
           "  --no-bridge              GUI: do not start the Python bridge (status bar shows it).\n"
+          "  --state-dir DIR          Bridge state and cache under DIR (default: the user's).\n"
           "  --python PATH            GUI: interpreter for the bridge (default: $STK_PYTHON, else\n"
           "                           python3 / python on PATH).\n"
           "  --gpu-backend B          auto, opengl, vulkan or metal (default: $STK_GPU_BACKEND,\n"
@@ -142,7 +143,6 @@ void print_help(FILE *f)
           "  --no-overlays            Hide scalar bars, legends, axes and text.\n"
           "  --sequence               Export every time step: <stem>.%%08d.png and an stk.series/1\n"
           "                           manifest <stem>.series.json next to --export.\n"
-          "  --state-dir DIR          Bridge state and cache under DIR (default: the user's).\n"
           "  --python PATH            Interpreter of the bridge (default: $STK_PYTHON, python3).\n"
           "\n"
           "  --gpu-debug              Create debug GPU contexts.\n"
@@ -818,6 +818,10 @@ int run_gui(const Args &a, const stk::gfx::Backend backend)
     bo.executor = wm->executor();
     bo.python.configured = a.python;
     bo.client_version = STK_DESKTOP_VERSION;
+    if (!a.state_dir.empty()) {
+      bo.state_dir = a.state_dir + "/state";
+      bo.cache_dir = a.state_dir + "/cache";
+    }
 #ifdef STK_DESKTOP_SOURCE_REPO
     /* Development builds: make the repository's suan package importable. */
     {
