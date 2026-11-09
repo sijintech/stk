@@ -41,6 +41,9 @@ class BlobCache {
   /** A BlobProvider for decode_manifest(). */
   BlobProvider provider(bool verify = true, bool use_mmap = true) const;
 
+  /** Decode from exact, owned blob bytes. Check the aggregate size of unique blobs before reading. */
+  Payload decode_owned_manifest(const Json &manifest, size_t max_buffer_bytes) const;
+
  private:
   std::filesystem::path root_;
 };

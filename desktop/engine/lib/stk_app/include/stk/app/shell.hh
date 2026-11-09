@@ -176,16 +176,15 @@ class AppShell {
                          io::Json draft, uint64_t expected_review_generation,
                          std::function<bool()> valid, ScriptState::Completion complete);
 
-  /** Pure preflight for importing an explicitly selected analysis output. All Viewer areas
-   * share one state: an occupied Viewer or any active desktop text edit prevents adoption.
+  /** Pure preflight for an explicitly selected payload. All Viewer areas share one state.
    * The returned version must still match after the payload has been read and verified. */
-  bridge::Result<uint64_t> analysis_payload_target(wm::Screen *screen);
-  /** Adopt an already decoded, verified payload into an empty shared Viewer. The durable run
-   * keeps its provenance separately; this import never invents a submitted Viewer graph.
-   * Navigation and adoption are deferred with project, caller and Viewer-version fences. */
-  void open_analysis_payload(wm::Screen *screen, std::string handle, uint64_t expected_viewer_version,
-                             std::shared_ptr<const io::Payload> payload, std::string label,
-                             std::function<bool()> valid, ScriptState::Completion complete);
+  bridge::Result<uint64_t> viewer_payload_target(wm::Screen *screen, bool replace_existing = false);
+  /** Adopt an already decoded payload. Navigation and adoption are deferred with project,
+   * caller and Viewer-version fences. Replacement requires an explicit caller action. */
+  void open_viewer_payload(wm::Screen *screen, std::string handle, uint64_t expected_viewer_version,
+                           std::shared_ptr<const io::Payload> payload, std::string label,
+                           std::function<bool()> valid, ScriptState::Completion complete,
+                           bool replace_existing = false);
 
   /** Explicit portable workspace actions. Import/open never execute restored programs. */
   WorkspaceTransfer &workspace_transfer();

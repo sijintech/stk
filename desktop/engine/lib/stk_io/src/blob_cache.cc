@@ -3,6 +3,7 @@
 
 #include "stk/core/log.hh"
 #include "stk/core/sha256.hh"
+#include <map>
 
 namespace stk::io {
 
@@ -73,6 +74,31 @@ std::string BlobCache::put(std::span<const uint8_t> data) const
 BlobProvider BlobCache::provider(bool verify, bool use_mmap) const
 {
   return [cache = *this, verify, use_mmap](std::string_view sha) { return cache.open(sha, verify, use_mmap); };
+}
+
+Payload BlobCache::decode_owned_manifest(const Json &manifest, size_t max_buffer_bytes) const
+{
+  const auto buffers = manifest.find("buffers");
+  if (buffers == manifest.end() || !buffers->is_array()) { throw PayloadError("Invalid payload buffers"); }
+  std::map<std::string, int64_t, std::less<>> sizes;
+  for (const auto &buffer : *buffers) {
+    const auto sha = get_string(buffer, "sha256");
+    const auto length = get_int(buffer, "byteLength", -1);
+    if (!core::is_sha256_hex(sha) || length < 0) { throw PayloadError("Invalid payload buffer"); }
+    const auto [entry, inserted] = sizes.try_emplace(sha, length);
+    if (!inserted) {
+      if (entry->second != length) { throw PayloadError("Payload buffer lengths disagree"); }
+      continue;
+    }
+    if (uint64_t(length) > max_buffer_bytes) { throw PayloadError("Payload buffers exceed their byte limit"); }
+    max_buffer_bytes -= size_t(length);
+  }
+  // The decoder checks each digest over the same owned bytes held by the resulting payload.
+  return decode_manifest(manifest, [&](std::string_view sha) -> std::optional<core::SharedBytes> {
+    const auto size = sizes.find(sha);
+    if (size == sizes.end()) { return std::nullopt; }
+    return core::SharedBytes::read_exact_file(path_for(sha), size_t(size->second));
+  });
 }
 
 }  // namespace stk::io

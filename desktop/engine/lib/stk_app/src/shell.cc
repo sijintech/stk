@@ -613,7 +613,7 @@ bool AppShell::swap_visual_editors(wm::Screen &screen)
   return true;
 }
 
-bridge::Result<uint64_t> AppShell::analysis_payload_target(wm::Screen *screen)
+bridge::Result<uint64_t> AppShell::viewer_payload_target(wm::Screen *screen, const bool replace_existing)
 {
   using bridge::Error;
   using bridge::ErrorCode;
@@ -626,8 +626,8 @@ bridge::Result<uint64_t> AppShell::analysis_payload_target(wm::Screen *screen)
     }
   }
   auto &viewer = store_.viewer();
-  if (viewer.source().kind != SourceKind::None || viewer.base_payload() || viewer.evaluating() ||
-      store_.has_open_result()) {
+  if (viewer.evaluating() || store_.has_open_result() ||
+      (!replace_existing && (viewer.source().kind != SourceKind::None || viewer.base_payload()))) {
     return Error::make(ErrorCode::Busy, std::string(store_.tr("analysis_runs.viewer_occupied")));
   }
   bool available = false;
@@ -645,15 +645,16 @@ bridge::Result<uint64_t> AppShell::analysis_payload_target(wm::Screen *screen)
   return viewer.version();
 }
 
-void AppShell::open_analysis_payload(wm::Screen *screen, std::string handle,
-                                     const uint64_t expected_viewer_version,
-                                     std::shared_ptr<const io::Payload> payload, std::string label,
-                                     std::function<bool()> valid, ScriptState::Completion complete)
+void AppShell::open_viewer_payload(wm::Screen *screen, std::string handle,
+                                   const uint64_t expected_viewer_version,
+                                   std::shared_ptr<const io::Payload> payload, std::string label,
+                                   std::function<bool()> valid, ScriptState::Completion complete,
+                                   const bool replace_existing)
 {
   using bridge::Error;
   using bridge::ErrorCode;
   if (!valid || !valid() || !complete) { return; }
-  const auto preflight = analysis_payload_target(screen);
+  const auto preflight = viewer_payload_target(screen, replace_existing);
   if (!preflight) { complete(preflight.error()); return; }
   if (!payload) {
     complete(Error::make(ErrorCode::InvalidParams, std::string(store_.tr("analysis_runs.no_payload"))));
@@ -662,18 +663,19 @@ void AppShell::open_analysis_payload(wm::Screen *screen, std::string handle,
   const std::weak_ptr<bool> weak = alive_;
   screen->defer([this, weak, screen, handle = std::move(handle), expected_viewer_version,
                  payload = std::move(payload), label = std::move(label),
-                 valid = std::move(valid), complete = std::move(complete)]() mutable {
+                 valid = std::move(valid), complete = std::move(complete), replace_existing]() mutable {
     if (!weak.lock() || !valid()) { return; }
-    const auto target = analysis_payload_target(screen);
-    if (!target) { complete(target.error()); return; }
     auto &project = store_.project();
     project.sync();
+    if (!valid()) { return; }
+    const auto target = viewer_payload_target(screen, replace_existing);
+    if (!target) { complete(target.error()); return; }
     if (!project.project() || project.project()->handle != handle || target.value() != expected_viewer_version) {
       complete(Error::make(ErrorCode::Conflict, std::string(store_.tr("analysis_runs.target_changed"))));
       return;
     }
-    // Capacity and input were checked before navigation. Factory failures leave the empty
-    // Viewer unchanged; after successful activation, adoption cannot call the bridge.
+    // Capacity and input were checked before navigation. Adoption only touches the Viewer
+    // after successful activation, and cannot call the bridge.
     const auto activated = activate_editor(screen, kEditorViewer, false);
     if (!activated) { complete(activated.error()); return; }
     store_.viewer().open_payload(std::move(payload), std::move(label));

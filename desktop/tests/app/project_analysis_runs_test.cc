@@ -521,9 +521,9 @@ TEST_F(ProjectAnalysisRunsPython, ResultImportIsDeferredAndOccupiedViewerPreserv
   ASSERT_NO_FATAL_FAILURE(prepare());
   ASSERT_NO_FATAL_FAILURE(execute());
   const auto payload = result_payload(); ASSERT_NE(payload, nullptr);
-  const auto target = f.shell->analysis_payload_target(&f.screen); ASSERT_TRUE(target.ok());
+  const auto target = f.shell->viewer_payload_target(&f.screen); ASSERT_TRUE(target.ok());
   auto reply = std::make_shared<std::optional<Reply>>();
-  f.shell->open_analysis_payload(&f.screen, handle(), target.value(), payload, "Frozen scalar / view",
+  f.shell->open_viewer_payload(&f.screen, handle(), target.value(), payload, "Frozen scalar / view",
       [] { return true; }, [reply](auto result) { *reply = std::move(result); });
   EXPECT_FALSE(viewer().payload()); EXPECT_FALSE(reply->has_value());
   f.screen.run_deferred(); ASSERT_TRUE(reply->has_value()); ASSERT_TRUE(reply->value().ok());
@@ -532,9 +532,9 @@ TEST_F(ProjectAnalysisRunsPython, ResultImportIsDeferredAndOccupiedViewerPreserv
   const auto layout = f.screen.to_json();
   const auto source = viewer().source().key();
   const auto version = viewer().version();
-  EXPECT_FALSE(f.shell->analysis_payload_target(&f.screen).ok());
+  EXPECT_FALSE(f.shell->viewer_payload_target(&f.screen).ok());
   auto denied = std::make_shared<std::optional<Reply>>();
-  f.shell->open_analysis_payload(&f.screen, handle(), version, payload, "Another result", [] { return true; },
+  f.shell->open_viewer_payload(&f.screen, handle(), version, payload, "Another result", [] { return true; },
       [denied](auto result) { *denied = std::move(result); });
   ASSERT_TRUE(denied->has_value()); EXPECT_FALSE(denied->value().ok());
   EXPECT_EQ(viewer().source().key(), source); EXPECT_EQ(viewer().version(), version); EXPECT_EQ(f.screen.to_json(), layout);
@@ -545,19 +545,46 @@ TEST_F(ProjectAnalysisRunsPython, ResultImportRefusesChangedThenClearedViewerAnd
   ASSERT_NO_FATAL_FAILURE(prepare());
   ASSERT_NO_FATAL_FAILURE(execute());
   const auto payload = result_payload(); ASSERT_NE(payload, nullptr);
-  const auto target = f.shell->analysis_payload_target(&f.screen); ASSERT_TRUE(target.ok());
+  const auto target = f.shell->viewer_payload_target(&f.screen); ASSERT_TRUE(target.ok());
   const auto layout = f.screen.to_json();
   auto reply = std::make_shared<std::optional<Reply>>();
-  f.shell->open_analysis_payload(&f.screen, handle(), target.value(), payload, "Saved result", [] { return true; },
+  f.shell->open_viewer_payload(&f.screen, handle(), target.value(), payload, "Saved result", [] { return true; },
       [reply](auto result) { *reply = std::move(result); });
   viewer().open_payload(payload, "Intervening result"); viewer().close(); f.screen.run_deferred();
   ASSERT_TRUE(reply->has_value()); EXPECT_FALSE(reply->value().ok());
   EXPECT_EQ(reply->value().error().code, bridge::ErrorCode::Conflict);
   EXPECT_FALSE(viewer().payload()); EXPECT_EQ(f.screen.to_json(), layout);
   bool live = true; reply->reset();
-  f.shell->open_analysis_payload(&f.screen, handle(), viewer().version(), payload, "Saved result", [&live] { return live; },
+  f.shell->open_viewer_payload(&f.screen, handle(), viewer().version(), payload, "Saved result", [&live] { return live; },
       [reply](auto result) { *reply = std::move(result); });
   live = false; f.screen.run_deferred(); EXPECT_FALSE(reply->has_value()); EXPECT_FALSE(viewer().payload());
+}
+
+TEST_F(ProjectAnalysisRunsPython, ExplicitPayloadReplacementRequiresTheSameViewerAtAdoption)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare());
+  ASSERT_NO_FATAL_FAILURE(execute());
+  const auto payload = result_payload(); ASSERT_TRUE(payload);
+  viewer().open_payload(payload, "Original result");
+  const auto first = f.shell->viewer_payload_target(&f.screen, true); ASSERT_TRUE(first.ok());
+  auto reply = std::make_shared<std::optional<Reply>>();
+  f.shell->open_viewer_payload(&f.screen, handle(), first.value(), payload, "Selected result",
+      [] { return true; }, [reply](auto result) { *reply = std::move(result); }, true);
+  EXPECT_FALSE(reply->has_value());
+  EXPECT_EQ(viewer().source_label(), "Original result");
+  viewer().open_payload(payload, "Intervening result");
+  f.screen.run_deferred();
+  ASSERT_TRUE(reply->has_value()); ASSERT_FALSE(reply->value().ok());
+  EXPECT_EQ(reply->value().error().code, bridge::ErrorCode::Conflict);
+  EXPECT_EQ(viewer().source_label(), "Intervening result");
+  reply->reset();
+  const auto current = f.shell->viewer_payload_target(&f.screen, true); ASSERT_TRUE(current.ok());
+  f.shell->open_viewer_payload(&f.screen, handle(), current.value(), payload, "Selected result",
+      [] { return true; }, [reply](auto result) { *reply = std::move(result); }, true);
+  f.screen.run_deferred();
+  ASSERT_TRUE(reply->has_value()); ASSERT_TRUE(reply->value().ok());
+  EXPECT_EQ(viewer().source_label(), "Selected result");
+  EXPECT_EQ(viewer().base_payload(), payload);
 }
 
 TEST_F(ProjectAnalysisRunsPython, ResultImportPreflightsCapacityAndAllInstalledWindowText)
@@ -571,13 +598,13 @@ TEST_F(ProjectAnalysisRunsPython, ResultImportPreflightsCapacityAndAllInstalledW
     while (area->tab_count() < 16) { ASSERT_TRUE(area->add_tab(kEditorLogs, false)); }
   }
   const auto layout = f.screen.to_json();
-  EXPECT_FALSE(f.shell->analysis_payload_target(&f.screen).ok());
+  EXPECT_FALSE(f.shell->viewer_payload_target(&f.screen).ok());
   auto reply = std::make_shared<std::optional<Reply>>();
-  f.shell->open_analysis_payload(&f.screen, handle(), viewer().version(), payload, "Saved result", [] { return true; },
+  f.shell->open_viewer_payload(&f.screen, handle(), viewer().version(), payload, "Saved result", [] { return true; },
       [reply](auto result) { *reply = std::move(result); });
   ASSERT_TRUE(reply->has_value()); EXPECT_FALSE(reply->value().ok()); EXPECT_EQ(f.screen.to_json(), layout);
   ASSERT_TRUE(f.area("a2").set_tab_type(0, kEditorViewer));
-  EXPECT_TRUE(f.shell->analysis_payload_target(&f.screen).ok());
+  EXPECT_TRUE(f.shell->viewer_payload_target(&f.screen).ok());
   struct Extra {
     AppShell &shell; wm::Screen screen; wmtest::ScreenDriver driver;
     explicit Extra(AppShell &owner) : shell(owner), driver(screen, 1000, 900, 1) {
@@ -589,15 +616,15 @@ TEST_F(ProjectAnalysisRunsPython, ResultImportPreflightsCapacityAndAllInstalledW
   ASSERT_TRUE(area->set_tab_type(0, kEditorPython)); extra.screen.set_maximized(area); extra.driver.frame();
   const auto *input = extra.screen.ui()->find("python_source"); ASSERT_NE(input, nullptr);
   const auto rect = input->rect;
-  const auto target = f.shell->analysis_payload_target(&f.screen); ASSERT_TRUE(target.ok()); reply->reset();
-  f.shell->open_analysis_payload(&f.screen, handle(), target.value(), payload, "Saved result", [] { return true; },
+  const auto target = f.shell->viewer_payload_target(&f.screen); ASSERT_TRUE(target.ok()); reply->reset();
+  f.shell->open_viewer_payload(&f.screen, handle(), target.value(), payload, "Saved result", [] { return true; },
       [reply](auto result) { *reply = std::move(result); });
   extra.driver.click(int(rect.cx()), extra.screen.rect().ymax - 1 - int(rect.cy()));
   extra.driver.key(wm::Key::Unknown, wm::ModNone, "unfinished"); ASSERT_TRUE(extra.screen.ui()->text_input_active());
   f.screen.run_deferred(); ASSERT_TRUE(reply->has_value()); EXPECT_FALSE(reply->value().ok());
   EXPECT_EQ(reply->value().error().code, bridge::ErrorCode::Busy); EXPECT_FALSE(viewer().payload());
   ASSERT_NE(extra.screen.ui()->edit_state(), nullptr); EXPECT_NE(extra.screen.ui()->edit_state()->text().find("unfinished"), std::string::npos);
-  EXPECT_FALSE(f.shell->analysis_payload_target(nullptr).ok());
+  EXPECT_FALSE(f.shell->viewer_payload_target(nullptr).ok());
 }
 
 TEST_F(ProjectAnalysisRunsPython, SavedRunsUiPreparesInspectableMappingsAndCancellationDoesNotExecute)
@@ -849,7 +876,7 @@ TEST_F(ProjectAnalysisRunsPython, OccupiedUnrenderedViewerIntentAndClosedTargetN
   viewer().set_parameter("component", ui::FormValue::number(2));
   store().set_bridge(client.get());
   const auto intent = viewer().graph_inspection(); ASSERT_TRUE(intent->desired); ASSERT_FALSE(viewer().payload());
-  EXPECT_FALSE(f.shell->analysis_payload_target(&f.screen).ok()); EXPECT_EQ(viewer().graph_inspection(), intent);
+  EXPECT_FALSE(f.shell->viewer_payload_target(&f.screen).ok()); EXPECT_EQ(viewer().graph_inspection(), intent);
   auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorViewer));
   EditorContext context{store(), area}; std::vector<ui::MenuEntry> entries;
   area.editor().menu_entries(entries, context);
@@ -858,14 +885,14 @@ TEST_F(ProjectAnalysisRunsPython, OccupiedUnrenderedViewerIntentAndClosedTargetN
   });
   ASSERT_NE(close, entries.end()); ASSERT_TRUE(close->enabled); ASSERT_TRUE(close->action);
   close->action(); EXPECT_EQ(viewer().source().kind, SourceKind::None); EXPECT_FALSE(viewer().payload());
-  EXPECT_TRUE(f.shell->analysis_payload_target(&f.screen).ok());
+  EXPECT_TRUE(f.shell->viewer_payload_target(&f.screen).ok());
   entries.clear(); area.editor().menu_entries(entries, context);
   close = std::find_if(entries.begin(), entries.end(), [&](const auto &entry) {
     return entry.text == store().tr("viewer.action.close");
   });
   ASSERT_NE(close, entries.end()); EXPECT_FALSE(close->enabled);
   wm::Screen other; f.shell->install(other, nullptr); f.shell->build_default_layout(other); f.shell->forget(other);
-  EXPECT_FALSE(f.shell->analysis_payload_target(&other).ok()); EXPECT_FALSE(viewer().payload());
+  EXPECT_FALSE(f.shell->viewer_payload_target(&other).ok()); EXPECT_FALSE(viewer().payload());
 }
 
 }  // namespace

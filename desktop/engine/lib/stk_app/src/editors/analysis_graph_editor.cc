@@ -1784,13 +1784,13 @@ class AnalysisGraphEditor final : public Editor {
   void show_output(AppShell *shell, wm::Screen *screen, const std::string &output, const std::function<bool()> &same_archive,
                    std::function<void(const bridge::Error &)> failed)
   {
-    const auto target = shell->analysis_payload_target(screen);
+    const auto target = shell->viewer_payload_target(screen);
     if (!target) { failed(target.error()); return; }
     const auto payload = runs_->decode_payload(output);
     if (!payload || !same_archive()) { return; }
     const auto id = io::get_string(runs_->run(), "id");
     const auto label = io::get_string(runs_->run(), "analysis_name") + " · " + id.substr(0, 8) + " / " + output;
-    shell->open_analysis_payload(screen, runs_->handle(), target.value(), payload, label, same_archive,
+    shell->open_viewer_payload(screen, runs_->handle(), target.value(), payload, label, same_archive,
         [same_archive, failed = std::move(failed)](bridge::Result<Json> result) {
       if (same_archive() && !result) { failed(result.error()); }
     });
@@ -1801,7 +1801,7 @@ class AnalysisGraphEditor final : public Editor {
     const auto warn = [this](std::string_view message) {
       if (store_->toast) { store_->toast(std::string(message), ui::ToastKind::Warning); }
     };
-    const auto target = shell->analysis_payload_target(screen);
+    const auto target = shell->viewer_payload_target(screen);
     if (!target) { warn(target.error().message); return; }
     runs_->read_result([this, shell, screen, current = std::move(current), warn, version = target.value()] {
       if (!current()) { return; }

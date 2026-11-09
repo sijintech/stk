@@ -14,7 +14,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <map>
 #include <stdexcept>
 
 namespace stk::app {
@@ -427,31 +426,10 @@ std::shared_ptr<const io::Payload> ProjectAnalysisRuns::decode_payload(const std
   try {
     const auto &selected = result().at("outputs").at(output);
     if (io::get_string(selected, "type") != "payload") { throw std::runtime_error("Select a payload output"); }
-    const auto &manifest = selected.at("manifest");
-    const auto &buffers = manifest.at("buffers");
-    if (!buffers.is_array()) { throw std::runtime_error("Invalid archived payload buffers"); }
-    auto remaining = io::get_int(run_.at("result"), "size_bytes", -1) - int64_t(result_inspection_->encoded_bytes());
-    std::map<std::string, int64_t, std::less<>> sizes;
-    for (const auto &buffer : buffers) {
-      const auto sha = io::get_string(buffer, "sha256");
-      const auto length = io::get_int(buffer, "byteLength", -1);
-      if (!core::is_sha256_hex(sha) || length < 0) { throw std::runtime_error("Invalid archived payload buffer"); }
-      const auto [entry, inserted] = sizes.try_emplace(sha, length);
-      if (!inserted) {
-        if (entry->second != length) { throw std::runtime_error("Archived payload buffer lengths disagree"); }
-        continue;
-      }
-      if (length > remaining) { throw std::runtime_error("Archived payload exceeds its verified size"); }
-      remaining -= length;
-    }
+    const auto remaining = io::get_int(run_.at("result"), "size_bytes", -1) - int64_t(result_inspection_->encoded_bytes());
+    if (remaining < 0) { throw std::runtime_error("Invalid archived payload size"); }
     const io::BlobCache blobs(core::path_from_utf8(blob_dir_));
-    // Decode checks each digest over the same owned bytes that will be kept by the Viewer.
-    return std::make_shared<const io::Payload>(io::decode_manifest(manifest, [&](const std::string_view sha)
-        -> std::optional<core::SharedBytes> {
-      const auto size = sizes.find(sha);
-      if (size == sizes.end()) { return std::nullopt; }
-      return core::SharedBytes::read_exact_file(blobs.path_for(sha), static_cast<size_t>(size->second));
-    }));
+    return std::make_shared<const io::Payload>(blobs.decode_owned_manifest(selected.at("manifest"), size_t(remaining)));
   }
   catch (const std::exception &error) { error_ = error.what(); changed(); return nullptr; }
 }

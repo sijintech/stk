@@ -139,7 +139,16 @@ TEST(BlobCache, StoresVerifiesAndProvides)
   const io::Payload p = io::decode_manifest(manifest, cache.provider());
   EXPECT_EQ(p.buffers.size(), manifest["buffers"].size());
   EXPECT_TRUE(p.buffers[0].bytes.mapped());
+  const auto owned = cache.decode_owned_manifest(manifest, 1024 * 1024);
+  EXPECT_EQ(owned.buffers.size(), p.buffers.size());
+  EXPECT_FALSE(owned.buffers[0].bytes.mapped());
   io::BlobCache empty(root / "none");
+  EXPECT_THROW(empty.decode_owned_manifest(manifest, 0), io::PayloadError);
+  auto conflicting = manifest;
+  auto buffer = conflicting.at("buffers").front();
+  buffer["byteLength"] = io::get_int(buffer, "byteLength", 0) + 1;
+  conflicting.at("buffers").push_back(buffer);
+  EXPECT_THROW(empty.decode_owned_manifest(conflicting, 1024 * 1024), io::PayloadError);
   try {
     io::decode_manifest(manifest, empty.provider());
     FAIL() << "missing blobs must be rejected";

@@ -111,17 +111,17 @@
 
 **范围。** 只做 MuFerro 仿真面板及原生载荷接纳接线。复用严格桥、已发布的图节点与 DAT View。
 
-**求值。** 以实测的 `scalar-volume` 图为模板。用内联 `mupro_hdf5@1`，固定 `binding: "run"` 和
-`path: "run.h5"`，把已明确选择的 `selector` 和行内 `expected_sha256` 作为字面值传入。原生
-[`bridge::Client::graph_evaluate`](../../desktop/engine/lib/stk_bridge/src/client.cc#L1597) 发起本地求值，绑定按运行 ID 推导的收集目录，
-使用 `desktop` profile，只请求 `view` 载荷。图节点参数直接取本次选择。面板在 Viewer 接纳前处理缺选择、摘要不符和输出错误。
+**求值。** 以实测的 `scalar-volume` 图为模板。原生 [`bridge::Client::graph_evaluate`](../../desktop/engine/lib/stk_bridge/src/client.cc#L1597)
+发起本地求值，绑定当前项目根。内联 `mupro_hdf5@1` 使用按运行 ID 推导的项目相对路径，以及本次选择的 `selector` 和行内 `expected_sha256`。
+项目根作为绑定边界，可拒绝调用端检查后被替换为项目外链接的算例目录。登记 SHA-256 约束实际解析的字节。
+使用 `desktop` profile，只请求 `view` 载荷。面板在 Viewer 接纳前处理缺选择、摘要不符和输出错误。
 
 **接纳。** [`ViewerState::open_path`](../../desktop/engine/lib/stk_app/src/viewer_state.cc#L1657) 会在求值前调用 `close()`。
 H1 先验证输出类型、载荷结构和每个唯一缓冲的长度、摘要及总预算，再解码并持有同一份缓冲字节。借鉴历史分析
 [`decode_payload`](../../desktop/engine/lib/stk_app/src/project_analysis_runs.cc#L425) 的普通文件句柄读取和独占缓冲做法。
 H1 的结果没有历史归档回执，使用此次明确请求、选中行、求值 ID 和专用输出预算核对。
 在主线程采纳前复核项目、选中行、求值 generation、屏幕和发起时 Viewer 版本。复用
-[`AppShell::open_analysis_payload`](../../desktop/engine/lib/stk_app/src/shell.cc#L648) 的延后导航与版本校验方式。
+[`AppShell::open_viewer_payload`](../../desktop/engine/lib/stk_app/src/shell.cc#L648) 的延后导航与版本校验方式。
 已有历史分析入口只接纳到空 Viewer。H1 由明确打开动作授权替换当前画面，接纳使用
 [`ViewerState::open_payload`](../../desktop/engine/lib/stk_app/src/viewer_state.cc#L1760)，在求值与验证全部通过后调用。
 失败、迟到结果或用户已改变 Viewer 时保留原画面。H1 显示静态载荷及场、步号和容器摘要来源。
@@ -129,8 +129,7 @@ H1 的结果没有历史归档回执，使用此次明确请求、选中行、�
 **面板控件。** 在 View 旁增加 HDF5 区，只在选中运行已有结果行、行中有 `case/run.h5` 且桌面就绪时启用：
 
 1. **列出 HDF5 帧**（明确点击，只读）：用行中的 SHA，经严格桥 `graph.evaluate` 本地模式求值内联运行索引，
-   绑定已收集的 case 目录。结果行只记录项目内相对路径，`local_bindings` 需要绝对目录，所以实现时要核实
-   面板能取得当前项目的绝对目录，并确认解析后仍在项目内。只在每帧 SHA 都等于行内 SHA 时显示选项，
+   绑定当前项目的绝对根，使用项目相对的 case 目录。只在每帧 SHA 都等于行内 SHA 时显示选项，
    否则显示"收集结果已在本地改变"，不给选项。若答复带 `hdf5_error`，显示该诊断，DAT 不受影响。
 2. **选取**：单个下拉框，条目为"场 · 第 N 步"，按场名再按步号排序。初始不选中任何项，打开按钮在明确
    选中之前保持禁用。
