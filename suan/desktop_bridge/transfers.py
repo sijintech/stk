@@ -316,6 +316,7 @@ class TransferManager:
     @_writer
     def resume(self, transfer_id):
         deadline = time.monotonic() + 5.0
+        waited_for = None
         while True:
             with self.lock:
                 if self.stopping.is_set():
@@ -324,6 +325,9 @@ class TransferManager:
                 record = self.load(transfer_id)
                 running = self.threads.get(transfer_id)
                 if record["state"] == "completed":
+                    return self.public(record)
+                if waited_for is not None and running is not None and running is not waited_for:
+                    # Another caller retried the attempt we joined. Its successor may already be terminal.
                     return self.public(record)
                 if running is None or not running.is_alive():
                     self.cancelled.discard(transfer_id)
@@ -339,6 +343,7 @@ class TransferManager:
             remaining = deadline - time.monotonic()
             if remaining <= 0 or running is threading.current_thread():
                 raise BridgeError("busy", "The previous transfer attempt is still finishing", retryable=True)
+            waited_for = running
             running.join(timeout=remaining)
 
     def resume_interrupted(self):

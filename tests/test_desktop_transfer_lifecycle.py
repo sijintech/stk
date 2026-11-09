@@ -300,6 +300,76 @@ def test_resume_after_failure_event_waits_for_old_worker_and_restarts(tmp_path, 
         manager.stop()
 
 
+@pytest.mark.parametrize("kind", ["runtime", "hub"])
+def test_concurrent_resumes_do_not_retry_a_new_failed_attempt(tmp_path, monkeypatch, kind):
+    initial_failed, release_initial, retry_failed = (threading.Event() for _ in range(3))
+    first_waiting, second_waiting, release_second = (threading.Event() for _ in range(3))
+    attempts = []
+
+    def emit(event, data):
+        if data["transfer"]["state"] == "failed":
+            if len(attempts) == 1:
+                initial_failed.set()
+                assert release_initial.wait(10)
+            else:
+                retry_failed.set()
+
+    def download(record, backend):
+        attempts.append(record["id"])
+        if len(attempts) <= 2:
+            raise BridgeError("unavailable", f"Simulated failure {len(attempts)}")
+
+    backend = SimpleNamespace(kind=kind, server_key=f"{kind}:test")
+    manager = TransferManager(tmp_path / "state", emit, lambda *_: backend)
+    monkeypatch.setattr(manager, "_download", download)
+    try:
+        transfer = manager.start_download(f"{kind}:test", "workspace", "workspace", "file", tmp_path / "file",
+                                          node="node" if kind == "hub" else None)
+        transfer_id = transfer["id"]
+        assert initial_failed.wait(5)
+        initial_worker = manager.threads[transfer_id]
+        join = initial_worker.join
+
+        def hold_second_resume(*args, **kwargs):
+            if not first_waiting.is_set():
+                first_waiting.set()
+                join(*args, **kwargs)
+            else:
+                second_waiting.set()
+                join(*args, **kwargs)
+                assert release_second.wait(10)
+
+        monkeypatch.setattr(initial_worker, "join", hold_second_resume)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(manager.resume, transfer_id)
+            try:
+                assert first_waiting.wait(5)
+                second = pool.submit(manager.resume, transfer_id)
+                assert second_waiting.wait(5)
+                release_initial.set()
+                assert first.result(timeout=5)["state"] == "queued"
+                assert retry_failed.wait(5)
+                retry_worker = manager.threads[transfer_id]
+                assert retry_worker is not initial_worker
+                retry_worker.join(timeout=5)
+                assert not retry_worker.is_alive()
+            finally:
+                release_initial.set()
+                release_second.set()
+            # The second caller requested a retry of the initial worker, not of this new failure.
+            coalesced = second.result(timeout=5)
+        assert coalesced["state"] == "failed" and coalesced["error"]["message"] == "Simulated failure 2"
+        assert manager.threads[transfer_id] is retry_worker and attempts == [transfer_id] * 2
+
+        assert manager.resume(transfer_id)["state"] == "queued"  # An explicit retry of the new failure.
+        final_worker = manager.threads[transfer_id]
+        final_worker.join(timeout=5)
+        assert not final_worker.is_alive()
+        assert manager.load(transfer_id)["state"] == "completed" and attempts == [transfer_id] * 3
+    finally:
+        manager.stop()
+
+
 def test_cancel_after_transfer_worker_retires_preserves_completed_download(tmp_path, monkeypatch):
     downloading, finish_download, cancel_at_lock, allow_cancel = (threading.Event() for _ in range(4))
     body = b"synthetic download"
