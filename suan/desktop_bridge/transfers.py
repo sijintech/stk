@@ -630,8 +630,24 @@ class TransferManager:
         attempt = int(record.get("import_attempt", 0))
         identity = action_id("workspace.import", backend.node_id, transfer_id, attempt)
         files = [{"path": item["remote"], "sha256": item["sha256"], "size": item["size"]} for item in record["items"]]
+
+        def post(identity):
+            self._check(transfer_id)
+            try:
+                return backend.post_import(record["workspace_id"], files, identity)
+            except BridgeError as exc:
+                if "before importing" not in exc.message:
+                    raise
+                # The hub collected the uploaded files: upload them again on resume.
+                for item in record["items"]:
+                    item.update(done=False, upload_id=None)
+                record.update(bytes_done=0, files_done=0)
+                raise BridgeError("remote_error", "The hub no longer holds the uploaded files (they expired before "
+                                  "the import); resume the transfer to upload them again") from None
+
         record["current"] = None
         self._check(transfer_id)
+        action = None
         cancelled_import = record.get("cancelled_import_id")
         if cancelled_import is not None:
             if cancelled_import == identity:
@@ -639,27 +655,22 @@ class TransferManager:
                 if previous.get("state") != "rejected":
                     # The hub may have recorded the rejection before its reply was lost.
                     previous = summary(backend.action_record(identity))
+                if previous.get("state") != "rejected":
+                    # Rejection can still arrive between the read and this same-ID replay.
+                    action = post(identity)
+                    previous = summary(action)
                 if (previous.get("id"), previous.get("node_id"), previous.get("kind"), previous.get("state")) == (
                         identity, backend.node_id, "workspace.import", "rejected"):
                     attempt += 1
                     record["import_attempt"] = attempt
                     identity = action_id("workspace.import", backend.node_id, transfer_id, attempt)
                     record.pop("action", None)
+                    action = None
             # Persist the choice before POST so interruption reuses the same successor.
             record.pop("cancelled_import_id")
             self.save(record)
-            self._check(transfer_id)
-        try:
-            action = backend.post_import(record["workspace_id"], files, identity)
-        except BridgeError as exc:
-            if "before importing" not in exc.message:
-                raise
-            # The hub collected the uploaded files (unreferenced for too long): upload them again on resume.
-            for item in record["items"]:
-                item.update(done=False, upload_id=None)
-            record.update(bytes_done=0, files_done=0)
-            raise BridgeError("remote_error", "The hub no longer holds the uploaded files (they expired before "
-                              "the import); resume the transfer to upload them again") from None
+        if action is None:
+            action = post(identity)
         delay = 0.25
         while True:
             view = summary(action)

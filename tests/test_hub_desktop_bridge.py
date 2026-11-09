@@ -236,7 +236,7 @@ def test_upload_through_the_hub_resumes_waits_for_review_and_imports(live, inpro
     restarted.close()
 
 
-@pytest.mark.parametrize("receipt", ["rejected", "lost", "approval_won", "older_attempt"])
+@pytest.mark.parametrize("receipt", ["rejected", "lost", "late", "approval_won", "older_attempt"])
 def test_cancelled_upload_resumes_using_the_original_import_receipt(  # noqa: F811
         live, inproc, tmp_path, monkeypatch, receipt):
     from suan.desktop_bridge.backends import action_id
@@ -257,8 +257,11 @@ def test_cancelled_upload_resumes_using_the_original_import_receipt(  # noqa: F8
     original_review = HubClient.review
 
     def resolve_before_reply(self, aid, approved):
-        if receipt == "approval_won" and aid == review["id"] and not approved:
-            original_review(self, aid, True)
+        if aid == review["id"] and not approved:
+            if receipt == "late":
+                raise ConnectionResetError("simulated rejection still in flight")
+            if receipt == "approval_won":
+                original_review(self, aid, True)
         result = original_review(self, aid, approved)
         if receipt == "lost" and aid == review["id"] and not approved:
             raise ConnectionResetError("simulated reply loss after rejection")
@@ -271,8 +274,8 @@ def test_cancelled_upload_resumes_using_the_original_import_receipt(  # noqa: F8
         if receipt == "approval_won":
             assert cancelled["action"]["state"] in ("queued", "succeeded")
         else:
-            assert cancelled["action"]["state"] == ("review" if receipt == "lost" else "rejected")
-            assert live.store.action(review["id"])["state"] == "rejected"
+            assert cancelled["action"]["state"] == ("review" if receipt in ("lost", "late") else "rejected")
+            assert live.store.action(review["id"])["state"] == ("review" if receipt == "late" else "rejected")
             assert live.client.files(workspace) == []
         if receipt == "older_attempt":
             manager = harness.bridge.transfers
@@ -283,6 +286,16 @@ def test_cancelled_upload_resumes_using_the_original_import_receipt(  # noqa: F8
         harness = inproc()
         assert harness.call("hello", {"protocol": 1})["resumed_transfers"] == []
         assert harness.call("transfer.get", identity)["transfer"]["state"] == "cancelled"
+        if receipt == "late":
+            original_action = HubClient.action
+
+            def read_before_rejection(self, aid):
+                result = original_action(self, aid)
+                if aid == review["id"] and result["state"] == "review":
+                    original_review(self, aid, False)
+                return result
+
+            monkeypatch.setattr(HubClient, "action", read_before_rejection)
         mark = harness.mark()
         assert harness.call("transfer.resume", identity)["transfer"]["id"] == transfer["id"]
         if receipt == "approval_won":
