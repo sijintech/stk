@@ -117,7 +117,12 @@ def test_numpy_free_parts(tmp_path):
         "inputs = registry.inputs('mupro.muferro')\n"
         "case = inputs.read_case(LocalFiles(sys.argv[1]))\n"
         "spec = inputs.task_spec(case, {'ranks': 2}, workspace_id='w' * 32)\n"
-        "assert len(Registry([sources])) == 6 and len(cubic26('stk-legacy')) == 26\n"
+        "node_ids = set(Registry([sources]).types())\n"
+        "expected = {'stk.source.file@1', 'stk.source.lammps_log@1', 'stk.source.muferro_frame@1',\n"
+        "            'stk.source.muferro_run@1', 'stk.source.mupro_hdf5@1', 'stk.source.mupro_hdf5_fields@1',\n"
+        "            'stk.source.table@1'}\n"
+        "assert expected <= node_ids, expected - node_ids\n"
+        "assert len(cubic26('stk-legacy')) == 26\n"
         "assert palettes.to_hex(palettes.cubic26_color((1, 0, 0))) == '#ff0000'\n"
         "print(case['app'], spec['resources']['ranks'], registry.get('mupro.muferro').sniff(LocalFiles(sys.argv[1])))\n"
     )
