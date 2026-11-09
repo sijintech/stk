@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -16,7 +17,9 @@ from mupro_fake import make_fake_sdk  # noqa: E402
 from suan.connectors.files import LocalFiles  # noqa: E402
 from suan.connectors.mupro import MuFerroConnector  # noqa: E402
 from suan.desktop_bridge.workflow_runs import WorkflowRunExecutor, _Job  # noqa: E402
+from suan.graph.catalog import load_preset  # noqa: E402
 from suan.project import ProjectError, ProjectStore  # noqa: E402
+from suan.render.payload import decode  # noqa: E402
 from suan.workflows.muferro import RESULT_FIELD_IDS, RESULT_TABLE_ID, native_action  # noqa: E402
 from test_desktop_bridge_runtime import add_profile  # noqa: E402
 from test_workflow_muferro import project, scripts, bridge_env, revision  # noqa: E402,F401
@@ -28,7 +31,7 @@ def test_collect_hdf5_sidecar_is_verified_registered_and_not_resubmitted(project
     api, p = project
     client, supervisor, _, _ = runtime
     connection = add_profile(scripts, runtime)
-    sdk = make_fake_sdk(tmp_path / "synthetic-sdk")
+    sdk = make_fake_sdk(tmp_path / "synthetic-sdk", steps=4)
     sidecar = tmp_path / "synthetic-run.h5"
     values = np.arange(4 * 3 * 2 * 3, dtype=np.float32).reshape(4, 3, 2, 3)
     if mode == "corrupt":
@@ -37,6 +40,8 @@ def test_collect_hdf5_sidecar_is_verified_registered_and_not_resubmitted(project
         with h5py.File(sidecar, "w") as file:
             if mode != "empty":
                 file.create_dataset("t00000002/Polar", data=np.ones((5, 3, 2, 3)) if mode == "grid" else values)
+                if mode == "valid":  # A later explicit step makes the frozen analysis selector discriminating.
+                    file.create_dataset("t00000004/Polar", data=values + 100)
                 if mode in {"dtype", "components"}:
                     file.create_dataset("t00000004/Polar", data=values.astype("float64") if mode == "dtype"
                                         else np.ones((4, 3, 2, 4), dtype="float32"))
@@ -87,6 +92,8 @@ def test_collect_hdf5_sidecar_is_verified_registered_and_not_resubmitted(project
     np.testing.assert_array_equal(image.array("Polar"), values.transpose(2, 1, 0, 3))
     assert image.array("Polar").dtype == np.dtype("float32")
     assert len(client.tasks()) == 1
+    _assert_collected_analysis(p, collected, sidecar.read_bytes(), values)
+    assert len(client.tasks()) == 1
     path = Path(collected["directory"]) / "run.h5"
     opened = []
     monkeypatch.setattr(api.viewer, "open", lambda folder, *, preset: opened.append((folder, preset)))
@@ -126,6 +133,74 @@ def test_collect_hdf5_sidecar_is_verified_registered_and_not_resubmitted(project
     with pytest.raises(ValueError, match="changed locally"):
         api.muferro.collect(run["id"])
     assert len(client.tasks()) == 1
+
+
+def _saved_hdf5_view(selector, expected_sha256):
+    graph = load_preset("scalar-volume")
+    graph["parameters"] = [p for p in graph["parameters"] if p["name"] != "path"]
+    source = next(node for node in graph["nodes"] if node["id"] == "src")
+    source.update(type="stk.source.mupro_hdf5@1", params={"binding": "data", "path": "run.h5",
+                                                          "selector": selector, "expected_sha256": expected_sha256})
+    return {"format": "stk.analysis-document/1", "graph": graph,
+            "parameters": {"field": "Polar", "component": 0}, "outputs": ["view"]}
+
+
+def _run_saved(p, document, snapshot_id, record_id):
+    analysis_id, run_id = str(uuid4()), str(uuid4())
+    p.analyses.create("Collected MuFerro HDF5", document, analysis_id=analysis_id, expected_revision=revision(p))
+    run = p.analysis_runs.prepare(analysis_id, snapshot_id, {"data": {"run.h5": record_id}},
+                                  run_id=run_id, expected_revision=revision(p))
+    assert p.analysis_runs.start(run_id)["status"] in {"running", "succeeded", "failed"}
+    deadline = time.monotonic() + 60
+    while (final := p.analysis_runs.get(run_id))["status"] in {"prepared", "running"}:
+        assert time.monotonic() < deadline, final
+        time.sleep(0.05)
+    return run, final
+
+
+def _assert_collected_analysis(p, collected, sidecar_bytes, values):
+    """The exact collected run.h5 record, frozen and read through the strict bridge's GraphWorker."""
+    recorded = next(file for file in collected["files"] if file["path"].endswith("/case/run.h5"))
+    assert recorded["sha256"] == hashlib.sha256(sidecar_bytes).hexdigest()
+    table = next(table for table in p.snapshot()["tables"] if table["id"] == RESULT_TABLE_ID)
+    assert recorded in table["records"][0]["values"][RESULT_FIELD_IDS["files"]]
+    files_before = p.files.list()["records"]
+    matches = [row for row in files_before if row["path"] == recorded["path"]]
+    assert len(matches) == 1 and matches[0]["location"] == "project"
+    record_id = matches[0]["id"]
+    snapshot = p.snapshots.capture([record_id], expected_revision=revision(p))["snapshot"]
+    assert [(f["record_id"], f["path"], f["sha256"]) for f in snapshot["manifest"]["files"]] == [
+        (record_id, recorded["path"], recorded["sha256"])]
+
+    selector = "/t00000004/Polar"
+    forged = "0" * 64 if recorded["sha256"] != "0" * 64 else "1" * 64
+    original = Path(collected["directory"]) / "run.h5"
+    moved = original.rename(original.with_name("run.h5.before-analysis"))
+    try:
+        run, final = _run_saved(p, _saved_hdf5_view(selector, recorded["sha256"]), snapshot["id"], record_id)
+        _, refused = _run_saved(p, _saved_hdf5_view(selector, forged), snapshot["id"], record_id)
+    finally:
+        moved.rename(original)
+    assert run["bindings"]["data"]["run.h5"] == {"record_id": record_id, "sha256": recorded["sha256"],
+                                                 "size": len(sidecar_bytes)}
+    assert final["status"] == "succeeded" and final["result"]["has_payload"] is True, final
+    output = p.analysis_runs.result(run["id"])
+    assert "src" in output["result"]["evaluated"]
+    manifest = output["result"]["outputs"]["view"]["manifest"]
+    blobs = {b["sha256"]: (Path(output["blob_dir"]) / b["sha256"][:2] / b["sha256"]).read_bytes()
+             for b in manifest["buffers"]}
+    payload = decode(manifest, blobs)
+    volume = payload.layer("volume")
+    assert volume["grid"]["dimensions"] == [4, 3, 2]  # x, y, z extent of the frozen case grid
+    assert (volume["name"], volume["quantity"], volume["unit"]) == ("Polar_x", "polarization", "unspecified")
+    assert volume["value_range"] == [100.0, 169.0]  # step 4; step 2 spans [0, 69]
+    data = payload.array(volume["data"])
+    assert data.dtype == np.dtype("float32")
+    np.testing.assert_array_equal(data, (values + 100)[..., 0].transpose(2, 1, 0).ravel())
+
+    assert (refused["status"], refused["result"], refused["error"]["code"]) == ("failed", None, "graph_error")
+    assert "expected SHA-256" in refused["error"]["message"]
+    assert p.files.list()["records"] == files_before
 
 
 def test_workflow_snapshot_refuses_changed_hdf5_after_collection(tmp_path, monkeypatch):
