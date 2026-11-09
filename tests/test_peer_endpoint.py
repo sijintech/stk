@@ -487,6 +487,76 @@ def test_real_peer_and_bridge_share_receipt_byte_limit_on_the_same_project(conne
     bridge.assert_clean()
 
 
+def test_real_peer_and_bridge_read_a_format_14_project_and_refuse_receipts_without_implicit_upgrade(
+        connected, sides, inproc):
+    """CP-0 F15: the explicitly synthesized format-14 fixture of test_peer_projects (receipt table dropped,
+    user_version 14), now with a nonempty normal table, across the strict bridge and an authenticated UDP peer."""
+    store, target = sides[1].store, sides[1].target
+    table, field = uuid(), uuid()
+    records = [uuid() for _ in range(2)]
+    commands = [{"op": "create_table", "id": table, "name": "Legacy records"},
+                {"op": "add_field", "id": field, "table_id": table, "name": "Text", "type": "text"}]
+    for index, record in enumerate(records):
+        commands.extend([{"op": "add_record", "id": record, "table_id": table},
+                         {"op": "set_cell", "table_id": table, "field_id": field,
+                          "record_id": record, "value": f"legacy-{index}"}])
+    store.apply(commands, expected_revision=0)
+    with closing(sqlite3.connect(store.path, isolation_level=None)) as db:
+        db.execute("DROP TABLE project_edit_operations")
+        db.execute("PRAGMA user_version=14")
+
+    def raw_state():
+        with closing(sqlite3.connect(store.path.as_uri() + "?mode=ro", uri=True)) as db:
+            return (db.execute("PRAGMA user_version").fetchone()[0],
+                    db.execute("SELECT type, name, sql FROM sqlite_master ORDER BY type, name").fetchall(),
+                    db.execute("SELECT id, name, revision FROM project").fetchall())
+
+    version, master, project = raw_state()
+    assert version == 14 and project == [(target["project_id"], "Authorized peer project", 1)]
+    assert "project_edit_operations" not in {row[1] for row in master}
+    before = raw_state(), store.info(), store.snapshot(), store.history()
+    assert before[1]["format_version"] == 14
+
+    client, _ = connected()
+    bridge = inproc()
+    handle = bridge.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    scopes = {"bridge": {"handle": handle}, "peer": target}
+
+    def read(entry):
+        call = bridge.call if entry == "bridge" else client.request
+        catalog = call("project.catalog", {**scopes[entry]})
+        page = call("project.table.read", {**scopes[entry], "table_id": table, "expected_revision": 1})
+        return catalog, page
+
+    def refused(entry, method, params):
+        params = {**scopes[entry], **params}
+        if entry == "bridge":
+            return bridge.error(method, params)["code"]
+        with pytest.raises(PeerProtocolError) as error:
+            client.request(method, params)
+        return error.value.code
+
+    catalog, page = read("bridge")
+    assert read("peer") == (catalog, page)
+    assert catalog["format_version"] == page["format_version"] == 14
+    assert catalog["project"] == {"id": target["project_id"], "name": "Authorized peer project", "revision": 1}
+    assert [item["id"] for item in catalog["tables"]] == [table] and catalog["total"] == 1
+    assert page["revision"] == 1 and page["total"] == 2
+    assert [(item["id"], item["values"]) for item in page["table"]["records"]] == [
+        (record, {field: f"legacy-{index}"}) for index, record in enumerate(records)]
+
+    for entry in scopes:
+        operation = uuid()
+        write = {"operation_id": operation, "expected_revision": 1,
+                 "commands": [{"op": "create_table", "name": f"{entry} legacy write"}]}
+        assert refused(entry, "project.edit_operations.apply_once", write) == "unsupported"
+        assert refused(entry, "project.edit_operations.get", {"operation_id": operation}) == "unsupported"
+        assert read(entry) == (catalog, page)
+    assert read("bridge") == read("peer") == (catalog, page)
+    assert (raw_state(), store.info(), store.snapshot(), store.history()) == before
+    bridge.assert_clean()
+
+
 def test_real_authorized_file_index_content_crosses_the_native_wire_until_grant_revocation(
         connected, sides, inproc, tmp_path):
     """CP-0 F23 over the real UDP WebRTC PeerEndpoint: CURRENT published stk.peer/1 behaviour.
