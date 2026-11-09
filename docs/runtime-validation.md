@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 完成标记与计划
+
+`fff8d77a6f2216ddf223c184dcd05ecf4e9e1715` 在内置 run-index 核对完成标记的存在性，变化返回 `invalid_data`。两个旧反例在标记出现或消失后恢复原状态，仍从旧键读到错误的 `frames.attrs.complete`。修后恢复原状态会重新求值，下一次可命中正确缓存。实时帧完成属性结合标记存在性与缺帧检查，标记正文由显式核验处理。源码和隔离 wheel 各 97 项通过，性能基准各跳过一项。证据见本机 `root-delivery-20261109-82`。 [图契约](specs/stk-graph-v1.md)
+
+远端 `15531049` 已通过 macOS 构建、Linux 包和干净机，Desktop 整轮仍在运行。Runtime 8/13 项已成功，其余运行中。 [Desktop](https://github.com/sijintech/stk/actions/runs/42601829902) [Runtime](https://github.com/sijintech/stk/actions/runs/42601829951)
+
 ## 2026-11-09 UTC · 原生 C++ 实时读取与 MuFerro 表格
 
 `85015dc1d4e88b6cd0a253ec8fb76071adb59069` 集成 Claude40 `c7b9f983e58e12a02fb28afa17563f5113dd3a21`。C++ 桥两参及显式 false 发送省略字段的请求，true 发送布尔值 `require_live`。原生测试校验完整 Target 和 task ID、桥重启后重发以及严格 Python 桥的错误映射。作者 Linux 桥测试 64 项，root 独立 Linux 构建的桥及相关 schema 共 66 项通过、零跳过。真实 Hub 的 Python 证据已在 `49169e0e`，C++ 到真实 Hub 的完整成功路径由 Claude41 复验。 [桥契约](specs/stk-desktop-bridge-v1.md)

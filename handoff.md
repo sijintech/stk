@@ -1,5 +1,9 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · MuFerro 完成标记
+
+本地 `fff8d77a` 把实时图索引的完成标记存在性绑定到计划，避免错误缓存帧完成状态。源码和隔离 wheel 各 97 项通过，性能基准各跳过一项。远端 `15531049` 的 macOS 已构建，原生对照待运行，Linux 包与干净机已过，Runtime 已过八项。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · C++ 精确读取和 MuFerro 表格
 
 远端 `15531049` 已推送，Desktop 和 Runtime 新轮运行。root 在本地 `85015dc1` 集成 Claude40 的 C++ 实时读取入口，相关 66 项通过。Claude41 在独立 worktree 核对 C++ 经真实单机 Hub 的窗口外读取、断线及恢复。Jobs 界面已复现选中任务退出窗口后详情丢失，候选与点击验收进行中。

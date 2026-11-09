@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · 图索引完成标记
+
+root 以 `fff8d77a` 修复规划后标记增删造成的缓存错配。两条旧反例复现，修后源码和隔离 wheel 各 97 项通过。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · C++ 入口与图表格核验
 
 root 推送 `15531049`，本地集成 Claude40 为 `85015dc1` 并以 `3ff96c0a` 修复 MuFerro 表格和结果摘要的绑定。已安排 Claude41 完成原生到真实 Hub 的单机验证。Jobs 状态候选保持独立。 [验收记录](runtime-validation.md)
