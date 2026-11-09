@@ -339,6 +339,71 @@ def test_bridge_and_peer_race_two_identities_at_one_revision_with_one_winner_and
     bridge.assert_clean()
 
 
+def _stored_receipts(store):
+    """Exact stored identities and bytes of every successful edit receipt (all scopes)."""
+    with sqlite3.connect(store.path.as_uri() + "?mode=ro", uri=True) as db:
+        return db.execute("SELECT scope, operation_id, base_revision, applied_revision, request, receipt, sha256 "
+                          "FROM project_edit_operations ORDER BY applied_revision").fetchall()
+
+
+@pytest.mark.parametrize("budget", ["count", "bytes_exhausted_before_write", "bytes_exceeded_by_new_edit"])
+def test_bridge_and_peer_share_the_project_receipt_quota_without_evicting_original_receipts(
+        access, inproc, monkeypatch, budget):
+    """CP-0 F14 on one SQLite project: the strict local Bridge and the authenticated PeerProjects
+    adapter share the project-wide receipt count and byte budgets (narrowed by monkeypatch only).
+
+    "count" and "bytes_exhausted_before_write" are refused before any edit; "bytes_exceeded_by_new_edit"
+    leaves the existing total below the budget, so the new edit is applied and then rolled back.
+    """
+    from suan.project import edit_operations as operations
+    bridge = inproc()
+    handle = bridge.call("project.open", {"directory": str(access.store.directory)})["project"]["handle"]
+    apply, get = "project.edit_operations.apply_once", "project.edit_operations.get"
+    local_request = {"handle": handle, "operation_id": str(uuid4()), "expected_revision": 0,
+                     "commands": [{"op": "create_table", "name": "Bridge original"}]}
+    local = bridge.call(apply, local_request)
+    peer_request = {"commands": [{"op": "create_table", "name": "Peer original"}],
+                    "operation_id": str(uuid4()), "expected_revision": 1}
+    remote = access.apply(**peer_request)
+    assert local["replayed"] is False and remote["replayed"] is False
+    assert local["receipt"]["scope"] == "local" and remote["receipt"]["scope"] != "local"
+    stored, before = _stored_receipts(access.store), unchanged(access.store)
+    assert [row[:4] for row in stored] == [("local", local_request["operation_id"], 0, 1),
+                                           (remote["receipt"]["scope"], peer_request["operation_id"], 1, 2)]
+    total = sum(len(row[4].encode("utf-8")) + len(row[5].encode("utf-8")) for row in stored)
+    if budget == "count":
+        monkeypatch.setattr(operations, "MAX_OPERATIONS", 2)
+        message = "receipt capacity is exhausted"
+    elif budget == "bytes_exhausted_before_write":
+        monkeypatch.setattr(operations, "MAX_TOTAL_BYTES", total)
+        message = "receipt capacity is exhausted"
+    else:
+        monkeypatch.setattr(operations, "MAX_TOTAL_BYTES", total + 1)
+        message = "receipts exceed their total byte budget"
+
+    failed = {"bridge": str(uuid4()), "peer": str(uuid4())}
+    error = bridge.error(apply, {"handle": handle, "operation_id": failed["bridge"], "expected_revision": 2,
+                                 "commands": [{"op": "create_table", "name": "Bridge over quota"}]})
+    assert error["code"] == "invalid_params" and message in error["message"]
+    with pytest.raises(ProjectError, match=message):
+        access.apply([{"op": "create_table", "name": "Peer over quota"}], operation_id=failed["peer"],
+                     expected_revision=2)
+    assert unchanged(access.store) == before and _stored_receipts(access.store) == stored
+    assert access.store.info()["revision"] == 2
+    assert bridge.error(get, {"handle": handle, "operation_id": failed["bridge"]})["code"] == "not_found"
+    with pytest.raises(OperationNotFound):
+        access.get(failed["peer"])
+
+    # The original identities stay readable and exactly replayable in their own scopes.
+    assert bridge.call(get, {"handle": handle, "operation_id": local_request["operation_id"]}) == {
+        "receipt": local["receipt"]}
+    assert access.get(peer_request["operation_id"]) == remote["receipt"]
+    assert bridge.call(apply, local_request) == {"receipt": local["receipt"], "replayed": True}
+    assert access.apply(**peer_request) == {"receipt": remote["receipt"], "replayed": True}
+    assert unchanged(access.store) == before and _stored_receipts(access.store) == stored
+    bridge.assert_clean()
+
+
 def test_lost_reply_reconnect_and_authority_restart_keep_original_receipt_and_scope(access):
     from suan.peer.authority import PeerAuthority
     identity = str(uuid4())
