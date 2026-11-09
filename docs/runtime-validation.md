@@ -1,5 +1,14 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · F12 真实续页与 F14 实额
+
+- **F12**。提交 `b326baef` 使用显式安装的 Linux helper 建立已认证 UDP WebRTC，与本机桥读取同一 SQLite 项目。结构页与记录页各读两页，末页 `next_offset=null`。本地删除一条记录推进修订后，旧的两个续页在两端均返回 `conflict`，peer 随后读取新修订成功。
+- **测试结果**。源码 `test_peer_endpoint.py`、`test_peer_projects.py`、`test_project_edit_operations.py`、`test_desktop_bridge_peer.py` 初跑 181 通过、2 跳过。补给 `STK_TEST_PEER_INSTALLATION` 后，这两个相同测试 ID 通过，共 183 个唯一通过项。另一次传输联跑 174 通过、2 跳过，跳过项需要独立的对抗测试程序。隔离 `49837655` wheel 的 F12 定向 1 项通过，桥及 peer 模块来源已核实。两个隔离副本分别把结构页、记录页的原修订替换为当前修订，各在对应的旧续页检查处失败。
+- **F14**。隔离 `49837655` wheel，Python 3.14.4 / SQLite 3.46.1。两个合成项目经本机 `ProjectStore.edit_operations` 正常提交，分别达到 10,000 份回执、9,514,466 字节和 140 份回执、67,108,864 字节。在字节项目 66,851,033 字节时，248,340 字节的合法单次请求及其 248,605 字节回执超出总额，事务回滚。两个满额项目拒绝新请求，失败 ID 无回执，项目修订、逻辑状态和已存回执一致。重开后首末原回执均可读及按原 CAS 精确重放。实际配额的桥与 peer 线路另验。
+- **CI**。精确 `39780e6d` 的远端 Desktop 仍在运行。macOS 原组与对照会在第 20 步尝试上传四个媒体用例及原生探针数据。 [Desktop 42564398378](https://github.com/sijintech/stk/actions/runs/42564398378) [macOS 任务](https://github.com/sijintech/stk/actions/runs/42564398378/job/128987632697)
+
+测试 JUnit、独立配额清单及摘要保存在 `root-delivery-20261109-57/closure.json`。 [CP-0 证据矩阵](design/cloud-project-service.md)
+
 ## 2026-11-09 UTC · CP-0 wheel 复验与 49837655 Desktop 终态
 
 | Python | SQLite | 通过 | 跳过 |

@@ -426,9 +426,13 @@ root 记录的结果，均为 0 skipped：
 
 已安装 helper 只服务于该联跑中 `tests/test_desktop_bridge_peer.py` 的 helper 验收用例。它不把上表各行变成活 peer 或线上证据。
 
-**1d. F14 真实通道及 Linux 隔离安装复验。** `1e7bebf2` 新增 [`tests/test_peer_endpoint.py`](../../tests/test_peer_endpoint.py) 的 `test_real_peer_and_bridge_share_receipt_byte_limit_on_the_same_project`。本机桥和经已安装 helper 建立的 WebRTC `PeerEndpoint` 操作同一 SQLite 库，分别在缩小的写后回执字节预算下得到 `invalid_params`。失败 ID 查回执均为 `not_found`，已有 scope 的回执仍能精确读取及重放。root 的源码联跑 182 项全过，隔离 wheel 单跑通过。把 peer 的该处错误映射改成 `conflict` 后，定向测试在原预期处失败。证据见 `root-delivery-20261109-55/closure.json`。
+**1d. 真实通道及 Linux 隔离安装复验。** `1e7bebf2` 新增 [`tests/test_peer_endpoint.py`](../../tests/test_peer_endpoint.py) 的 `test_real_peer_and_bridge_share_receipt_byte_limit_on_the_same_project`。本机桥和经已安装 helper 建立的 WebRTC `PeerEndpoint` 操作同一 SQLite 库，分别在缩小的写后回执字节预算下得到 `invalid_params`。失败 ID 查回执均为 `not_found`，已有 scope 的回执仍能精确读取及重放。root 的源码联跑 182 项全过，隔离 wheel 单跑通过。把 peer 的该处错误映射改成 `conflict` 后，定向测试在原预期处失败。证据见 `root-delivery-20261109-55/closure.json`。
 
 root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导出的 `test_peer_projects.py`、`test_project_edit_operations.py` 和上述一个 F14 用例。主进程及热日志子进程均验证从 wheel 安装目录导入。Python 3.11.16 / SQLite 3.53.1、Python 3.12.14 / SQLite 3.53.1、Python 3.14.4 / SQLite 3.46.1 各通过同一组 116 项，零跳过。1b、1c 在这里仍按各自入口验收，真实通道覆盖限于 F14 写后溢出。证据见 `root-delivery-20261109-56/installed-cp0-matrix.json`。
+
+`b326baef` 新增 F12 的 `test_real_peer_and_bridge_reject_stale_project_page_continuations`。本机桥和已认证的 UDP WebRTC peer 对同一 SQLite 项目分别读完两页结构、两页记录。一次本地删除推进修订，两个入口对两种旧续页均返回 `conflict`，peer 随后可读新修订。Linux 隔离 wheel 定向测试通过。分别在两个隔离副本中把 peer 结构页、记录页的原续页修订替换为当前修订，两次都因错误接受陈旧续页而失败。证据见 `root-delivery-20261109-57/closure.json`。
+
+**1e. F14 本机安装态真实配额。** 在 Python 3.14.4 / SQLite 3.46.1 中，以 `ProjectStore.edit_operations` 正常提交合成编辑。独立项目分别达到 10,000 份回执和 67,108,864 字节的请求与回执合计，字节项目共 140 份。字节项目在 66,851,033 字节时，一个请求和回执分别满足单条上限的新编辑越过总额，事务回滚。两个项目满额后均拒绝新写入，失败 ID 无回执，原修订、逻辑内容和回执未改变。重开后首末原回执均可读取和按原 CAS 精确重放。证据见 `root-delivery-20261109-57/f14-limits/closure.json`。这组经本机安装的 store API 执行，桥与真实 WebRTC 的配额证据仍分别见 1c 和 1d。
 
 **2. root 外部探针（仓库外，未提交）。** 证据记录在 `root-delivery-20261109-43/closure.json` 的 `cp0` 节：
 - 两个脚本：`cp0-parity-probe.py`（sha256 `23de877c…`）和 `cp0-hot-journal-probe.py`（sha256 `1d951c7c…`）；
@@ -451,10 +455,10 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 这些探针仍是有效的历史观察。F23 与 F5b/F5c 现在另有 1c 中的已提交测试，探针不再是这几行的唯一证据。
 
 **3. 仍待验证。**
-- **活 peer：** 1d 的 F14 写后溢出之外，CP-0 各行经 `PeerEndpoint` 与原生 helper 的线上行为，包括适用的错误码映射。
+- **活 peer：** 1d 已列 F12 和 F14 写后溢出。其余缺少真实通道证据的场景仍待 `PeerEndpoint` 与原生 helper 验收。
 - **平台：** Windows、macOS 上这些行的复验。
 - **F5b/F5c/F23 的旧代码反例：** 已找到的 RED 证据只覆盖 F3、F13、F15、F14。
-- **F14 的真实上限：** 按真实的 10000 条与 64 MiB 实际写满。现有测试只缩小预算。
+- **F14 的真实上限：** 本机 store 已按 1e 实测。真实上限下的桥和 peer 线路，以及配额监控仍待验证。
 - **F5c：** 保留现行恢复行为还是改为拒绝，仍由 root 决定。
 - **第 (d) 组：** 跨部署并发（F3′）、网络分区与换设备（F21′）、两个服务实例（F22）；以及云服务、R2/R3。
 
@@ -483,9 +487,9 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 | F11b | a | 两个独立 scope 用同一 UUID 先后写入 | 第一个 scope 在修订 r 写入；第二个 scope 用当时的当前修订 r+1 写入，得到 `replayed=false` 的另一个新回执。两个回执的 scope 不同，各自 `get` 返回各自的回执（`test_peer_projects.py:187-190`）。主键是 `(scope, operation_id)`。桥 `local` 与 peer scope 的跨入口情形，由 `994a3b1a` 的已提交测试覆盖（§8.4 1b） | 同左；scope 由服务推导 | 云端服务上的同一验收 |
 | F11c | a | 同一 scope、同一 UUID，重放时修改了原 CAS | 冲突，状态与原回执都不变（`test_peer_projects.py:143-145` 中 `(None, 1)` 一例，第 151 行断言） | 同左 | 无 |
 | F11d | a | 新 UUID、陈旧修订的首次写入 | 冲突，不插入回执，之后 `get` 为 `not_found`（`test_peer_projects.py:146-151`）。同一项目上的两入口情形（桥 `conflict`、peer `RevisionConflict`）见 `b8e42c66` 的竞争测试（§8.4 1c） | 同左 | 无 |
-| F12 | a | 翻页途中项目被修改 | 续页因修订冲突而失败（`catalog.py:20-25`、`52-53`；`test_peer_projects.py:114-118`）。两入口一致性，以及结构页、表页的陈旧续页被拒，由 `994a3b1a` 的已提交测试覆盖（2 页结构页、3 页记录页，§8.4 1b）；root 的外部探针另有观察（§8.4 2） | 同左，不拼接不同修订的页 | 云端服务上的同一验收 |
+| F12 | a | 翻页途中项目被修改 | 两入口在固定修订分页，末页游标为 `null`。旧续页在本机桥和真实 WebRTC 两端均返回 `conflict`，结构和记录两种路径各有隔离反例（`b326baef`，§8.4 1d）。同进程适配器证据见 §8.4 1b | 同左，不拼接不同修订的页 | 云端服务上的同一验收 |
 | F13 | a | 页过大，或参数越界 | 超过页数上限、缺少续页修订、超过 8 MiB 都拒绝，状态不变（`catalog.py:14-31`；`test_peer_projects.py:355-372`）。`b8e42c66` 将 `test_shared_paging_and_serialized_response_budgets_are_not_relaxed` 扩展到桥：均为 `invalid_params`，其中 `limit` 越界由桥的已发布 schema 在分发前拒绝（§8.4 1c） | 同左；网络层不放宽 | 网络帧上限 |
-| F14 | a | 回执容量耗尽 | 两入口共用项目级配额。数量已满或字节已耗尽时在写前拒绝，新增回执越过字节上限时回滚。适配器用例固定桥 `invalid_params` 和 peer `ProjectError`（§8.4 1c）。写后溢出另有同库真实线路用例，两端均返回 `invalid_params`，并可读取及精确重放各自的旧回执（§8.4 1d） | 同左，并报警；不做 GC | 监控；真实上限下的验证；其余配额情形的真实线路验证 |
+| F14 | a | 回执容量耗尽 | 数量已满或字节已耗尽时在写前拒绝，新增回执越过字节上限时回滚。适配器证据见 §8.4 1c，真实线路的缩小写后预算用例两端均返回 `invalid_params`（§8.4 1d）。安装态 store 实际达到 10,000 条和 64 MiB，首末旧回执可精确读回及重放（§8.4 1e） | 同左，并报警；不做 GC | 监控；真实上限下的桥及 peer 验证；其余配额情形的真实线路验证 |
 | F15 | a | 旧格式项目 | 1–14 可读；新 API 要求显式升级（`test_project_edit_operations.py:427`；`test_peer_projects.py:390`）。`b8e42c66` 将该测试扩展到桥：格式 14 可读，回执接口返回 `unsupported`，不隐式升级（§8.4 1c） | 服务不隐式升级 | 升级审批流程 |
 | F16 | b | 快照对象缺失或损坏 | `resolve` 时校验失败，拒绝（`snapshots.py:103-123`、`333-341`） | 结果元数据中不带本机对象路径。清单中的路径值属于内容（I15），默认不开放快照，或单独设计 | 对象存储归属 |
 | F17 | b | `external:*` 文件不在服务主机 | 只有原机能解析（`files.py:82-95`） | 报不可用，不改写成别的路径 | 文件归属模型 |
@@ -504,11 +508,11 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 3. 方案 B 的仓储端口与 PostgreSQL 适配：没有。
 4. 服务级的项目归属锁、重复打开检测、恢复运维流程：没有。
 5. 网络候选的内容策略（文件索引、含路径的命令与回执、快照清单）及其负对照：没有（F23）。
-6. CP-0 已提交的同进程测试涵盖 F1/F11b、F12、F5b/F5c、F23、F3/F11d、F13、F15、F14（§8.4 1b、1c）。Linux 隔离 wheel 已复验这些测试，以及 F14 的真实通道写后溢出（§8.4 1d）。仍待验证：
-   - F14 写后溢出之外，经活 `PeerEndpoint` 与原生 helper 的线上行为；
+6. CP-0 已提交的同进程测试涵盖 F1/F11b、F12、F5b/F5c、F23、F3/F11d、F13、F15、F14（§8.4 1b、1c）。Linux 隔离 wheel 还验证了 F12 和 F14 写后溢出的真实通道，并实测 F14 本机配额（§8.4 1d、1e）。仍待验证：
+   - 其余场景经活 `PeerEndpoint` 与原生 helper 的线上行为；
    - Windows、macOS 复验；
    - F5b/F5c/F23 的旧代码反例；
-   - F14 在真实上限下的验证（§8.4 3）。
+   - F14 在真实上限下的桥及 peer 线路验证（§8.4 3）。
 7. 快照对象与项目文件的远端归属与传输模型：没有。peer 文件扩展是另一份契约，不授予项目权限（stk-peer-files-1 第 1–13 行）。
 8. 网络 DTO 与已发布 schema：没有，本文也不定义。
 9. 真实部署、跨主机、网络分区、目标 OS 的验收证据：没有。

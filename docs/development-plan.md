@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · F12 真实续页与 F14 本机实额
+
+F12 结构页、记录页的陈旧续页在本机桥与真实 WebRTC 上均获 `conflict`。F14 的两个实际配额已用本机安装 store 填满，分别核对拒绝、回滚、原回执读取和重放。后续区分实际配额线路验证、目标平台和跨部署。 [CP-0 证据矩阵](design/cloud-project-service.md)
+
+Mac 媒体的新探针已随 `39780e6d` 进入 Desktop CI，等待 macOS 运行结果。原生报告验收继续按原门。 [Desktop 42564398378](https://github.com/sijintech/stk/actions/runs/42564398378)
+
 ## 2026-11-09 UTC · CP-0 安装复验与下一轮原生证据
 
 D1 的 CP-0 已补齐回执、读页、热日志、授权内容及预算的证据矩阵。隔离 Linux wheel 在三个 Python 版本各通过 116 项。其中 F14 写后字节溢出经真实 WebRTC 和本机桥对同一 SQLite 库验证，其余入口范围按矩阵逐行记录。下一步由 Claude 在独立 worktree 用现有 F5b/F5c/F23 测试做隔离反例。Windows/macOS 复验、其余真实通道、真实配额上限、跨部署及 R2/R3 继续按独立条件推进。 [CP-0 矩阵](design/cloud-project-service.md)

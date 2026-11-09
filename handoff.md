@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · F12 真实续页与 F14 实际配额
+
+本地 `b326baef` 覆盖同库本机桥与真实 WebRTC 的结构、记录续页。两端同修订读两页，修订推进后旧续页均为 `conflict`。相关四文件分两次完成 183 项，隔离 wheel 定向 1 项通过，两项修订替换反例各在预期处失败。
+
+F14 本机安装 store 已实测 10,000 份回执及恰好 64 MiB 的两个独立项目，超限回滚和满额拒绝后，重开可精确读取并重放首末回执。实际配额的桥和 peer 线路仍待验证。Claude26 反例已派发，结果待收。远端 `39780e6d` 的 Desktop `42564398378` 尚未终态。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · CP-0 安装复验和前序 Desktop 终态
 
 Claude25 的 CP-0 证据矩阵 `08773ca5` 经 root 核对后原样集成为 `db9a7ed8`。Linux 隔离 wheel 三个 Python 版本各通过同一组 116 项，零跳过。真实 WebRTC 仅覆盖 F14 写后字节溢出，同库两端均按原 scope 读回及重放。Claude26 已在独立分支 `claude/cp0-negative-evidence-26` 接手 F5b/F5c/F23 的隔离反例，产物留在仓库外。
