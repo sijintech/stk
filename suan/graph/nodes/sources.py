@@ -179,7 +179,7 @@ def _empty_table(table_id, columns, index="step"):
                                            "\"auto\" = the case_dir recorded by the STK launcher in stk-mupro.json "
                                            "(runs submitted with --input DIR), else the binding root."),
       },
-      time_dependent=True, impl_version=5, fingerprint=_muferro_run_fingerprint)
+      time_dependent=True, impl_version=6, fingerprint=_muferro_run_fingerprint)
 def muferro_run(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
     from suan.connectors.mupro.tables import ENERGY_COLUMNS
@@ -211,14 +211,18 @@ def muferro_run(ctx, inputs, params):
             progress = connector.open(source, "progress", **extra).read(frame=None) if "progress" in datasets else None
     except ConnectorError as exc:
         raise _failure(exc) from None
+    files = {f["path"] for f in result.get("files", ())}
+    marker = prefix + "mupro_completion.json"
+    completion_present = marker in files
+    if native and completion_present != (marker in ctx.source_fingerprint["sha256"]):
+        raise NodeExecutionError("MuFerro completion marker changed after discovery was planned", code="invalid_data")
     if energy is None:
         energy = _empty_table("energy", ("step",) + ENERGY_COLUMNS)
         ctx.warn("The run has no energy_out.dat yet", code="empty_result")
     if progress is None:
         progress = _empty_table("progress", ("step", "completed_steps", "total_steps"))
-    files = {f["path"] for f in result.get("files", ())}
     extension = (result.get("extensions") or {}).get("mupro") or {}
-    complete = prefix + "mupro_completion.json" in files and not extension.get("missing_frames")
+    complete = completion_present and not extension.get("missing_frames")
     frames = _frames_table(result, {"binding": params["binding"], "case_dir": case_dir, "complete": bool(complete)})
     if not frames.n_rows:
         ctx.warn("The run has no field frames yet", code="empty_result")

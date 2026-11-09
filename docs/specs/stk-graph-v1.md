@@ -1262,6 +1262,7 @@ hash actual bytes and Runtime sources use the published artifact digest. Executi
 up to 64 MiB per table before parsing. The energy table and its manifest QOI share one observation.
 An append between evaluations produces a new plan. A table that changes during evaluation must be
 retried against a new plan.
+The frames table checks the completion marker's presence against the plan before reporting `complete`.
 
 #### `stk.source.mupro_hdf5@1` — MuPRO HDF5 field / MuPRO HDF5 场
 

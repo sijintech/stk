@@ -73,7 +73,7 @@ PROGRESS_FILE = "mupro_progress.jsonl"
 
 def _run_index(folder, *, cache=None, on_event=None, source=None):
     graph = {"schema": "stk.graph/1", "catalog": {"stk": 1}, "nodes": [GRAPH["nodes"][0]],
-             "outputs": {port: f"run.{port}" for port in ("energy", "progress", "result")}}
+             "outputs": {port: f"run.{port}" for port in ("frames", "energy", "progress", "result")}}
     resolver = LocalDirResolver({"run": folder}) if source is None else {"run": source}
     return evaluate(graph, registry=default_registry(), resolver=resolver, cache=cache, on_event=on_event)
 
@@ -181,6 +181,40 @@ def test_run_index_accepts_short_reads_from_a_file_source(tmp_path):
     outputs = _run_index(tmp_path, source=ShortSource(tmp_path)).outputs
     _assert_one_energy(outputs, -1.125)
     assert outputs["progress"].column("completed_steps").tolist() == [1]
+
+
+@pytest.mark.parametrize("initially_present", [False, True])
+def test_run_index_refuses_completion_marker_presence_drift(tmp_path, initially_present):
+    write_case(tmp_path, steps=4, interval=2)
+    write_outputs(tmp_path, steps=4, interval=2)
+    marker = tmp_path / "mupro_completion.json"
+    original, stamp = marker.read_bytes(), marker.stat()
+    if not initially_present:
+        marker.unlink()
+    cache = GraphCache()
+
+    def change_presence(event):
+        if event["type"] == "node.started":
+            if initially_present:
+                marker.unlink()
+            else:
+                marker.write_bytes(original)
+
+    with pytest.raises(EvaluationFailed) as error:
+        _run_index(tmp_path, cache=cache, on_event=change_presence)
+    assert error.value.errors[0]["code"] == "invalid_data"
+
+    if initially_present:
+        marker.write_bytes(original)
+        os.utime(marker, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    else:
+        marker.unlink()
+    restored = _run_index(tmp_path, cache=cache)
+    assert restored.evaluated == ["run"]
+    assert restored.outputs["frames"].attrs["complete"] is initially_present
+    assert (marker.name in {item["path"] for item in restored.outputs["result"]["files"]}) is initially_present
+    assert restored.outputs["result"]["complete"] is False
+    assert _run_index(tmp_path, cache=cache).evaluated == []
 
 
 def test_run_index_hashes_same_size_and_mtime_local_energy_rewrite(tmp_path):
