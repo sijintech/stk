@@ -1,6 +1,7 @@
 """Authenticated peer project operations use real grants and shared SQLite state."""
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+import hashlib
 import inspect
 import sqlite3
 import threading
@@ -16,6 +17,7 @@ from suan.project.store import UnsupportedProjectFormat
 from suan.peer.projects import PeerProjects
 from suan.peer.protocol import FORMAT, decode_message, encode_message
 from test_desktop_bridge import bridge_env, inproc  # noqa: F401
+from test_project_edit_operations import _physical, _spill
 
 
 def authenticated(authority, private, peer_id, binding="b" * 64):
@@ -460,3 +462,80 @@ def test_legacy_project_reads_remain_supported_without_implicit_format_upgrade(a
         access.get(str(uuid4()))
     assert (access.store.snapshot(), access.store.history()) == before
     assert access.store.info()["format_version"] == 14
+
+
+# CP-0 F5b/F5c (docs/design/cloud-project-service.md): the two peer paths currently treat a physical hot
+# rollback journal differently. These tests pin the CURRENT behavior of this base; they are not a cloud
+# project ownership or recovery policy, which R2/R3 have not decided.
+
+
+def _registry(access):
+    """Byte digests of every file of the owner authority registry (rollback-journal mode, no WAL)."""
+    return {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(access.authority.directory.iterdir()) if path.is_file()}
+
+
+def _registered_revision(access):
+    with sqlite3.connect(access.authority.path.as_uri() + "?mode=ro", uri=True) as db:
+        return db.execute("SELECT revision FROM projects WHERE project_id=?", (access.project_id,)).fetchone()[0]
+
+
+def _hot_journal(access):
+    """A real SQLite hot rollback journal from a killed apply_once (shared _spill), not a mocked error code.
+
+    _spill's child process opens the store, forces cache spill, writes 800 uncommitted tables at revision 0
+    and exits before commit. It already asserts the journal magic, the uncommitted rows in the database file
+    and its growth. The killed operation used scope "local", so no peer scope could ever own its receipt;
+    the receipt table must therefore be empty in every scope.
+    """
+    assert access.store.info()["revision"] == 0 and _registered_revision(access) == 0
+    before = unchanged(access.store)
+    operation, original = _spill(access.store)
+    journal = access.store.path.with_name(access.store.path.name + "-journal")
+    hot = _physical(access.store)
+    assert set(original) == {str(access.store.path)} and set(hot) == {str(access.store.path), str(journal)}
+    assert hot[str(access.store.path)] != original[str(access.store.path)]
+    return operation, original, hot, before
+
+
+@pytest.mark.parametrize("cached", [False, True], ids=["first_owner_observation", "cached_owner_store"])
+def test_current_bound_owner_observation_refuses_a_physical_hot_journal_without_any_write(access, cached):
+    """CURRENT behavior (CP-0 F5b): the owner's bound observation fails closed.
+
+    bound_project uses _BoundProjectStore, whose read-only recovery hook refuses; the database, the hot
+    journal and the authority registry keep their exact bytes, and the grant is not revoked.
+    """
+    from suan.peer.authority import PeerDenied
+    generation = access.target["database_generation"]
+    if cached:  # The same owner store object is reused for an unchanged generation, inode and directory.
+        assert access.authority.bound_project(access.project_id, generation).info()["revision"] == 0
+    _, _, hot, _ = _hot_journal(access)
+    registry = _registry(access)
+    with pytest.raises(PeerDenied, match="Bound project is unavailable") as refused:
+        access.authority.bound_project(access.project_id, generation)
+    assert "explicit local recovery" in str(refused.value.__context__)  # the recovery hook, not another check
+    assert _physical(access.store) == hot and _registry(access) == registry
+    assert _registered_revision(access) == 0
+    with sqlite3.connect(access.authority.path.as_uri() + "?mode=ro", uri=True) as db:
+        assert db.execute("SELECT active FROM grants WHERE grant_id=?",
+                          (access.target["grant_id"],)).fetchone()[0] == 1
+
+
+def test_current_peer_catalog_physically_recovers_the_preimage_without_a_receipt(access):
+    """CURRENT behavior (CP-0 F5c): peer project methods open an ordinary ProjectStore.
+
+    The authenticated catalog therefore lets SQLite roll back the hot journal (store recovery path) and
+    returns the old revision and contents. The killed operation leaves no receipt in any scope; the grant
+    and the registered revision watermark stay valid at revision 0.
+    """
+    operation, original, _, before = _hot_journal(access)
+    page = access.projects.catalog(access.context, access.project_id, **access.target)
+    assert page["project"]["revision"] == 0 and page["tables"] == [] and page["total"] == 0
+    assert _physical(access.store) == original  # journal gone and database bytes equal to the preimage
+    assert unchanged(access.store) == before and before[1] == [] and before[2] == 0
+    with pytest.raises(OperationNotFound):
+        access.store.edit_operations.get(operation, scope="local")
+    with pytest.raises(OperationNotFound):
+        access.get(operation)
+    assert _registered_revision(access) == 0
+    assert access.projects.catalog(access.context, access.project_id, **access.target)["project"]["revision"] == 0
