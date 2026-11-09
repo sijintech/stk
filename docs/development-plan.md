@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-09 22:32 UTC · Cocoa 帧号诊断与前一 Desktop 终态
+
+`dbc0ebbb` 已接入两项独立 Cocoa 帧编号诊断，目标平台验证随下一头运行。 [运行验收](runtime-validation.md)
+
+前头 `75b20fc6` Desktop `42702711687` 于 22:24:01 UTC 终态 failure，6 个作业全部结束，5 个成功。Linux 主测 2159/2159，两个打包作业成功。Windows CPU 1478/1478，独立原生 6/6 且每项 20/20 轮，零跳过。macOS CPU 1537/1537、Metal 254/254、原生主测 4/6。当前 MP4 在首次显式暂停下界失败，HTML 在隐藏暂停下界失败。同头 Runtime `42702712232` 全部 13/13。整轮终态满足本批推送前提。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42702711687) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42702711687/artifacts/13715432852) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42702712232)
+
+Claude72 已从冻结基线 2b45ed81 在独立 `claude/guarded-viewer-open-72` 补受约束打开失败时保留原 Viewer 及参数草稿的回归，root 负责审阅和产品实现。现有异步打开在最终字节验证前清理旧来源，该路径继续验证。
+
 ## 2026-11-09 22:12 UTC · 探针代次与原生 MuPRO 查看回归
 
 `3f36d736` 修复已完成探针回调跨选点/来源覆盖。MuPRO 查看链路增加真实原生 Bridge 与双后端离屏渲染验证。 [运行验收](runtime-validation.md)

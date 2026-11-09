@@ -1,5 +1,17 @@
 # STK 当前交接
 
+## 2026-11-09 22:32 UTC · Cocoa 帧号诊断与前一 Desktop 终态
+
+`dbc0ebbb` 集成 Claude71 最终 `0d0de6a1` 的独立合成帧编号视频和可选 Cocoa 诊断。先取得两张递增的播放画面，再取得两张相同帧号的暂停画面，并记录已有 DOM 采样。root 补充了历史 DOM 时间回退判据，以及结论所用四张截图的持久化和摘要核对。缺少必要截图或时间证据时报告不确定。独立 MP4 与 HTML 嵌入视频两项诊断已接入 macOS CI，保存具名 JUnit 和裁剪截图。
+
+最终新视频 44,339 字节，SHA-256 `c2bbcb873b7628c22b512051443adde6ff2e6c8688c6d84f0307d6bab2a34eef`。60 帧、10 fps、六种缩放与关键帧 [0,30] 均验证。精确 C++ 逻辑通过 1080 次解码位置、16 项分类、12 项审计和 5 项记录失败检查。真实 PNG 编解码及最终路径冲突证明无法用较早截图替代丢失的必需截图。Linux 编译、普通及 Apple 宏分支的 GCC 语法检查通过。这些检查尚不能证明 Apple SDK 编译或 Cocoa 截图时延，实际目标执行待新头 CI。
+
+前头 `75b20fc6` Desktop `42702711687` 于 22:24:01 UTC 终态 failure，6 个作业全部结束，5 个成功。Linux 主测 2159/2159，两个打包作业成功。Windows CPU 1478/1478，独立原生 6/6 且每项 20/20 轮，零跳过。macOS CPU 1537/1537、Metal 254/254、原生主测 4/6。当前 MP4 在首次显式暂停下界失败，HTML 在隐藏暂停下界失败。同头 Runtime `42702712232` 全部 13/13。整轮终态满足本批推送前提。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42702711687) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42702711687/artifacts/13715432852) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42702712232)
+
+本头 MP4 的 fresh-hidden 与 fresh-visible 形成完整配对，已有播放 DOM 时间分别为 0.350154 与 0.367201 秒，两次暂停采样都回到 0.234 秒。隐藏原生报 Playing，持续可见时报 Paused。两组独立会话的视口高度相差 1 CSS 像素。当前 HTML 可见组在初始暂停阶段失败，缺少本头完整配对。该原视频回执仍未证明可见画面帧倒退，新帧号视频用于下一步独立观察。
+
+Claude72 已从冻结基线 2b45ed81 在独立 `claude/guarded-viewer-open-72` 补受约束打开失败时保留原 Viewer 及参数草稿的回归，root 负责审阅和产品实现。现有异步打开在最终字节验证前清理旧来源，该路径继续验证。
+
 ## 2026-11-09 22:12 UTC · 探针代次与原生 MuPRO 查看回归
 
 `3f36d736` 让探针请求编号跨清除选点和关闭来源继续递增。已完成但排在主循环队列中的旧回调，即使无法取消，也无法覆盖新选点或新来源的探针结果。新请求仍按原路径完成。
