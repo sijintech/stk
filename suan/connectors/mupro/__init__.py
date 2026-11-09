@@ -1,7 +1,7 @@
 """The public muFerro connector ``mupro.muferro`` (stk-data-format-v1.md §14, contracts §2.4).
 
 It wraps STK's own launcher/verifier ``suan.mupro.run`` (``FRAME``,
-``COMPONENTS``, ``ENERGY_ROW``, ``RESULT``, ``read_case``, ``expected_frames``,
+``COMPONENTS``, ``ENERGY_ROW``, ``RESULT``, ``read_case``, ``missing_frames``,
 ``verify_run``, ``MuproError``) and never imports MuPRO code:
 
 * ``sniff`` -- ``stk-mupro.json``, ``mupro_completion.json``, ``<Stem>.<8 digits>.dat``
@@ -31,7 +31,7 @@ import json
 from pathlib import PurePosixPath
 import tempfile
 
-from suan.mupro.run import COMPONENTS, FRAME, RESULT, MuproError, expected_frames, read_case, verify_run
+from suan.mupro.run import COMPONENTS, FRAME, RESULT, MuproError, missing_frames, read_case, verify_run
 
 from ..api import API_VERSION, ConnectorError, Match
 from ..builtin import crop_sample, field_stats, select_frame
@@ -353,7 +353,7 @@ class MuFerroConnector:
         missing = []
         if case and {"start_step", "steps", "output_interval"} <= set(case):
             present = {f"{stem}.{step:08d}.dat" for stem, items in frames.items() for step, _ in items}
-            missing = sorted(set(expected_frames(case)) - present)
+            missing = missing_frames(case, present, 50)
         complete = not live and completion and not missing
         verification = None
         state = "unknown"
@@ -387,7 +387,7 @@ class MuFerroConnector:
         if case_error:
             extensions["mupro"]["case_error"] = case_error
         if missing:
-            extensions["mupro"]["missing_frames"] = missing[:50]
+            extensions["mupro"]["missing_frames"] = missing
         if header:
             extensions["mupro"]["header"] = header
         app = {"id": CONNECTOR_ID, "name": "muFerro", "version": None, "executable_sha256": None}

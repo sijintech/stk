@@ -18,7 +18,7 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from suan.connectors.mupro.inputs import dump_toml
 from .common import (_canonical, _capture, _cells, _copy_input, _create_table, _directory, _folder,  # noqa: F401
                      _hash, _revision, _table)
-from suan.mupro.run import (_toml_document, read_case, check_case, verify_run, expected_frames,
+from suan.mupro.run import (_toml_document, read_case, check_case, verify_run, expected_frame_count, expected_frames,
                             case_input_info, RUN_OUTPUTS, VERIFIER, tomllib)
 from suan.mupro.spec import muferro_spec
 from suan.runtime.models import TaskSpec, relative_path
@@ -297,19 +297,19 @@ class MuFerro:
         task = status.get("task")
         if not task or task["state"] != "succeeded":
             raise ValueError("Collect requires a successfully finished task; inspect its state and logs")
-        root = _directory(self.stk, p)
-        destination = _folder(root, "results", "muferro", str(UUID(run_id)))
-        runtime = self.stk.runtime(plan["connection"])
-        artifacts = {item["path"]: item for item in runtime.tasks.artifacts(task["id"])}
         with TemporaryDirectory(prefix="stk-muferro-check-") as scratch:
             folder = Path(scratch)
             _restore(p, {"snapshot_id": plan["input_snapshot_id"], "bindings": {
                 name.removeprefix("case/"): value for name, value in plan["input_bindings"].items()}}, folder)
             case = read_case(folder)
+        if type(max_bytes) is not int or max_bytes <= 0 or expected_frame_count(case) > 10000:
+            raise ValueError("Invalid download budget or more than 10000 result files")
+        runtime = self.stk.runtime(plan["connection"])
+        artifacts = {item["path"]: item for item in runtime.tasks.artifacts(task["id"])}
         names = sorted(set(plan["input_bindings"]) | {"stk-mupro.json"} |
                        {"case/" + name for name in (*RUN_OUTPUTS, *expected_frames(case))} |
                        ({"case/run.h5"} if "case/run.h5" in artifacts else set()))
-        if type(max_bytes) is not int or max_bytes <= 0 or len(names) > 10000:
+        if len(names) > 10000:
             raise ValueError("Invalid download budget or more than 10000 result files")
         if any(name not in artifacts for name in names):
             raise ValueError("Successful task has missing MuFerro outputs or original inputs")
@@ -317,6 +317,8 @@ class MuFerro:
             raise ValueError("MuFerro results exceed the download budget")
         if any(artifacts[f["path"]]["sha256"] != f["sha256"] for f in plan["inputs"]):
             raise ValueError("Task input bytes do not match the frozen run plan")
+        root = _directory(self.stk, p)
+        destination = _folder(root, "results", "muferro", str(UUID(run_id)))
         paths = []
         for name in names:
             path = destination / relative_path(name)

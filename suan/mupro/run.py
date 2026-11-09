@@ -22,6 +22,7 @@ the same either way.
 
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import argparse
+from itertools import islice
 import json
 import math
 import os
@@ -176,19 +177,45 @@ def check_case(case, folder, ranks):
                          + "); submit a clean case directory")
 
 
+def _frame_steps(case):
+    start, interval = case["start_step"], case["output_interval"]
+    stop = start + case["steps"] + 1
+    return range(start + interval, stop, interval), range(start + 1, stop, interval)
+
+
+def expected_frame_count(case):
+    polar, fields = _frame_steps(case)
+    return 1 + len(polar) + len(COMPONENTS) * len(fields)
+
+
+def _frames_by_name(case):
+    polar, fields = _frame_steps(case)
+    for stem in sorted((*COMPONENTS, "Polar")):
+        if stem == "Polar":
+            yield "Polar.00000000.dat", 3
+        steps = polar if stem == "Polar" else fields
+        count = COMPONENTS.get(stem, 3)
+        for step in steps:
+            yield f"{stem}.{step:08d}.dat", count
+
+
+def missing_frames(case, present, limit):
+    """Return only the first missing names in diagnostic order."""
+    return list(islice((name for name, _ in _frames_by_name(case) if name not in present), limit))
+
+
 def expected_frames(case):
     """Frame names and component counts, as muprosdk tools/mupro/mupro/worker.py:40-50.
 
     muFerro writes the initial Polar frame with the main-loop step still unset,
     so it is always Polar.00000000.dat (apps/muFerro/src/output.f90:24).
     """
-    start, interval = case["start_step"], case["output_interval"]
+    polar, fields = _frame_steps(case)
     expected = {"Polar.00000000.dat": 3}
-    for step in range(start + 1, start + case["steps"] + 1):
-        remainder = (step - start) % interval
-        if remainder == 0:
+    for step in range(fields.start, fields.stop):
+        if step in polar:
             expected[f"Polar.{step:08d}.dat"] = 3
-        if remainder == 1 or interval == 1:
+        if step in fields:
             expected.update({f"{stem}.{step:08d}.dat": count for stem, count in COMPONENTS.items()})
     return expected
 
@@ -281,31 +308,36 @@ def verify_run(work_dir=".", case_dir=".", *, expected_case=None):
     except (OSError, ValueError) as exc:
         add("completion", f"Cannot read mupro_completion.json: {exc}", "invalid_result")
 
-    rows = []
+    total_energy = None
     try:
-        for line in (folder / "energy_out.dat").read_text(encoding="utf-8").splitlines()[1:]:
-            match = ENERGY_ROW.fullmatch(line)
-            if not match:
-                raise MuproError("Malformed energy row", "invalid_result")
-            values = [fortran_float(v) for v in match[2].split()]
-            if len(values) != 5 or not all(math.isfinite(v) for v in values):
-                raise MuproError("Missing or non-finite energy values", "numerical_failure")
-            rows.append((int(match[1]), values))
-        if [row[0] for row in rows] != list(range(case["start_step"] + 1, final + 1)):
+        count, steps_match = 0, True
+        with (folder / "energy_out.dat").open(encoding="utf-8") as stream:
+            next(stream, None)  # Header.
+            for count, line in enumerate(stream, 1):
+                match = ENERGY_ROW.fullmatch(line)
+                if not match:
+                    raise MuproError("Malformed energy row", "invalid_result")
+                values = [fortran_float(v) for v in match[2].split()]
+                if len(values) != 5 or not all(math.isfinite(v) for v in values):
+                    raise MuproError("Missing or non-finite energy values", "numerical_failure")
+                steps_match &= int(match[1]) == case["start_step"] + count
+                total_energy = values[-1]
+        if count != case["steps"] or not steps_match:
             raise MuproError("Energy trace steps are incomplete, duplicated or stale", "incomplete_result")
-        add("energy", f"{len(rows)} finite energy rows")
+        add("energy", f"{count} finite energy rows")
     except MuproError as exc:
         add("energy", str(exc), exc.classification)
     except (OSError, ValueError) as exc:
         add("energy", f"Cannot read energy_out.dat: {exc}", "invalid_result")
 
-    expected = [{"step": case["start_step"] + step, "completed_steps": step, "total_steps": case["steps"]}
-                for step in range(1, case["steps"] + 1)]
     try:
-        text = (folder / "mupro_progress.jsonl").read_text(encoding="utf-8")
-        records = [_native_result_json(line) for line in text.splitlines()]
-        if len(records) == len(expected) and all(_same_native_record(actual, row) for actual, row in zip(records, expected)):
-            add("progress", f"{len(expected)} progress records")
+        count, steps_match = 0, True
+        with (folder / "mupro_progress.jsonl").open(encoding="utf-8") as stream:
+            for count, line in enumerate(stream, 1):
+                expected = {"step": case["start_step"] + count, "completed_steps": count, "total_steps": case["steps"]}
+                steps_match &= _same_native_record(_native_result_json(line), expected)
+        if count == case["steps"] and steps_match:
+            add("progress", f"{count} progress records")
         else:
             add("progress", "Native progress is incomplete or stale", "incomplete_result")
     except (OSError, ValueError) as exc:
@@ -319,25 +351,21 @@ def verify_run(work_dir=".", case_dir=".", *, expected_case=None):
             result["frames"].append({"stem": match[1], "step": int(match[2]),
                                      "components": header[1] if header else None, "path": prefix + path.name})
     result["frames"].sort(key=lambda frame: (frame["stem"], frame["step"]))
-    wanted = expected_frames(case)
-    missing = sorted(set(wanted) - set(headers))
-    wrong_grid = sorted(name for name, header in headers.items() if header is None or header[0] != case["grid"])
-    wrong_components = sorted(name for name, count in wanted.items()
-                              if headers.get(name) and headers[name][1] != count)
+    missing = missing_frames(case, headers, 5)
     if missing:
-        add("frames", "Required field frames are missing: " + ", ".join(missing[:5]), "incomplete_result")
-    elif wrong_grid:
+        add("frames", "Required field frames are missing: " + ", ".join(missing), "incomplete_result")
+    elif wrong_grid := sorted(name for name, header in headers.items() if header is None or header[0] != case["grid"]):
         add("frames", "Field grid mismatch: " + ", ".join(wrong_grid[:5]), "invalid_result")
-    elif wrong_components:
-        add("frames", "Field component mismatch: " + ", ".join(wrong_components[:5]), "invalid_result")
+    elif wrong_components := list(islice((name for name, count in _frames_by_name(case) if headers[name][1] != count), 5)):
+        add("frames", "Field component mismatch: " + ", ".join(wrong_components), "invalid_result")
     else:
-        add("frames", f"{len(wanted)} required frames with grid {case['grid']}")
+        add("frames", f"{expected_frame_count(case)} required frames with grid {case['grid']}")
 
     if failures:
         result.update(classification=failures[0][0], reason=failures[0][1])
     else:
         result["verification"]["status"] = "passed"
-        result["qoi"] = {"total_energy": rows[-1][1][-1], "step": final}
+        result["qoi"] = {"total_energy": total_energy, "step": final}
     return result
 
 

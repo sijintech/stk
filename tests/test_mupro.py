@@ -430,16 +430,43 @@ def test_verify_accepts_three_digit_exponents_without_a_letter(tmp_path):
 
 
 def test_expected_frames_match_muferro_naming():
-    frames = expected_frames({"grid": [16, 16, 16], "start_step": 0, "steps": 101, "output_interval": 100})
+    case = {"grid": [16, 16, 16], "start_step": 0, "steps": 101, "output_interval": 100}
+    frames = expected_frames(case)
     assert len(frames) == 30 and all(FRAME.search(name) for name in frames)
+    assert mupro_run.expected_frame_count(case) == len(frames)
     assert frames["Polar.00000000.dat"] == frames["Polar.00000100.dat"] == 3
     assert frames["Strain.00000001.dat"] == frames["Strain.00000101.dat"] == 6
     assert frames["Charges.00000001.dat"] == frames["Elast_En.00000101.dat"] == 1
     assert frames["Eigen_St.00000001.dat"] == 6 and "Polar.00000101.dat" not in frames
     # A restart still writes its initial Polar frame as step 0 (muprosdk worker.py:40, output.f90:24).
-    restart = expected_frames({"grid": [4, 3, 2], "start_step": 10, "steps": 2, "output_interval": 1})
+    case = {"grid": [4, 3, 2], "start_step": 10, "steps": 2, "output_interval": 1}
+    restart = expected_frames(case)
+    assert mupro_run.expected_frame_count(case) == len(restart)
     assert "Polar.00000000.dat" in restart and "Polar.00000010.dat" not in restart
     assert {"Polar.00000011.dat", "Polar.00000012.dat", "Strain.00000011.dat", "Strain.00000012.dat"} <= set(restart)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="requires a Linux address space limit")
+def test_verify_missing_outputs_in_a_maximum_step_case(tmp_path):
+    write_case(tmp_path, steps=999_999, interval=1, grid=(1, 1, 1))
+    script = """
+import resource
+limit = 224 * 1024**2
+resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+from suan.mupro.cli import mupro
+mupro()
+"""
+    result = subprocess.run([sys.executable, "-c", script, "verify", str(tmp_path)],
+                            cwd=Path(mupro_run.__file__).resolve().parents[2],
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 3, (result.stdout, result.stderr)
+    report = json.loads(result.stdout)
+    assert report["classification"] == "invalid_result" and report["qoi"] is None
+    checks = report["verification"]["checks"]
+    assert [(check["id"], check["status"]) for check in checks] == [
+        ("completion", "fail"), ("energy", "fail"), ("progress", "fail"), ("frames", "fail")]
+    assert checks[-1]["message"] == "Required field frames are missing: " + ", ".join(
+        f"Charges.{step:08d}.dat" for step in range(1, 6))
 
 
 def test_read_case_uses_muferro_defaults(tmp_path):
