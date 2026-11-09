@@ -1252,6 +1252,12 @@ Index of a muFerro run directory: published field frames, the energy trace, the 
 | `binding` | string (pattern) | **required** | data |
 | `case_dir` | string (pattern) | `"auto"` | data |
 
+The built-in connector binds the launcher report (`stk-mupro.json`) to the run-index plan.
+It uses the same report bytes to resolve `case_dir: "auto"` and read launcher metadata.
+Evaluation fails with `invalid_data` if the report appears, disappears, or its bounded content changes after planning.
+Absent, malformed, or oversized reports use the binding root for `"auto"`. The report read limit is 4 MiB,
+subject to any lower Runtime download limit. A listed report within the limit must be readable.
+
 #### `stk.source.mupro_hdf5@1` — MuPRO HDF5 field / MuPRO HDF5 场
 
 Read one explicit /tNNNNNNNN/field from MuPRO HDF5, preserving numeric dtype and unknown physical units. Source file limit 1 GiB; selected array budget 256 MiB.

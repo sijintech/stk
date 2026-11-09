@@ -26,6 +26,7 @@ The full muFerro input schema, exact thresholds and label maps belong to the
 private ``stk-mupro`` package (priority 10); the light half here
 (:mod:`.inputs`) ships a minimal schema.
 """
+from hashlib import sha256
 from importlib.metadata import PackageNotFoundError, version as _package_version
 import json
 from pathlib import PurePosixPath
@@ -45,6 +46,8 @@ VERSION = "0.2.0"
 READER = "mupro.dat@1"
 IDENTITY = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
 OUTPUTS = ("energy_out.dat", "mupro_progress.jsonl", "mupro_completion.json")
+_LAUNCHER_REPORT_LIMIT = 1 << 22
+_UNPLANNED_LAUNCHER = object()
 # Stem -> (quantity, vector?) for the stems STK knows; never an assumed unit or tensor order.
 _QUANTITIES = {
     "Polar": "polarization", "Displace": "displacement", "Elefield": "electric_field",
@@ -117,9 +120,13 @@ def recorded_case_dir(run):
     An unreadable record or an unsafe path gives ``"."``.
     """
     try:
-        record = json.loads(_read_text(run, RESULT, 1 << 22))
+        record = json.loads(_read_text(run, RESULT, _LAUNCHER_REPORT_LIMIT))
     except (ConnectorError, OSError, ValueError):
         return "."
+    return _case_dir_from_record(record)
+
+
+def _case_dir_from_record(record):
     value = record.get("case_dir") if isinstance(record, dict) else None
     if not isinstance(value, str) or not value:
         return "."
@@ -127,6 +134,35 @@ def recorded_case_dir(run):
         return case_prefix(value).rstrip("/") or "."
     except (ConnectorError, ValueError):
         return "."
+
+
+def _observe_launcher_report(run, item):
+    """Return the report identity and the record decoded from those same bytes."""
+    from ..files import RuntimeFiles
+    if item is None:
+        return None, None
+    runtime = isinstance(run, RuntimeFiles)
+    limit = _LAUNCHER_REPORT_LIMIT
+    if runtime and run.max_bytes is not None:
+        limit = min(limit, run.max_bytes)
+    if item.size > limit:
+        return {"size": item.size, "sha256": None}, None
+    try:
+        published = run.sha256(RESULT) if runtime else None
+        with run.open(RESULT) as stream:
+            raw = stream.read(limit + 1)
+    except (ConnectorError, OSError, KeyError) as exc:
+        raise ConnectorError(f"Cannot read MuFerro launcher report: {exc}", "invalid_data") from None
+    if len(raw) > limit:
+        raise ConnectorError("MuFerro launcher report grew beyond the read limit", "invalid_data")
+    digest = sha256(raw).hexdigest()
+    if runtime and published != digest:
+        raise ConnectorError("MuFerro launcher report does not match its published digest", "invalid_data")
+    try:
+        record = json.loads(raw.decode("utf-8", "replace"))
+    except ValueError:
+        record = None
+    return {"size": len(raw), "sha256": digest}, record if isinstance(record, dict) else None
 
 
 def run_files(run, prefix=""):
@@ -215,7 +251,7 @@ class MuFerroConnector:
         if RESULT not in names:
             return None
         try:
-            record = json.loads(_read_text(run, RESULT, 1 << 22))
+            record = json.loads(_read_text(run, RESULT, _LAUNCHER_REPORT_LIMIT))
         except (ConnectorError, FileNotFoundError, ValueError):
             return None
         return record if isinstance(record, dict) else None
@@ -281,13 +317,20 @@ class MuFerroConnector:
             return info["dimensions"], info
         return None, None
 
-    def describe(self, run, *, live=False, case_dir=None, hdf5_sha256=None):
+    def describe(self, run, *, live=False, case_dir=None, hdf5_sha256=None, launcher_report=_UNPLANNED_LAUNCHER):
         """stk.result/1 of a muFerro run directory (``live``: frames so far, ``complete: false``)."""
         from suan.data.manifest import file_entry, qoi_entry, result_manifest
-        case_dir = self._case_dir(run, case_dir)
+        planned_launcher = launcher_report is not _UNPLANNED_LAUNCHER
+        if not planned_launcher:
+            case_dir = self._case_dir(run, case_dir)
         prefix = case_prefix(case_dir)
         names = run_files(run, prefix)
-        record = self._record(run, names)
+        if planned_launcher:
+            actual_launcher, record = _observe_launcher_report(run, names.get(RESULT))
+            if actual_launcher != launcher_report:
+                raise ConnectorError("MuFerro launcher report changed after discovery was planned", "invalid_data")
+        else:
+            record = self._record(run, names)
         case, case_error = self._case(run, case_dir, record, names)
         frames = self._frames(run, prefix)
         if live:
@@ -408,6 +451,8 @@ class MuFerroConnector:
                     else "log" if name.endswith(".log") else "output" if (FRAME.search(name) or name in OUTPUTS or name == "run.h5")
                     else "other")
             observed = observation if path == hdf5_path else None
+            if path == RESULT and planned_launcher:
+                observed = launcher_report
             files.append(file_entry(path, size=observed["size"] if observed else item.size,
                                     sha256=observed["sha256"] if observed else known(path) if known else None,
                                     media_type=_media_type(path), role=role))

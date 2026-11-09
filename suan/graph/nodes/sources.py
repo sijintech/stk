@@ -57,7 +57,7 @@ def _muferro():
     return default_registry().get("mupro.muferro")
 
 
-def _native_hdf5(connector):
+def _native_muferro_description(connector):
     from suan.connectors.mupro import MuFerroConnector
     # Replacement plugins keep their published describe signature and native-format policy.
     return getattr(connector.describe, "__func__", None) is MuFerroConnector.describe
@@ -69,25 +69,41 @@ def _native_hdf5(connector):
 
 def _muferro_run_fingerprint(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
+    from suan.connectors.mupro import _case_dir_from_record, _observe_launcher_report, run_files
     from suan.mupro.run import FRAME, RESULT
     source = _source(ctx, params["binding"])
-    case_dir = _case_dir(source, params["case_dir"])
-    prefix = _prefix(case_dir)
-    from suan.connectors.mupro import run_files
-    names = run_files(source, prefix)
     connector = _muferro()
-    # Frames by (path, size, mtime): a frame rewritten in place (same size) changes the run key.
-    frames = sorted([path, item.size, item.mtime] for path, item in names.items()
-                    if path.startswith(prefix) and "/" not in path[len(prefix):] and FRAME.search(path))
-    small = [prefix + name for name in RUN_FILES] + [RESULT]
-    # The case (input.toml and its includes) is part of the run: the frames table records its grid.
-    small += sorted(path for path in names if path.endswith(".toml"))[:MAX_TOML_FILES]
+    native = _native_muferro_description(connector)
+    launcher_report = None
     try:
+        if native:
+            names = run_files(source)
+            launcher_report, record = _observe_launcher_report(source, names.get(RESULT))
+            case_dir = params["case_dir"]
+            if case_dir == "auto":
+                case_dir = _case_dir_from_record(record)
+            prefix = _prefix(case_dir)
+            if prefix:
+                names.update({item.path: item for item in source.list(prefix)})
+        else:
+            case_dir = _case_dir(source, params["case_dir"])
+            prefix = _prefix(case_dir)
+            names = run_files(source, prefix)
+        # A same-size DAT frame rewrite can change the run key through its mtime.
+        frames = sorted([path, item.size, item.mtime] for path, item in names.items()
+                        if path.startswith(prefix) and "/" not in path[len(prefix):] and FRAME.search(path))
+        small = [prefix + name for name in RUN_FILES]
+        if not native:
+            small.append(RESULT)
+        # The frames table records the grid from input.toml and its includes.
+        small += sorted(path for path in names if path.endswith(".toml"))[:MAX_TOML_FILES]
         hashed = {path: source.sha256(path) for path in dict.fromkeys(small) if path in names}
+        if launcher_report and launcher_report["sha256"] is not None:
+            hashed[RESULT] = launcher_report["sha256"]
         from suan.connectors.mupro.source import ContentChanged, FILE_LIMIT, file_fingerprint
         hdf5_path = prefix + "run.h5"
         hdf5, hdf5_files = {}, []
-        if _native_hdf5(connector) and hdf5_path in names:
+        if native and hdf5_path in names:
             item = names[hdf5_path]
             hdf5_files.append([hdf5_path, item.size, item.mtime])
             try:
@@ -101,7 +117,7 @@ def _muferro_run_fingerprint(ctx, inputs, params):
     except ConnectorError as exc:
         raise _failure(exc) from None
     return {"connector": f"{connector.id}@{connector.version}", "case_dir": case_dir, "frames": frames,
-            "sha256": hashed, "hdf5": hdf5, "hdf5_files": hdf5_files}
+            "sha256": hashed, "hdf5": hdf5, "hdf5_files": hdf5_files, "launcher_report": launcher_report}
 
 
 def _frames_table(result, attrs):
@@ -148,21 +164,23 @@ def _empty_table(table_id, columns, index="step"):
                                            "\"auto\" = the case_dir recorded by the STK launcher in stk-mupro.json "
                                            "(runs submitted with --input DIR), else the binding root."),
       },
-      time_dependent=True, impl_version=3, fingerprint=_muferro_run_fingerprint)
+      time_dependent=True, impl_version=4, fingerprint=_muferro_run_fingerprint)
 def muferro_run(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
     from suan.connectors.mupro.tables import ENERGY_COLUMNS
     from suan.connectors.mupro import MuFerroConnector
     source = _source(ctx, params["binding"])
     connector = _muferro()
-    case_dir = _case_dir(source, params["case_dir"])
+    native = _native_muferro_description(connector)
+    case_dir = ctx.source_fingerprint["case_dir"] if native else _case_dir(source, params["case_dir"])
     # A replacement connector (e.g. the private stk-mupro package) implements the plain protocol.
     ours = isinstance(connector, MuFerroConnector)
     if case_dir != "." and not ours:
         raise NodeExecutionError(f"Connector {connector.id} does not take a case directory", code="unsupported")
     extra = {"case_dir": case_dir} if ours else {}
-    if _native_hdf5(connector):
+    if native:
         extra["hdf5_sha256"] = ctx.source_fingerprint.get("hdf5", {})
+        extra["launcher_report"] = ctx.source_fingerprint["launcher_report"]
     try:
         result = connector.describe(source, live=True, **extra)
         datasets = {d["id"] for d in result["datasets"]}

@@ -1,6 +1,8 @@
 """MuPRO HDF5 discovery, coexistence with DAT and content-bound result observations."""
 import hashlib
+import json
 import os
+from io import BytesIO
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -41,6 +43,93 @@ def evaluate_result(root, **kwargs):
     # Catalog tests reload built-ins; do not reuse an earlier module's functions.
     return evaluate(result_graph(), registry=build_registry(entry_points=False),
                     resolver=LocalDirResolver({"run": root}), **kwargs)
+
+
+@pytest.mark.parametrize("change", ["case", "state", "added", "removed"])
+def test_run_index_cannot_cache_a_rewritten_launcher_report(tmp_path, change):
+    for case in (tmp_path, tmp_path / "case_a", tmp_path / "case_b"):
+        write_case(case)
+        write_outputs(case)
+    if change == "state":
+        write_hdf5(tmp_path / "case_a" / "run.h5")
+
+    report = tmp_path / "stk-mupro.json"
+    original = json.dumps({"case_dir": "case_a", "state": "succeeded"}).encode()
+    if change != "added":
+        report.write_bytes(original)
+        stamp = report.stat()
+    cache = GraphCache()
+
+    def rewrite(event):
+        if event["type"] != "node.started":
+            return
+        if change == "removed":
+            report.unlink()
+        else:
+            report.write_text(json.dumps({"case_dir": "case_b" if change == "case" else "case_a",
+                                          "state": "failed"}))
+
+    with pytest.raises(EvaluationFailed) as error:
+        evaluate_result(tmp_path, cache=cache, on_event=rewrite)
+    assert error.value.errors[0]["code"] == "invalid_data"
+
+    if change == "added":
+        report.unlink()
+        case, state = ".", "running"
+    else:
+        report.write_bytes(original)
+        os.utime(report, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        case, state = "case_a", "succeeded"
+    restored = evaluate_result(tmp_path, cache=cache)
+    assert restored.evaluated == ["run"]
+    assert restored.outputs["frames"].attrs["case_dir"] == case
+    result = restored.outputs["result"]
+    assert result["state"] == state
+    if change != "added":
+        artifact = next(item for item in result["files"] if item["path"] == "stk-mupro.json")
+        assert artifact["size"] == len(original) and artifact["sha256"] == hashlib.sha256(original).hexdigest()
+    assert evaluate_result(tmp_path, cache=cache).evaluated == []
+
+
+def test_run_index_checks_first_report_read_for_a_case_named_auto(tmp_path, monkeypatch):
+    for case in (tmp_path / "auto", tmp_path / "other"):
+        write_case(case)
+        write_outputs(case)
+    report = tmp_path / "stk-mupro.json"
+    report.write_text('{"case_dir":"auto","state":"succeeded"}')
+    open_source = LocalFiles.open
+    execution_reads = None
+
+    def start(event):
+        nonlocal execution_reads
+        if event["type"] == "node.started":
+            execution_reads = 0
+
+    def replace_first_execution_read(source, path):
+        nonlocal execution_reads
+        if path == report.name and execution_reads is not None:
+            execution_reads += 1
+            if execution_reads == 1:
+                return BytesIO(b'{"case_dir":"other","state":"succeeded"}')
+        return open_source(source, path)
+
+    monkeypatch.setattr(LocalFiles, "open", replace_first_execution_read)
+    with pytest.raises(EvaluationFailed) as error:
+        evaluate_result(tmp_path, on_event=start)
+    assert error.value.errors[0]["code"] == "invalid_data"
+    execution_reads = None
+    assert evaluate_result(tmp_path).outputs["frames"].attrs["case_dir"] == "auto"
+
+
+@pytest.mark.parametrize("size", [3, (1 << 22) + 1])
+def test_run_index_keeps_dat_with_a_malformed_or_oversized_launcher_report(tmp_path, size):
+    write_case(tmp_path)
+    write_outputs(tmp_path)
+    with (tmp_path / "stk-mupro.json").open("wb") as report:
+        report.truncate(size)
+    outputs = evaluate_result(tmp_path).outputs
+    assert outputs["frames"].attrs["case_dir"] == "." and outputs["frames"].n_rows > 0
+    assert outputs["result"]["state"] == "running"
 
 
 def test_hdf5_and_dat_are_distinct_and_read_with_native_metadata(tmp_path):
@@ -99,11 +188,12 @@ def test_remote_source_metadata_and_read_use_the_same_content(tmp_path):
     np.testing.assert_array_equal(image.array("Polar"), values.transpose(2, 1, 0, 3))
 
 
-class _PublishedHDF5Runtime(RuntimeClient):
+class _PublishedFileRuntime(RuntimeClient):
     """Use RuntimeClient's real checksum and download code with an offline transport."""
 
-    def __init__(self, published, replacement=None):
+    def __init__(self, published, replacement=None, *, path="run.h5"):
         self.published, self.replacement = published, replacement
+        self.path = path
         self.listings = self.file_reads = 0
 
     def request(self, method, path, data=None, binary=False, max_response_bytes=None):
@@ -111,13 +201,45 @@ class _PublishedHDF5Runtime(RuntimeClient):
         if path.endswith("/artifacts"):
             self.listings += 1
             payload = self.replacement if self.listings > 1 and self.replacement is not None else self.published
-            return [{"path": "run.h5", "size": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}]
+            return [{"path": self.path, "size": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}]
         assert binary and "/file?" in path
         self.file_reads += 1
         query = parse_qs(urlsplit(path).query)
         offset, limit = int(query["offset"][0]), int(query["limit"][0])
         payload = self.replacement if self.replacement is not None else self.published
         return payload[offset:offset + limit]
+
+
+def test_runtime_run_index_checks_report_against_published_digest(tmp_path):
+    path = "stk-mupro.json"
+    original = b'{"state":"succeeded"}'
+    replacement = b'{"state":"cancelled"}'
+    assert len(original) == len(replacement)
+    client = _PublishedFileRuntime(original, path=path)
+    resolver = RuntimeResolver(client, tmp_path / "cache", {"run": "a" * 32})
+    cached = resolver.resolve("run").fetch(path)
+    stamp = cached.stat()
+    cached.write_bytes(replacement)
+    os.utime(cached, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+
+    with pytest.raises(EvaluationFailed, match="published digest") as error:
+        evaluate(result_graph(), registry=build_registry(entry_points=False), resolver=resolver)
+    assert error.value.errors[0]["code"] == "invalid_data"
+
+    cached.write_bytes(original)
+    os.utime(cached, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    result = evaluate(result_graph(), registry=build_registry(entry_points=False), resolver=resolver)
+    assert result.outputs["result"]["state"] == "succeeded"
+    assert client.file_reads == 1
+
+
+def test_runtime_run_index_ignores_a_report_above_its_download_limit(tmp_path):
+    original = b'{"state":"succeeded"}'
+    client = _PublishedFileRuntime(original, path="stk-mupro.json")
+    resolver = RuntimeResolver(client, tmp_path / "cache", {"run": "a" * 32}, max_bytes=len(original) - 1)
+    result = evaluate(result_graph(), registry=build_registry(entry_points=False), resolver=resolver)
+    assert result.outputs["result"]["state"] == "running"
+    assert client.file_reads == 0
 
 
 def _original_and_replacement(path):
@@ -133,7 +255,7 @@ def _original_and_replacement(path):
 @pytest.mark.parametrize("consumer", ["describe", "handle", "run_index", "field_node"])
 def test_runtime_hdf5_rejects_same_size_cached_replacement(tmp_path, consumer):
     original, replacement = _original_and_replacement(tmp_path / "run.h5")
-    client = _PublishedHDF5Runtime(original)
+    client = _PublishedFileRuntime(original)
     resolver = RuntimeResolver(client, tmp_path / "cache", {"run": "a" * 32})
     source = resolver.resolve("run")
     connector = MuFerroConnector()
@@ -178,7 +300,7 @@ def test_runtime_hdf5_rejects_same_size_cached_replacement(tmp_path, consumer):
 
 def test_runtime_hdf5_rejects_download_for_a_changed_listing(tmp_path):
     original, replacement = _original_and_replacement(tmp_path / "run.h5")
-    client = _PublishedHDF5Runtime(original, replacement)
+    client = _PublishedFileRuntime(original, replacement)
     source = RuntimeFiles(client, "a" * 32, tmp_path / "cache")
     with pytest.raises(ConnectorError, match="published artifact") as error:
         MuFerroConnector().describe(source)

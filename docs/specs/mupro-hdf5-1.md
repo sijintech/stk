@@ -115,7 +115,7 @@ the separate diagnostic before using this container.
 
 The graph run index exposes these descriptors in `result.datasets`. Its `frames` table and
 `muferro_frame@1` remain DAT interfaces; use `mupro_hdf5@1` with a discovered selector for HDF5
-analysis. Run-index implementation version 3 binds discovery to its planned container SHA and
+analysis. The run index binds discovery to its planned container SHA and
 rejects additions, removals, rewrites or inability to verify a previously hashed container during
 execution. These content-binding failures are errors, not optional-format diagnostics. Replacement connectors
 keep their existing `describe` call signature and own native-format policy; the public HDF5 extension
