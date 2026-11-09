@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · Cocoa 隐藏会话关闭诊断候选
+
+本地 `133778cd` 在报告媒体隐藏前观察同一个活的 Cocoa 子视图。实际首次关闭前取原会话的媒体及导航代次、最近暂停 ACK 和核验状态。保持或隐藏截图失败时写 `hidden_media_native_close`，其中的关闭原因区分 `pause_watchdog`、`pause_reply_after_deadline` 和 `other`。观察未附着与附着但无关闭快照分别记录。相对时间从播放返回起算。原 1 秒截止、0.75 秒保持与两次连续真实截图条件继续执行。
+
+本地 Linux 以启用探针的构建生成报告测试程序、媒体探针、报告宿主和辅助功能驱动测试。针对原暂停状态机、DOM 媒体探针、报告宿主和驱动的 CTest 共 25 项通过，零跳过。传输生命周期 pytest 32 项通过，包括主线 `2de183f9` 的旧 worker 清理并重试用例。证据在 `root-delivery-20261109-53/`。Linux 使用 Unsupported 文档后端，Cocoa 新记录须同代码头 macOS runner 核对。
+
+截至 03:52Z，远端 `49837655` 的 Desktop `42558025291` 正在运行。24.04 包成功并启动安装冒烟，26.04 GPU、Mac 和 Windows CPU 在跑。同头 Runtime `42558025404` 已有 8 项成功、5 项运行中。Docs 与 Secret scan 成功。
+
 ## 2026-11-09 UTC · fbe4b0cc 整轮 Desktop 终态
 
 [Desktop 42551958437](https://github.com/sijintech/stk/actions/runs/42551958437) 在代码头 `fbe4b0cc64d283fe5298bb76f3f14e16fa244906` 于 03:41:28Z 结束，结论失败。下表是同一轮的全部六个任务。
