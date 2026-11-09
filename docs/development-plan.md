@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · 节点离线完成和 HDF5 图索引
+
+D1 X7 已补 NodeAgent 离线期间原任务自然完成的单机真实线路证据。Claude39 继续 Hub 停机的独立场景。MuPRO 图索引拒绝已计划摘要的容器执行时无法核对，恢复原内容后重新求值。macOS 隔离暂停对照已通过目标编译，运行证据待远端。 [验收记录](runtime-validation.md) [D1 矩阵](planning/d1-compatibility-gates.md)
+
 ## 2026-11-09 UTC · 冻结准备与 Windows 捕获
 
 工作流首次及重试准备按实际项目修订复核冻结参数。Windows 原生 PDF 对已准备新会话但没有截图样本的阶段启用有界 WGC 会话替换，继续验证两张独立的 OS 像素。macOS 隔离暂停对照随远端 `3d2fcea7` 执行。 [验收记录](runtime-validation.md)

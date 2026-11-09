@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · X7 节点离线完成与 HDF5 索引
+
+`3a7928f828ad08d67990be4694441760a4ee7e32` 集成 Claude38 `e31d1f2954e3fef1c8cae4387c21e74013adbf73` 与 `58aebf21caa314db24fd0d09cc78cad011e3313e`。真实单机 Hub、NodeAgent 和 Runtime 验证原任务在节点退出期间完成，原程序和 worker 已退出，完成前后各两次精确读取均明确拒绝，同配置重连的首答复为同一任务成功。读取固定日志和唯一 `out.txt`，保留一次创建和一次提交的动作账本。root 补到期及逾期答复和四种缺失/非布尔状态的反例，旧六例失败，新源码 151 项通过。新隔离 wheel 以 `-I` 验证取消 10/10、离线完成 12/12，实测 26.96 与 28.82 秒，清理通过。证据限单机合成任务。 [D1 矩阵](planning/d1-compatibility-gates.md)
+
+`d2bf693bb0dd450ac0fce364cb1719910ea125a4` 在 MuPRO 图索引执行时拒绝已绑定摘要的容器超限、消失或读取失败，避免将 DAT-only 结果写入原缓存键。旧实现四种反例返回成功。真实稀疏探针将容器由 6,056 字节扩为 1 GiB + 1，修复后拒绝，恢复原字节和 mtime 后重新求值并取到两个 HDF5 字段。规划时已知的可选错误及通过摘要核对的格式错误仍保留 DAT。实现版本升为 3，发布节点仍为 v1。源码相关 210 项通过、2 项条件跳过，root 源码和隔离 wheel 各 73 项通过。Python 3.11、3.14 定向各 34 项。 [HDF5 契约](specs/mupro-hdf5-1.md)
+
+`7366d117` 单独采纳 PR #53 的 `transfer.resume` 表项勘误。当前主线实测取消后同键重放保留原记录，显式同 ID 恢复可发布校验正确的字节。PR 的立即写入排队意图和 worker 循环仍需修订，原竞态已有主线回归。 [PR #53](https://github.com/sijintech/stk/pull/53) [桥接契约](specs/stk-desktop-bridge-v1.md)
+
+远端 `3d2fcea7` Runtime 13 项于 09:42:02Z 全过。Desktop 的 macOS 目标编译和 Linux 包与干净机已通过，原生对照待执行。当前本地批次待整轮终态。证据见本机 `root-delivery-20261109-79`。 [Runtime](https://github.com/sijintech/stk/actions/runs/42593219053) [Desktop](https://github.com/sijintech/stk/actions/runs/42593218935)
+
 ## 2026-11-09 UTC · 冻结子任务准备及 WGC 空捕获
 
 `862208e6986845bc3fedf098aaa57e7906609a89` 在每次子任务准备与修订重试中，用传给引擎的同一项目修订核对冻结行。真实 loopback Runtime 和合成 MuFerro 的两条反例分别在早期检查之后、引擎首次准备入口编辑温度。旧版两例均创建任务，修复后均返回 `row_changed`，无新工作区、子计划或任务，下游分析仍待处理。源码工作流和智能体相关 109 项通过，1 项为真实许可条件跳过。root 源码定向 3 项和隔离 wheel 48 项通过。隔离夹具从 wheel 复制纯数据的 volume preset，以支持测试原有的相对路径。已有接管、取消和 LAMMPS 回归通过。
