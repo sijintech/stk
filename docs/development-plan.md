@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-09 20:18 UTC · X7 单机链路切断样例
+
+D1 X7 已交付 `127b0316` 单机主动断链样例，源码和 wheel 各 15/15，联测 455/455。跨主机、静默丢包和原生桌面界面继续验收。 [D1 矩阵](planning/d1-compatibility-gates.md)
+
+Claude65 已从 `ed08a0c9` 在独立 `claude/cli-log-resume-65` 修复另一处 CLI 中断续读问题。真实 Click 入口在读取 UTF-8 首字节后被中断，未输出字符却把游标从 7 报到 8。
+
+远端 `fa2ff5e2` Desktop `42679509572` 的 Windows 原生 `129402349100` 仍在运行，本地提交等待整轮终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42679509572)
+
 ## 2026-11-09 20:04 UTC · Runtime 日志末段与 Cocoa 对照
 
 D1 日志末段读取竞态已在 `0458516a` 修复，直连与 Hub 旧 Runtime 兼容纳入回归。P4 macOS 原生媒体保持 4/6，当前证据等待同 seek 保持可见对照。 [运行验收](runtime-validation.md)

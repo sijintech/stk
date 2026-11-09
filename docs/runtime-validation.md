@@ -1,5 +1,17 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 20:18 UTC · X7 单机链路切断样例
+
+Claude64 的 `47e3cdde` 由 root 审阅修订后集成为 `127b0316`。`disconnect.py --scenario socket-partition` 在真实 NodeAgent 与 Hub 间主动关闭 TCP 隧道。两端保持运行，Runtime 在断线期间完成原任务，恢复后的首个精确答复返回同一任务成功。固定 stdout 和制品经真实 HubBackend 读取、下载并校验，只启动一次且 Hub 动作账本一致。
+
+root 修复 pending connect 导致的排空与清理假成功，阻止切断前的连接跨越重开。失败回执清空 verified。三条回归在作者版按预期失败，在集成候选通过。另以真实断链只注入离线查询回退旧缓存，恰好 P4、P9 拒绝，其余 13 项通过，清理完整。
+
+源码场景 15/15，约 36.49 秒。隔离 wheel 安装态场景 15/15，约 38.37 秒，12 个导入文件与主线摘要匹配。显式启用场景的最终联测 455/455，零跳过。单机主动关闭与静默丢包是不同故障，跨主机与原生桌面界面待验。严格 Bridge 子进程范围另见 19:54 UTC 诊断。
+
+远端 `fa2ff5e2` Desktop `42679509572` 的 Windows 原生 `129402349100` 仍在运行，本地提交等待整轮终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42679509572)
+
+本机证据 `root-delivery-20261109-112/` 的 `source-final/`、`installed/`、`parity-final.xml` 和 `claude64-root-negative/receipt.json`。
+
 ## 2026-11-09 20:04 UTC · Runtime 日志末段与 Cocoa 对照
 
 `0458516a` 先读取 Runtime 任务状态再读日志，避免把末段写入前的空读取标成终态。CLI `logs --follow` 在连续两次收到空的终态响应后退出，兼容旧 Runtime。字节偏移与增量 UTF-8 解码保持原义，调度器更晚写入的日志仍可从最后游标续读。
