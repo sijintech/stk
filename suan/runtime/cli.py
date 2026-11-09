@@ -836,23 +836,29 @@ def watch_job(client, task_id, interval, timeout):
 def logs(client, task_id, stream, offset, follow, show_offset):
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
     previous_empty_terminal = False
+    # ``offset`` is the Runtime read cursor; ``emitted`` is where the printed text ends. They differ
+    # while a character split across reads is held back, as in desktop_bridge's LogDecoder, so a
+    # resume from the reported offset re-reads that prefix instead of skipping it.
+    emitted = offset
     try:
         while True:
             chunk = client.logs(task_id, stream, offset)
             data = chunk["bytes"]
             click.echo(decoder.decode(data), nl=False)
             offset = chunk["next_offset"]
+            emitted = offset - len(decoder.getstate()[0])
             # Older runtimes can report terminal after an empty read raced the final write.
             empty_terminal = follow and chunk["terminal"] and not data
             if not follow or (empty_terminal and previous_empty_terminal):
                 click.echo(decoder.decode(b"", final=True), nl=False)
+                emitted = offset
                 break
             previous_empty_terminal = empty_terminal
             if not data:
                 time.sleep(0.5)
     finally:
         if show_offset:
-            click.echo(f"Next offset: {offset}", err=True)
+            click.echo(f"Next offset: {emitted}", err=True)
 
 
 @jobs.command("events")

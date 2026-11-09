@@ -10,7 +10,8 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from suan.runtime.cli import connect, jobs, workspaces
+from suan.runtime.cli import HubCLIClient, connect, jobs, workspaces
+from suan.runtime.client import RuntimeClient
 from suan.runtime.models import TaskSpec
 from suan.desktop_bridge.backends import HubBackend, action_id
 from suan.desktop_bridge.hub import HubClient, HubResponseError
@@ -124,6 +125,58 @@ def test_cli_log_follow_drains_a_late_tail_from_an_older_runtime(transport, live
     followed = invoke(jobs, args + ["--follow"])
     assert followed.stdout == "末尾\n" and followed.stderr == f"Next offset: {end}\n"
     assert offsets == [start, start, start + 1, end, end]
+    assert live.actions() == actions_before
+
+
+@pytest.mark.parametrize("transport", ["direct", "hub"])
+def test_cli_log_follow_interrupt_reports_the_offset_of_emitted_text(transport, live, paired, runtime, monkeypatch):
+    client, _, server, _ = runtime
+    workspace = client.create_workspace("log interrupt")["id"]
+    script = "import sys; sys.stdout.buffer.write('ready\\n末尾\\n'.encode() + b'ok\\xe4\\xb8')"
+    task = client.submit(TaskSpec(workspace, ["{python}", "-c", script]))["id"]
+    assert client.wait(task, timeout=10)["state"] == "succeeded"
+    if transport == "direct":
+        monkeypatch.setenv("STK_RUNTIME_URL", client.url)
+        monkeypatch.setenv("STK_RUNTIME_TOKEN", client.token)
+    target = paired[0] if transport == "hub" else []
+    actions_before = live.actions()
+    read_logs = server.service.logs
+    offsets, limits = [], []
+
+    def bounded_read(task_id, stream="stdout", offset=0, limit=1024 * 1024):
+        offsets.append(offset)
+        assert len(offsets) <= 6
+        return read_logs(task_id, stream, offset, limits.pop(0) if limits else limit)
+
+    monkeypatch.setattr(server.service, "logs", bounded_read)
+    start, held = len(b"ready\n"), len("末尾\n".encode())
+    eof = start + held + len(b"ok\xe4\xb8")
+    caller = RuntimeClient if transport == "direct" else HubCLIClient
+    poll, polls = caller.logs, []
+
+    def interrupt_second_poll(self, *args, **kwargs):
+        polls.append(args)
+        if len(polls) == 2:
+            raise KeyboardInterrupt
+        return poll(self, *args, **kwargs)
+
+    # The first Runtime read ends after the first byte of the three-byte "末"; Ctrl-C lands on the next poll.
+    limits.append(start + 1)
+    monkeypatch.setattr(caller, "logs", interrupt_second_poll)
+    interrupted = CliRunner().invoke(jobs, target + ["logs", task, "--follow", "--show-offset"])
+    assert interrupted.exit_code == 1 and isinstance(interrupted.exception, SystemExit)
+    assert interrupted.stdout == "ready\n" and f"Next offset: {start}\n" in interrupted.stderr
+    assert offsets == [0] and len(polls) == 2
+    monkeypatch.setattr(caller, "logs", poll)
+
+    # Resuming at the reported cursor re-reads the held prefix; later splits inside "末" and "尾"
+    # rejoin, and the incomplete tail at the actual end is flushed as U+FFFD with the end cursor.
+    offsets.clear()
+    limits.extend([2, 3])
+    resumed = invoke(jobs, target + ["logs", task, "--offset", str(start), "--follow", "--show-offset"])
+    assert resumed.stdout == "末尾\nok�" and resumed.stderr == f"Next offset: {eof}\n"
+    assert offsets == [start, start + 2, start + 5, eof, eof]
+    assert invoke(jobs, target + ["logs", task, "--offset", str(eof), "--show-offset"]).stderr == f"Next offset: {eof}\n"
     assert live.actions() == actions_before
 
 
