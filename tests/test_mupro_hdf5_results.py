@@ -1,6 +1,7 @@
 """MuPRO HDF5 discovery, coexistence with DAT and content-bound result observations."""
 import hashlib
 import os
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -16,7 +17,8 @@ from suan.data.manifest import check, validate_result  # noqa: E402
 from suan.graph.cache import GraphCache  # noqa: E402
 from suan.graph.catalog import build_registry  # noqa: E402
 from suan.graph.evaluator import EvaluationFailed, evaluate  # noqa: E402
-from suan.graph.resolve import LocalDirResolver  # noqa: E402
+from suan.graph.resolve import LocalDirResolver, RuntimeResolver  # noqa: E402
+from suan.runtime.client import RuntimeClient  # noqa: E402
 from test_connectors_muferro import FakeClient  # noqa: E402
 
 
@@ -95,6 +97,94 @@ def test_remote_source_metadata_and_read_use_the_same_content(tmp_path):
     result = connector.describe(source)
     image = connector.open(source, "hdf5:Polar", result=result).read(frame={"first": True})
     np.testing.assert_array_equal(image.array("Polar"), values.transpose(2, 1, 0, 3))
+
+
+class _PublishedHDF5Runtime(RuntimeClient):
+    """Use RuntimeClient's real checksum and download code with an offline transport."""
+
+    def __init__(self, published, replacement=None):
+        self.published, self.replacement = published, replacement
+        self.listings = self.file_reads = 0
+
+    def request(self, method, path, data=None, binary=False, max_response_bytes=None):
+        assert method == "GET"
+        if path.endswith("/artifacts"):
+            self.listings += 1
+            payload = self.replacement if self.listings > 1 and self.replacement is not None else self.published
+            return [{"path": "run.h5", "size": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}]
+        assert binary and "/file?" in path
+        self.file_reads += 1
+        query = parse_qs(urlsplit(path).query)
+        offset, limit = int(query["offset"][0]), int(query["limit"][0])
+        payload = self.replacement if self.replacement is not None else self.published
+        return payload[offset:offset + limit]
+
+
+def _original_and_replacement(path):
+    write_hdf5(path)
+    original = path.read_bytes()
+    with h5py.File(path, "r+") as file:
+        file["t00000002/Polar"][0, 0, 0, 0] = 99
+    replacement = path.read_bytes()
+    assert len(original) == len(replacement) and original != replacement
+    return original, replacement
+
+
+@pytest.mark.parametrize("consumer", ["describe", "handle", "run_index", "field_node"])
+def test_runtime_hdf5_rejects_same_size_cached_replacement(tmp_path, consumer):
+    original, replacement = _original_and_replacement(tmp_path / "run.h5")
+    client = _PublishedHDF5Runtime(original)
+    resolver = RuntimeResolver(client, tmp_path / "cache", {"run": "a" * 32})
+    source = resolver.resolve("run")
+    connector = MuFerroConnector()
+    handle = connector.open(source, "hdf5:Polar")
+    first = {"first": True}
+    assert handle.read(frame=first).array("Polar")[0, 0, 0, 0] == 0
+    assert client.file_reads == 1
+    cached = source.fetch("run.h5")
+    metadata = cached.stat()
+    cached.write_bytes(replacement)
+    os.utime(cached, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+    assert cached.stat().st_size == metadata.st_size and cached.stat().st_mtime_ns == metadata.st_mtime_ns
+    assert source.sha256("run.h5") == hashlib.sha256(original).hexdigest()
+    registry = build_registry(entry_points=False)
+
+    if consumer == "describe":
+        with pytest.raises(ConnectorError, match="published artifact") as error:
+            connector.describe(source)
+        assert error.value.code == "invalid_data"
+    elif consumer == "handle":
+        # A legitimate description of the replacement bytes still cannot reopen on this Runtime task.
+        other = connector.describe(LocalFiles(tmp_path))
+        with pytest.raises(ConnectorError, match="published artifact") as error:
+            connector.open(source, "hdf5:Polar", result=other).read(frame=first)
+        assert error.value.code == "invalid_data"
+    else:
+        graph = result_graph() if consumer == "run_index" else {
+            "schema": "stk.graph/1", "catalog": {"stk": 1}, "nodes": [{
+                "id": "read", "type": "stk.source.mupro_hdf5@1",
+                "params": {"binding": "run", "selector": "/t00000002/Polar"}}],
+            "outputs": {"field": "read.out"},
+        }
+        with pytest.raises(EvaluationFailed, match="published artifact") as error:
+            evaluate(graph, registry=registry, resolver=resolver)
+        assert error.value.errors[0]["code"] == "invalid_data"
+
+    cached.write_bytes(original)
+    os.utime(cached, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+    assert connector.open(source, "hdf5:Polar").read(frame=first).array("Polar")[0, 0, 0, 0] == 0
+    assert client.file_reads == 1  # The additional content check makes no network request on a warm cache.
+
+
+def test_runtime_hdf5_rejects_download_for_a_changed_listing(tmp_path):
+    original, replacement = _original_and_replacement(tmp_path / "run.h5")
+    client = _PublishedHDF5Runtime(original, replacement)
+    source = RuntimeFiles(client, "a" * 32, tmp_path / "cache")
+    with pytest.raises(ConnectorError, match="published artifact") as error:
+        MuFerroConnector().describe(source)
+    assert error.value.code == "invalid_data"
+    assert client.listings == 2 and client.file_reads == 1
+    assert source.sha256("run.h5") == hashlib.sha256(original).hexdigest()
 
 
 def test_old_handle_refuses_rewrite_with_same_size_and_restored_mtime(tmp_path):

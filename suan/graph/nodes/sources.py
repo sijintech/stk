@@ -84,7 +84,7 @@ def _muferro_run_fingerprint(ctx, inputs, params):
     small += sorted(path for path in names if path.endswith(".toml"))[:MAX_TOML_FILES]
     try:
         hashed = {path: source.sha256(path) for path in dict.fromkeys(small) if path in names}
-        from suan.connectors.mupro.source import FILE_LIMIT, file_fingerprint
+        from suan.connectors.mupro.source import ContentChanged, FILE_LIMIT, file_fingerprint
         hdf5_path = prefix + "run.h5"
         hdf5, hdf5_files = {}, []
         if _native_hdf5(connector) and hdf5_path in names:
@@ -94,6 +94,8 @@ def _muferro_run_fingerprint(ctx, inputs, params):
                 if item.size > FILE_LIMIT:
                     raise ConnectorError("MuPRO HDF5 source exceeds the 1 GiB file limit", "budget_exceeded")
                 hdf5[hdf5_path] = file_fingerprint(source, hdf5_path, check=ctx.check)["sha256"]
+            except ContentChanged:
+                raise
             except ConnectorError as exc:
                 hdf5[hdf5_path] = {"error": exc.code, "message": str(exc)}
     except ConnectorError as exc:

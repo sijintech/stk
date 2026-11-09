@@ -12,10 +12,11 @@ from contextlib import ExitStack, contextmanager
 from tempfile import TemporaryFile
 
 from ..api import ConnectorError
-from ..files import check_path
+from ..files import RuntimeFiles, check_path
 
 FILE_LIMIT = 1024 * 1024 * 1024
 _BLOCK = 1024 * 1024
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 class ContentChanged(ConnectorError):
@@ -25,10 +26,24 @@ class ContentChanged(ConnectorError):
         super().__init__(message, "invalid_data")
 
 
+def _runtime_published_sha256(source, path):
+    if not isinstance(source, RuntimeFiles):
+        return None
+    try:
+        sha = source.sha256(path)
+    except KeyError:
+        sha = None
+    if not isinstance(sha, str) or _SHA256.fullmatch(sha) is None:
+        raise ConnectorError("The Runtime listed no SHA-256 for the MuPRO HDF5 artifact", "invalid_data")
+    return sha
+
+
 def _stream(source, path, *, destination=None, check=None):
     """Hash the actual stream, optionally retaining the exact same bytes for parsing."""
+    path = check_path(path)
+    published_sha = _runtime_published_sha256(source, path)
     digest, size = hashlib.sha256(), 0
-    with source.open(check_path(path)) as stream:
+    with source.open(path) as stream:
         while True:
             if check is not None:
                 check()
@@ -41,7 +56,10 @@ def _stream(source, path, *, destination=None, check=None):
             digest.update(chunk)
             if destination is not None:
                 destination.write(chunk)
-    return digest.hexdigest(), size
+    sha = digest.hexdigest()
+    if published_sha is not None and sha != published_sha:
+        raise ContentChanged("The MuPRO HDF5 stream differs from the Runtime's published artifact SHA-256")
+    return sha, size
 
 
 def fingerprint(source, path, selector, *, check=None):
@@ -62,7 +80,7 @@ def file_fingerprint(source, path, *, check=None):
 def _check_expected_sha256(expected_sha256, *, optional=False):
     if expected_sha256 is None and optional:
         return
-    if not isinstance(expected_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
+    if not isinstance(expected_sha256, str) or _SHA256.fullmatch(expected_sha256) is None:
         raise ConnectorError("A planned content SHA-256 is required", "invalid_param")
 
 

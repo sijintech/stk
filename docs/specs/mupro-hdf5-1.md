@@ -60,8 +60,11 @@ the original relative path/SHA; a single frame's `SourceRef` binds that path, re
 native selector, rather than the temporary filename.
 FileSource path rules apply before copying: `LocalFiles` allows links whose resolved target stays
 inside its binding root; the pinned-reader rule above applies to the verified anonymous copy.
-Runtime bindings expose published artifacts only after the task reaches a terminal state; this
-profile does not add live access to an actively written Runtime `run.h5`.
+Runtime bindings expose published artifacts only after the task reaches a terminal state. HDF5
+fingerprinting, discovery and field reads also require the streamed bytes to match the Runtime's
+published artifact SHA-256, including when a cached download supplies the stream. A mismatch is
+a content-binding error. This profile does not add live access to an actively written Runtime
+`run.h5`.
 The copy uses the host's default temporary filesystem; on tmpfs its bytes consume memory outside
 the selected-array estimate and the evaluator's process-RSS accounting. The separate 1 GiB source
 cap still applies. Fingerprinting reads the complete source even on cache hits; cache misses read
