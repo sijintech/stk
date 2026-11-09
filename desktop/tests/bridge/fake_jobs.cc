@@ -65,6 +65,7 @@ struct Options {
   bool f03 = false;
   bool late_transfer_snapshots = false;
   bool completed_transfer_list_first = false;
+  bool late_transfer_start = false;
   int submit_fail = 0;
   int stale_workspace_lists = 0; /**< hub: new workspaces missing from the next N listings */
 } g_opt;
@@ -471,6 +472,17 @@ void ticker()
   }
 }
 
+void respond_transfer_start(const Json &id, Json transfer)
+{
+  transfer.erase("files");
+  if (g_opt.late_transfer_start) {
+    tick_transfers_locked();
+    tick_transfers_locked();
+    save_locked();
+  }
+  respond(id, {{"transfer", std::move(transfer)}});
+}
+
 void run_logs(const std::string sub, const std::string task_id, const Json streams, const Json offsets)
 {
   std::map<std::string, std::string> text;
@@ -566,6 +578,9 @@ void init(const std::string &dir, std::vector<std::string> args, SendFn send)
     }
     else if (args[i] == "--completed-transfer-list-first") {
       g_opt.completed_transfer_list_first = true;
+    }
+    else if (args[i] == "--late-transfer-start") {
+      g_opt.late_transfer_start = true;
     }
     else if (args[i] == "--stale-workspace-lists" && i + 1 < args.size()) {
       g_opt.stale_workspace_lists = std::atoi(args[++i].c_str());
@@ -884,9 +899,7 @@ bool handle(const Json &id, const std::string &method, const Json &p)
                {"error", nullptr}, {"action", nullptr}, {"created_at", iso(t)}, {"updated_at", iso(t)}, {"files", files}};
     g_model["transfers"].push_back(tr);
     save_locked();
-    Json pub = tr;
-    pub.erase("files");
-    respond(id, {{"transfer", pub}});
+    respond_transfer_start(id, std::move(tr));
     return true;
   }
   if (method == "download.start") {
@@ -906,9 +919,7 @@ bool handle(const Json &id, const std::string &method, const Json &p)
                {"created_at", iso(t)}, {"updated_at", iso(t)}, {"files", Json::array()}};
     g_model["transfers"].push_back(tr);
     save_locked();
-    Json pub = tr;
-    pub.erase("files");
-    respond(id, {{"transfer", pub}});
+    respond_transfer_start(id, std::move(tr));
     return true;
   }
   if (method == "transfer.list") {

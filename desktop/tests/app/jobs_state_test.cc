@@ -647,6 +647,59 @@ TEST_F(JobsFake, DownloadIsVerifiedAndPngIsPreviewedAsATexture)
   EXPECT_EQ(freed, textures);
 }
 
+TEST_F(JobsFake, CompletedTransfersKeepTheirStateAndOwnershipWhenStartRepliesArriveLate)
+{
+  FakeJobs f({"--late-transfer-start"});
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  const auto drain = [&] {
+    bool received = false;
+    /* This read uses the same executor without adopting its snapshot in JobsState. */
+    f.client->transfer_list().then([&](const auto &reply) {
+      EXPECT_TRUE(reply);
+      received = true;
+    });
+    ASSERT_TRUE(f.pump([&] { return received; }));
+  };
+  const auto workspace_reads = [&] {
+    const auto methods = f.methods();
+    return std::count(methods.begin(), methods.end(), "workspace.files");
+  };
+  ASSERT_NO_FATAL_FAILURE(drain());
+  const auto before_upload = workspace_reads();
+  const std::string source = (f.dir.path() / "input.txt").string();
+  std::ofstream(source) << "synthetic input";
+  j.upload({source});
+  ASSERT_NO_FATAL_FAILURE(drain());
+  ASSERT_TRUE(f.pump([&] { return j.workspace_files().size() == 1; }));
+  ASSERT_EQ(j.transfers().size(), 1u);
+  EXPECT_EQ(j.transfers()[0].state, "completed");
+  EXPECT_EQ(j.uploads_in_flight(), 0);
+  EXPECT_EQ(workspace_reads(), before_upload + 1);
+  EXPECT_NE(j.status().text.find("Uploaded"), std::string::npos);
+
+  const std::string dest = (f.dir.path() / "downloaded.txt").string();
+  j.download_input("input.txt", dest);
+  ASSERT_NO_FATAL_FAILURE(drain());
+  EXPECT_EQ(f.opened, (std::vector<std::string>{dest}));
+
+  int previews = 0;
+  j.create_texture = [&](const io::Image &) -> uint64_t { return ++previews; };
+  j.free_texture = [](uint64_t) {};
+  j.form().name = "completed upload no longer blocks submission";
+  ASSERT_TRUE(j.submit());
+  ASSERT_TRUE(f.pump([&] { return j.artifacts().size() == 2; }));
+  j.download_artifact("result.png");
+  ASSERT_NO_FATAL_FAILURE(drain());
+  ASSERT_EQ(j.transfers().size(), 3u);
+  EXPECT_TRUE(std::all_of(j.transfers().begin(), j.transfers().end(),
+                          [](const bridge::Transfer &t) { return t.state == "completed"; }));
+  EXPECT_EQ(j.artifacts()[0].verify, app::ArtifactRow::Verify::Ok);
+  EXPECT_EQ(j.preview().texture, 1u);
+  EXPECT_EQ(previews, 1);
+  EXPECT_EQ(f.opened, (std::vector<std::string>{dest}));
+}
+
 TEST_F(JobsFake, CancelShowsCancellingThenCancelled)
 {
   FakeJobs f;

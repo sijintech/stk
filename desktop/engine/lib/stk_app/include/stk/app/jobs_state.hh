@@ -117,6 +117,7 @@ struct EventsSummary {
 struct ArtifactRow {
   bridge::FileEntry file;
   std::string transfer_id; /**< Its download (empty before one started). */
+  std::string download_request; /**< Latest start awaiting its transfer ID. */
   std::string local;       /**< Where the verified file is. */
   enum class Verify : uint8_t { None, Pending, Ok, Mismatch } verify = Verify::None;
 };
@@ -447,8 +448,11 @@ class JobsState {
   void maybe_resend_after_review();
   void on_hub_event(const bridge::HubEvent &event);
   uint64_t transfer_observation(const std::string &id) const;
+  void record_transfer_observation(const bridge::Transfer &transfer);
+  const bridge::Transfer *transfer_after_request(const std::string &id, uint64_t since) const;
+  void apply_download_start(const bridge::Transfer &transfer, uint64_t since);
   void transfer_finished(const bridge::Transfer &transfer);
-  void download_done(const bridge::Transfer &t);
+  void download_done(const bridge::Transfer &t, bool notify);
   void verify_download(ArtifactRow &row);
   void release_preview();
   bridge::Target target() const;
@@ -501,7 +505,11 @@ class JobsState {
   std::vector<std::string> pending_;
   std::vector<bridge::Transfer> transfers_;
   uint64_t transfer_sequence_ = 0, transfer_list_request_ = 0;
-  std::map<std::string, uint64_t> transfer_observations_;
+  struct TransferObservation {
+    uint64_t sequence = 0;
+    bool finished_handled = false;
+  };
+  std::map<std::string, TransferObservation> transfer_observations_;
   std::set<std::string> upload_ids_; /**< uploads started from here (status messages) */
   std::map<std::string, std::string> download_for_; /**< transfer id -> artifact path */
   std::set<std::string> open_after_;                /**< downloads opened when verified */

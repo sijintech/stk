@@ -368,6 +368,12 @@ void JobsState::attach(bridge::Client *client)
     clear_task_observation();
     clear_task_detail();
   }
+  for (ArtifactRow &row : artifacts_) {
+    if (!row.download_request.empty()) {
+      row.download_request.clear();
+      row.verify = ArtifactRow::Verify::None;
+    }
+  }
   state_listener_.reset();
   transfer_listener_.reset();
   watch_.unsubscribe();
@@ -1432,14 +1438,14 @@ void JobsState::download_input(const std::string &path, const std::string &dest)
   p.path = path;
   p.dest = dest;
   p.idempotency_key = new_idempotency_key();
-  on(client_->download_start(p), [this](const bridge::Result<bridge::Transfer> &r) {
+  on_bridge_read(client_->download_start(p), [this, since = transfer_sequence_](const bridge::Result<bridge::Transfer> &r) {
     if (!r) {
       fail(std::string(store_.tr("jobs.op.download")), r.error());
       return;
     }
     /* As the legacy tab: a downloaded input file is opened (preview, Viewer or the system). */
     open_after_.insert(r.value().id);
-    apply_transfer(r.value());
+    apply_download_start(r.value(), since);
   });
 }
 
@@ -1481,14 +1487,20 @@ void JobsState::start_upload(const std::string &path)
     p.remote = "."; /* the folder's contents at the workspace root */
   }
   p.idempotency_key = new_idempotency_key();
-  on(client_->upload_start(p), [this, path](const bridge::Result<bridge::Transfer> &r) {
+  on_bridge_read(client_->upload_start(p), [this, path, since = transfer_sequence_](const bridge::Result<bridge::Transfer> &r) {
     if (!r) {
       fail(store_.catalog().format("jobs.op.upload", {{"file", file_name(path)}}), r.error());
       return;
     }
     upload_ids_.insert(r.value().id);
+    const auto *observed = transfer_after_request(r.value().id, since);
+    if (observed && observed->finished()) {
+      transfer_finished(*observed);
+      changed();
+      return;
+    }
     set_status(store_.catalog().format("jobs.status.uploading", {{"file", file_name(path)}}));
-    apply_transfer(r.value());
+    apply_transfer(observed ? *observed : r.value());
   });
 }
 
@@ -1524,7 +1536,21 @@ const bridge::Transfer *JobsState::transfer(const std::string &id) const
 uint64_t JobsState::transfer_observation(const std::string &id) const
 {
   const auto it = transfer_observations_.find(id);
-  return it == transfer_observations_.end() ? 0 : it->second;
+  return it == transfer_observations_.end() ? 0 : it->second.sequence;
+}
+
+void JobsState::record_transfer_observation(const bridge::Transfer &t)
+{
+  auto &observation = transfer_observations_[t.id];
+  observation.sequence = ++transfer_sequence_;
+  if (!t.finished()) {
+    observation.finished_handled = false;
+  }
+}
+
+const bridge::Transfer *JobsState::transfer_after_request(const std::string &id, uint64_t since) const
+{
+  return transfer_observation(id) > since ? transfer(id) : nullptr;
 }
 
 void JobsState::refresh_transfers()
@@ -1554,7 +1580,7 @@ void JobsState::refresh_transfers()
         t = *old->second;
       }
       else if (old == current.end() || old->second->raw != t.raw) {
-        transfer_observations_[t.id] = ++transfer_sequence_;
+        record_transfer_observation(t);
         if (old != current.end() && !old->second->finished() && t.finished()) {
           finished.insert(t.id);
         }
@@ -1569,6 +1595,9 @@ void JobsState::refresh_transfers()
       }
       else {
         transfer_observations_.erase(id);
+        upload_ids_.erase(id);
+        download_for_.erase(id);
+        open_after_.erase(id);
       }
     }
     std::stable_sort(list.begin(), list.end(), [](const bridge::Transfer &a, const bridge::Transfer &b) {
@@ -1592,7 +1621,7 @@ void JobsState::apply_transfer(const bridge::Transfer &t)
     if (x.id == t.id) {
       was_finished = x.finished();
       if (x.raw != t.raw) {
-        transfer_observations_[t.id] = ++transfer_sequence_;
+        record_transfer_observation(t);
       }
       x = t;
       found = true;
@@ -1600,7 +1629,7 @@ void JobsState::apply_transfer(const bridge::Transfer &t)
   }
   if (!found) {
     transfers_.insert(transfers_.begin(), t);
-    transfer_observations_[t.id] = ++transfer_sequence_;
+    record_transfer_observation(t);
   }
   if (t.finished() && !was_finished) {
     transfer_finished(t);
@@ -1615,19 +1644,23 @@ void JobsState::apply_transfer(const bridge::Transfer &t)
 
 void JobsState::transfer_finished(const bridge::Transfer &t)
 {
+  /* A start reply can bind the user's intent after the generic completion was handled. */
+  auto &observation = transfer_observations_[t.id];
+  const bool first = !observation.finished_handled;
+  observation.finished_handled = true;
   if (t.kind == "download") {
-    download_done(t);
+    download_done(t, first);
   }
   else if (t.kind == "upload" && t.state == "completed") {
     if (upload_ids_.count(t.id)) {
       set_status(store_.catalog().format("jobs.status.uploaded", {{"count", std::to_string(t.files_total)}}),
                  ui::ToastKind::Success);
     }
-    if (t.workspace_id == workspace_) {
+    if (first && t.workspace_id == workspace_) {
       refresh_files();
     }
   }
-  else if (t.kind == "upload" && t.state == "failed" && t.error) {
+  else if (first && t.kind == "upload" && t.state == "failed" && t.error) {
     fail(store_.catalog().format("jobs.op.upload", {{"file", file_name(t.local)}}), *t.error);
   }
 }
@@ -2290,18 +2323,30 @@ void JobsState::download_artifact(const std::string &path, const std::string &de
   p.idempotency_key = new_idempotency_key();
   for (ArtifactRow &a : artifacts_) {
     if (a.file.path == path) {
+      a.download_request = p.idempotency_key;
+      a.transfer_id.clear();
       a.verify = ArtifactRow::Verify::Pending;
     }
   }
   changed();
   const uint64_t epoch = detail_epoch_;
   const bool open_after = dest.empty();
-  on(client_->download_start(p), [this, path, epoch, open_after](const bridge::Result<bridge::Transfer> &r) {
-    if (!r) {
+  on_bridge_read(client_->download_start(p),
+                 [this, path, epoch, open_after, request = p.idempotency_key, since = transfer_sequence_]
+                 (const bridge::Result<bridge::Transfer> &r) {
+    ArtifactRow *row = nullptr;
+    if (epoch == detail_epoch_) {
       for (ArtifactRow &a : artifacts_) {
-        if (a.file.path == path) {
-          a.verify = ArtifactRow::Verify::None;
+        if (a.file.path == path && a.download_request == request) {
+          row = &a;
+          row->download_request.clear();
+          break;
         }
+      }
+    }
+    if (!r) {
+      if (row) {
+        row->verify = ArtifactRow::Verify::None;
       }
       fail(store_.catalog().format("jobs.op.download_file", {{"file", path}}), r.error());
       return;
@@ -2310,38 +2355,54 @@ void JobsState::download_artifact(const std::string &path, const std::string &de
     if (open_after) {
       open_after_.insert(r.value().id);
     }
-    if (epoch == detail_epoch_) {
-      for (ArtifactRow &a : artifacts_) {
-        if (a.file.path == path) {
-          a.transfer_id = r.value().id;
-        }
-      }
+    if (row) {
+      row->transfer_id = r.value().id;
     }
-    apply_transfer(r.value());
+    apply_download_start(r.value(), since);
   });
 }
 
-void JobsState::download_done(const bridge::Transfer &t)
+void JobsState::apply_download_start(const bridge::Transfer &t, uint64_t since)
+{
+  if (const auto *observed = transfer_after_request(t.id, since)) {
+    /* The event could finish before the reply binds this user's open or artifact intent. */
+    if (observed->finished()) {
+      transfer_finished(*observed);
+    }
+    changed();
+  }
+  else {
+    apply_transfer(t);
+  }
+}
+
+void JobsState::download_done(const bridge::Transfer &t, bool notify)
 {
   const auto it = download_for_.find(t.id);
   ArtifactRow *row = nullptr;
+  const auto scope = target();
+  const bool same_task = t.connection == scope.connection && t.node == scope.node && t.task_id == selected_;
   for (ArtifactRow &a : artifacts_) {
-    if (a.transfer_id == t.id || (it != download_for_.end() && a.file.path == it->second && t.task_id == selected_)) {
+    if (a.transfer_id == t.id || (same_task && a.transfer_id.empty() && a.download_request.empty() &&
+                                  it != download_for_.end() && a.file.path == it->second)) {
       row = &a;
+      break;
     }
   }
   if (t.state != "completed") {
     if (row) {
       row->verify = ArtifactRow::Verify::None;
     }
-    if (t.error) {
+    if (notify && t.error) {
       fail(store_.catalog().format("jobs.op.download_file", {{"file", t.remote}}), *t.error);
     }
     return;
   }
   const bool open = open_after_.erase(t.id) > 0;
   if (!row) {
-    set_status(store_.catalog().format("jobs.status.downloaded", {{"path", t.local}}), ui::ToastKind::Success);
+    if (notify) {
+      set_status(store_.catalog().format("jobs.status.downloaded", {{"path", t.local}}), ui::ToastKind::Success);
+    }
     if (open) {
       open_local(t.local);
     }
@@ -2351,7 +2412,9 @@ void JobsState::download_done(const bridge::Transfer &t)
   row->local = t.local;
   verify_download(*row);
   if (row->verify == ArtifactRow::Verify::Ok) {
-    set_status(store_.catalog().format("jobs.status.downloaded", {{"path", t.local}}), ui::ToastKind::Success);
+    if (notify) {
+      set_status(store_.catalog().format("jobs.status.downloaded", {{"path", t.local}}), ui::ToastKind::Success);
+    }
     if (ends_with_ci(row->local, ".png")) {
       show_preview(row->local);
     }
