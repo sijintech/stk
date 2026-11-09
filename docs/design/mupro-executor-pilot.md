@@ -57,6 +57,50 @@ Root 审阅 Claude 的 `1150229f` 方案后，选择在桌面桥的产物列表�
 
 [桌面桥契约](../specs/stk-desktop-bridge-v1.md) [运行验收](../runtime-validation.md)
 
+## 节点能力观察（D1 P-1/F-5，拟议）
+
+Claude 以 `a656f879` 为基线核对执行器和读取器入口。下文比较观察值的传递方案。执行、授权及放置沿用当前发布契约。
+
+### 当前证据
+
+- 节点预检入口是 `python -m suan.mupro check`。CLI 的 `suan mupro` 提供 `submit`、`result` 和 `verify`。预检检查环境脚本、程序、动态库、MPI、许可目录和示例。合成前缀中的两行脚本和空许可目录也能通过当前预检。原始诊断会包含主机路径，节点间传递只应选取固定检查项和状态。[节点预检](../../suan/mupro/run.py) [客户端命令](../../suan/mupro/cli.py)
+- Runtime health 的后端和资源是实现清单。Runtime、心跳和 `graph.meta` 的 `features` 都来自组件常量或配置。Hub 的 `public_snapshot` 保留 `features` 字符串并丢弃额外的快照键。`graph.meta` 的 `include` 为闭集。一次新的 Hub `graph.meta` 请求沿用动作路径，带来动作记录。[Runtime health](../../suan/runtime/server.py) [节点能力](../../suan/control/agent.py) [Hub 投影](../../suan/control/federation.py) [动作策略](../../suan/control/policy.py)
+- 连接器 `info()` 与图目录可在缺少 NumPy 和 h5py 时读取，声明与装齐依赖的对照一致。DAT、表格和运行索引在读取边界检查 NumPy，HDF5 另查 h5py。已完成结果的连接器描述仍可运行 DAT 核验并生成核验结论。[连接器](../../suan/connectors/mupro/__init__.py) [HDF5 合同](../specs/mupro-hdf5-1.md)
+- Hub 列表中的 `online` 依据未撤权设备最近 20 秒内的心跳。节点连接断开时，Hub 保留最后快照和时间。精确读取另检查活动连接，因此最近心跳和当次请求可达性是两个观测值。[心跳存储](../../suan/control/store.py) [Hub 精确读取](../../suan/control/app.py)
+
+| 安装 | DAT 和表格 | HDF5 |
+|---|---|---|
+| `[server]` | 元数据可列出，能量表行数未知。请求读取时返回 `unavailable`，打开数据零次 | 可选发现记录 `hdf5_error`，显式图在规划阶段返回 `unavailable` |
+| NumPy-only | 可读取 DAT 和表格 | 缺 h5py，返回 `unavailable` |
+| `[science]` | 可读取 DAT 和表格 | 合成对照读到 float32 第 4 步首值 100 |
+
+合成安装证据见 `root-delivery-20261109-86/f5-installed-review/matrix_receipt.json` 和 `root-delivery-20261109-87/claude44-installed/matrix_receipt.json`。完整结果描述的本地核验仍会读取原生记录及 DAT 头。能力方案的合成预检和投影探针见 `root-delivery-20261109-87/claude45/evidence/`。
+
+### 拟分别记录的观察值
+
+| 观察值 | 来源与含义 |
+|---|---|
+| 执行器安装 | 节点找到可执行程序时记录组件身份和观察时间。程序路径只供节点本地诊断 |
+| 执行器预检 | 记录固定检查项和状态。真实软件版本、许可签出和实际算例运行需要各自证据 |
+| 当次放置授权 | 由目标、资源和当次请求经现有授权与复核判断。有限 S2c 使用桌面明确选择的直连或 SSH 目标和人工首次批准 |
+| 最近一次真实运行 | Runtime 终态与同一任务 `stk-mupro.json` 的 `stk-mupro-1` 核验、程序摘要和时间共同形成回执 |
+| DAT 读取 | 在承担读取的进程验证 NumPy 加载 |
+| HDF5 读取 | 在承担读取的进程验证 NumPy 和 h5py 加载，数据按原生格式合同另验 |
+| 当前可达性 | 列表保留最近心跳，当次精确请求单独反映活动连接 |
+
+每条观察记录来源、组件版本和生成时间。执行器或读取器观察的时效独立于传输心跳。离线时可显示带时间的最近值，实际读取和放置仍经过对应的请求检查。投影使用固定枚举、计数、时间和摘要，预检的路径、环境值和原始错误留在节点本地。[首次批准契约](../specs/agent-muferro-run-1.md)
+
+### 传递方案（待选）
+
+| 方案 | 兼容性与使用范围 |
+|---|---|
+| `features` 字符串 | 现有 Hub 投影保留字符串。适合标记观察操作的支持，可变状态还需要来源和时效 |
+| 结构化快照或 health | 可承载独立状态和时间。旧 Hub 会丢弃额外快照键，部署需要版本化投影 |
+| `graph.meta` 现有 `features` 对象 | 可按需观察执行图的进程。旧 Hub 的结果转发和客户端兼容性须实测，现有动作记录成本适合低频诊断 |
+| 现有请求诊断和任务回执 | 继续提供当次读取状态和历史运行证据。节点列表的能力筛选仍待实施 |
+
+先补可重复的节点本地验证，核对合成预检、依赖缺失、旧投影、连接断开和心跳老化。对照应分别记录未报告、过期、断开和明确不可用，检验活动连接上的精确读取。随后可以验证节点本地的固定状态投影。发布入口、Hub 列表和放置策略仍需按各自契约审阅。
+
 ## 电场扫描与剩余决定
 
 电场扫描是将外加电场按任务方案改变，获得 P–E 回线等响应。任务需明确场方向、幅度和单位、
