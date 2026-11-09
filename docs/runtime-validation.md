@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 21:27 UTC · 前一 Desktop 终态与 Cocoa 配对对照
+
+远端 `a7fce899` Desktop `42692999966` 于 21:26:05 UTC 终态 failure，6 个作业全部结束，5 个成功。Linux 主测 2159/2159，两个打包作业成功。Windows CPU 1478/1478，独立原生 6/6 且零跳过。macOS CPU 1537/1537、Metal 254/254，主原生 4/6，视频与 HTML 的隐藏暂停下界失败。同头 Runtime 13/13。前头整轮终态已满足本批推送前提，当前 Viewer 修改继续作为未提交开发。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42692999966) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42692999966/artifacts/13711373511) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42692999627)
+
+同头 fresh-visible 的 MP4 与 HTML 均暂停成功，DOM current_time 退回上一次 seek 位置。HTML 与 fresh-hidden 配对，两组前置历史和四个 OS 捕获阶段一致。隐藏时原生仍报 Playing、DOM 位置停在 seek，最终触发 watchdog。fresh-hidden MP4 在初始暂停阶段失败，缺少完整同头配对。时钟回退在持续可见时已复现，画面截图尚不能证明百毫秒级的解码帧回退。
+
+本机原生证据 `root-delivery-20261109-109/cia7/` 的 `latest.json`、`macos/receipt.json`、`macos-matched.json`、`macos-summary.jsonl` 和 `windows-native-official-counts.txt`。当前源码与回归交付见 `80804d6f`。
+
 ## 2026-11-09 21:19 UTC · Project Runs 精确刷新与 MuPRO 文件身份
 
 `0e5112ed` 通过 Hub 精确查询刷新已接受的 Project Runs 任务。旧节点缺精确读取能力时返回 unsupported 并保留最后观察，恢复现代节点能力后读回同一任务。底层 task.get 的旧节点兼容读取继续可用。真实严格 Bridge、Hub、NodeAgent 与 Runtime 复现了旧版缓存回退和错误的 not_found。持久回归在旧头失败，修复后 Python 3.11 联测 63/63。

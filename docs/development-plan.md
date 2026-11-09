@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 21:27 UTC · 前一 Desktop 终态与 Cocoa 配对对照
+
+远端 `a7fce899` Desktop `42692999966` 于 21:26:05 UTC 终态 failure，6 个作业全部结束，5 个成功。Linux 主测 2159/2159，两个打包作业成功。Windows CPU 1478/1478，独立原生 6/6 且零跳过。macOS CPU 1537/1537、Metal 254/254，主原生 4/6，视频与 HTML 的隐藏暂停下界失败。同头 Runtime 13/13。前头整轮终态已满足本批推送前提，当前 Viewer 修改继续作为未提交开发。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42692999966) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42692999966/artifacts/13711373511) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42692999627)
+
 ## 2026-11-09 21:19 UTC · Project Runs 精确刷新与 MuPRO 文件身份
 
 D1 `0e5112ed` 修复 Project Runs 精确刷新。MuPRO `3ae33035` 补齐文件变化时间和目录重解析点回归。Windows 目标平台与真实许可待验。 [运行验收](runtime-validation.md)
