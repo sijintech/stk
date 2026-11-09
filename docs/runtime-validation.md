@@ -10,7 +10,7 @@ Linux X11/Xvfb 1440×1600，软件 OpenGL、英文、缩放 1。固定起点为 
 
 Jobs 原生定向 47/47、零跳过。持久用例覆盖两份旧快照和先完成列表两种顺序，并核对已知上传完成后仅刷新一次工作区文件。隔离 Python 3.11 全量 `7cdaece6` 为 6477 通过、180 跳过、4 排除、零失败。随后加入的晚到 Hub 拒绝修复已由此前 141 项定向联测覆盖。`c5b87b91` 显式取消新增 HDF5 夹具子进程的模型变量，以空模型 API key 重跑仿真与 HDF5 原生定向 20/20、零跳过。
 
-远端 `15dff6ac` Desktop `42669507898` 有四个作业通过。Linux 主作业 2142/2142，Windows CPU 1466/1466，Linux 打包和冷环境通过。macOS CPU 和 Metal 步骤通过，主原生验收的 MP4 和 HTML 视频仍失败。新的 Cocoa 诊断 2/2，分别在约 183 和 182 ms 收到 WebKit Playing，各两次 DOM 采样均为暂停，位置分别停在先前 seek 的 0.234 和 0.102 秒。两组都在原一秒窗口内确认了位置回退。下一步用同一 seek 历史做保持可见的暂停对照。Windows 原生仍在运行，本地提交等待整轮终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42669507898) · [macOS 原生工件](https://github.com/sijintech/stk/actions/runs/42669507898/artifacts/13701990267)
+远端 `15dff6ac` Desktop `42669507898` 于 18:59:02 UTC 结束，5/6 个作业通过。Linux 主作业 2142/2142，Windows CPU 1466/1466，Linux 打包和冷环境通过。macOS CPU 和 Metal 步骤通过，主原生验收的 MP4 和 HTML 视频仍失败。新的 Cocoa 诊断 2/2，分别在约 183 和 182 ms 收到 WebKit Playing，各两次 DOM 采样均为暂停，位置分别停在先前 seek 的 0.234 和 0.102 秒。两组都在原一秒窗口内确认了位置回退。下一步用同一 seek 历史做保持可见的暂停对照。Windows 原生 6/6，零跳过，18:59:01 UTC 结束。 [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42669507898/artifacts/13701368078) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42669507898) · [macOS 原生工件](https://github.com/sijintech/stk/actions/runs/42669507898/artifacts/13701990267)
 
 本机证据包括 `root-delivery-20261109-106/final-jobs-v2.xml`、`late-transfer-native/{red-list,final-green-list}/evidence/receipt.json` 和 `root-delivery-20261109-107/owned-transfer-native/{red-owned-final,green-owned}/evidence/receipt.json`。PNG 实窗验收核对的是 Jobs 校验状态。
 

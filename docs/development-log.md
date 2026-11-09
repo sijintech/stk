@@ -12,7 +12,7 @@ Jobs 原生定向 47/47、零跳过。持久用例覆盖两份旧快照和先完
 
 Claude60 的独立 Linux 全量项目测试 937/937 通过。root 集成 Claude61 的 `c0a4c75c` 为 `9ac67dde`。查找重试持久用例在缺少按钮的旧版复现失败，当前一次重试只重读同一行。合并后的仿真与 HDF5 原生定向 20/20、零跳过。Claude62 已从传输修复头在独立 worktree 开始核查初始派发回执乱序。
 
-远端 `15dff6ac` Desktop `42669507898` 有四个作业通过。Linux 主作业 2142/2142，Windows CPU 1466/1466，Linux 打包和冷环境通过。macOS CPU 和 Metal 步骤通过，主原生验收的 MP4 和 HTML 视频仍失败。新的 Cocoa 诊断 2/2，分别在约 183 和 182 ms 收到 WebKit Playing，各两次 DOM 采样均为暂停，位置分别停在先前 seek 的 0.234 和 0.102 秒。两组都在原一秒窗口内确认了位置回退。下一步用同一 seek 历史做保持可见的暂停对照。Windows 原生仍在运行，本地提交等待整轮终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42669507898) · [macOS 原生工件](https://github.com/sijintech/stk/actions/runs/42669507898/artifacts/13701990267)
+远端 `15dff6ac` Desktop `42669507898` 于 18:59:02 UTC 结束，5/6 个作业通过。Linux 主作业 2142/2142，Windows CPU 1466/1466，Linux 打包和冷环境通过。macOS CPU 和 Metal 步骤通过，主原生验收的 MP4 和 HTML 视频仍失败。新的 Cocoa 诊断 2/2，分别在约 183 和 182 ms 收到 WebKit Playing，各两次 DOM 采样均为暂停，位置分别停在先前 seek 的 0.234 和 0.102 秒。两组都在原一秒窗口内确认了位置回退。下一步用同一 seek 历史做保持可见的暂停对照。Windows 原生 6/6，零跳过，18:59:01 UTC 结束。 [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42669507898/artifacts/13701368078) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42669507898) · [macOS 原生工件](https://github.com/sijintech/stk/actions/runs/42669507898/artifacts/13701990267)
 
 ## 2026-11-09 18:25 UTC · 原传输继续与 HDF5 回执回归
 
