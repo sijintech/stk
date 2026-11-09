@@ -1252,18 +1252,6 @@ Index of a muFerro run directory: published field frames, the energy trace, the 
 | `binding` | string (pattern) | **required** | data |
 | `case_dir` | string (pattern) | `"auto"` | data |
 
-The built-in connector binds the launcher report (`stk-mupro.json`) to the run-index plan.
-It uses the same report bytes to resolve `case_dir: "auto"` and read launcher metadata.
-Evaluation fails with `invalid_data` if the report appears, disappears, or its bounded content changes after planning.
-Absent, malformed, or oversized reports use the binding root for `"auto"`. The report read limit is 4 MiB,
-subject to any lower Runtime download limit. A listed report within the limit must be readable.
-The built-in energy and progress tables also bind presence and content to the plan. Local sources
-hash actual bytes and Runtime sources use the published artifact digest. Execution reads and checks
-up to 64 MiB per table before parsing. The energy table and its manifest QOI share one observation.
-An append between evaluations produces a new plan. A table that changes during evaluation must be
-retried against a new plan.
-The frames table checks the completion marker's presence against the plan before reporting `complete`.
-
 #### `stk.source.mupro_hdf5@1` — MuPRO HDF5 field / MuPRO HDF5 场
 
 Read one explicit /tNNNNNNNN/field from MuPRO HDF5, preserving numeric dtype and unknown physical units. Source file limit 1 GiB; selected array budget 256 MiB.
@@ -1359,6 +1347,17 @@ Unless stated otherwise: input fields are kept (zero-copy), coordinates are phys
   `result` is the stk.result/1 manifest. Fingerprint: the resolved `case_dir`, the (path, size,
   mtime) listing of frame files plus the sha256 of `energy_out.dat`, `mupro_progress.jsonl`,
   `mupro_completion.json`, `stk-mupro.json` and the case's `*.toml` files when present.
+  The built-in connector uses the same `stk-mupro.json` bytes to resolve `case_dir: "auto"` and read
+  launcher metadata. Absent, malformed, or oversized reports use the binding root for `"auto"`.
+  The report read limit is 4 MiB, subject to any lower Runtime download limit. A listed report within
+  the limit must be readable. Evaluation fails with `invalid_data` if the report appears, disappears,
+  or its bounded content changes after planning.
+  The built-in energy and progress tables bind presence and content to the plan. Local sources hash
+  actual bytes and Runtime sources use the published artifact digest. Execution reads and checks up
+  to 64 MiB per table before parsing. The energy table and its manifest QOI share one observation.
+  An append between evaluations produces a new plan. A table that changes during evaluation must be
+  retried against a new plan. The frames table checks the completion marker's presence against the
+  plan before reporting `complete`.
 - `muferro_frame`: picks rows with `dataset` = the stem, resolves `step` with `policy` (unknown →
   `frame_not_found`) and reports the steps as choices. Output `ImageData` (id = stem) with one point
   field named after the stem, `time.step` = the resolved step, provenance `used` = the file. Geometry:
