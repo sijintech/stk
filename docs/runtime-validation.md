@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 图目录同步与 DAT 实际字节
+
+远端 `15531049c5c027153c232a2c4ac82c13deb6fe55` Runtime 于 10:54:41Z 终态 8 成功、5 失败。五个作业各只失败 `test_catalog_is_in_sync_with_declarations_and_spec`，JSON 声明比较通过，Markdown 生成器删除了生成区中的手写段落。root 在远端原提交的副本复现，单独移动段落后定向测试通过。 `9c1255a60064615927f111a44a6139c0d618f461` 将内置 MuFerro 说明放到节点语义区。本批完整目录回归通过。 [Runtime](https://github.com/sijintech/stk/actions/runs/42601829951)
+
+`ff5e615f32b7d4fe66513b30ea467235e8a30dcc` 使 MuFerro DAT 场帧按本地实际字节或 Runtime 发布摘要规划，缓存未命中时复制并校验临时文件，再解析同一文件句柄。三条旧反例涵盖等长改写并恢复 mtime、规划后换帧、Runtime 暖下载被改写。Linux 探针在解析前持有 3066 字节已核验快照，强制终止后无具名文件残留。固定宽度与空白回退解析从路径或调用方持有的文件均得到相同数组。源码 175 通过、2 项性能跳过，隔离 wheel 149 通过、1 项性能跳过。Windows 文件回收行为待目标 CI。证据见本机 `root-delivery-20261109-83`。 [图契约](specs/stk-graph-v1.md)
+
+同头 Desktop 仍运行，Linux 包和干净机通过，macOS 原生基线已开始。Jobs 修订候选在独立副本，真实 Hub 的 C++ 路径继续验证。 [Desktop](https://github.com/sijintech/stk/actions/runs/42601829902)
+
 ## 2026-11-09 UTC · 完成标记与计划
 
 `fff8d77a6f2216ddf223c184dcd05ecf4e9e1715` 在内置 run-index 核对完成标记的存在性，变化返回 `invalid_data`。两个旧反例在标记出现或消失后恢复原状态，仍从旧键读到错误的 `frames.attrs.complete`。修后恢复原状态会重新求值，下一次可命中正确缓存。实时帧完成属性结合标记存在性与缺帧检查，标记正文由显式核验处理。源码和隔离 wheel 各 97 项通过，性能基准各跳过一项。证据见本机 `root-delivery-20261109-82`。 [图契约](specs/stk-graph-v1.md)
