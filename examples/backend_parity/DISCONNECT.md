@@ -9,8 +9,9 @@ This is the next D1 fault slice after [the two-deployment parity run](README.md)
 It is not a failover test: no other node, Runtime or authority is used. It adds no product command,
 contract, endpoint or state.
 
-`disconnect.py` loads the helpers of `offline.py` by file path; it does not change them. In installed mode
-nothing is put on `sys.path`.
+`disconnect.py` loads the helpers of `offline.py` by file path; it does not change them at run time. The only
+addition to `offline.py` is the optional `extra_templates` of `start_hub`, used by the offline-completion
+scenario below. In installed mode nothing is put on `sys.path`.
 
 ## Deployment
 
@@ -81,6 +82,106 @@ one more action, a `task.cancel`.
 | D9 | only the cancel added a Hub action |
 | D10 | requests: one workspace creation, one submission, one cancel |
 
+## Offline completion (`--scenario offline-completion`, X7)
+
+The default scenario above is unchanged. This second scenario covers the case it leaves out: the worker
+completes normally while the NodeAgent is offline. Only the Hub's ability to observe the task is lost; the
+task itself is not failed, retried or handed over.
+
+It uses the same deployment and one extra public synthetic program, `parity-release`. That program is
+registered as an exact template in this run's Hub only, through the optional `extra_templates` of
+`offline.start_hub`. The fixed `offline.py` templates and their default template file do not change, and an
+extra template may not replace one of them. The program:
+1. appends its `start <pid>` line to the start marker and prints `waiting 等待`;
+2. waits up to 120 s for a private release flag, `parity-release.flag`, in its run directory. That is the
+   parent of its working directory, so the flag is never published as an artifact;
+3. once released, writes the fixed `out.txt` (`parity 结果\n`), prints `released 已释放 ✓` and exits 0.
+   If it is never released, it prints `never released 未释放` and exits 3 (failed), so it can never succeed on
+   its own.
+
+Steps:
+1. **Submit once.** As in the default scenario: one workspace, one submission, the ready line, the frozen
+   program and worker identities, one start marker. No release flag, worker result or output exists yet.
+   The harness also waits up to 15 s until a heartbeat snapshot lists the task as `running`. This is the
+   cached view that exact reads must later refuse to serve.
+2. **Stop only the NodeAgent.** The same SIGKILL, reaping and checks as the default step 2. Three exact live
+   reads, each with the Hub's node status read right before and right after it:
+   - one between the kill and the Hub's offline report. It is recorded on its own as
+     `read_before_offline_report`: the Hub still lists the node online, so it is typically refused with the
+     Hub's 503 (`hub_node_link_closed`). It must be refused or unknown, never a task state or `not_found`, and
+     it never counts as an offline refusal;
+   - two after the report. Each must be the strict offline refusal: code `unavailable` with cause
+     `node_offline`, with an explicit boolean `online: false` from the Hub on both sides. `node_offline` is
+     HubBackend's own refusal when the device listing it just read shows the node offline. It is raised before
+     anything is forwarded, so it is never a timeout. A Hub 503 or 504, an HTTP timeout, an unreachable Hub
+     (all also code `unavailable`) or an unanswered read never counts.
+
+   Read directly, the owned Runtime still has the same task `running`, with the original program and worker
+   alive and no result or output.
+3. **Complete offline.** The harness writes the release flag only after the Hub has reported the node offline.
+   It writes it once, with exclusive create, and only while the original NodeAgent is the only one ever
+   started. With the NodeAgent still down:
+   - the owned Runtime reports the original task `succeeded`, never cancel-requested;
+   - the original program and worker (frozen identities) have exited. This is checked before any reconnect
+     or cleanup;
+   - two more exact Hub reads are both the strict offline refusal of step 2 (a timeout or unknown read
+     fails). Meanwhile the Hub's heartbeat snapshot still caches the task as `running`. So exact reads served
+     neither the completed state nor the stale cache.
+4. **Reconnect and read back.** Restart `suan-node run` with the same node state. Then, through the Hub:
+   - the first answered exact live read, whatever its state, must be the original task, `succeeded`. This
+     read is not the default scenario's `observe_live`, which skips an answered `queued`: here an answered
+     `queued`, a stale `running` or any other state fails C8. Only `unavailable` is retried (counted as
+     `unavailable_before_answer`). `not_found` or any other refusal fails the run at once. An answer at or
+     after the deadline is unknown;
+   - the stdout, read by byte cursor, must be exactly `waiting 等待\nreleased 已释放 ✓\n`, the same as
+     the owned Runtime;
+   - before any content is read, the artifact list must be exactly one item: `out.txt` with the fixed size
+     (an integer), SHA-256 and media type. An unknown path, an extra or duplicate item, or a malformed or
+     oversized size fails the run with a fixed message. Nothing is downloaded, and the listed values are not
+     exported;
+   - then the fixture's own `out.txt` description (not the Hub's) is downloaded. The bytes must equal the
+     fixed bytes and digest.
+5. **Count.** One task, one run directory with one start marker carrying the program's PID, program and
+   worker exited, a worker result record. No cancel request.
+
+The action listing is the same at all four points: before the disconnect, while offline, after the offline
+completion and after the reconnect and reads. The requests are exactly one workspace creation and one
+submission.
+
+| Check | |
+|---|---|
+| C1 | one submission; ready line; one start marker; unreleased, no result or output; the snapshot lists it running |
+| C2 | only the original NodeAgent stopped by the SIGKILL and reaped; Hub, Runtime API and supervisor alive throughout |
+| C3 | the Hub reported the node offline; the two reads after that were the strict offline refusal (`unavailable`, cause `node_offline`, explicit Hub offline status before and after); the read before the report was refused or unknown, never a state |
+| C4 | not finished before the disconnect: while offline and unreleased, the owned Runtime still ran it, with the original processes, no result and no output |
+| C5 | released only after the offline report, with the original NodeAgent still the only one; the owned Runtime reports `succeeded`, not cancelled |
+| C6 | the original program and worker exited before any reconnect or cleanup; still one start |
+| C7 | after the completion, two exact Hub reads were the strict offline refusal (never a timeout or unknown), while the snapshot still cached `running` |
+| C8 | the same node profile reconnected; the first answered exact read, whatever its state, is the original task, `succeeded` |
+| C9 | the fixed stdout bytes through the Hub, equal to the owned Runtime's |
+| C10 | exactly `out.txt` with the fixed bytes: the listing checked against the fixture before any download, then downloaded and hash-checked |
+| C11 | one task, one run directory, one start, program and worker exited; never cancelled |
+| C12 | requests: one workspace creation and one submission; no Hub action after the submission, no cancel |
+
+The normal run takes about 25–30 s, mostly the 18–20 s until the Hub reports the node offline. The program's
+own 120 s wait has to outlast the worst case before the release:
+- snapshot, 15 s;
+- offline, 40 s;
+- the offline reads, each bounded by the HTTP timeout.
+
+If it does not, the program ends `failed` and C5 fails. That is again a correct, timing-caused failure. The
+evidence files are the same five. `phases.json` holds `baseline`, `node_stop`, `offline`, `completed_offline`,
+`reconnect`, `outputs`, `final` and `actions`; `run-manifest.json` names the scenario and the
+`parity-release` template digest. Each offline read records its outcome, code, cause label and the Hub's
+online report before and after; refusal messages are never exported. Neither the flag path nor any workspace
+path is exported.
+
+The cause label comes from the message of the product's refusal. HubBackend's offline refusal starts with
+`The execution node is offline`; the Hub's HTTP errors carry their status, such as `(503)`. If the product
+changes that text, the strict refusal is no longer recognised and C3/C7 fail. That is a safe failure, never
+a false pass. The tests drive the real `HubBackend` with a stub Hub to keep the labels in step with the
+product.
+
 ## Running it
 
 ```sh
@@ -92,7 +193,11 @@ STK_TOKEN_PLAN_API_KEY= timeout 300 /path/to/venv/bin/python examples/backend_pa
 STK_TOKEN_PLAN_API_KEY= timeout 300 python examples/backend_parity/disconnect.py --mode source \
     --evidence-dir NEW_EVIDENCE_DIR
 
-# The focused tests, including one real source-mode run:
+# The X7 offline-completion scenario (either mode):
+STK_TOKEN_PLAN_API_KEY= timeout 300 python examples/backend_parity/disconnect.py --mode source \
+    --scenario offline-completion --evidence-dir NEW_EVIDENCE_DIR
+
+# The focused tests, including one real source-mode run of each scenario:
 STK_TOKEN_PLAN_API_KEY= python -m pytest -q tests/test_backend_parity_disconnect.py
 ```
 
@@ -108,7 +213,7 @@ The rest of the run's environment and handling comes from the `offline.py` helpe
 - the cleanup.
 
 Exit codes:
-- `0`: D1–D10 passed, the scenario ended within the budget and cleanup was clean;
+- `0`: D1–D10 (or C1–C12) passed, the scenario ended within the budget and cleanup was clean;
 - `1`: a check failed, a wait ended `unknown`, an error occurred, the budget ran out or cleanup was unclean;
 - `2`: not Linux, an invalid `--deadline`, or an evidence directory that is not new.
 
@@ -157,10 +262,19 @@ exception text are written. Action IDs are compared in memory; only their kinds 
 **Verified:** on one Linux host, with a synthetic program:
 - a Runtime task keeps running while its outbound NodeAgent is killed and offline;
 - the same node profile reconnects;
-- the Hub observes the same task exactly, with no second submission, start or Hub action.
+- the Hub observes the same task exactly, with no second submission, start or Hub action;
+- with `--scenario offline-completion`, the task completes normally on its original Runtime while the node is
+  offline. Exact Hub reads are refused because the node is offline, with the Hub answering, and the stale
+  snapshot is not served. After the reconnect the first answered exact read is the same task `succeeded`; its
+  fixed log and its artifact bytes (listing checked first) follow. There is no cancel and no second start.
 
 **Not verified:**
 - A Hub restart, a Runtime restart, a network partition without a process exit, or long outages.
+- Completion at any other moment than one release after the Hub reported the node offline (for example
+  exactly at the kill, or while the Hub has not yet noticed).
+- That a Hub timeout (504) or an unreachable Hub is told apart in a real run. None was provoked: the real
+  runs show the node-offline refusal, and the other causes are exercised only against the real `HubBackend`
+  with a stub Hub.
 - Failover to another node or Runtime; none is attempted.
 - Hub actions outside the client-visible listing (the newest 200, plus actions awaiting review).
 - Windows, macOS, other hosts, sites or clusters.

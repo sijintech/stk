@@ -282,11 +282,15 @@ def stop_runtime(owned, state, env, label):
         owned.resources["cleanup"].append({"label": f"{label} runtime", "stopped": False, "error": type(exc).__name__})
 
 
-def start_hub(owned, base, env, runtime_state):
+def start_hub(owned, base, env, runtime_state, extra_templates=None):
+    """``extra_templates`` (optional) registers further exact templates of a caller's own scenario in this Hub
+    only; ``TEMPLATES`` itself is never changed, and without it the template file is exactly ``TEMPLATES``."""
+    if set(extra_templates or ()) & set(TEMPLATES):
+        raise HarnessError("an extra template may not replace one of the fixed parity templates")
     from suan.desktop_bridge.hub import HubClient
     control_state, node_state = base / "control", base / "node"
     templates = base / "templates.json"
-    templates.write_text(json.dumps(TEMPLATES, ensure_ascii=False), encoding="utf-8")
+    templates.write_text(json.dumps({**TEMPLATES, **(extra_templates or {})}, ensure_ascii=False), encoding="utf-8")
     control = python_cli("suan.control.cli:control", "suan-control")
     node = python_cli("suan.control.cli:node", "suan-node")
     owned.run("B control init", control + ["init", "--state-dir", str(control_state)], env)
