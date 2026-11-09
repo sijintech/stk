@@ -1,5 +1,17 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 12:31 UTC · S2c 实窗审批、产物核验和最小安装
+
+独立 `66b8eb58` 的 S2c 原生联合验收通过三次。固定起点为英语 X11/Xvfb 1280×1600、缩放 1、软件 OpenGL、a2 智能体区域最大化，已选原待批准卡片、Prepare 关闭。XTest 实际点击两次，先在 `(640,693)` 读取完整计划，再在 `(396,1023)` 批准。复核展示 3608 字节，按界面换行显示 128 行，审批前 Runtime 保持零任务。严格 Python stdio 桥与独立 JSON Schema 校验各通过一次 `run_plan` 和一次 `run_decide`。真实回环 Runtime 完成一个合成 MuFerro 任务，绑定原计划摘要与原案例行，在第一次尝试完成工作流，卡片进入原回执 Observe。批准后没有额外规划或直接任务写调用。Viewer、布局和会话选择一致，跟踪进程已回收。早期两次外部适配分别纠正 X11 坐标和产物回执字段，随后三次通过。证据 `root-delivery-20261109-87/s2c-native-receipt/evidence/run-05/receipt.json` 与三张截图。平台范围为 Linux 软件 OpenGL，使用脚本规划器和合成求解器。
+
+`7daf672f9f77796c4dccfac139089b70458321ed` 让核验器和 MuFerro 末次监控读取普通文件，检查最后一级路径的符号链接、reparse 和文件身份。旧版本四类链接产物误判成功，独立核验和监控回放均能在管道处阻塞。六项复现修后通过。源码 135 过 3 跳过，隔离 wheel 112 过 2 跳过。另验默认读取和硬链接仍可用，Linux 普通文件在 `lstat` 后变为 FIFO 时能返回。Windows reparse 实机仍待 CI。证据 `root-delivery-20261109-87/verify-source-final.xml` 与 `verify-wheel/installed-final.xml`。
+
+`a656f8797554259695d24da83dea39d0aabdd695` 集成 Claude44 `e0498ee0`。源码 175 过 1 跳过。根验三种离线安装表明 `[server]` 可列 Polar、energy、progress 元数据，能量行数未知且无总能量。DAT、表格和图运行索引缺 NumPy 时在打开数据前返回 `unavailable`。缺绑定仍为 `unknown_binding`。完整离线结果描述仍执行验证，按原契约读取 30 个 DAT 头和三类结果记录。NumPy-only 与 `[science]` 的值、事件和读取计数与直接父提交一致。证据 `root-delivery-20261109-87/claude44-installed/matrix_receipt.json`。 [D1 兼容门](planning/d1-compatibility-gates.md)
+
+本地 `d02a5938` 的首次 Python 3.11 全量 6249 过、9 败、233 跳过、4 排除，19 分 58 秒。旧导入顺序用例通过，九条失败都是 Peer 身份相关测试。原环境缺 `cryptography`，同一源码在带该依赖的独立环境复跑九项全过。新一轮 `a656f879` 的 3.11 全量已在包含 `peer` extra 的干净环境启动，证据 `root-delivery-20261109-87/runtime-full311/`。
+
+`ab86c2ee` Desktop 的 Linux 主作业 2134/2134，包与干净机也通过。macOS 正跑原生 WKWebView 和 ReportsEditor，Windows CPU 正跑测试，整轮仍未结束。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42611844039)
+
 ## 2026-11-09 12:12 UTC · 图文件字节、HDF5 依赖和 Windows 计时
 
 `23ad9f90add2c07facf21a8edc0388a628c78393` 以实际文件字节规划本地缓存，Runtime 使用发布摘要。缓存未命中时校验解析用的私有副本。四个旧反例覆盖原时间和长度不变的本地改写、规划后两种本地改写及 Runtime 暖缓存改写，均在旧实现失败。新回归核对 VTKHDF 外部链接、外部虚拟数据集和外部原始存储被拒绝，同文件虚拟数据集、内部软链接与 VTI/legacy VTK 单位仍可读。无 `/STK` 描述符时，图数据集 ID 取绑定内文件名。源码、独立 wheel 各 206 项通过，两个性能基准按条件跳过。隔离首轮漏复制 `graph_testnodes.py`，补齐后整组重跑。VTI 和 legacy VTK 因原生库需要实际路径，正常退出清理具名副本。图缓存已配置时，强制终止后可能残留的副本纳入缓存暂存目录的裁剪。证据 `root-delivery-20261109-86/file-source-final.xml` 与 `file-wheel/installed-final.xml`。

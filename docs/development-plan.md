@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 12:31 UTC · S2c 联合验收与 MuFerro 文件边界
+
+S2c 已补 Linux 原生批准卡片、严格桥和真实本机 Runtime 的联合证据。使用脚本规划器和合成求解器，真实许可、跨主机与目标平台仍待验证。MuFerro 核验及监控拒绝链接或非普通产物，最小安装缺 NumPy 时可列元数据，读取和图规划返回稳定错误。Claude45 比较现有契约下的节点能力声明，执行预检与授权状态分别记录。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 12:12 UTC · 通用文件、HDF5 预检和原生定位
 
 通用图文件源已核对实际解析的内容。单文件 VTKHDF 保持内部链接，外部存储明确拒绝。MuPRO HDF5 缺依赖时在读取容器前报告，按执行节点声明能力和真实许可算例仍待验证。Claude44 在独立 worktree 核对 MuFerro DAT 与运行索引缺 NumPy 时的诊断。Windows PDF 的捕获启动已加入分步计时，下一轮要区分 WinRT/DWM、设备、会话、启动和 COM 释放。macOS 当前头第二次可见暂停仍待结果。 [验收记录](runtime-validation.md)

@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 12:31 UTC · S2c 原生审批与 MuFerro 读取边界
+
+本地 `7daf672f` 要求 MuFerro 核验及末次监控只消费普通结果文件。源码 135 项通过，隔离 wheel 112 项通过。`a656f879` 集成 Claude44 的 NumPy 缺失诊断，root 保留缺绑定错误优先级。源码 175 项和三种独立安装对照通过。Claude45 在独立 worktree 比较节点能力声明方案。
+
+`66b8eb58` 的隔离 S2c 联合验收三次通过。Linux 原生两次点击通过严格 Python 桥读取完整计划并批准，真实本机 Runtime 执行一个合成 MuFerro 任务。Python 3.11 首轮本地广跑 6249 过、9 败，9 项 Peer 在含 `cryptography` 的环境复跑全过。含 Peer 依赖的新全量已启动。远端 `ab86c2ee` 三个 Linux 作业通过，macOS 原生与 Windows CPU 仍运行，推送等待整轮终态。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 12:12 UTC · 图文件内容绑定、MuPRO 依赖与 WGC 定位
 
 本地 `23ad9f90` 把通用图文件源实际解析的字节绑定到缓存计划。源码、隔离 wheel 各 206 项通过、两项性能例跳过。`0a0b0f2f` 将 MuPRO HDF5 依赖检查前移，源码 295 项通过，三种最小安装对照通过。Claude44 在独立 worktree 接手 NumPy 缺失的稳定诊断。
