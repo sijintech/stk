@@ -6,7 +6,7 @@ Conventions: links are written on the input side as `{"from": "<node>.<port>"}` 
 
 ## Families
 
-- **source** — read data through connectors; a `binding` names the run, `path` is relative inside it: `stk.source.file@1`, `stk.source.lammps_density_series@1`, `stk.source.lammps_log@1`, `stk.source.lammps_structure@1`, `stk.source.muferro_frame@1`, `stk.source.muferro_run@1`, `stk.source.mupro_hdf5@1`, `stk.source.table@1`
+- **source** — read data through connectors; a `binding` names the run, `path` is relative inside it: `stk.source.file@1`, `stk.source.lammps_density_series@1`, `stk.source.lammps_log@1`, `stk.source.lammps_structure@1`, `stk.source.muferro_frame@1`, `stk.source.muferro_run@1`, `stk.source.mupro_hdf5@1`, `stk.source.mupro_hdf5_fields@1`, `stk.source.table@1`
 - **filter** — transform datasets (data-stage params re-run them): `stk.filter.calculator@1`, `stk.filter.contour@1`, `stk.filter.crop@1`, `stk.filter.glyph_source@1`, `stk.filter.label_surfaces@1`, `stk.filter.sample@1`, `stk.filter.slice@1`, `stk.filter.streamlines@1`, `stk.filter.threshold@1`
 - **analysis** — derive labels, fractions and statistics: `stk.analysis.film_detect@1`, `stk.analysis.label_fractions@1`, `stk.analysis.lammps_diffusion@1`, `stk.analysis.lammps_modulus@1`, `stk.analysis.lammps_tg@1`, `stk.analysis.orientation_classify@1`, `stk.analysis.reproduction_compare@1`, `stk.analysis.statistics@1`
 - **render** — turn data into draw layers; appearance params are client-stage: `stk.render.axes@1`, `stk.render.categorical_legend@1`, `stk.render.glyphs@1`, `stk.render.molecule_atoms@1`, `stk.render.molecule_lines@1`, `stk.render.orientation_legend@1`, `stk.render.outline@1`, `stk.render.scalar_bar@1`, `stk.render.surface@1`, `stk.render.volume@1`
@@ -123,6 +123,19 @@ Read one explicit /tNNNNNNNN/field from MuPRO HDF5, preserving numeric dtype and
 | `expected_sha256` | string \| null | null | data | Expected container SHA-256 |
 | `extent` | array[6] of integer \| null | [null, null, null, null, null, null] | data | Inclusive [i0, i1, j0, j1, k0, k1] |
 | `stride` | array[3] of integer (≥1) | [1, 1, 1] | data |  |
+
+## `stk.source.mupro_hdf5_fields@1` — MuPRO HDF5 field metadata
+
+List explicit native field selectors, steps, shapes and dtypes from one verified MuPRO HDF5 container. Return up to 256 field choices without reading values.
+
+- Inputs: none
+- Outputs: `out` (value)
+
+| param | type | default | stage | notes |
+|---|---|---|---|---|
+| `binding` | string | **required** | data | binding |
+| `path` | string | **required** | data | path |
+| `expected_sha256` | string | **required** | data | Expected container SHA-256 |
 
 ## `stk.source.table@1` — Table file
 

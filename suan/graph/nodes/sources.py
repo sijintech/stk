@@ -517,6 +517,39 @@ def mupro_hdf5_source(ctx, inputs, params):
         raise _failure(exc) from None
 
 
+def _mupro_hdf5_fields_fingerprint(ctx, inputs, params):
+    from suan.connectors.api import ConnectorError
+    from suan.connectors.mupro.source import ContentChanged, file_fingerprint
+    try:
+        planned = file_fingerprint(_source(ctx, params["binding"]), params["path"], check=ctx.check)
+        if planned["sha256"] != params["expected_sha256"]:
+            raise ContentChanged("The MuPRO HDF5 source does not match the expected SHA-256")
+        return planned
+    except ConnectorError as exc:
+        raise _failure(exc) from None
+
+
+@node("stk.source.mupro_hdf5_fields", title={"en": "MuPRO HDF5 field metadata", "zh": "MuPRO HDF5 场元数据"},
+      description={"en": "List explicit native field selectors, steps, shapes and dtypes from one verified "
+                         "MuPRO HDF5 container. Return up to 256 field choices without reading values."},
+      outputs=[Port("out", "value", value_type="json")],
+      params={"binding": binding(), "path": rel_path(),
+              "expected_sha256": string(pattern=r"^[0-9a-f]{64}$", max_length=64,
+                                        title="Expected container SHA-256")},
+      cache="disk", fingerprint=_mupro_hdf5_fields_fingerprint)
+def mupro_hdf5_fields(ctx, inputs, params):
+    from suan.connectors.api import ConnectorError
+    from suan.connectors.mupro.source import describe
+    try:
+        result = describe(_source(ctx, params["binding"]), params["path"],
+                          expected_sha256=params["expected_sha256"], check=ctx.check)
+    except ConnectorError as exc:
+        raise _failure(exc) from None
+    if len(result["fields"]) > 256:
+        raise NodeExecutionError("The MuPRO HDF5 container has more than 256 field choices", code="budget_exceeded")
+    return result
+
+
 # ---------------------------------------------------------------------------
 # stk.source.table
 

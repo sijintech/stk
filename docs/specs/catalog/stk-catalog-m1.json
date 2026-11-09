@@ -5341,6 +5341,64 @@
    "cache": "disk"
   },
   {
+   "id": "stk.source.mupro_hdf5_fields@1",
+   "type": "stk.source.mupro_hdf5_fields",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "source",
+   "category": "source",
+   "title": {
+    "en": "MuPRO HDF5 field metadata",
+    "zh": "MuPRO HDF5 场元数据"
+   },
+   "description": {
+    "en": "List explicit native field selectors, steps, shapes and dtypes from one verified MuPRO HDF5 container. Return up to 256 field choices without reading values."
+   },
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "value",
+     "value_type": "json"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "binding": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "x-stk-widget": "binding",
+      "x-stk-stage": "data"
+     },
+     "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(^|/)\\.\\.(/|$))[^\\\\\\u0000]+$",
+      "x-stk-widget": "path",
+      "x-stk-stage": "data"
+     },
+     "expected_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "maxLength": 64,
+      "title": "Expected container SHA-256",
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [
+     "binding",
+     "path",
+     "expected_sha256"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "disk"
+  },
+  {
    "id": "stk.source.table@1",
    "type": "stk.source.table",
    "version": 1,

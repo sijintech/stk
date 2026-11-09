@@ -1,6 +1,7 @@
 # MuPRO HDF5 reader /1
 
-This additive profile defines `mupro.hdf5@1` and `stk.source.mupro_hdf5@1`.
+This additive profile defines the `mupro.hdf5@1` reader and the graph nodes
+`stk.source.mupro_hdf5@1` and `stk.source.mupro_hdf5_fields@1`.
 Existing DAT readers and MuFerro task verification retain their contracts. The public MuFerro
 connector 0.2.0 additionally discovers native fields in the selected case's `run.h5`.
 Reading an HDF5 field does not establish solver success or scientific validity.
@@ -95,6 +96,26 @@ version observed during planning.
 
 The node is available through the shared graph service/CLI and saved project analyses with an
 explicit input binding. It does not execute MuPRO or expand agent permissions.
+
+## Verified field metadata
+
+`stk.source.mupro_hdf5_fields@1` requires `binding`, a relative `path` and `expected_sha256`
+of exactly 64 lowercase hexadecimal digits. It opens the one named container through the
+FileSource. A caller can pass the digest registered for a collected artifact.
+
+Planning hashes the actual stream before cache lookup and reports `invalid_data` if the digest
+differs. On a cache miss, the node verifies a private copy against the same SHA-256 before
+opening the HDF5 metadata. The 1 GiB container limit and dependency checks apply to both reads.
+
+The JSON value on `out` contains `path`, the observed `sha256`, `size` in bytes, `reader`
+(`mupro.hdf5@1`) and `fields`. Each field entry contains the exact `selector`, integer `step`,
+field `name`, native `shape` `[nx, ny, nz, nc]` and numeric `dtype`. Entries sort by step, then name.
+If discovery finds no recognized field selectors, `fields` is empty.
+
+Discovery visits at most 4096 links in the two-level native layout. Step groups and ignored names
+count toward that limit. The node returns at most 256 field and step choices. Exceeding either
+limit reports `budget_exceeded` and returns no partial list. This output contains metadata only.
+Solver completion still requires the existing run verification.
 
 ## Run discovery and collection
 

@@ -1270,6 +1270,20 @@ Read one explicit /tNNNNNNNN/field from MuPRO HDF5, preserving numeric dtype and
 | `extent` | integer \| null (>=0)[6] | `[null, null, null, null, null, null]` | data |
 | `stride` | integer (>=1)[3] | `[1, 1, 1]` | data |
 
+#### `stk.source.mupro_hdf5_fields@1` — MuPRO HDF5 field metadata / MuPRO HDF5 场元数据
+
+List explicit native field selectors, steps, shapes and dtypes from one verified MuPRO HDF5 container. Return up to 256 field choices without reading values.
+
+- stage `source`, cache `disk`, time_dependent `false`
+- inputs: none
+- outputs: `out`: value<json>
+
+| param | type | default | stage |
+|---|---|---|---|
+| `binding` | string (pattern) | **required** | data |
+| `path` | string (pattern) | **required** | data |
+| `expected_sha256` | string (pattern) | **required** | data |
+
 #### `stk.source.table@1` — Table file / 表格文件
 
 Read a table file inside a binding: muFerro energy_out.dat, whitespace columns (optional header), CSV or a progress JSONL log.
@@ -1332,6 +1346,10 @@ Unless stated otherwise: input fields are kept (zero-copy), coordinates are phys
 
 **Sources**
 
+- `mupro_hdf5_fields@1` inspects the metadata of one explicit container inside a binding.
+  The required lowercase SHA-256 pins the bytes before cache lookup and before metadata discovery.
+  The node limits discovery to 4096 visited HDF5 links and returns at most 256 field and step choices.
+  Its JSON output gives exact selectors and container identity. See [MuPRO HDF5/1](mupro-hdf5-1.md#verified-field-metadata).
 - `muferro_run`: the selected case's `run.h5` discovery binds its
   metadata observation to the planned container SHA. HDF5 descriptors are qualified as `hdf5:<field>`
   in `result.datasets`; the `frames` table and `muferro_frame@1` retain their DAT contract. Native

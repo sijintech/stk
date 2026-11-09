@@ -14,7 +14,7 @@ from suan.connectors.files import LocalFiles  # noqa: E402
 from suan.connectors.mupro import source as adapter  # noqa: E402
 from suan.data.manifest import check  # noqa: E402
 from suan.graph.cache import GraphCache  # noqa: E402
-from suan.graph.catalog import default_registry  # noqa: E402
+from suan.graph.catalog import build_registry, default_registry  # noqa: E402
 from suan.graph.evaluator import EvaluationFailed, evaluate  # noqa: E402
 from suan.graph.registry import Budget, Cancelled  # noqa: E402
 from suan.graph.resolve import LocalDirResolver  # noqa: E402
@@ -38,6 +38,133 @@ def graph(selector="/t00000002/Polar", **params):
 def run(root, document=None, **kw):
     return evaluate(document or graph(), registry=default_registry(),
                     resolver=LocalDirResolver({"data": root}), **kw)
+
+
+def fields_graph(path="run.h5", **params):
+    return {"schema": "stk.graph/1", "catalog": {"stk": 1},
+            "nodes": [{"id": "fields", "type": "stk.source.mupro_hdf5_fields@1",
+                       "params": {"binding": "data", "path": path, **params}}],
+            "outputs": {"fields": "fields.out"}}
+
+
+def test_metadata_node_dispatches_only_the_explicit_file(tmp_path, monkeypatch):
+    from suan.graph.service import MemoryBlobSink, evaluate_request
+
+    relative = "results/muferro/example/case/run.h5"
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True)
+    write_file(path)
+    with h5py.File(path, "r+") as container:
+        container.create_dataset("t00000002/Strain", data=np.zeros((5, 4, 3, 6), dtype=np.int16))
+        container["other"] = h5py.SoftLink("/unrelated")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    opens, open_file = [], LocalFiles.open
+
+    def open_one(source, name):
+        assert name == relative
+        opens.append(name)
+        return open_file(source, name)
+
+    monkeypatch.setattr(LocalFiles, "open", open_one)
+    monkeypatch.setattr(LocalFiles, "list", lambda *_: pytest.fail("the node scanned its binding"))
+    monkeypatch.setattr(h5py.Dataset, "__getitem__", lambda *_: pytest.fail("the node read field values"))
+    result = evaluate_request({"graph": fields_graph(relative, expected_sha256=digest), "profile": "desktop"},
+                              resolver=LocalDirResolver({"data": tmp_path}), cache_dir=tmp_path / "cache",
+                              blob_sink=MemoryBlobSink(), registry=build_registry(entry_points=False))
+    assert result["outputs"] == {"fields": {"type": "value", "value": {
+        "path": relative, "sha256": digest, "size": path.stat().st_size, "reader": "mupro.hdf5@1", "fields": [
+            {"selector": "/t00000002/Polar", "step": 2, "name": "Polar", "shape": [5, 4, 3, 3], "dtype": "float64"},
+            {"selector": "/t00000002/Strain", "step": 2, "name": "Strain", "shape": [5, 4, 3, 6], "dtype": "int16"},
+            {"selector": "/t00000004/Polar", "step": 4, "name": "Polar", "shape": [5, 4, 3, 3], "dtype": "float32"},
+        ]}}}
+    assert opens == [relative, relative]
+
+
+def test_metadata_digest_is_required_before_cache_and_discovery(tmp_path, monkeypatch):
+    path = tmp_path / "run.h5"
+    write_file(path)
+    before = path.stat()
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    pinned = fields_graph(expected_sha256=digest)
+    cache_dir = tmp_path / "cache"
+    first = run(tmp_path, pinned, cache=GraphCache(cache_dir))
+    cached = run(tmp_path, pinned, cache=GraphCache(cache_dir))
+    assert cached.evaluated == [] and cached.outputs == first.outputs
+
+    with h5py.File(path, "r+") as container:
+        container["t00000002/Polar"][0, 0, 0, 0] = 999
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert path.stat().st_size == before.st_size
+    monkeypatch.setattr(adapter, "describe", lambda *_, **__: pytest.fail("the node started discovery"))
+    for cache in (GraphCache(), GraphCache(cache_dir)):
+        events = []
+        with pytest.raises(EvaluationFailed) as raised:
+            run(tmp_path, pinned, cache=cache, on_event=lambda event: events.append(event["type"]))
+        error = raised.value.errors[0]
+        assert error["code"] == "invalid_data" and "expected SHA-256" in error["message"]
+        assert "node.started" not in events and "node.cached" not in events
+
+
+def test_metadata_change_after_planning_is_refused_before_hdf5_discovery(tmp_path, monkeypatch):
+    from suan.connectors.mupro import discovery
+
+    path = tmp_path / "run.h5"
+    write_file(path)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def mutate(event):
+        if event["type"] == "node.started":
+            with h5py.File(path, "r+") as container:
+                container["t00000002/Polar"][0, 0, 0, 0] = 999
+
+    monkeypatch.setattr(discovery, "_discover_hdf5_stream", lambda *_, **__: pytest.fail("the changed file was parsed"))
+    with pytest.raises(EvaluationFailed) as raised:
+        run(tmp_path, fields_graph(expected_sha256=digest), on_event=mutate)
+    assert raised.value.errors[0]["code"] == "invalid_data"
+    assert "changed after" in raised.value.errors[0]["message"]
+
+
+@pytest.mark.parametrize("params", [{}, {"expected_sha256": None}, {"expected_sha256": "A" * 64},
+                                    {"expected_sha256": "a" * 63}, {"expected_sha256": "a" * 64 + "\n"}])
+def test_metadata_node_rejects_missing_or_nonliteral_sha256(tmp_path, params):
+    from suan.graph.schema import GraphValidationError
+
+    with pytest.raises(GraphValidationError):
+        run(tmp_path, fields_graph(**params))
+
+
+def test_metadata_choice_limit_is_separate_from_visited_links(tmp_path):
+    path = tmp_path / "run.h5"
+    with h5py.File(path, "w") as container:
+        group = container.create_group("t00000002")
+        for i in range(256):
+            group.create_dataset(f"Field{i:03}", data=np.zeros((1, 1, 1, 1), dtype=np.int16))
+        container["other"] = h5py.SoftLink("/unrelated")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    result = run(tmp_path, fields_graph(expected_sha256=digest))
+    assert len(result.outputs["fields"]["fields"]) == 256
+
+    with h5py.File(path, "r+") as container:
+        container["t00000002"].create_dataset("Extra", data=np.zeros((1, 1, 1, 1), dtype=np.int16))
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(EvaluationFailed) as raised:
+        run(tmp_path, fields_graph(expected_sha256=digest))
+    error = raised.value.errors[0]
+    assert error["code"] == "budget_exceeded" and "256 field choices" in error["message"]
+    assert raised.value.partial.outputs == {}
+
+
+def test_metadata_visited_link_limit_refuses_even_ignored_names(tmp_path):
+    path = tmp_path / "run.h5"
+    with h5py.File(path, "w") as container:
+        for i in range(4097):
+            container[f"ignored_{i:04}"] = h5py.SoftLink("/unrelated")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(EvaluationFailed) as raised:
+        run(tmp_path, fields_graph(expected_sha256=digest))
+    error = raised.value.errors[0]
+    assert error["code"] == "budget_exceeded" and "max_entries=4096" in error["message"]
+    assert raised.value.partial.outputs == {}
 
 
 def test_local_source_preserves_values_metadata_and_crop(tmp_path):

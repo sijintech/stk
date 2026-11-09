@@ -173,6 +173,18 @@ def mupro_hdf5_source(ctx, inputs, params):
     _todo()
 
 
+@node("stk.source.mupro_hdf5_fields", title={"en": "MuPRO HDF5 field metadata", "zh": "MuPRO HDF5 场元数据"},
+      description={"en": "List explicit native field selectors, steps, shapes and dtypes from one verified "
+                         "MuPRO HDF5 container. Return up to 256 field choices without reading values."},
+      outputs=[Port("out", "value", value_type="json")],
+      params={"binding": binding(), "path": rel_path(),
+              "expected_sha256": string(pattern=r"^[0-9a-f]{64}$", max_length=64,
+                                        title="Expected container SHA-256")},
+      cache="disk", fingerprint=_todo)
+def mupro_hdf5_fields(ctx, inputs, params):
+    _todo()
+
+
 @node("stk.source.table", impl_version=3, title={"en": "Table file", "zh": "表格文件"},
       description={"en": "Read a table file inside a binding: muFerro energy_out.dat, whitespace columns "
                          "(optional header), CSV or a progress JSONL log."},
