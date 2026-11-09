@@ -1,5 +1,15 @@
 # STK 当前交接
 
+## 2026-11-09 16:46 UTC · Runtime 取消确认、Cocoa 对照与桌面终态
+
+`c3f869eb` 先向正在跟踪的各 Runtime 原任务分别发出一次取消，再用原连接只读核对待确认的任务。只有观察到 Runtime `cancelled` 才记录原任务已取消。已先结束的任务保留 Runtime 原终态，未确认的任务保留原 ID 并标为中断。五秒是发出请求后的观察窗口，单次网络读取仍受原连接超时约束。已经持久化的取消可阻止新收集开始。人工再次启动可接回原运行或原成功任务。
+
+root 集成 Claude57 在独立 worktree 提交的 `d86b2324`。真实回环 Runtime 拒绝第一次取消时，第 2 次尝试停为中断。求解器 PID、创建时点与任务 ID 保持一致，无新增提交、取消重试、收集或分析。第 3 次经人工启动接回同一任务，原批准保留。Claude 基线组 114 过、1 项预期失败。root 在隔离 worktree 使用修复和作者的原始测试，拒绝取消与正常取消对照 2/2。使用门控合成求解器，商业许可宿主仍待验。
+
+上一轮 macOS 的两个失败用例中，DOM 报告暂停但媒体时间倒退。原无 DOM 对照在两例都读到 WK `Playing`。`ad174492` 保留该对照，新增两例非门禁诊断，在同一隐藏视图先保留被动 WK 原生回执，再相隔 400 ms 观察两次 DOM 媒体时间。Linux 相关 CTest 29/29。Apple 条件 C++ 语法和工作流步骤检查通过，实际行为待 macOS CI。
+
+远端 `b4110f8c` Desktop `42646061897` 于 16:41:18 UTC 终态，五项通过，仅 macOS 失败。Linux 主测试 2138/2138，Linux 打包与冷环境验证通过，Windows CPU 1463/1463。Windows 原生 6/6、零跳过，六项各 20 轮。PDF 160 张截图、20 次重准备，重准备启动最长 89 ms，PDF 全程单次捕获启动最长 114 ms。macOS CPU 1521/1521、Metal 254/254、原生 4/6。Runtime `42646061798` 13/13。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42646061897) · [Windows 工件](https://github.com/sijintech/stk/actions/runs/42646061897/artifacts/13692551836) · [macOS 工件](https://github.com/sijintech/stk/actions/runs/42646061897/artifacts/13690393949) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42646061798) [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 16:25 UTC · 网页精确任务观察、Hub 撤权和人工取消
 
 `683963e9` 为 STK 网页任务面板接入 Hub 精确只读观察。节点快照与 Runtime 最近状态分开，核对节点、工作区和任务 ID。通过任务 ID 也可查询快照外的任务。断线保留最后一次观察，重连继续读。图谱事件轮询使用现有只读入口，选择和自动观察不写 Hub 操作记录。
