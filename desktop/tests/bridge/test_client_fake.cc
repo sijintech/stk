@@ -247,6 +247,52 @@ TEST_F(FakeBridge, ReadsAreRetriedAfterTheBridgeDies)
   EXPECT_EQ(client->state(), BridgeState::Ready);
 }
 
+TEST_F(FakeBridge, TaskGetSendsRequireLiveOnlyWhenAsked)
+{
+  /* The fake answers task.get with the params it read from stdin: the exact wire shape. */
+  auto client = started(options({}));
+  const std::string node(32, 'a');
+  const Target hub{"hub:mesh", node};
+  const Json hub_params = {{"connection", "hub:mesh"}, {"node", node}, {"task_id", "t-1"}};
+  auto sent = [&](Future<Json> future) {
+    const Result<Json> r = future.get();
+    EXPECT_TRUE(r.ok()) << r.error().describe();
+    EXPECT_EQ(r.ok() ? r.value()["method"] : Json(), "task.get");
+    return r.ok() ? r.value()["params"] : Json();
+  };
+  /* The two-argument entry keeps its exact shape: no require_live key at all. */
+  EXPECT_EQ(sent(client->task_get(hub, "t-1")), hub_params);
+  EXPECT_EQ(sent(client->task_get({"runtime:lab", ""}, "t-2")),
+            Json({{"connection", "runtime:lab"}, {"task_id", "t-2"}}));
+  /* Opting in sends the JSON boolean true, beside the unchanged selectors and task id. */
+  Json live = hub_params;
+  live["require_live"] = true;
+  const Json live_sent = sent(client->task_get(hub, "t-1", true));
+  EXPECT_EQ(live_sent, live);
+  EXPECT_TRUE(live_sent.contains("require_live") && live_sent["require_live"].is_boolean());
+  EXPECT_EQ(sent(client->task_get({"local", ""}, "t-3", true)),
+            Json({{"connection", "local"}, {"task_id", "t-3"}, {"require_live", true}}));
+  /* false is the published default, sent as omission like the two-argument call. */
+  EXPECT_EQ(sent(client->task_get(hub, "t-1", false)), hub_params);
+  EXPECT_EQ(client->stats().protocol_errors, 0u);
+}
+
+TEST_F(FakeBridge, ALiveTaskGetIsRetriedWithItsParamsAfterTheBridgeDies)
+{
+  auto client = started(options({"--die-once-on", "task.get"}));
+  const int64_t first = client->bridge_pid();
+  const std::string node(32, 'b');
+  Future<Json> pending = client->task_get({"hub:mesh", node}, "t-9", true);
+  const Result<Json> r = pending.get();
+  ASSERT_TRUE(r.ok()) << r.error().describe();
+  EXPECT_EQ(r.value()["params"],
+            Json({{"connection", "hub:mesh"}, {"node", node}, {"task_id", "t-9"}, {"require_live", true}}));
+  EXPECT_NE(client->bridge_pid(), first);
+  track(*client);
+  EXPECT_EQ(client->stats().calls_retried, 1u);
+  EXPECT_EQ(client->state(), BridgeState::Ready);
+}
+
 TEST_F(FakeBridge, NonIdempotentCallsFailUnavailableAfterADeath)
 {
   auto client = started(options({"--die-once-on", "upload.start"}));

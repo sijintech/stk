@@ -320,6 +320,11 @@ TEST_F(PythonBridge, HelloListsTheProtocol)
   const Result<Json> not_found = client->task_get({"runtime:nope", ""}, "a").get();
   ASSERT_FALSE(not_found.ok());
   EXPECT_EQ(not_found.error().code, ErrorCode::NotFound);
+  /* require_live passes the local schema and the strict bridge; the direct read maps the same way. */
+  const Result<Json> live_not_found = client->task_get({"runtime:nope", ""}, "a", true).get();
+  ASSERT_FALSE(live_not_found.ok());
+  EXPECT_EQ(live_not_found.error().code, ErrorCode::NotFound) << live_not_found.error().describe();
+  EXPECT_FALSE(live_not_found.error().local);
   const Result<HubPolicy> policy = client->hub_policy("hub:nope").get(); /* WP11 method, typed */
   ASSERT_FALSE(policy.ok());
   EXPECT_EQ(policy.error().code, ErrorCode::NotFound) << policy.error().describe();

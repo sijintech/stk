@@ -359,8 +359,16 @@ Future<Json> Client::task_list(const Target &target, const std::string &workspac
 
 Future<Json> Client::task_get(const Target &target, const std::string &task_id)
 {
+  return task_get(target, task_id, false);
+}
+
+Future<Json> Client::task_get(const Target &target, const std::string &task_id, bool require_live)
+{
   Json params = with_target(target);
   params["task_id"] = task_id;
+  if (require_live) {
+    params["require_live"] = true;
+  }
   return call("task.get", params);
 }
 

@@ -334,6 +334,10 @@ class Client {
   Future<Submitted> task_submit(const TaskSubmitParams &params);
   Future<Json> task_list(const Target &target, const std::string &workspace_id = {});
   Future<Json> task_get(const Target &target, const std::string &task_id);
+  /** `require_live` true sends `require_live: true`: a Hub connection then answers only from the
+   * exact node lookup, never the heartbeat snapshot (`unsupported` / `unavailable` otherwise).
+   * false sends nothing, the same request as the two-argument call. */
+  Future<Json> task_get(const Target &target, const std::string &task_id, bool require_live);
   Future<Submitted> task_cancel(const Target &target, const std::string &task_id,
                                 const std::string &idempotency_key = {});
   Future<std::vector<FileEntry>> task_artifacts(const Target &target, const std::string &task_id);

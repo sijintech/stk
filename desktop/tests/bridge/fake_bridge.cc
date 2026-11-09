@@ -8,7 +8,8 @@
  * oversize / badutf8 / badjson (junk lines first, then the response), interleave {n} (events
  * around the response), interleave.hold {n} (same sequence held until interleave.release),
  * partial_crash (half a line, then _exit), logs.subscribe (a fake log
- * stream from `offsets`), unsubscribe, stats -> {unsubscribes}, anything else -> {method}.
+ * stream from `offsets`), unsubscribe, stats -> {unsubscribes}, task.get -> {method, params} (the
+ * request params as received, so tests see the exact wire shape), anything else -> {method}.
  *
  * Options:
  *   --max-line N          limits.max_line_bytes in hello (default 4096)
@@ -612,6 +613,9 @@ int main(int argc, char **argv)
     }
     else if (method == "echo") {
       respond(id, Json{{"params", params}});
+    }
+    else if (method == "task.get") {
+      respond(id, Json{{"method", method}, {"params", params}});
     }
     else if (method == "slow") {
       const int ms = params.value("ms", 100);
