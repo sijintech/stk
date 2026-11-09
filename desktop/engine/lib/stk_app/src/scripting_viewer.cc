@@ -86,6 +86,7 @@ Json viewer_status(ViewerState &viewer)
     result["evaluation"] = {{"id", last->eval_id}, {"reason", last->reason}, {"cache_hits", last->cache_hits},
                             {"cache_misses", last->cache_misses}, {"from_cache", last->from_cache}};
   }
+  if (!viewer.opening_status().is_null()) { result["opening"] = viewer.opening_status(); }
   return result;
 }
 

@@ -2,7 +2,8 @@
 /** \file The Viewer's state and GPU viewer against the real Python bridge (local graph.evaluate
  * of muferro-domains on a fake muFerro run): a client-stage change re-runs no data node and the
  * view re-renders; a data-stage change re-runs the data nodes; a cached step switch completes in
- * under 300 ms with the camera kept; a GPU pick is probed for its original value. */
+ * under 300 ms with the camera kept; a GPU pick is probed for its original value; a collected
+ * open whose registered bytes changed must keep the previous Viewer and its unsaved draft. */
 
 #include <algorithm>
 #include <chrono>
@@ -571,6 +572,141 @@ TEST(PythonViewer, CollectedFramesKeepTheirProofAcrossCachedStepsAndWorkspaceRes
     ASSERT_TRUE(wait([&] { return vs.probe().status != app::ProbeState::Status::Pending; }));
     ASSERT_EQ(vs.probe().status, app::ProbeState::Status::Done) << vs.probe().error;
     EXPECT_EQ(vs.probe().sample, original_sample);
+    vs.close();
+    store.set_bridge(nullptr);
+  }
+  client->close();
+  loop.run_ready();
+}
+
+TEST(PythonViewer, FailedCollectedOpenKeepsThePreviousViewerAndItsDraft)
+{
+  std::string reason;
+  const auto python = graph_python(reason);
+  if (python.empty()) { g_skipped_all = true; GTEST_SKIP() << reason; }
+  ASSERT_NE(g_gpu, nullptr);
+  TempDir dir("viewer-guarded-open-python");
+  const auto proof_of = [&](const std::string &case_path) {
+    Json files = Json::array();
+    for (const auto &entry : std::filesystem::recursive_directory_iterator(dir.path() / case_path)) {
+      if (entry.is_regular_file()) {
+        files.push_back({{"path", entry.path().lexically_relative(dir.path()).generic_string()},
+                         {"sha256", core::Sha256::hex(read_text(entry.path().string()))}});
+      }
+    }
+    return Json{{"project_root", dir.str()}, {"case_path", case_path}, {"files", files}};
+  };
+  const auto run_a = dir.str() + "/run-a", run_b = dir.str() + "/run-b";
+  ASSERT_TRUE(write_fake_run(python, run_a));
+  ASSERT_TRUE(write_fake_run(python, run_b));
+  const Json proof_a = proof_of("run-a"), proof_b = proof_of("run-b");
+  const std::string preset = "muferro-collected-domains";
+  ManualLoop loop;
+  auto options = python_bridge_options(python, dir.str(), loop.executor());
+  options.strict = options.validate = true;
+  auto client = bridge::Client::create(std::move(options));
+  std::string error;
+  ASSERT_TRUE(client->start(&error)) << error;
+  ASSERT_TRUE(client->wait_ready(120)) << client->bridge_log().text();
+  {
+    app::AppStore store;
+    store.set_bridge(client.get());
+    auto &vs = store.viewer();
+    vs.prefetch_neighbours = false;
+    const auto wait = [&](const std::function<bool()> &condition, double timeout = 120) {
+      return loop.pump_until(condition, timeout, [&] { vs.pump(); });
+    };
+    const auto failure = [&] { return vs.open_error() + "|" + vs.eval_error(); };
+
+    // A good collected Viewer A with an unsaved data-stage draft (automatic evaluation off).
+    ASSERT_TRUE(vs.open_path(run_a, preset, Json(), proof_a));
+    ASSERT_TRUE(wait([&] { return vs.payload() && !vs.evaluating(); })) << failure() << client->bridge_log().text();
+    ASSERT_EQ(vs.shown_step(), Json(2));
+    vs.set_auto_evaluate(false);
+    vs.set_parameter("min_magnitude", ui::FormValue::number(0.3));
+    ASSERT_EQ(vs.pending_edit(), "data");
+    ASSERT_EQ(vs.parameters().value("min_magnitude", Json()), Json(0.3));
+    const auto a_base = vs.base_payload(), a_payload = vs.payload();
+    const auto a_serial = vs.payload_serial(), a_camera = vs.camera_serial();
+    const auto a_step = vs.shown_step();
+    const auto a_parameters = vs.parameters();
+    viewer_gpu::Viewer viewer(g_gpu->fonts());
+    viewer.set_payload(a_payload);
+    const auto a_image = render(viewer, 400, 300);
+    const auto a_intact = [&] {
+      EXPECT_EQ(vs.source().path, run_a) << "the previous Viewer source was dropped";
+      EXPECT_TRUE(vs.source().source_proof == proof_a) << vs.source().source_proof.value("case_path", "");
+      EXPECT_EQ(vs.preset_id(), preset);
+      EXPECT_TRUE(vs.base_payload() == a_base) << "base payload replaced";
+      EXPECT_TRUE(vs.payload() == a_payload) << "rendered payload replaced";
+      EXPECT_EQ(vs.payload_serial(), a_serial);
+      EXPECT_EQ(vs.camera_serial(), a_camera);
+      EXPECT_EQ(vs.shown_step(), a_step);
+      EXPECT_EQ(vs.parameters(), a_parameters) << "the unsaved draft of the previous Viewer was dropped";
+      EXPECT_EQ(vs.pending_edit(), "data");
+      EXPECT_FALSE(vs.auto_evaluate);
+      if (vs.payload()) {
+        viewer.set_payload(vs.payload());
+        EXPECT_LT(differing_fraction(a_image, render(viewer, 400, 300)), 0.001);
+      }
+    };
+    a_intact();
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "Viewer A precondition";
+
+    // B keeps its original exact proof, but a registered frame changes locally before the open.
+    const auto frame = std::filesystem::path(run_b) / "Polar.00000002.dat";
+    const auto original = read_text(frame.string());
+    const auto modified = std::filesystem::last_write_time(frame);
+    auto replacement = original;
+    const auto digit = replacement.find_last_of("0123456789");
+    ASSERT_NE(digit, std::string::npos);
+    replacement[digit] = replacement[digit] == '0' ? '1' : '0';
+    const auto rewrite = [&](const std::string &bytes) {
+      std::fstream stream(frame, std::ios::in | std::ios::out | std::ios::binary);
+      stream.write(bytes.data(), std::streamsize(bytes.size()));
+      stream.close();
+      ASSERT_TRUE(stream.good());
+      std::filesystem::last_write_time(frame, modified);
+      ASSERT_EQ(std::filesystem::file_size(frame), original.size());
+      ASSERT_EQ(std::filesystem::last_write_time(frame), modified);
+    };
+    ASSERT_NO_FATAL_FAILURE(rewrite(replacement));
+    const auto before = client->stats();
+    const int started = vs.evaluations_started();
+    ASSERT_TRUE(vs.open_path(run_b, preset, Json(), proof_b)) << failure();
+    // The graph worker's byte check completes; A's still-present payload is not a completion signal.
+    ASSERT_TRUE(wait([&] {
+      return !vs.evaluating() && failure().find("Polar.00000002.dat") != std::string::npos;
+    })) << failure() << client->bridge_log().text();
+    std::printf("METRIC guarded collected open failure: %s\n", failure().c_str());
+    EXPECT_NE(failure().find("changed"), std::string::npos) << failure();
+    ASSERT_TRUE(vs.graph_inspection());
+    EXPECT_NE(vs.graph_inspection()->error.find("Polar.00000002.dat"), std::string::npos);
+    a_intact();
+
+    // The failure replays nothing: no further evaluation, retry or bridge restart while idle.
+    const int after_failure = vs.evaluations_started();
+    const auto calls = client->stats().calls_sent;
+    EXPECT_LE(after_failure, started + 1);
+    EXPECT_FALSE(wait([&] { return vs.evaluating() || vs.evaluations_started() != after_failure; }, 1.5));
+    EXPECT_EQ(vs.evaluations_started(), after_failure);
+    EXPECT_EQ(client->stats().calls_sent, calls);
+    EXPECT_EQ(client->stats().calls_retried, before.calls_retried);
+    EXPECT_EQ(client->stats().restarts, before.restarts);
+    EXPECT_EQ(vs.prefetched_count(), 0);
+
+    // Positive control: explicitly restoring the registered bytes lets the user reopen B.
+    ASSERT_NO_FATAL_FAILURE(rewrite(original));
+    ASSERT_TRUE(vs.open_path(run_b, preset, Json(), proof_b)) << failure();
+    ASSERT_TRUE(wait([&] { return vs.source().path == run_b && vs.payload() && !vs.evaluating(); }))
+        << failure() << client->bridge_log().text();
+    EXPECT_EQ(failure(), "|");
+    EXPECT_EQ(vs.source().source_proof, proof_b);
+    EXPECT_EQ(vs.shown_step(), Json(2));
+    EXPECT_NE(vs.base_payload(), a_base);
+    EXPECT_GT(vs.camera_serial(), a_camera);
+    viewer.set_payload(vs.payload());
+    EXPECT_LT(differing_fraction(a_image, render(viewer, 400, 300)), 0.001) << "B's frame is A's synthetic frame";
     vs.close();
     store.set_bridge(nullptr);
   }

@@ -81,18 +81,37 @@ class Viewer:
         return self._operation("reset_camera", expected_source=expected_source)
 
     def wait(self, *, timeout=120, interval=0.1):
-        """Wait for current Viewer work; timeouts never cancel it, source changes abort waiting."""
+        """Wait for current work, following one guarded open; timeouts never cancel it."""
         if (type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout < 0
                 or type(interval) not in (int, float) or not math.isfinite(interval) or interval <= 0):
             raise ValueError("timeout must be finite and non-negative; interval must be finite and positive")
         deadline, source = time.monotonic() + timeout, None
+        opening_id, opening_source = None, None
         while True:
             status = self.status()
             current = status["source"]["key"]
-            if source is not None and current != source:
-                raise RuntimeError("The Viewer source changed while waiting; inspect its current state")
-            source = current
-            if (not status["evaluating"] and not status["pending_edit"]
+            opening = status.get("opening")
+            if source is None:
+                source = current
+                if opening is not None:
+                    opening_id, opening_source = opening["id"], opening["source"]["key"]
+            if opening_id is not None:
+                if (opening is None or opening["id"] != opening_id
+                        or opening["source"]["key"] != opening_source or opening["state"] == "cancelled"):
+                    raise RuntimeError("The Viewer opening was cancelled or replaced while waiting; inspect its current state")
+                expected_source = opening_source if opening["state"] == "succeeded" else source
+                if current != expected_source:
+                    raise RuntimeError("The Viewer source changed while waiting; inspect its current state")
+                if opening["state"] == "failed":
+                    return status  # The retained source can still have an unsent parameter draft.
+                opening_pending = opening["state"] != "succeeded"
+            else:
+                if opening is not None:
+                    raise RuntimeError("The Viewer opening was cancelled or replaced while waiting; inspect its current state")
+                if current != source:
+                    raise RuntimeError("The Viewer source changed while waiting; inspect its current state")
+                opening_pending = False
+            if (not opening_pending and not status["evaluating"] and not status["pending_edit"]
                     and (status["has_payload"] or status["error"] or status["metadata_error"] or status["source"]["kind"] == "none")):
                 return status
             remaining = deadline - time.monotonic()

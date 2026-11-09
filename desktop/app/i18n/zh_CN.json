@@ -2661,7 +2661,7 @@
   "table.io.limit": "导入最多 1000 条编辑命令；保存为新文件，不覆盖现有文件。",
   "table.io.import": "导入表格",
   "table.io.export": "导出表格",
-  "viewer.workspace.suspended": "已恢复工作空间：计算与播放已暂停。明确运行或选择时间步后恢复。",
+  "viewer.workspace.suspended": "自动计算与播放已暂停。明确运行或选择时间步后恢复。",
   "workspace.transfer.export": "导出工作空间",
   "workspace.transfer.import": "导入工作空间",
   "workspace.transfer.open": "重新打开工作空间",

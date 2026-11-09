@@ -174,6 +174,244 @@ TEST(ViewerWorkspace, CompletedProbeCannotOverwriteRepickAfterReopen)
   ASSERT_NO_FATAL_FAILURE(completed_probe_cannot_overwrite_repick(true));
 }
 
+/** The portable bridge proves Viewer state transitions; real graph byte checks live in Python tests. */
+struct GuardedOpenViewer {
+  TempDir dir{"guarded-open"};
+  ManualLoop loop;
+  ProbeCallbackGate gate{loop.executor()};
+  std::unique_ptr<bridge::Client> client;
+  AppStore store;
+
+  ~GuardedOpenViewer()
+  {
+    gate.take();
+    store.viewer().close();
+    store.set_bridge(nullptr);
+    if (client) { client->close(); }
+    loop.run_ready();
+  }
+
+  ViewerState &viewer() { return store.viewer(); }
+
+  bool start(const bool metadata = true)
+  {
+    bridge::ClientOptions options;
+    options.command = {fake_bridge_path(), "--payload-dir", fixture_payload_dir().string(),
+                       "--blob-dir", (dir.path() / "blobs").string()};
+    options.executor = gate.executor();
+    client = bridge::Client::create(std::move(options));
+    std::string error;
+    if (!client->start(&error) || !client->wait_ready(30)) { return false; }
+    store.set_bridge(client.get());
+    viewer().prefetch_neighbours = false;
+    viewer().set_colormaps(std::make_shared<const std::vector<ui::ColormapItem>>());
+    if (metadata) { viewer().set_metadata(repo_presets(), repo_catalog()); }
+    return true;
+  }
+
+  bool open(const std::string &name)
+  {
+    const auto path = dir.path() / name;
+    std::filesystem::create_directories(path);
+    if (!write_text((path / "Polar.00000000.dat").string(), "1 1 1\n")) { return false; }
+    const Json proof = {{"project_root", dir.str()}, {"case_path", name},
+                        {"files", {{{"path", name + "/Polar.00000000.dat"}, {"sha256", std::string(64, 'a')}}}}};
+    return viewer().open_path(path.string(), "muferro-domains", Json(), proof);
+  }
+
+  bool wait(const std::function<bool()> &condition)
+  {
+    return loop.pump_until(condition, 30, [&] { viewer().pump(); });
+  }
+
+  Json barrier()
+  {
+    const auto reply = client->call("stats").wait_for(std::chrono::seconds(30));
+    if (!reply || !reply->ok()) { return Json(); }
+    return reply->value();
+  }
+
+  bool open_first()
+  {
+    if (!open("first") || !wait([&] { return viewer().payload() && !viewer().evaluating(); })) { return false; }
+    if (!barrier().is_object()) { return false; }
+    loop.run_ready();
+    viewer().set_auto_evaluate(false);
+    viewer().set_parameter("min_magnitude", ui::FormValue::number(0.3));
+    return viewer().pending_edit() == "data";
+  }
+};
+
+Json visible_viewer_state(const ViewerState &viewer)
+{
+  auto state = viewer.save_workspace_state();
+  state.erase("open_error");
+  state.erase("eval_error");
+  return state;
+}
+
+TEST(ViewerWorkspace, GuardedOpenCommitsOneCompletedCandidateWithoutClearingTheOldDraft)
+{
+  GuardedOpenViewer f;
+  ASSERT_TRUE(f.start());
+  ASSERT_TRUE(f.open_first());
+  auto &viewer = f.viewer();
+  const auto previous = visible_viewer_state(viewer);
+  const auto payload = viewer.base_payload(), display = viewer.payload();
+  const auto camera = viewer.camera_serial(), serial = viewer.payload_serial();
+  f.gate.hold();
+  ASSERT_TRUE(f.open("second"));
+  viewer.pump();
+  const auto completed = f.barrier();
+  ASSERT_TRUE(completed.is_object());
+  ASSERT_EQ(completed["evaluate_requests"].size(), 2u);
+  EXPECT_NE(completed["evaluate_requests"][0]["eval_id"], completed["evaluate_requests"][1]["eval_id"]);
+  auto callbacks = f.gate.take();
+  ASSERT_EQ(callbacks.size(), 1u);
+  EXPECT_TRUE(viewer.evaluating());
+  EXPECT_TRUE(visible_viewer_state(viewer) == previous);
+  EXPECT_EQ(viewer.base_payload(), payload);
+  EXPECT_EQ(viewer.payload(), display);
+  EXPECT_EQ(viewer.camera_serial(), camera);
+  EXPECT_EQ(viewer.payload_serial(), serial);
+
+  callbacks.front()();
+  viewer.pump();
+  EXPECT_FALSE(viewer.evaluating());
+  EXPECT_EQ(viewer.source().path, (f.dir.path() / "second").string());
+  EXPECT_TRUE(viewer.payload());
+  EXPECT_GT(viewer.camera_serial(), camera);
+  EXPECT_GT(viewer.payload_serial(), serial);
+  EXPECT_FALSE(viewer.auto_evaluate);
+  EXPECT_TRUE(viewer.pending_edit().empty());
+  ASSERT_EQ(f.barrier()["evaluate_requests"].size(), 2u) << "Commit must adopt the decoded frame without evaluating again";
+}
+
+enum class OpenInterruption { Cancel, Edit, Close, NewerOpen };
+
+TEST(ViewerWorkspace, RejectedOpenCannotCancelAnAcceptedCandidate)
+{
+  GuardedOpenViewer f;
+  ASSERT_TRUE(f.start());
+  ASSERT_TRUE(f.open_first());
+  auto &viewer = f.viewer();
+  const auto payload = viewer.payload();
+  f.gate.hold();
+  ASSERT_TRUE(f.open("second"));
+  const auto request = viewer.opening_status();
+  const auto completed = f.barrier();
+  ASSERT_EQ(completed["evaluate_requests"].size(), 2u);
+  auto callbacks = f.gate.take();
+  ASSERT_EQ(callbacks.size(), 1u);
+
+  // Validation rejects this request before superseding the already accepted open.
+  EXPECT_FALSE(viewer.open_path((f.dir.path() / "second").string(), "muferro-domains", Json(), Json::object()));
+  EXPECT_EQ(viewer.opening_status(), request);
+  EXPECT_TRUE(viewer.evaluating());
+  EXPECT_EQ(viewer.payload(), payload);
+  EXPECT_EQ(viewer.pending_edit(), "data");
+  callbacks.front()();
+  viewer.pump();
+  EXPECT_FALSE(viewer.evaluating());
+  EXPECT_EQ(viewer.source().path, (f.dir.path() / "second").string());
+  EXPECT_EQ(viewer.opening_status()["state"], "succeeded");
+  EXPECT_EQ(f.barrier()["evaluate_requests"].size(), 2u);
+}
+
+void completed_guarded_open_cannot_overwrite_a_newer_action(const OpenInterruption action)
+{
+  GuardedOpenViewer f;
+  ASSERT_TRUE(f.start());
+  ASSERT_TRUE(f.open_first());
+  auto &viewer = f.viewer();
+  const auto first = visible_viewer_state(viewer);
+  f.gate.hold();
+  ASSERT_TRUE(f.open("second"));
+  viewer.pump();
+  ASSERT_EQ(f.barrier()["evaluate_requests"].size(), 2u);
+  auto callbacks = f.gate.take();
+  ASSERT_EQ(callbacks.size(), 1u) << "The candidate Future is fulfilled, and cancel cannot revoke its held success";
+  switch (action) {
+    case OpenInterruption::Cancel:
+      viewer.cancel_evaluation();
+      EXPECT_TRUE(visible_viewer_state(viewer) == first);
+      break;
+    case OpenInterruption::Edit:
+      viewer.set_parameter("min_magnitude", ui::FormValue::number(0.7));
+      EXPECT_EQ(viewer.source().path, (f.dir.path() / "first").string());
+      EXPECT_EQ(viewer.parameters()["min_magnitude"], Json(0.7));
+      break;
+    case OpenInterruption::Close:
+      viewer.close();
+      EXPECT_EQ(viewer.source().kind, SourceKind::None);
+      EXPECT_FALSE(viewer.payload());
+      break;
+    case OpenInterruption::NewerOpen:
+      ASSERT_TRUE(f.open("third"));
+      ASSERT_TRUE(f.wait([&] { return viewer.source().path == (f.dir.path() / "third").string() && !viewer.evaluating(); }));
+      ASSERT_EQ(f.barrier()["evaluate_requests"].size(), 3u);
+      break;
+  }
+  const auto newer = visible_viewer_state(viewer);
+  const auto payload = viewer.base_payload(), display = viewer.payload();
+  const auto camera = viewer.camera_serial(), serial = viewer.payload_serial();
+  callbacks.front()();
+  viewer.pump();
+  EXPECT_FALSE(viewer.evaluating());
+  EXPECT_TRUE(visible_viewer_state(viewer) == newer);
+  EXPECT_EQ(viewer.base_payload(), payload);
+  EXPECT_EQ(viewer.payload(), display);
+  EXPECT_EQ(viewer.camera_serial(), camera);
+  EXPECT_EQ(viewer.payload_serial(), serial);
+}
+
+TEST(ViewerWorkspace, CompletedGuardedOpenCannotReplaceTheOldViewerAfterCancellation)
+{
+  ASSERT_NO_FATAL_FAILURE(completed_guarded_open_cannot_overwrite_a_newer_action(OpenInterruption::Cancel));
+}
+
+TEST(ViewerWorkspace, CompletedGuardedOpenCannotReplaceANewerParameterDraft)
+{
+  ASSERT_NO_FATAL_FAILURE(completed_guarded_open_cannot_overwrite_a_newer_action(OpenInterruption::Edit));
+}
+
+TEST(ViewerWorkspace, CompletedGuardedOpenCannotReopenAClosedViewer)
+{
+  ASSERT_NO_FATAL_FAILURE(completed_guarded_open_cannot_overwrite_a_newer_action(OpenInterruption::Close));
+}
+
+TEST(ViewerWorkspace, CompletedGuardedOpenCannotReplaceANewerSource)
+{
+  ASSERT_NO_FATAL_FAILURE(completed_guarded_open_cannot_overwrite_a_newer_action(OpenInterruption::NewerOpen));
+}
+
+TEST(ViewerWorkspace, GuardedOpenMetadataFailureKeepsThePreviousPayload)
+{
+  GuardedOpenViewer f;
+  ASSERT_TRUE(f.start(false));
+  auto &viewer = f.viewer();
+  ASSERT_TRUE(viewer.open_path(fixture_stkp().string()));
+  const auto previous = visible_viewer_state(viewer);
+  const auto payload = viewer.base_payload(), display = viewer.payload();
+  const auto camera = viewer.camera_serial(), serial = viewer.payload_serial();
+  ASSERT_TRUE(f.open("second"));
+  ASSERT_TRUE(f.wait([&] {
+    return !viewer.evaluating() && (!viewer.open_error().empty() || !viewer.eval_error().empty() ||
+                                    !viewer.metadata_error().empty());
+  }));
+  EXPECT_TRUE(visible_viewer_state(viewer) == previous);
+  EXPECT_EQ(viewer.base_payload(), payload);
+  EXPECT_EQ(viewer.payload(), display);
+  EXPECT_EQ(viewer.camera_serial(), camera);
+  EXPECT_EQ(viewer.payload_serial(), serial);
+  EXPECT_EQ(f.barrier()["evaluate_requests"].size(), 0u);
+  // The error is terminal: another completed main-loop turn must not queue a retry.
+  f.loop.run_ready();
+  viewer.pump();
+  EXPECT_FALSE(viewer.evaluating());
+  EXPECT_EQ(f.barrier()["evaluate_requests"].size(), 0u);
+}
+
 TEST(ViewerWorkspace, RestoresFrozenPayloadParametersLayersAndSettingsWithoutAnyReplay)
 {
   FakeViewer f;

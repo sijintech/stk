@@ -2662,7 +2662,7 @@
   "table.io.limit": "Imports allow at most 1000 edit commands. Export creates a new file and never replaces an existing file.",
   "table.io.import": "Import table",
   "table.io.export": "Export table",
-  "viewer.workspace.suspended": "Restored workspace: evaluation and playback are paused. Run or choose a step to resume.",
+  "viewer.workspace.suspended": "Automatic evaluation and playback are paused. Run or choose a step to resume.",
   "workspace.transfer.export": "Export workspace",
   "workspace.transfer.import": "Import workspace",
   "workspace.transfer.open": "Reopen workspace",

@@ -246,6 +246,8 @@ class ViewerState {
   void open_payload(std::shared_ptr<const io::Payload> payload, std::string label);
   void close();
   const ViewerSource &source() const;
+  /** Optional guarded-open request identity and state; the active source stays visible until success. */
+  const io::Json &opening_status() const;
   const std::string &source_label() const;
   const std::string &open_error() const;
 
@@ -406,6 +408,11 @@ class ViewerState {
  private:
   AppStore &store_;
   std::unique_ptr<Impl> impl_;
+  std::unique_ptr<Impl> opening_;
+  io::Json opening_status_;
+  uint64_t eval_seq_ = 0;
+  void discard_opening();
+  void finish_opening();
 };
 
 }  // namespace stk::app

@@ -1579,12 +1579,24 @@ Operation shapes: `layout.get {}` → `{layout}` (`stk.desktop.layout/1`),
 `layout.apply {layout}` → `{applied: true}`, `editors.list {}` → `{editors: [{id, label}]}`,
 `project.current {}` → `{project: projectInfo|null}`, `project.open {directory}` → `{project: projectInfo}`,
 `project.close {}` → `{closed: boolean}`. Viewer adds `viewer.status`, `viewer.presets`,
-`viewer.open {path, preset?, parameters?, focus?}`, `viewer.close`, `viewer.configure`, `viewer.preset {id}`,
+`viewer.open {path, preset?, parameters?, focus?, source_proof?}`, `viewer.close`, `viewer.configure`, `viewer.preset {id}`,
 `viewer.evaluate`, `viewer.cancel`, `viewer.layer {id, visible?, opacity?}`, `viewer.step {index}`,
 `viewer.play {playing}`, and `viewer.reset_camera`. Mutations except open accept optional `expected_source`,
 checked against the current source key before applying. Configure validates all supplied parameters/display
 settings before changing any; graph semantic/data errors can still occur asynchronously. Open returns acceptance,
 not completion. Status reports current source, parameters, layers, pending/evaluating flags, errors and timeline.
+When replacing an existing source with a collected local `source_proof`, the new source is evaluated as a
+candidate before it replaces the current Viewer. A failed or cancelled candidate retains the prior payload,
+camera and unsent parameter draft, with automatic evaluation and playback paused. Status may include
+`opening: {id, state, source: {key, kind, path}}`, where `id` identifies the request independently of its
+target source key and `state` is `pending`, `succeeded`, `failed` or `cancelled`. While pending, `source`
+still describes the previous Viewer and `evaluating` includes candidate work. Opening, closing, changing
+parameters/preset, evaluation/cancellation, playback, layer/overlay edits and camera reset supersede the
+candidate; a synchronously rejected open preserves it. Prefetch, fps and loop preferences alone do not
+replace an opening request. Terminal opening status remains until an action affecting the candidate.
+Python `wait()` follows only the opening request observed when waiting starts,
+accepts its successful source transition, returns its failure even when the retained source has unsent edits,
+and raises on cancellation or replacement. Older desktops that omit `opening` retain existing wait behavior.
 An explicit `muferro-collected-domains` preset opens a directory with an ordinary `input.toml` as a MuFerro
 run, including when it also contains a saved payload or result. Open the saved `result.json` directly
 to select the saved result.

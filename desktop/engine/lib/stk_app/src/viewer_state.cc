@@ -372,6 +372,7 @@ struct ViewerState::Impl {
   AppStore &store;
   std::shared_ptr<int> alive = std::make_shared<int>(0);
   uint64_t version = 0;
+  bool is_opening = false;
 
   /* Metadata. */
   bool presets_requested = false, catalog_requested = false, colormaps_requested = false;
@@ -414,7 +415,6 @@ struct ViewerState::Impl {
     bridge::Future<bridge::EvaluateResult> future;
   };
   std::optional<Running> main, prefetch;
-  uint64_t seq = 0;
   EvalProgress progress;
   std::optional<EvalRecord> last;
   std::optional<io::GraphResult> result;
@@ -466,6 +466,14 @@ struct ViewerState::Impl {
 
   Impl(ViewerState &s, AppStore &st) : self(s), store(st) {}
 
+  ~Impl()
+  {
+    alive.reset();
+    cancel_prefetch();
+    cancel_main();
+    probe_future.cancel();
+  }
+
   double now() const
   {
     return self.now();
@@ -474,7 +482,8 @@ struct ViewerState::Impl {
   void changed()
   {
     version++;
-    store.changed();
+    if (is_opening) { self.impl_->changed(); }
+    else { store.changed(); }
   }
 
   bridge::Client *client() const
@@ -527,6 +536,7 @@ struct ViewerState::Impl {
           return;
         }
         set_catalog(r.value().contains("catalog") ? r.value()["catalog"] : Json());
+        if (!catalog_model) { catalog_requested = false; }
         metadata_arrived();
       });
     }
@@ -602,6 +612,7 @@ struct ViewerState::Impl {
 
   void metadata_arrived()
   {
+    if (workspace_suspended) { changed(); return; }
     if (have_metadata()) {
       if (!waiting_for_metadata && !preset_id.empty() && schema.properties.empty()) {
         build_form(false);
@@ -730,6 +741,7 @@ struct ViewerState::Impl {
     if (form_quiet) {
       return;
     }
+    if (!is_opening) { self.discard_opening(); }
     const bool is_step = !step_param.empty() && name == step_param;
     const std::string stage = param_stage(name);
     const bool client = stage == "client";
@@ -956,7 +968,7 @@ struct ViewerState::Impl {
   {
     static const long long session = (long long)(std::chrono::steady_clock::now().time_since_epoch().count() & 0xffffff);
     char buf[64];
-    std::snprintf(buf, sizeof(buf), "desktop-%06llx-%llu", session, (unsigned long long)++seq);
+    std::snprintf(buf, sizeof(buf), "desktop-%06llx-%llu", session, (unsigned long long)++self.eval_seq_);
     return buf;
   }
 
@@ -1289,7 +1301,7 @@ struct ViewerState::Impl {
   /** Neighbours of the shown step (ahead first while playing). */
   void schedule_prefetch()
   {
-    if (workspace_suspended) { return; }
+    if (workspace_suspended || is_opening) { return; }
     if (!self.prefetch_neighbours || step_param.empty() || choices.size() < 2 || prefetch || main ||
         !source.evaluates() || pending_at < kInf)
     {
@@ -1580,18 +1592,7 @@ ViewerState::ViewerState(AppStore &store) : store_(store), impl_(std::make_uniqu
   impl_->schema.type = ui::SchemaType::Object;
 }
 
-ViewerState::~ViewerState()
-{
-  if (impl_) {
-    impl_->alive.reset();
-    impl_->cancel_prefetch();
-    if (impl_->main) {
-      impl_->main->policy_future.cancel();
-      impl_->main->future.cancel();
-    }
-    impl_->probe_future.cancel();
-  }
-}
+ViewerState::~ViewerState() = default;
 
 double ViewerState::now() const
 {
@@ -1603,6 +1604,7 @@ double ViewerState::now() const
 
 void ViewerState::refresh_metadata(const bool force)
 {
+  if (force) { discard_opening(); }
   impl_->request_metadata(force);
 }
 
@@ -1638,6 +1640,7 @@ const std::string &ViewerState::metadata_error() const
 
 void ViewerState::set_metadata(const Json &presets_result, const Json &catalog)
 {
+  discard_opening();
   Impl &m = *impl_;
   m.presets_requested = m.catalog_requested = true;
   m.parse_presets(presets_result);
@@ -1648,6 +1651,7 @@ void ViewerState::set_metadata(const Json &presets_result, const Json &catalog)
 
 void ViewerState::set_colormaps(std::shared_ptr<const std::vector<ui::ColormapItem>> colormaps)
 {
+  discard_opening();
   impl_->colormaps_requested = true;
   impl_->colormaps = std::move(colormaps);
   impl_->changed();
@@ -1722,6 +1726,54 @@ bool ViewerState::open_path(const std::string &path, const std::string &preset, 
       m.changed();
       return false;
     }
+  }
+  if (!source_proof.is_null() && m.source.kind != SourceKind::None) {
+    if (!m.bridge_ready()) {
+      m.open_error = std::string(store_.tr("viewer.error.no_bridge"));
+      m.changed();
+      return false;
+    }
+    discard_opening();
+    auto next = std::make_unique<Impl>(*this, store_);
+    next->is_opening = true;
+    next->source = std::move(s);
+    next->label = next->source.label();
+    next->overlays = m.overlays;
+    next->initial_params = parameters;
+    next->presets = m.presets;
+    next->presets_loaded = m.presets_loaded;
+    next->presets_requested = m.presets_loaded;
+    next->catalog = m.catalog;
+    next->catalog_model = m.catalog_model;
+    next->catalog_requested = !m.catalog.is_null();
+    next->colormaps = m.colormaps;
+    next->colormaps_requested = bool(m.colormaps);
+    next->preset_id = !preset.empty() ? preset : guess_preset(next->source.path);
+    opening_status_ = {{"id", next->new_eval_id()}, {"state", "pending"},
+                       {"source", {{"key", next->source.key()}, {"kind", source_kind_name(next->source.kind)},
+                                   {"path", next->source.path}}}};
+    m.cancel_main();
+    m.cancel_prefetch();
+    m.waiting_for_metadata = false;
+    m.workspace_suspended = true;
+    m.playing = false;
+    m.pending_at = kInf;
+    m.job.reset();
+    m.open_error.clear();
+    opening_ = std::move(next);
+    if (opening_->have_metadata()) {
+      if (opening_->preset_id.empty() || !opening_->preset(opening_->preset_id)) {
+        opening_->preset_id = opening_->presets.empty() ? std::string() : opening_->presets.front().id;
+      }
+      opening_->build_form(false);
+      opening_->start_eval("open");
+    }
+    else {
+      opening_->waiting_for_metadata = true;
+      opening_->request_metadata(false);
+    }
+    m.changed();
+    return true;
   }
   close();
   m.source = s;
@@ -1809,6 +1861,7 @@ bool ViewerState::open_path(const std::string &path, const std::string &preset, 
 
 void ViewerState::open_payload(std::shared_ptr<const io::Payload> payload, std::string label)
 {
+  discard_opening();
   close();
   Impl &m = *impl_;
   m.source.kind = SourceKind::Payload;
@@ -1822,6 +1875,8 @@ void ViewerState::open_payload(std::shared_ptr<const io::Payload> payload, std::
 
 void ViewerState::close()
 {
+  discard_opening();
+  opening_status_ = Json();
   Impl &m = *impl_;
   m.cancel_main();
   m.cancel_prefetch();
@@ -1864,6 +1919,11 @@ const ViewerSource &ViewerState::source() const
   return impl_->source;
 }
 
+const Json &ViewerState::opening_status() const
+{
+  return opening_status_;
+}
+
 const std::string &ViewerState::source_label() const
 {
   return impl_->label;
@@ -1881,6 +1941,7 @@ const std::string &ViewerState::preset_id() const
 
 void ViewerState::select_preset(const std::string &id)
 {
+  discard_opening();
   Impl &m = *impl_;
   if (!m.source.field_file.empty()) {
     const auto *selected = m.preset(id);
@@ -1933,6 +1994,7 @@ std::string ViewerState::param_stage(const std::string &name) const
 
 void ViewerState::set_auto_evaluate(const bool enabled)
 {
+  discard_opening();
   Impl &m = *impl_;
   auto_evaluate = enabled;
   // An explicit step selection keeps its own request; only automatically scheduled
@@ -1956,6 +2018,7 @@ std::vector<std::string> ViewerState::payload_outputs() const
 
 void ViewerState::evaluate_now(const std::string &reason)
 {
+  discard_opening();
   Impl &m = *impl_;
   m.workspace_suspended = false;
   m.restored_playing = false;
@@ -1973,6 +2036,7 @@ void ViewerState::evaluate_now(const std::string &reason)
 
 void ViewerState::cancel_evaluation()
 {
+  if (opening_) { discard_opening(); return; }
   Impl &m = *impl_;
   m.pending_reason.clear();
   m.pending_at = kInf;
@@ -1984,12 +2048,12 @@ void ViewerState::cancel_evaluation()
 
 bool ViewerState::evaluating() const
 {
-  return impl_->main.has_value();
+  return bool(opening_) || impl_->main.has_value();
 }
 
 const EvalProgress &ViewerState::progress() const
 {
-  return impl_->progress;
+  return opening_ ? opening_->progress : impl_->progress;
 }
 
 const std::optional<EvalRecord> &ViewerState::last_eval() const
@@ -2021,7 +2085,7 @@ std::shared_ptr<const ViewerGraphInspection> ViewerState::graph_inspection() con
     snapshot->shown_matches_desired = same_graph_configuration(*snapshot->desired, *snapshot->shown_configuration);
   }
   snapshot->has_payload = bool(m.base);
-  snapshot->evaluating = m.main.has_value();
+  snapshot->evaluating = evaluating();
   snapshot->pending_edit = m.pending_reason;
   snapshot->error = !m.open_error.empty() ? m.open_error : !m.eval_error.empty() ? m.eval_error : m.metadata_error;
   m.inspection = std::move(snapshot);
@@ -2040,7 +2104,7 @@ std::vector<std::string> ViewerState::data_nodes() const
 
 int ViewerState::evaluations_started() const
 {
-  return impl_->started;
+  return impl_->started + (opening_ ? opening_->started : 0);
 }
 
 int ViewerState::evaluations_cancelled() const
@@ -2081,6 +2145,7 @@ Json ViewerState::shown_step() const
 
 void ViewerState::set_step_index(const int index)
 {
+  discard_opening();
   Impl &m = *impl_;
   if (index < 0 || size_t(index) >= m.choices.size()) {
     return;
@@ -2125,6 +2190,7 @@ void ViewerState::step_by(const int delta)
 
 void ViewerState::step_latest()
 {
+  discard_opening();
   Impl &m = *impl_;
   m.workspace_suspended = false;
   m.restored_playing = false;
@@ -2150,6 +2216,7 @@ bool ViewerState::playing() const
 
 void ViewerState::set_playing(const bool playing)
 {
+  discard_opening();
   Impl &m = *impl_;
   if (playing) { m.workspace_suspended = false; }
   m.restored_playing = false;
@@ -2195,6 +2262,7 @@ uint64_t ViewerState::camera_serial() const
 
 void ViewerState::request_camera_reset()
 {
+  discard_opening();
   impl_->camera_serial++;
   impl_->changed();
 }
@@ -2291,12 +2359,14 @@ std::vector<ViewerState::LayerRow> ViewerState::layers() const
 
 void ViewerState::set_layer_visible(const std::string &id, const bool visible)
 {
+  discard_opening();
   impl_->visibility[id] = visible;
   impl_->changed();
 }
 
 void ViewerState::set_layer_opacity(const std::string &id, const double opacity)
 {
+  discard_opening();
   Impl &m = *impl_;
   const double o = std::isfinite(opacity) ? std::clamp(opacity, 0.0, 1.0) : 1.0;
   if (const auto it = m.opacity.find(id); it != m.opacity.end() && it->second == o) {
@@ -2319,17 +2389,20 @@ bool ViewerState::overlays() const
 
 void ViewerState::set_overlays(const bool on)
 {
+  discard_opening();
   impl_->overlays = on;
   impl_->changed();
 }
 
 void ViewerState::set_pick(PickInfo pick)
 {
+  discard_opening();
   impl_->query_probe(pick);
 }
 
 void ViewerState::probe_position(const std::array<double, 3> &position)
 {
+  discard_opening();
   PickInfo p = impl_->probe.pick;
   p.physical = position;
   impl_->query_probe(p);
@@ -2337,6 +2410,7 @@ void ViewerState::probe_position(const std::array<double, 3> &position)
 
 void ViewerState::clear_pick()
 {
+  discard_opening();
   impl_->probe_future.cancel();
   impl_->probe = ProbeState{.serial = impl_->probe.serial + 1};
   impl_->changed();
@@ -2349,6 +2423,7 @@ const ProbeState &ViewerState::probe() const
 
 void ViewerState::request_export()
 {
+  discard_opening();
   Impl &m = *impl_;
   ExportJob job;
   job.settings = export_settings;
@@ -2788,8 +2863,96 @@ bool ViewerState::workspace_suspended() const
   return impl_->workspace_suspended;
 }
 
+void ViewerState::discard_opening()
+{
+  if (!opening_) {
+    opening_status_ = Json();
+    return;
+  }
+  opening_->cancel_main();
+  impl_->started += opening_->started;
+  impl_->cancelled += opening_->cancelled;
+  opening_.reset();
+  opening_status_["state"] = "cancelled";
+  impl_->changed();
+}
+
+void ViewerState::finish_opening()
+{
+  if (!opening_) { return; }
+  Impl &next = *opening_;
+  std::string error;
+  if (!next.bridge_ready()) {
+    error = std::string(store_.tr("viewer.error.no_bridge"));
+  }
+  else if (!next.eval_error.empty()) {
+    error = next.eval_error;
+  }
+  else if (next.waiting_for_metadata && !next.metadata_error.empty() &&
+           (!next.presets_requested || !next.catalog_requested)) {
+    error = next.metadata_error;
+  }
+  else if (next.have_metadata() && (!next.catalog_model || next.preset_id.empty())) {
+    error = next.metadata_error.empty() ? std::string(store_.tr("viewer.error.no_result")) : next.metadata_error;
+  }
+  if (error.empty() && (next.main || next.waiting_for_metadata)) { return; }
+  if (error.empty() && (!next.base || !next.result || !next.last)) {
+    error = std::string(store_.tr("viewer.error.no_payload"));
+  }
+  if (!error.empty()) {
+    const auto path = next.source.path;
+    discard_opening();
+    opening_status_["state"] = "failed";
+    impl_->eval_error = error;
+    store_.log(store_.catalog().format("viewer.log.open_failed", {{"path", path}, {"error", error}}));
+    impl_->changed();
+    return;
+  }
+
+  // Keep the active Impl and FormModel addresses stable for existing editor callbacks.
+  auto candidate = std::move(opening_);
+  auto request = std::move(opening_status_);
+  const auto parameters = candidate->parameters();
+  Impl::Frame frame;
+  frame.result = std::move(*candidate->result);
+  frame.payload = candidate->base;
+  frame.record = std::move(*candidate->last);
+  frame.step = candidate->shown_step;
+  frame.params = candidate->shown_params;
+  frame.configuration = std::move(candidate->shown_configuration);
+  frame.resolved_parameters = candidate->shown_resolved_parameters;
+  Impl &m = *impl_;
+  m.alive = std::make_shared<int>(0);
+  close();
+  m.source = std::move(candidate->source);
+  m.label = std::move(candidate->label);
+  m.presets = std::move(candidate->presets);
+  m.presets_loaded = candidate->presets_loaded;
+  m.presets_requested = m.presets_loaded;
+  m.catalog = std::move(candidate->catalog);
+  m.catalog_model = std::move(candidate->catalog_model);
+  m.catalog_requested = !m.catalog.is_null();
+  m.colormaps = std::move(candidate->colormaps);
+  m.colormaps_requested = bool(m.colormaps);
+  m.metadata_error = std::move(candidate->metadata_error);
+  m.preset_id = std::move(candidate->preset_id);
+  m.initial_params = parameters;
+  m.build_form(false);
+  m.started += candidate->started;
+  m.cancelled += candidate->cancelled;
+  m.progress = std::move(candidate->progress);
+  m.camera_serial++;
+  m.store_frame(m.cache_key(frame.params), frame);
+  m.show_frame(frame, frame.record);
+  opening_status_ = std::move(request);
+  opening_status_["state"] = "succeeded";
+  m.changed();
+}
+
 double ViewerState::pump()
 {
+  finish_opening();
+  if (opening_) { return kInf; }
   Impl &m = *impl_;
   if (m.workspace_suspended) { return kInf; }
   const double t = now();
