@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · 日志绑定、冷恢复和节点离线完成
+
+MuFerro 桌面日志逐次检查冻结端点，已验两处切换和原连接双流。已补冷重启恢复原连接后按同一 ID 完成传输的验收。Claude38 接手 D1 X7 的节点离线期间任务自然完成，既有断连后显式取消作为回归。macOS 静默对照确认关闭发生在隐藏期 DOM 采样前，后续核对宿主暂停及原生关闭路径。 [验收记录](runtime-validation.md) [D1 故障矩阵](planning/d1-compatibility-gates.md)
+
 ## 2026-11-09 UTC · 冻结连接和传输恢复
 
 MuFerro 已接入冻结端点检查，覆盖产物列表、下载启动及按日志恢复的后端。Claude37 补冷重启后恢复原连接的完整成功路径。Cocoa 静默对照仍在当前 Desktop 队列，Windows 联接点已通过独立客户端矩阵。 [执行器试点](design/mupro-executor-pilot.md) [验收记录](runtime-validation.md)

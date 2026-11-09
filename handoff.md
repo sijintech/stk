@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · 冻结端点日志与下载冷恢复
+
+本地 `0d414c8a` 对 MuFerro 桌面和历史入口的 stdout、stderr 分别核对冻结端点，活跃的引擎分派同时覆盖 LAMMPS。原连接输出正常，刷新后或两条日志间切换连接会在替换端点读之前返回冲突。`bd5b7e91` 集成 Claude37 `13874a28`，验证恢复原端点后同一持久传输完成并校验字节。
+
+Linux 源码两组共 116 项通过，1 项真实许可条件跳过。隔离 wheel 70 项、Linux 原生 schema 七项通过。Claude38 在独立 worktree 的 `claude/d1-x7-offline-completion-38` 接手原 NodeAgent 离线期间任务自然完成的真实线路验收。
+
+远端 `bc25f579` macOS 原生 4/6，定位前隐藏 0/2，静默隐藏 0/2。静默对照在首次隐藏 DOM 读取前已关闭。Linux 三项和 Windows CPU 通过，Windows 原生仍运行，本地批次待整轮终态。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · MuFerro 收集绑定冻结连接
 
 本地 `5821e025` 采纳 Claude36 `1150229f` 的可选端点前置条件。MuFerro 产物查询和下载使用保存的连接身份及节点。两个连接切换反例均在替换后端 I/O 前返回冲突。已有同键传输使用日志中的身份，冷重启后的工作线程继续核对。

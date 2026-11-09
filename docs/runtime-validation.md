@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 日志端点绑定、冷恢复和 Cocoa 静默对照
+
+`0d414c8a90efb2ad13183b3d9c910bfd3f01d20b` 为 `task.logs` 增加可选 `expected_connection_identity`，沿用严格桥在实际后端对象上的检查。MuFerro 桌面与历史入口各验证稳定连接、刷新后切换及 stdout 之后切换。旧代码四个切换用例读取替换端点，修复后返回 `conflict` 且替换后端无日志调用。原 stdout 在第二条读取被拒绝前已输出。桌面共享入口同样应用于 LAMMPS。原有通用日志脚本仍可省略该字段。 [桥接契约](specs/stk-desktop-bridge-v1.md) [MuFerro 工作流](simulation-muferro.md)
+
+`bd5b7e91d6401aaad850e70be9f9069bd1a63f7d` 集成 Claude37 `13874a2898a0af9c8a7c55a62a9c3775b7af1db6`。两个传输管理器实例通过实际持久日志验证冷恢复。替换端点在描述、读取及创建目标目录前被拒绝，恢复原端点后同 ID、原请求及身份完成校验和原子发布，重复启动同键仍只返回该日志。范围为实际传输管理器与内存后端。作者移除守卫的隔离反例在预期断言失败。
+
+Linux 源码原生分派与 MuFerro 53 项通过、1 项真实许可条件跳过。候选精确源码的端点绑定、传输、Runtime 桥和脚本 63 项通过，隔离 wheel 同组 63 项及日志/分派定向 7 项通过。Python 3.11 和 3.14 的六个日志用例均通过。Linux 重新构建 C++ 嵌入 schema，七项通过。发布 schema 对照确认只增加该可选参数。证据见本机 `root-delivery-20261109-75`。
+
+远端 `bc25f579` 的 macOS 作业于 09:04:11Z 终态失败。CPU 1516/1516，Metal 254/254，原生 4/6，定位前采样对照 0/2，静默隐藏对照 0/2。两项静默对照在首次 DOM 观察前由原生暂停校验关闭同一会话。两者在可见时派发并收到 ACK，导航代次均为 1，关闭前分别连续收到 28 和 25 次 Playing。独立视频由超过期限的回复触发关闭，HTML 视频由 watchdog 触发。带采样对照的独立视频通过 0.777 秒的 DOM 观测后仍被 watchdog 关闭。带采样的 HTML 视频更早在显式暂停的时点断言失败。Desktop Linux 三项和 Windows CPU 通过，记录时仅 Windows 原生仍运行。本地批次待整轮终态。 [macOS 作业](https://github.com/sijintech/stk/actions/runs/42584441296/job/129050766481) [macOS 工件](https://github.com/sijintech/stk/actions/runs/42584441296/artifacts/13661187057) [Desktop](https://github.com/sijintech/stk/actions/runs/42584441296)
+
 ## 2026-11-09 UTC · MuFerro 收集端点前置条件
 
 `5821e025c5f28ff89eb984c8aa0b5a71f9e5bf00` 采用 Claude36 `1150229f0de21df4ce302a980ed5c96f74eeb9ae` 方案，在 `task.artifacts` 与 `download.start` 增加可选 `expected_connection_identity`。MuFerro 使用冻结计划的身份和节点。两项旧代码反例分别在刷新后、产物列表后观察到替换后端调用，修复后均返回 `conflict`，替换后端无产物调用且无新传输日志。默认缓存目录保留私有权限，匹配日志可返回原传输，身份缺失或不符时拒绝带前置条件的重放。冷重启在错配后端上恢复时拒绝传输。
