@@ -707,6 +707,24 @@ TEST_F(ProjectAnalysisRunsPython, ExplicitPayloadSelectionAndShowAreRequiredAfte
   ASSERT_TRUE(viewer().payload()); EXPECT_EQ(viewer().source().kind, SourceKind::Payload);
   EXPECT_FALSE(viewer().graph_inspection()->shown_configuration);
   EXPECT_EQ(calls("project.analysis_runs.start").size(), 1u); EXPECT_TRUE(calls("graph.evaluate").empty());
+
+  // The first frame after adoption must expose the GPU view without waiting for another UI event.
+  f.drv->frame();
+  const auto areas = f.screen.areas();
+  const auto area = std::find_if(areas.begin(), areas.end(), [](const auto *candidate) {
+    const auto *editor = dynamic_cast<const EditorArea *>(candidate);
+    return editor && editor->editor().type().id == kEditorViewer;
+  });
+  ASSERT_NE(area, areas.end());
+  const auto *region = (*area)->find_region(EditorArea::kMain);
+  ASSERT_NE(region, nullptr);
+  const auto &context = *f.screen.ui();
+  const auto &blocks = context.blocks();
+  const auto block = std::find_if(blocks.begin(), blocks.end(), [region](const auto &candidate) {
+    return candidate->name() == region->block_name();
+  });
+  ASSERT_NE(block, blocks.end());
+  EXPECT_EQ(context.draw_list().cmds.at((*block)->draw_begin()).type, ui::CmdType::ClipPush);
 }
 
 TEST_F(ProjectAnalysisRunsPython, OccupiedUnrenderedViewerIntentAndClosedTargetNeverGetReplaced)

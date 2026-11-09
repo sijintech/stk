@@ -72,8 +72,9 @@ class EditorRegion final : public wm::Region {
         break;
       case Kind::Main:
         ui_pass_through = ed.draws_gpu();
-        b.set_background(ed.main_background(ui.theme()));
         ed.draw_main(b.layout(), ec);
+        // The Viewer updates its payload state while building the main region.
+        b.set_background(ed.main_background(ui.theme()));
         break;
     }
   }
