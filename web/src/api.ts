@@ -3,12 +3,19 @@ export const uid=()=>crypto.randomUUID().replaceAll('-','');
 let credential=sessionStorage.getItem('stk-token')||'';
 export const setToken=(value:string)=>{credential=value;sessionStorage.setItem('stk-token',value);};
 export const hasToken=()=>!!credential;
-export async function api(path:string,method='GET',body?:unknown):Promise<any>{
-  const response=await fetch(`/api/v1/${path}`,{method,headers:{Authorization:`Bearer ${credential}`,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) { super(message); }
+}
+export async function api(path:string,method='GET',body?:unknown,signal?:AbortSignal):Promise<any>{
+  const response=await fetch(`/api/v1/${path}`,{method,headers:{Authorization:`Bearer ${credential}`,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal});
   // A proxy or gateway error page is not JSON: report the HTTP status instead of a parse error.
   const data=await response.json().catch(()=>{if(response.ok)throw new Error(`控制服务返回了无效数据 (${response.status})`);return null;});
-  if(!response.ok)throw new Error(typeof data?.detail==='string'?data.detail:`请求失败 (${response.status})`);
+  if(!response.ok)throw new ApiError(response.status,typeof data?.detail==='string'?data.detail:`请求失败 (${response.status})`);
   return data;
+}
+export async function readNode(node: string, kind: string, payload: Json, signal?: AbortSignal): Promise<unknown> {
+  const response = await api(`nodes/${encodeURIComponent(node)}/read`, 'POST', {kind, payload}, signal);
+  return response?.result;
 }
 /**
  * remember: keep the request for an explicit retry (default true); timeoutMs: how long to poll a queued action;
@@ -20,13 +27,14 @@ export interface ActionOptions{remember?:boolean,timeoutMs?:number,keepQueued?:b
 export async function action(node_id:string,kind:string,payload:Json,onReview?:(item:Json)=>void,options:ActionOptions={}):Promise<Json>{
   if(!node_id)throw new Error('请先选择执行节点');
   const body={id:uid(),node_id,kind,payload};
+  const token=credential;
+  const active=()=>token===credential&&(options.active?.()??true);
   // Preserve the complete immutable request for an explicit retry after a lost response.
   // Background polls (task.events) do not replace the user's last explicit action.
   if(options.remember!==false)sessionStorage.setItem('stk-last-action',JSON.stringify(body));
   let item=await api('actions','POST',body);
-  if(item.state==='review'){onReview?.(item);return item;}
+  if(item.state==='review'){if(active())onReview?.(item);return item;}
   const deadline=Date.now()+(options.timeoutMs??90000);
-  const active=options.active??(()=>true);
   while(item.state==='queued'&&Date.now()<deadline&&active()){await new Promise(r=>setTimeout(r,500));if(!active())break;item=await api(`actions/${body.id}`);}
   if(!active())return item;
   if(item.state==='failed')throw new Error(item.error);
@@ -42,16 +50,19 @@ export async function blob(sha256:string,signal?:AbortSignal):Promise<ArrayBuffe
   return response.arrayBuffer();
 }
 export async function events(onEvent:()=>void,signal:AbortSignal){
+  const token=credential;
+  const active=()=>!signal.aborted&&token===credential;
   let cursor=Number(sessionStorage.getItem('stk-event-cursor')||0);
-  while(!signal.aborted){
+  while(active()){
     try{
-      const response=await fetch(`/api/v1/events?after=${cursor}`,{headers:{Authorization:`Bearer ${credential}`},signal,cache:'no-store'});
+      const response=await fetch(`/api/v1/events?after=${cursor}`,{headers:{Authorization:`Bearer ${token}`},signal,cache:'no-store'});
+      if(response.status===401||response.status===403)return;
       if(!response.ok||!response.body)throw new Error('Event connection unavailable');
       const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='';
-      try{while(!signal.aborted){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});let end;
+      try{while(active()){const {value,done}=await reader.read();if(done||!active())break;buffer+=decoder.decode(value,{stream:true});let end;
         while((end=buffer.indexOf('\n\n'))>=0){const packet=buffer.slice(0,end);buffer=buffer.slice(end+2);const id=/^id: (\d+)$/m.exec(packet);if(id){cursor=Number(id[1]);sessionStorage.setItem('stk-event-cursor',String(cursor));onEvent();}}
       }}finally{await reader.cancel();}
-    }catch(error){if(signal.aborted)return;}
+    }catch(error){if(!active())return;}
     await new Promise(r=>setTimeout(r,2000));
   }
 }

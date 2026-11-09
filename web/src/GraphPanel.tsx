@@ -1,7 +1,7 @@
 // 图谱 (graph) mode: evaluate a preset graph next to the data (action graph.evaluate), draw the returned
 // stk.payload/2, scrub steps with the camera kept, show plots/images/tables, and a task.events progress line.
 import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {action, api, blob, type Json} from './api';
+import {action, api, blob, readNode, type Json} from './api';
 import {cachedBlob, loadPayload, loadStkp, type LoadedPayload} from './payload';
 import {bindingNames, blobSha, coerceParameters, DISPLAYABLE, duration, editorKind, emptyProgress, EVENTS_POLL_MS, EVENTS_TAIL_BYTES, foldEvents,
   frameDataset, framesFromArtifacts, initialValues, nextEventsDelay, outputImages, payloadOutputs, presetParameters, progressText, resolveProbeTarget,
@@ -154,7 +154,8 @@ function JsonView({out}: {out: any}) {
   return text === null ? <p className="muted">正在读取数据…</p> : <pre>{text}</pre>;
 }
 
-export default function GraphPanel({node, task, tasks, artifacts, onError, onLog}: {node: string, task: string, tasks: Json[], artifacts: Json[],
+export default function GraphPanel({node, task, tasks, artifacts, canReadEvents, onError, onLog}: {node: string, task: string, tasks: Json[], artifacts: Json[],
+  canReadEvents: boolean,
   onError: (text: string) => void, onLog: (text: string) => void}) {
   const [presets, setPresets] = useState<Preset[] | null>(null);
   const [presetError, setPresetError] = useState('');
@@ -206,7 +207,7 @@ export default function GraphPanel({node, task, tasks, artifacts, onError, onLog
     setValues(initialValues(params));
     setBindings(Object.fromEntries(names.map(n => [n, task])));
     setResult(null); setPayload(null); setProbe(null); setStatus(''); setRunning(false); setLocalName(''); setEvaluated(null);
-  }, [preset, params, names, task]);
+  }, [preset, params, names, node, task]);
 
   async function evaluate(overrides: Record<string, unknown> = {}) {
     if (!preset) return;
@@ -274,14 +275,15 @@ export default function GraphPanel({node, task, tasks, artifacts, onError, onLog
     void evaluate({[stepName]: 'latest'});
   }
 
-  // Minimal live progress for the bound running task (action task.events, see stk-events-v1.md §5).
+  // Minimal live progress for the bound running task (task.events, see stk-events-v1.md §5).
   const progressTask = bindings[names[0]] || task;
   const taskState = tasks.find(t => t.id === progressTask)?.state;
   // Polls only while the page is visible and the task runs, every 10 s backing off to 30 s while no new
-  // events arrive, and stops once the Runtime reports the task terminal (each poll is a hub action).
+  // events arrive, and stops once the Runtime reports the task terminal.
   useEffect(() => {
     setProgress(null);
-    if (!node || !progressTask || taskState !== 'running') return;
+    if (!canReadEvents || !node || !progressTask || taskState !== 'running') return;
+    const abort = new AbortController();
     let stop = false;
     let wake: (() => void) | null = null;
     // Resolves after `ms`, or at once on cleanup.
@@ -303,9 +305,9 @@ export default function GraphPanel({node, task, tasks, artifacts, onError, onLog
         if (stop) return;
         let again = false, received = false;
         try {
-          const item = await action(node, 'task.events', {task_id: progressTask, offset}, undefined, {remember: false, timeoutMs: 30000, active: () => !stop});
+          const result = await readNode(node, 'task.events', {task_id: progressTask, offset}, abort.signal);
           if (stop) return;
-          const r = item.result;
+          const r = result as Json | null;
           failures = 0;
           if (r && Array.isArray(r.events)) {
             received = r.events.length > 0;
@@ -327,8 +329,8 @@ export default function GraphPanel({node, task, tasks, artifacts, onError, onLog
         if (!again) { delay = nextEventsDelay(delay, received); await pause(delay); }
       }
     })();
-    return () => { stop = true; wake?.(); document.removeEventListener('visibilitychange', onVisibility); };
-  }, [node, progressTask, taskState]);
+    return () => { stop = true; abort.abort(); wake?.(); document.removeEventListener('visibilitychange', onVisibility); };
+  }, [canReadEvents, node, progressTask, taskState]);
 
   async function openLocal(file: File | undefined) {
     if (!file) return;
@@ -350,12 +352,15 @@ export default function GraphPanel({node, task, tasks, artifacts, onError, onLog
     if ('error' in target) { onError(target.error); return; }
     const body: Json = {task_id: target.task_id, path: target.path, position: probe.position};
     if (target.metadata) body.metadata = target.metadata;
+    const current = generation.current;
+    const active = () => generation.current === current;
     setStatus('正在读取原始数据…');
     try {
-      const item = await action(node, 'view.probe', body, () => setStatus('探针查询等待复核。'));
+      const item = await action(node, 'view.probe', body, () => { if (active()) setStatus('探针查询等待复核。'); }, {active});
+      if (!active()) return;
       if (item.result) onLog(JSON.stringify({layer: probe.info?.layerName, path: target.path, ...item.result}, null, 2));
       if (item.state !== 'review') setStatus('');
-    } catch (e) { setStatus(''); onError(message(e)); }
+    } catch (e) { if (active()) { setStatus(''); onError(message(e)); } }
   }
 
   const newerFrame = progress?.frame?.step !== undefined && steps.choices.length > 0 && progress.frame.step > steps.choices[steps.choices.length - 1];
