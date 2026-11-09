@@ -23,6 +23,7 @@
 #include "reports_native_scroll.hh"
 #include "reports_native_wait.hh"
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+#  include "stk/document/media_pause_verification.hh"
 #  include "stk/document/test_media_probe.hh"
 #  include "reports_native_input.hh"
 #endif
@@ -60,6 +61,7 @@ struct Options {
   std::string python, backend, source = "markdown";
   fs::path output, media_fixture;
   bool pre_seek_hide_control = false;
+  bool quiet_hidden_hold = false;
   int reading_cycles() const { return pre_seek_hide_control ? 1 : 20; }
 };
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
@@ -1557,24 +1559,62 @@ raise SystemExit(main())
       const auto playing = play(cycle, "play-before-hide", session, bounds);
       const auto playing_returned = Clock::now();
       require(!playing.paused && playing.current_time < 2.5, "Hide must interrupt a playing early clip");
+      const auto before_hide_pause = ui.last_native_pause();
       ui.begin_hidden_media(cycle, session, playing, playing_returned);
 #ifdef __APPLE__
       const auto close = ui.observe_native_close(session);
 #endif
       auto hidden = [&] {
         try {
+#ifdef __APPLE__
+          if (options.quiet_hidden_hold) {
+            require(bool(close), "Quiet hidden hold needs the exact native close observer");
+          }
+#endif
           ui.hidden_media_checkpoint("tab-begin");
           ui.tab(*area, 1);
           ui.hidden_media_checkpoint("tab-returned");
+          if (options.quiet_hidden_hold) {
+            // Pump only the window event loop until the original native verification can finish.
+            const auto started = Clock::now();
+            constexpr auto hold = document_preview::detail::MediaPauseVerification::timeout +
+                                  std::chrono::milliseconds(250);
+            ui.hidden_media_checkpoint("quiet-native-hold");
+            ui.wait([&] { return !resources->active() || Clock::now() - started >= hold; },
+                "Hidden hold without DOM observation", 3);
+            result["quiet_hidden_observation"] = {{"session_sha256", core::Sha256::hex(session)},
+                {"elapsed_seconds", media_seconds(started, Clock::now())},
+                {"session_active_before_dom_probe", resources->active()}};
+            require(resources->active(), "Native media session closed during the hold without DOM observation");
+          }
           ui.hidden_media_checkpoint("paused-begin");
-          auto hidden = paused(session, "Hide must pause the actual native media");
+          auto hidden = options.quiet_hidden_hold ? ui.media(session) :
+              paused(session, "Hide must pause the actual native media");
           ui.hidden_media_checkpoint("paused-returned");
           ui.hidden_media_snapshot(hidden, playing);
+          if (options.quiet_hidden_hold) {
+            const auto after_hold = ui.last_native_pause();
+            require(before_hide_pause && after_hold, "Quiet hidden hold needs both native pause observations");
+            const auto &previous = (*before_hide_pause)[1];
+            const auto &pause = (*after_hold)[0]; // Sampled before the post-hold DOM evaluation.
+            result["quiet_hidden_observation"]["native_pause_before_dom_probe"] = native_pause_json(pause);
+            require(previous.available && pause.available &&
+                previous.navigation_generation == playing.navigation_generation &&
+                pause.navigation_generation == playing.navigation_generation &&
+                pause.media_generation == previous.media_generation + 1 && pause.visible_at_dispatch &&
+                pause.acknowledged && pause.verified,
+                "Quiet hidden hold must verify one new native pause on the same navigation before DOM sampling");
+            require(hidden.navigation_generation == playing.navigation_generation && hidden.paused && !hidden.seeking,
+                "The first post-hold DOM sample must show the same media paused");
+          }
           require(hidden.current_time < 2.9 && hidden.current_time >= playing.current_time - 0.05 && !hidden.ended,
               "Hidden pause must precede the color transition and natural ending");
-          hidden = ui.held_media(cycle, "hidden-tab-pause", session, hidden, 0.75);
+          if (!options.quiet_hidden_hold) {
+            hidden = ui.held_media(cycle, "hidden-tab-pause", session, hidden, 0.75);
+          }
           ui.finish_hidden_media(true);
-          ui.media_capture(cycle, "hidden-video-tab", 0, rectangle, hidden, session);
+          ui.media_capture(cycle, "hidden-video-tab", 0, rectangle, hidden,
+              options.quiet_hidden_hold ? std::string{} : session);
           return hidden;
         }
         catch (...) {
@@ -1781,6 +1821,11 @@ int main(int argc, char **argv)
     const std::string arg = argv[i];
 #if defined(__APPLE__) && defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES)
     if (arg == "--pre-seek-hide-control") { options.pre_seek_hide_control = true; continue; }
+    if (arg == "--quiet-pre-seek-hide-control") {
+      options.pre_seek_hide_control = true;
+      options.quiet_hidden_hold = true;
+      continue;
+    }
 #endif
     if (i + 1 >= argc) { return 2; }
     if (arg == "--python") { options.python = argv[++i]; }
@@ -1797,13 +1842,15 @@ int main(int argc, char **argv)
        && options.source != "video" && options.source != "html-video"
 #endif
       )) {
-    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control]\n"); return 2;
+    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control]\n"); return 2;
   }
   Json result = {{"format", "stk.reports-native-evidence/1"}, {"status", "running"}, {"required_cycles", options.reading_cycles()},
       {"completed_cycles", 0}, {"images", Json::array()}, {"native_scroll_requests", Json::array()},
       {"claim", "Production ReportsEditor app actions, frozen bridge resources and OS-composited STK client pixels; opt-in media also records bounded local native child input and fixed read-only media observations"},
       {"not_proven_here", "OS hardware input, IME, arbitrary PDF fidelity/search/selection, modal same-OS-batch ordering, physical scanout and browser memory stability; URL410/parent-close are separate Host CPU and spike native tests; final guarded memory is the separate after-static spike gate"}};
-  if (options.pre_seek_hide_control) { result["scenario"] = "pre-seek-hide-control"; }
+  if (options.pre_seek_hide_control) {
+    result["scenario"] = options.quiet_hidden_hold ? "quiet-pre-seek-hide-control" : "pre-seek-hide-control";
+  }
   fs::path directory;
   try {
     fs::create_directories(options.output);
@@ -1819,7 +1866,10 @@ int main(int argc, char **argv)
     // Engine static destructors and the final guarded leak gate belong to the separate spike.
     result["status"] = "passed";
     write(directory / "result.json", result.dump(2));
-    const char *scenario = options.pre_seek_hide_control ? "pre-seek hide control" : "native evidence";
+    const char *scenario = "native evidence";
+    if (options.pre_seek_hide_control) {
+      scenario = options.quiet_hidden_hold ? "quiet pre-seek hide control" : "pre-seek hide control";
+    }
     std::fprintf(stdout, "PASS: production ReportsEditor %s; cycles=%d; OS images=%zu; %s\n",
         scenario, options.reading_cycles(), result.at("images").size(), core::path_to_utf8(directory).c_str());
     return 0;
