@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 20:25 UTC · CLI 续读游标与前一 Desktop 终态
+
+Claude65 的 `92c94ffd` 经 root 复验合入为 `4169e528`。CLI 中断时报告已经输出的字节位置，轮询仍用 Runtime 原游标。直连与 Hub 旧版红例各自报告 7，修复后从 6 续读，中文字符完整，正常 EOF 的残缺字符按替换字符输出并推进到末尾。若恰在输出写入中断，续读可能重放该段。
+
+root 隔离候选的 Python 3.11 联测 120/120，Python 3.14 定向 4/4，均零跳过。此前旧 Runtime 末段重读的两项对照保持通过。
+
+远端 `fa2ff5e2` Desktop `42679509572` 于 20:23:30 UTC 终态，5/6 作业通过，唯一失败是 macOS 主原生 4/6。Linux 主测 2156/2156，两个打包作业成功。macOS CPU 1537/1537、Metal 254/254，同 seek 保持可见对照随本批进入下一头。Windows CPU 1478/1478，Windows 原生 6/6 且每项 20 轮，零跳过。同头 Runtime 13/13。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42679509572) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42679509572/artifacts/13707666795) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42679509438)
+
+证据位于本机 `root-delivery-20261109-113/` 的 `cli-{red,green,314}.xml` 和 `desktop-terminal.json`。Windows 原生 PDF 的 20 次重新准备各有独立会话，160 张截图，捕获启动最长 93 ms，重新准备阶段最长 1433 ms。
+
 ## 2026-11-09 20:18 UTC · X7 单机链路切断样例
 
 Claude64 的 `47e3cdde` 由 root 审阅修订后集成为 `127b0316`。`disconnect.py --scenario socket-partition` 在真实 NodeAgent 与 Hub 间主动关闭 TCP 隧道。两端保持运行，Runtime 在断线期间完成原任务，恢复后的首个精确答复返回同一任务成功。固定 stdout 和制品经真实 HubBackend 读取、下载并校验，只启动一次且 Hub 动作账本一致。

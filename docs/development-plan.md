@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-09 20:25 UTC · CLI 续读游标与前一 Desktop 终态
+
+`4169e528` 修正 CLI 中断时的 UTF-8 字节续读，最终联测 120/120。MuPRO 结果收集一致性已复现并进入后续修复。 [运行验收](runtime-validation.md)
+
+远端 `fa2ff5e2` Desktop `42679509572` 于 20:23:30 UTC 终态，5/6 作业通过，唯一失败是 macOS 主原生 4/6。Linux 主测 2156/2156，两个打包作业成功。macOS CPU 1537/1537、Metal 254/254，同 seek 保持可见对照随本批进入下一头。Windows CPU 1478/1478，Windows 原生 6/6 且每项 20 轮，零跳过。同头 Runtime 13/13。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42679509572) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42679509572/artifacts/13707666795) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42679509438)
+
 ## 2026-11-09 20:18 UTC · X7 单机链路切断样例
 
 D1 X7 已交付 `127b0316` 单机主动断链样例，源码和 wheel 各 15/15，联测 455/455。跨主机、静默丢包和原生桌面界面继续验收。 [D1 矩阵](planning/d1-compatibility-gates.md)
