@@ -91,7 +91,7 @@ def _plot_common():
 # Sources
 
 
-@node("stk.source.muferro_run", impl_version=8, title={"en": "muFerro run", "zh": "muFerro 计算"},
+@node("stk.source.muferro_run", impl_version=9, title={"en": "muFerro run", "zh": "muFerro 计算"},
       description={"en": "Index of a muFerro run directory: published field frames, the energy trace, "
                          "the progress log and the derived stk.result/1 manifest."},
       outputs=[Port("frames", "table", kind="frames"), Port("energy", "table"), Port("progress", "table"),
@@ -103,6 +103,8 @@ def _plot_common():
                                description="Directory inside the binding holding input.toml and the outputs; "
                                            "\"auto\" = the case_dir recorded by the STK launcher in stk-mupro.json "
                                            "(runs submitted with --input DIR), else the binding root."),
+          "live": boolean(True, title="Live run",
+                          description="Apply the stability filter for frames being written."),
       },
       time_dependent=True, fingerprint=_todo)
 def muferro_run(ctx, inputs, params):

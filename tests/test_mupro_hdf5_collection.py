@@ -92,7 +92,7 @@ def test_collect_hdf5_sidecar_is_verified_registered_and_not_resubmitted(project
     monkeypatch.setattr(api.viewer, "open", lambda folder, *, preset: opened.append((folder, preset)))
     params = {"project_id": p.snapshot()["project"]["id"], "run_id": run["id"]}
     native_action(api, "view", params)
-    assert opened == [(path.parent, "muferro-domains")]
+    assert opened == [(path.parent, "muferro-collected-domains")]
 
     path.unlink()
     if hasattr(os, "mkfifo"):
@@ -120,7 +120,7 @@ def test_collect_hdf5_sidecar_is_verified_registered_and_not_resubmitted(project
         path.unlink()
     with pytest.raises(ValueError, match="changed locally"):
         native_action(api, "view", params)
-    assert opened == [(path.parent, "muferro-domains")]
+    assert opened == [(path.parent, "muferro-collected-domains")]
 
     path.write_bytes(sidecar.read_bytes() + b"changed")
     with pytest.raises(ValueError, match="changed locally"):

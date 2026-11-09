@@ -149,7 +149,7 @@ def test_prepare_collect_retry_and_reopen(project, scripts, runtime, tmp_path, m
     opened = []
     monkeypatch.setattr(api.viewer, 'open', lambda path, *, preset: opened.append((path, preset)))
     api.muferro.view(run['id'])
-    assert opened == [(case_folder, 'muferro-domains')]
+    assert opened == [(case_folder, 'muferro-collected-domains')]
     before = revision(p)
     for name, content in (
         ('Polar.00000099.dat', (case_folder / 'Polar.00000000.dat').read_bytes()),
@@ -162,10 +162,10 @@ def test_prepare_collect_retry_and_reopen(project, scripts, runtime, tmp_path, m
             api.muferro.view(run['id'])
         with pytest.raises(ValueError, match='unregistered result file'):
             api.muferro.collect(run['id'])
-        assert opened == [(case_folder, 'muferro-domains')] and revision(p) == before
+        assert opened == [(case_folder, 'muferro-collected-domains')] and revision(p) == before
         extra.unlink()
     api.muferro.view(run['id'])
-    assert opened == [(case_folder, 'muferro-domains')] * 2
+    assert opened == [(case_folder, 'muferro-collected-domains')] * 2
 
     edit(p, row, 'attempt', 2)
     second = api.muferro.prepare(row, connection, expected_revision=revision(p), launcher='none')

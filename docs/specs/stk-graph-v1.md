@@ -1251,6 +1251,7 @@ Index of a muFerro run directory: published field frames, the energy trace, the 
 |---|---|---|---|
 | `binding` | string (pattern) | **required** | data |
 | `case_dir` | string (pattern) | `"auto"` | data |
+| `live` | boolean | `true` | data |
 
 #### `stk.source.mupro_hdf5@1` — MuPRO HDF5 field / MuPRO HDF5 场
 
@@ -1334,10 +1335,13 @@ Unless stated otherwise: input fields are kept (zero-copy), coordinates are phys
   metadata observation to the planned container SHA. HDF5 descriptors are qualified as `hdf5:<field>`
   in `result.datasets`; the `frames` table and `muferro_frame@1` retain their DAT contract. Native
   selectors are read by `mupro_hdf5@1`; see [MuPRO HDF5/1](mupro-hdf5-1.md).
-  The node uses the `mupro.muferro` connector (`describe(live=True)`). `case_dir: "auto"` (the
-  default) is the `case_dir` the STK launcher recorded in `stk-mupro.json` at the binding root (runs
-  submitted with `suan mupro submit --input DIR` keep their case in `DIR/`), else `"."`; an unsafe
-  recorded path also gives `"."`. `frames` columns: `dataset` (string stem), `step` (int64), `time`
+  The node passes `live` to the `mupro.muferro` connector's `describe` method. Its default is
+  `true`. Set `live: false` to index all frames of a finished run. MuFerro project View uses
+  the `muferro-collected-domains` preset with this option after checking the registered files.
+  An older node registry without this option keeps using the original `muferro-domains` preset.
+  `case_dir: "auto"` (the default) uses the `case_dir` the STK launcher recorded in `stk-mupro.json`
+  at the binding root. Runs submitted with `suan mupro submit --input DIR` keep their case in `DIR/`.
+  A missing or unsafe recorded path gives `"."`. `frames` columns: `dataset` (string stem), `step` (int64), `time`
   (float64, NaN = unknown), `path` (string, relative to the binding), `size` (int64), `sha256`
   (string, `""` if not computed; informational), `reader` (string, `mupro.dat@1`), `components`
   (int64); attrs `{binding, case_dir (resolved), complete}`. On a live view the newest frame of a stem

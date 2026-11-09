@@ -18,8 +18,8 @@ energy rows appended by a live run do not invalidate frame-derived nodes.
 from hashlib import sha256
 
 from suan.connectors.files import _stream_sha256
-from suan.graph.registry import (NodeExecutionError, Port, array, binding, enum, int3, integer, json_param, node,
-                                 rel_path, step, string, string_list, vector3)
+from suan.graph.registry import (NodeExecutionError, Port, array, binding, boolean, enum, int3, integer, json_param,
+                                 node, rel_path, step, string, string_list, vector3)
 
 RUN_FILES = ("energy_out.dat", "mupro_progress.jsonl", "mupro_completion.json")
 MAX_TOML_FILES = 64  # informational TOML listing cap, separate from the case dependency closure
@@ -193,8 +193,10 @@ def _empty_table(table_id, columns, index="step"):
                                description="Directory inside the binding holding input.toml and the outputs; "
                                            "\"auto\" = the case_dir recorded by the STK launcher in stk-mupro.json "
                                            "(runs submitted with --input DIR), else the binding root."),
+          "live": boolean(True, title="Live run",
+                          description="Apply the stability filter for frames being written."),
       },
-      time_dependent=True, impl_version=8, fingerprint=_muferro_run_fingerprint)
+      time_dependent=True, impl_version=9, fingerprint=_muferro_run_fingerprint)
 def muferro_run(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
     from suan.connectors.mupro.tables import ENERGY_COLUMNS
@@ -203,6 +205,7 @@ def muferro_run(ctx, inputs, params):
     connector = _muferro()
     native = _native_muferro_description(connector)
     planned = ctx.source_fingerprint if native else None
+    live = params["live"]
     case_dir = planned["case_dir"] if native else _case_dir(source, params["case_dir"])
     prefix = _prefix(case_dir)
     # A replacement connector (e.g. the private stk-mupro package) implements the plain protocol.
@@ -219,11 +222,11 @@ def muferro_run(ctx, inputs, params):
     try:
         if _native_muferro_tables(connector):
             tables = _read_planned_run_tables(source, prefix, planned["sha256"], ctx.check)
-            result = connector.describe(source, live=True, table_observations=tables, **extra)
+            result = connector.describe(source, live=live, table_observations=tables, **extra)
             energy = tables.get(prefix + _ENERGY_FILE, {}).get("table")
             progress = tables.get(prefix + _PROGRESS_FILE, {}).get("table")
         else:
-            result = connector.describe(source, live=True, **extra)
+            result = connector.describe(source, live=live, **extra)
             datasets = {d["id"] for d in result["datasets"]}
             extra = {"case_dir": case_dir, "result": result} if ours else {}
             energy = connector.open(source, "energy", **extra).read(frame=None) if "energy" in datasets else None

@@ -5161,7 +5161,7 @@
    "id": "stk.source.muferro_run@1",
    "type": "stk.source.muferro_run",
    "version": 1,
-   "impl_version": 8,
+   "impl_version": 9,
    "stage": "source",
    "category": "source",
    "title": {
@@ -5212,6 +5212,13 @@
       "description": "Directory inside the binding holding input.toml and the outputs; \"auto\" = the case_dir recorded by the STK launcher in stk-mupro.json (runs submitted with --input DIR), else the binding root.",
       "x-stk-widget": "path",
       "default": "auto",
+      "x-stk-stage": "data"
+     },
+     "live": {
+      "type": "boolean",
+      "title": "Live run",
+      "description": "Apply the stability filter for frames being written.",
+      "default": true,
       "x-stk-stage": "data"
      }
     },

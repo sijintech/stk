@@ -9,7 +9,7 @@
   take down the catalog.
 * :func:`compare_catalog`: the live catalog against the frozen spec catalog
   (``docs/specs/catalog/stk-catalog-m1.json``), family by family.
-* :func:`list_presets` / :func:`load_preset`: graph templates shipped in
+* :func:`list_presets` / :func:`load_preset`: graph templates shipped or derived from files in
   ``suan/graph/presets/<id>.json`` (either an ``stk.graph/1`` document or
   ``{"id", "name", "description", "graph", "bindings"?}``).
 
@@ -23,7 +23,7 @@ import threading
 
 from .nodes import MODULE_FAMILIES, builtin_modules, register_builtin
 from .registry import Registry
-from .schema import GraphError
+from .schema import GraphError, validate_graph
 
 __all__ = [
     "ENTRY_POINT_GROUP", "NAMESPACES", "PRESET_ID_RE",
@@ -34,6 +34,7 @@ __all__ = [
 NAMESPACES = {"stk": 1}
 ENTRY_POINT_GROUP = "stk.nodes"
 PRESET_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}\Z")
+_COLLECTED_MUFERRO_PRESET = "muferro-collected-domains"
 
 _default = None
 _default_lock = threading.Lock()
@@ -145,6 +146,16 @@ def _presets_root():
 def _read_preset(preset_id):
     if not isinstance(preset_id, str) or not PRESET_ID_RE.match(preset_id):
         raise GraphError("unknown_preset", f"Invalid preset id {preset_id!r}")
+    if preset_id == _COLLECTED_MUFERRO_PRESET:
+        preset = _read_preset("muferro-domains")
+        name = "Collected muFerro ferroelectric domains"
+        description = "Classify the polarization of the selected published frame in a collected MuFerro run."
+        preset.update(id=preset_id, name=name, description=description)
+        graph = preset["graph"]
+        graph.update(id=preset_id, name=name, description=description)
+        run = next(node for node in graph["nodes"] if node["id"] == "run")
+        run["params"]["live"] = False
+        return preset
     resource = _presets_root().joinpath(preset_id + ".json")
     if not resource.is_file():
         known = ", ".join(entry["id"] for entry in _preset_files()) or "none installed"
@@ -161,11 +172,13 @@ def _read_preset(preset_id):
 def _preset_files():
     root = _presets_root()
     try:
-        entries = sorted(root.iterdir(), key=lambda entry: entry.name)
+        ids = {entry.name[:-5] for entry in root.iterdir()
+               if entry.name.endswith(".json") and PRESET_ID_RE.match(entry.name[:-5])}
     except (FileNotFoundError, NotADirectoryError):
         return []
-    return [{"id": entry.name[:-5]} for entry in entries
-            if entry.name.endswith(".json") and PRESET_ID_RE.match(entry.name[:-5])]
+    if "muferro-domains" in ids:
+        ids.add(_COLLECTED_MUFERRO_PRESET)
+    return [{"id": preset_id} for preset_id in sorted(ids)]
 
 
 def load_preset(preset_id):
@@ -188,7 +201,7 @@ def _bindings(graph, registry):
 
 
 def preset_document(preset_id):
-    """A shipped preset file as read: ``{"id", "graph", ...}`` (``GraphError('unknown_preset')`` otherwise).
+    """A bundled preset document ``{"id", "graph", ...}`` (``GraphError('unknown_preset')`` otherwise).
 
     A bare ``stk.graph/1`` file becomes ``{"id", "graph"}``; a new object is returned on every call.
     """
@@ -215,4 +228,12 @@ def describe_preset(preset, registry=None):
 def list_presets(registry=None):
     """``[{"id", "name", "description", "graph", "bindings": [{"name", "description"}], "parameters"}]``."""
     registry = registry if registry is not None else default_registry()
-    return [describe_preset(_read_preset(item["id"]), registry) for item in _preset_files()]
+    presets = []
+    for item in _preset_files():
+        preset = _read_preset(item["id"])
+        if preset["id"] == _COLLECTED_MUFERRO_PRESET:
+            # Keep older node overrides usable through the original preset.
+            if any(issue.severity == "error" for issue in validate_graph(preset["graph"], registry)):
+                continue
+        presets.append(describe_preset(preset, registry))
+    return presets

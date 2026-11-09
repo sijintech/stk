@@ -456,7 +456,10 @@ class MuFerro:
             registered.add(path)
         folder = root / "results" / "muferro" / str(UUID(run_id)) / "case"
         _check_local_result_inventory(folder, registered)
-        return self.stk.viewer.open(folder, preset="muferro-domains")
+        preset = "muferro-collected-domains"
+        if not any(entry["id"] == preset for entry in self.stk.graph.presets()):
+            preset = "muferro-domains"
+        return self.stk.viewer.open(folder, preset=preset)
 
 
 def native_action(stk, action, params):

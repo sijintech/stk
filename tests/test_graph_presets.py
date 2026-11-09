@@ -13,7 +13,8 @@ from suan.graph.registry import Registry
 from suan.graph.schema import validate_graph
 
 ROOT = Path(__file__).resolve().parents[1]
-PRESETS = ("energy-plot", "iso", "lammps-diffusion", "lammps-modulus", "lammps-molecule", "lammps-tg", "muferro-domains", "muferro-polarization-glyphs",
+PRESETS = ("energy-plot", "iso", "lammps-diffusion", "lammps-modulus", "lammps-molecule", "lammps-tg",
+           "muferro-collected-domains", "muferro-domains", "muferro-polarization-glyphs",
            "scalar-volume", "slice", "vectors", "volume")
 
 
@@ -32,7 +33,7 @@ def test_every_preset_validates_against_the_spec_and_live_catalogs():
             assert issues == [], (preset["id"], [(i.code, i.path, i.message) for i in issues])
         assert preset["name"] and preset["description"] and preset["parameters"]
         names = [b["name"] for b in preset["bindings"]]
-        assert names == (["run"] if preset["id"] in ("energy-plot", "muferro-domains", "muferro-polarization-glyphs")
+        assert names == (["run"] if preset["id"] == "energy-plot" or preset["id"].startswith("muferro-")
                          else ["data"])
         assert all(b["description"] for b in preset["bindings"])
         assert catalog.load_preset(preset["id"]) == preset["graph"]
@@ -41,6 +42,22 @@ def test_every_preset_validates_against_the_spec_and_live_catalogs():
                 "summary", "fit", "diagnostics", "plot") if preset["id"].startswith("lammps-") else (
                 "view", "image", "fractions", "families", "energy", "table")
             assert name in allowed
+
+
+def test_collected_domains_keeps_the_existing_live_preset_definition():
+    collected = catalog.load_preset("muferro-collected-domains")
+    live = catalog.load_preset("muferro-domains")
+    assert collected["nodes"][0]["params"] == {"binding": "run", "live": False}
+    assert live["nodes"][0]["params"] == {"binding": "run"}
+    assert collected["nodes"][1:] == live["nodes"][1:]
+    assert collected["parameters"] == live["parameters"]
+    assert collected["outputs"] == live["outputs"]
+
+    legacy = catalog.catalog_document(catalog.build_registry(entry_points=False))
+    run_node = next(node for node in legacy["nodes"] if node["id"] == "stk.source.muferro_run@1")
+    del run_node["params"]["properties"]["live"]
+    presets = {preset["id"] for preset in catalog.list_presets(Registry.from_catalog(legacy))}
+    assert "muferro-domains" in presets and "muferro-collected-domains" not in presets
 
 
 def test_presets_hold_no_paths_and_expose_their_thresholds():
