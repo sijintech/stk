@@ -1,5 +1,9 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · bc25f579 Desktop 终态
+
+精确 `bc25f579b9c4ddd645145f7c7d29963dbb6ea7f6` 的 Desktop 于 09:22:41Z 终态失败。Windows 原生作业于 09:22:40Z 结束，六项均执行且五项通过，`reports_native_pdf_opengl` 在重新准备后等待 `reprepared-page1` 的 OS 像素超时。Windows CPU 1460/1460，Linux 三项通过。macOS 原生 4/6，定位前采样和静默隐藏各 0/2。Runtime 13 项通过。整轮终态满足下一批推送门，目标平台结果继续逐项验收。 [Desktop](https://github.com/sijintech/stk/actions/runs/42584441296) [Windows 原生作业](https://github.com/sijintech/stk/actions/runs/42584441296/job/129068743682) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42584441296/artifacts/13661772980)
+
 ## 2026-11-09 UTC · 快照发布摘要与 Cocoa 暂停动作对照
 
 `7eb7782206f425bdeb99e0cda25b3cfb42be2aa6` 把工作流收集回执的逐文件 SHA-256 传到快照的实际复制路径。合成 HDF5 在项目文件登记后将 Polar 从 1 改为 9，旧执行器接受并发布改写字节。候选在对象入库前拒绝，快照、改写对象和临时文件均无记录，已完成的文件登记保留。恢复原字节后同一路径捕获成功。共享入口也覆盖 LAMMPS。精确源码联合 129 项通过，1 项为真实许可条件跳过。root 另验源码 36 项与隔离 wheel 23 项。 [桥接契约](specs/stk-desktop-bridge-v1.md)

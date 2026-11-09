@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · 目标平台接续
+
+下一轮 macOS 对比固定隔离暂停动作与现有静默隐藏。Windows 保留 PDF 重准备的画面判据，`bc25f579` 本轮超时后核对会话与画面阶段。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 结果冻结和原生暂停对照
 
 工作流结果快照绑定验证过的收集摘要，异常替换在对象入库前拒绝。macOS 下一轮用固定隔离暂停动作与既有静默隐藏路径比较，沿用相同的核验、截止、保留草稿及重显判据。D1 X7 已有作者单机证据，待 Claude38 收口首个实时答复和下载清单后由 root 验收。 [验收记录](runtime-validation.md) [D1 矩阵](planning/d1-compatibility-gates.md)

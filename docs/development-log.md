@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · 核对整轮终态
+
+root 核对 `bc25f579` 的 Windows PDF 重新准备和 macOS 隐藏验收失败，确认上轮所有作业已终态，进入含 Cocoa 新对照的下一批。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · Cocoa 动作对照和快照摘要
 
 root 在 `41ac8fdf` 以 macOS 测试专用的一次性动作隔离暂停派发变量。 `7eb77822` 将 MuFerro 与 LAMMPS 的最终状态快照绑定各自收集摘要，HDF5 替换反例验证无错误对象、临时文件或快照。Claude38 `e31d1f29` 已审阅，后续候选补首答复和下载前的验收。 [验收记录](runtime-validation.md)
