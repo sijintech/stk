@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,32 +22,25 @@ from suan.graph.catalog import load_preset  # noqa: E402
 from suan.project import ProjectError, ProjectStore  # noqa: E402
 from suan.render.payload import decode  # noqa: E402
 from suan.workflows.muferro import RESULT_FIELD_IDS, RESULT_TABLE_ID, native_action  # noqa: E402
+from test_desktop_bridge import BridgeCallError  # noqa: E402
 from test_desktop_bridge_runtime import add_profile  # noqa: E402
 from test_workflow_muferro import project, scripts, bridge_env, revision  # noqa: E402,F401
 
 
-@pytest.mark.parametrize("mode", ["valid", "grid", "empty", "corrupt", "dtype", "components"])
-def test_collect_hdf5_sidecar_is_verified_registered_and_not_resubmitted(project, scripts, runtime,
-                                                                       tmp_path, monkeypatch, mode):
+SELECTOR = "t00000002/Polar"
+_POSIX_LINKS = pytest.mark.skipif(os.name == "nt" or not hasattr(os, "symlink"),
+                                 reason="the case-directory swap uses a POSIX directory symlink")
+
+
+def _synthetic_hdf5_run(project, scripts, runtime, tmp_path, monkeypatch, sidecar):
+    """Prepare, submit and finish one synthetic MuFerro task whose solver publishes ``sidecar`` as run.h5."""
     api, p = project
     client, supervisor, _, _ = runtime
     connection = add_profile(scripts, runtime)
     sdk = make_fake_sdk(tmp_path / "synthetic-sdk", steps=4)
-    sidecar = tmp_path / "synthetic-run.h5"
-    values = np.arange(4 * 3 * 2 * 3, dtype=np.float32).reshape(4, 3, 2, 3)
-    if mode == "corrupt":
-        sidecar.write_bytes(b"synthetic invalid HDF5")
-    else:
-        with h5py.File(sidecar, "w") as file:
-            if mode != "empty":
-                file.create_dataset("t00000002/Polar", data=np.ones((5, 3, 2, 3)) if mode == "grid" else values)
-                if mode == "valid":  # A later explicit step makes the frozen analysis selector discriminating.
-                    file.create_dataset("t00000004/Polar", data=values + 100)
-                if mode in {"dtype", "components"}:
-                    file.create_dataset("t00000004/Polar", data=values.astype("float64") if mode == "dtype"
-                                        else np.ones((4, 3, 2, 4), dtype="float32"))
     program = sdk / "bin/muFerro"
     text = program.read_text()
+    assert text.count("sys.exit(fake_muferro('ok'))") == 1
     text = text.replace("sys.exit(fake_muferro('ok'))",
                         "result = fake_muferro('ok')\nimport shutil\n"
                         f"shutil.copyfile({str(sidecar)!r}, 'run.h5')\nsys.exit(result)")
@@ -60,6 +54,28 @@ def test_collect_hdf5_sidecar_is_verified_registered_and_not_resubmitted(project
     run = api.muferro.prepare(row, connection, expected_revision=revision(p), launcher="none")
     task_id = p.runs.submit(run["id"])["status"]["task"]["id"]
     assert finish(client, supervisor, task_id)["state"] == "succeeded"
+    return run, task_id
+
+
+@pytest.mark.parametrize("mode", ["valid", "grid", "empty", "corrupt", "dtype", "components"])
+def test_collect_hdf5_sidecar_is_verified_registered_and_not_resubmitted(project, scripts, runtime,
+                                                                       tmp_path, monkeypatch, mode):
+    api, p = project
+    client = runtime[0]
+    sidecar = tmp_path / "synthetic-run.h5"
+    values = np.arange(4 * 3 * 2 * 3, dtype=np.float32).reshape(4, 3, 2, 3)
+    if mode == "corrupt":
+        sidecar.write_bytes(b"synthetic invalid HDF5")
+    else:
+        with h5py.File(sidecar, "w") as file:
+            if mode != "empty":
+                file.create_dataset("t00000002/Polar", data=np.ones((5, 3, 2, 3)) if mode == "grid" else values)
+                if mode == "valid":  # A later explicit step makes the frozen analysis selector discriminating.
+                    file.create_dataset("t00000004/Polar", data=values + 100)
+                if mode in {"dtype", "components"}:
+                    file.create_dataset("t00000004/Polar", data=values.astype("float64") if mode == "dtype"
+                                        else np.ones((4, 3, 2, 4), dtype="float32"))
+    run, _ = _synthetic_hdf5_run(project, scripts, runtime, tmp_path, monkeypatch, sidecar)
     if mode != "valid":
         with pytest.raises((ValueError, RuntimeError), match="HDF5|HDF|readable"):
             api.muferro.collect(run["id"])
@@ -203,7 +219,8 @@ def _assert_collected_analysis(p, collected, sidecar_bytes, values):
     assert p.files.list()["records"] == files_before
 
 
-def test_workflow_snapshot_refuses_changed_hdf5_after_collection(tmp_path, monkeypatch):
+@pytest.mark.parametrize("fault", ["bytes", pytest.param("relink", marks=_POSIX_LINKS)])
+def test_workflow_snapshot_refuses_changed_hdf5_after_collection(tmp_path, monkeypatch, fault):
     store = ProjectStore.create(tmp_path / "project", "Collected HDF5 snapshot")
     simulation_id, workflow_id, row_id, result_id = (str(uuid4()) for _ in range(4))
     relative = f"results/muferro/{simulation_id}/case/run.h5"
@@ -215,15 +232,20 @@ def test_workflow_snapshot_refuses_changed_hdf5_after_collection(tmp_path, monke
     verified = output.read_bytes()
     digest = hashlib.sha256(verified).hexdigest()
 
-    def collect(run_id, *, project):
-        assert run_id == simulation_id and project is store
-        return {"record_id": result_id, "files": [{"path": relative, "sha256": digest}]}
-
     replaced = False
+    restore = None
+
+    def collect(run_id, *, project):
+        nonlocal replaced, restore
+        assert run_id == simulation_id and project is store
+        if fault == "relink" and not replaced:
+            replaced = True
+            restore = _link_case_elsewhere(output.parent, tmp_path / "outside-case")
+        return {"record_id": result_id, "files": [{"path": relative, "sha256": digest}]}
 
     def after_index(_project):
         nonlocal replaced
-        if not replaced:
+        if fault == "bytes" and not replaced:
             replaced = True
             with h5py.File(output, "r+") as file:
                 file[selector][...] = 9.0
@@ -237,17 +259,172 @@ def test_workflow_snapshot_refuses_changed_hdf5_after_collection(tmp_path, monke
     row = {"id": row_id}
     run = {"id": simulation_id, "status": {"task": {"id": "c" * 32}}}
 
-    with pytest.raises(ProjectError, match="expected SHA-256"):
+    with pytest.raises(ProjectError, match="expected SHA-256" if fault == "bytes" else "directories"):
         executor._collect(job, plan, "simulation", row, 1, run)
     assert replaced and store.snapshots.list()["snapshots"] == []
-    assert store.info()["revision"] == 1  # Only the file index was saved.
+    assert store.info()["revision"] == (1 if fault == "bytes" else 0)
+    assert all(record["location"] == "project" for record in store.files.list()["records"])
     assert not list((store.directory / ".stk/objects/sha256").glob("*/*"))
-    assert not list((store.directory / ".stk/tmp").iterdir())
+    assert not list((store.directory / ".stk/tmp").glob("*"))
 
-    output.write_bytes(verified)
+    if restore is None:
+        output.write_bytes(verified)
+    else:
+        restore()
     produced = executor._collect(job, plan, "simulation", row, 1, run)
     file_id = produced["files"]["case/run.h5"]
     frozen = store.snapshots.resolve(produced["snapshot_id"], file_id)
     assert produced["result_record_id"] == result_id
     assert Path(frozen["path"]).read_bytes() == verified
     assert len(store.snapshots.list()["snapshots"]) == 1
+
+
+def _sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def _tamper_at_first_registration(patch, files_type, root, tamper, *, after_index=False):
+    """Change run.h5 just before or after its managed index batch."""
+    fired, original_index = [], files_type.index
+
+    def index(self, paths, **kwargs):
+        target = next((Path(path) for path in paths if Path(path).name == "run.h5"), None)
+        if target is None or fired:
+            return original_index(self, paths, **kwargs)
+        target = root / target
+        result = original_index(self, paths, **kwargs) if after_index else None
+        fired.append(target)
+        tamper(target)
+        return result if after_index else original_index(self, paths, **kwargs)
+    patch.setattr(files_type, "index", index)
+    return fired
+
+
+def _same_size_same_mtime(path, original, write):
+    """Change one voxel with ``write``, keep the size and restore the mtime; return the byte restorer."""
+    before = path.stat()
+    write(path)
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    after, changed = path.stat(), path.read_bytes()
+    assert (after.st_size, after.st_mtime_ns) == (before.st_size, before.st_mtime_ns)
+    assert _sha256(changed) != _sha256(original)
+
+    def restore():
+        path.write_bytes(original)
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    return restore
+
+
+def _overwrite_voxel(path):
+    with h5py.File(path, "r+") as file:
+        file[SELECTOR][0, 0, 0, 0] = 999
+
+
+def _replace_with_changed_copy(swap):
+    def write(path):
+        shutil.copyfile(path, swap)
+        _overwrite_voxel(swap)
+        os.replace(swap, path)  # a new file; the caller restores the verified mtime
+    return write
+
+
+def _link_case_elsewhere(case, outside):
+    """Move the owned case directory aside and put a link to a byte-identical tree outside the project in its place."""
+    shutil.copytree(case, outside)
+    displaced = case.rename(case.with_name("displaced-case"))
+    case.symlink_to(outside, target_is_directory=True)
+
+    def restore():
+        case.unlink()  # the link only; the outside tree stays untouched
+        displaced.rename(case)
+    return restore
+
+
+def _assert_registered_verified_bytes(p, collected, run_id, task_id, original, values):
+    """The returned files, result row, project Files record and normal reads all name the verified run.h5."""
+    recorded = next(file for file in collected["files"] if file["path"].endswith("/case/run.h5"))
+    assert recorded == {"path": f"results/muferro/{run_id}/case/run.h5", "sha256": _sha256(original)}
+    table = next(table for table in p.snapshot()["tables"] if table["id"] == RESULT_TABLE_ID)
+    [row] = table["records"]
+    assert row["values"][RESULT_FIELD_IDS["task"]] == task_id
+    assert recorded in row["values"][RESULT_FIELD_IDS["files"]]
+    files = p.files.list()["records"]
+    assert [(r["location"], r["path"]) for r in files if r["location"] != "project"] == []
+    [record] = [r for r in files if r["path"] == recorded["path"]]
+    assert (record["location"], record["state"], record["size"]) == ("project", "present", len(original))
+    frozen = p.snapshots.capture([record["id"]], expected_revision=revision(p))["snapshot"]
+    assert [(f["path"], f["sha256"]) for f in frozen["manifest"]["files"]] == [(recorded["path"], _sha256(original))]
+    with h5py.File(p.snapshots.resolve(frozen["id"], record["id"])["path"], "r") as file:
+        np.testing.assert_array_equal(file[SELECTOR][...], values)
+    image = MuFerroConnector().open(LocalFiles(collected["directory"]), "hdf5:Polar").read(frame={"first": True})
+    np.testing.assert_array_equal(image.array("Polar"), values.transpose(2, 1, 0, 3))
+
+
+@pytest.mark.parametrize("mode", ["control", "rewrite", "replace", "late", pytest.param("relink", marks=_POSIX_LINKS)])
+def test_collect_registers_only_the_verified_hdf5_bytes(project, scripts, runtime, tmp_path, monkeypatch, mode):
+    """A same-size, same-mtime change or a case-directory link swap during registration is refused; restore and retry."""
+    api, p = project
+    client, server = runtime[0], runtime[2]
+    submissions, cancels = [], []
+    submit, cancel = server.service.submit, server.service.cancel
+
+    def record_submit(spec, key):
+        submissions.append(key)
+        return submit(spec, key)
+
+    def record_cancel(task_id):
+        cancels.append(task_id)
+        return cancel(task_id)
+    monkeypatch.setattr(server.service, "submit", record_submit)
+    monkeypatch.setattr(server.service, "cancel", record_cancel)
+    sidecar = tmp_path / "synthetic-run.h5"
+    values = np.arange(4 * 3 * 2 * 3, dtype=np.float32).reshape(4, 3, 2, 3)
+    with h5py.File(sidecar, "w") as file:
+        file.create_dataset(SELECTOR, data=values)
+    original = sidecar.read_bytes()
+    run, task_id = _synthetic_hdf5_run(project, scripts, runtime, tmp_path, monkeypatch, sidecar)
+    root = Path(next(item["directory"] for item in api.projects.list() if item["handle"] == p.handle))
+    assert (len(submissions), cancels) == (1, [])
+    restorers = []
+
+    def tamper(path):
+        assert path.read_bytes() == original  # collection has already verified these bytes
+        if mode in {"rewrite", "late"}:
+            restorers.append(_same_size_same_mtime(path, original, _overwrite_voxel))
+        elif mode == "replace":
+            restorers.append(_same_size_same_mtime(path, original, _replace_with_changed_copy(tmp_path / "swap.h5")))
+        elif mode == "relink":
+            restorers.append(_link_case_elsewhere(path.parent, tmp_path / "outside-case"))
+
+    with monkeypatch.context() as patch:
+        fired = _tamper_at_first_registration(patch, type(p.files), root, tamper, after_index=mode == "late")
+        try:
+            collected, error = api.muferro.collect(run["id"]), None
+        except (BridgeCallError, ValueError, RuntimeError) as exc:
+            collected, error = None, exc
+    assert len(fired) == 1, "collection no longer reached the injected registration seam; retarget it"
+    if mode == "control":
+        assert error is None
+        _assert_registered_verified_bytes(p, collected, run["id"], task_id, original, values)
+        assert (len(submissions), cancels, len(client.tasks())) == (1, [], 1)
+        return
+
+    observed = {
+        "rejected": error is not None,
+        "result_rows": [row["id"] for table in p.snapshot()["tables"] if table["id"] == RESULT_TABLE_ID
+                        for row in table["records"]],
+        "external_files": [(r["location"], r["path"]) for r in p.files.list()["records"] if r["location"] != "project"],
+        "submissions": len(submissions), "cancels": len(cancels), "tasks": len(client.tasks()),
+    }
+    assert observed == {"rejected": True, "result_rows": [], "external_files": [],
+                        "submissions": 1, "cancels": 0, "tasks": 1}, (observed, collected)
+    if mode == "late":
+        assert isinstance(error, ProjectError) and "digest changed" in str(error)
+    else:
+        assert isinstance(error, BridgeCallError) and error.code == "invalid_params"
+
+    [restore] = restorers
+    restore()
+    retried = api.muferro.collect(run["id"])
+    _assert_registered_verified_bytes(p, retried, run["id"], task_id, original, values)
+    assert (len(submissions), cancels, len(client.tasks())) == (1, [], 1)

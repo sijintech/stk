@@ -1,6 +1,7 @@
 """The local project extension over the real bridge envelope and strict shared schema."""
 
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import sqlite3
 import threading
 from uuid import uuid4
@@ -192,6 +193,36 @@ def test_files_bridge_metadata_edits_resolution_and_undo_follow_shared_contract(
     assert harness.call("project.files.list", {"handle": handle})["records"][0]["state"] == "present"
     assert not inside.exists()
     assert not harness.violations
+
+
+def test_managed_index_checks_every_path_and_digest_before_writing(inproc, files):
+    store, first, external = files
+    harness = inproc()
+    handle = harness.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    second = first.with_name("second.bin")
+    second.write_bytes(b"second")
+    paths = [path.relative_to(store.directory).as_posix() for path in (first, second)]
+    proof = [{"size": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+             for path in (first, second)]
+    params = {"handle": handle, "expected_revision": 0, "paths": paths, "expected_files": proof}
+    wrong_digest = {**proof[1], "sha256": "0" * 64}
+    for refused in (
+        {**params, "expected_files": proof[:1]},
+        {**params, "expected_files": [proof[0], wrong_digest]},
+        {**params, "paths": [paths[0], str(external)]},
+        {**params, "paths": [paths[0], paths[0]], "expected_files": [proof[0], proof[0]]},
+    ):
+        assert harness.error("project.files.index", refused)["code"] == "invalid_params"
+        index = harness.call("project.files.list", {"handle": handle})
+        assert index["revision"] == 0 and index["records"] == []
+    accepted = harness.call("project.files.index", params)
+    assert accepted["revision"] == 1 and len(accepted["record_ids"]) == 2
+    assert harness.wait_event(lambda event: event["event"] == "project.changed")["data"] == {"handle": handle, "revision": 1}
+    listed = harness.call("project.files.list", {"handle": handle})["records"]
+    assert [(row["path"], row["location"], row["size"]) for row in listed] == [
+        (path, "project", item["size"]) for path, item in zip(paths, proof)]
+    ordinary = harness.call("project.files.index", {"handle": handle, "expected_revision": 1, "paths": [str(external)]})
+    assert ordinary["revision"] == 2 and not harness.violations
 
 
 def test_shutdown_does_not_wait_again_on_an_inflight_database_operation():

@@ -84,32 +84,32 @@ def _is_reparse(info):
     return bool(getattr(info, "st_file_attributes", 0) & _stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
-def _unlinked_regular(path):
-    info = os.lstat(path)
+def _unlinked_regular(path, *, dir_fd=None):
+    info = os.lstat(path) if dir_fd is None else os.lstat(path, dir_fd=dir_fd)
     if not _stat.S_ISREG(info.st_mode) or _is_reparse(info):
         raise NotRegularFile(f"Not a regular file or is a symbolic link or reparse point: {path}")
     return info
 
 
-def open_regular(path, *, follow_symlinks=True):
+def open_regular(path, *, follow_symlinks=True, dir_fd=None):
     """Open a regular file for binary reading; never blocks on a FIFO (``O_NONBLOCK`` + ``fstat``).
 
     ``follow_symlinks=False`` also rejects symbolic links and reparse points at the last path component.
-    The caller supplies the parent path.
+    The caller supplies the parent path or a pinned directory descriptor on POSIX.
     Raises ``FileNotFoundError`` or :class:`NotRegularFile` (an ``OSError``).
     """
     nonblock = getattr(os, "O_NONBLOCK", 0)
     flags = os.O_RDONLY | nonblock | getattr(os, "O_BINARY", 0)
-    before = None if follow_symlinks else _unlinked_regular(path)
+    before = None if follow_symlinks else _unlinked_regular(path, dir_fd=dir_fd)
     if before is not None:
         flags |= getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags)
+    descriptor = os.open(path, flags) if dir_fd is None else os.open(path, flags, dir_fd=dir_fd)
     try:
         opened = os.fstat(descriptor)
         if not _stat.S_ISREG(opened.st_mode):
             raise NotRegularFile(f"Not a regular file: {path}")
         if before is not None and (_is_reparse(opened) or not os.path.samestat(before, opened) or
-                                   not os.path.samestat(_unlinked_regular(path), opened)):
+                                   not os.path.samestat(_unlinked_regular(path, dir_fd=dir_fd), opened)):
             raise NotRegularFile(f"File changed while opening: {path}")
         if nonblock:
             import fcntl

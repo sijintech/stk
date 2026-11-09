@@ -1,12 +1,14 @@
 """A file index built from ordinary project tables, fields and records.
 
-Registration/refresh observes metadata only. It never copies, removes, executes or
-reads file contents. Relative locations remain portable; external locations retain
-the originating path syntax. All writes go through the shared revisioned edit API.
+Ordinary registration and refresh observe metadata only. Managed registration can
+verify expected content before writing the same index records. Neither copies,
+removes or executes files. All edits use the shared revisioned API.
 """
 from datetime import datetime, timezone
+import hashlib
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
+import re
 import stat
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -93,10 +95,60 @@ def _resolve(root, location, path):
             candidate = Path(path).resolve()
     else:
         raise ProjectError("File index location must be project, external:posix or external:windows")
+    _check_database_path(root, candidate)
+    return candidate
+
+
+def _check_database_path(root, candidate):
     name = candidate.name.casefold() if PLATFORM == "windows" else candidate.name
     if candidate.parent == root and name in {"project.sqlite3", "project.sqlite3-wal", "project.sqlite3-shm", "project.sqlite3-journal"}:
         raise ProjectError("The live project database and its transaction files are not indexable resources")
-    return candidate
+
+
+def observe_managed_file(root, path, expected=None):
+    """Observe exactly one project-relative file, optionally binding the bytes to a manifest."""
+    from suan.connectors.files import open_regular
+    from suan.runtime.models import relative_path
+    from .file_tree import _directory, _link
+
+    try:
+        if relative_path(path) != path or len(path) > 32768:
+            raise ValueError
+    except ValueError:
+        raise ProjectError("Managed files require canonical project-relative paths") from None
+    parts = PurePosixPath(path).parts
+    _check_database_path(root, root.joinpath(*parts))
+    try:
+        with _directory(root, parts[:-1]) as directory:
+            descriptor = directory if isinstance(directory, int) else None
+            target = parts[-1] if descriptor is not None else directory / parts[-1]
+            with open_regular(target, follow_symlinks=False, dir_fd=descriptor) as stream:
+                before = os.fstat(stream.fileno())
+                if expected is not None:
+                    remaining = expected["size"]
+                    if before.st_size != remaining:
+                        raise ProjectError(f"Managed file size changed: {path}")
+                    digest = hashlib.sha256()
+                    while remaining:
+                        block = stream.read(min(1024 * 1024, remaining))
+                        if not block:
+                            raise ProjectError(f"Managed file was truncated: {path}")
+                        digest.update(block)
+                        remaining -= len(block)
+                    if stream.read(1) or digest.hexdigest() != expected["sha256"]:
+                        raise ProjectError(f"Managed file digest changed: {path}")
+                after = os.fstat(stream.fileno())
+                current = os.lstat(target, dir_fd=descriptor)
+                if (_link(current) or not os.path.samestat(after, current)
+                        or before.st_size != after.st_size or after.st_size != current.st_size
+                        or before.st_mtime_ns != after.st_mtime_ns or after.st_mtime_ns != current.st_mtime_ns
+                        or before.st_ctime_ns != after.st_ctime_ns):
+                    raise ProjectError(f"Managed file changed while checking: {path}")
+    except (OSError, RuntimeError) as exc:
+        raise ProjectError(f"Managed file is unavailable or has an unsafe path: {path}") from exc
+    return {"kind": _kind(path), "size": after.st_size, "state": "present",
+            "modified": datetime.fromtimestamp(after.st_mtime, timezone.utc).isoformat(),
+            "checked": datetime.now(timezone.utc).isoformat()}
 
 
 def _observe(root, location, path):
@@ -183,9 +235,19 @@ class FileIndex:
         return {"revision": snapshot["project"]["revision"], "table_id": TABLE_ID,
                 "records": [{"id": row["id"], **self._values(row)} for row in table["records"]] if table else []}
 
-    def index(self, paths, *, expected_revision):
+    def index(self, paths, *, expected_revision, expected_files=None, _project_only=False):
+        plan = self._plan_index(paths, expected_revision, expected_files, _project_only)
+        return self._apply_index(plan, expected_revision)
+
+    def _plan_index(self, paths, expected_revision, expected_files=None, project_only=False):
         if not isinstance(paths, list) or not 1 <= len(paths) <= MAX_FILES:
             raise ProjectError("Register between 1 and 100 explicit file paths per batch")
+        if expected_files is not None and (not isinstance(expected_files, list) or len(paths) != len(expected_files)
+                or any(not isinstance(item, dict) or set(item) != {"sha256", "size"}
+                       or type(item["size"]) is not int or not 0 <= item["size"] < 2**63
+                       or not isinstance(item["sha256"], str) or re.fullmatch(r"[a-f0-9]{64}", item["sha256"]) is None
+                       for item in expected_files)):
+            raise ProjectError("Managed file proofs must match the paths in order and supply size and SHA-256")
         snapshot = self._read(expected_revision)
         table = self._table(snapshot)
         self._fields(table)
@@ -208,23 +270,38 @@ class FileIndex:
                     raise ProjectError("The file index contains duplicate locations; remove or repair the duplicate record")
                 existing[key] = row["id"]
         selected = []
-        for value in paths:
-            location, path = _location(self.store.directory, value)
-            target = _resolve(self.store.directory, location, path)
-            if target.is_dir():
-                raise ProjectError("Register explicit files, not directories; recursive scanning is not enabled")
+        managed = expected_files is not None or project_only
+        for offset, value in enumerate(paths):
+            if managed:
+                location, path = "project", value
+                values = observe_managed_file(self.store.directory, path,
+                                              expected_files[offset] if expected_files is not None else None)
+                name = PurePosixPath(path).name
+            else:
+                location, path = _location(self.store.directory, value)
+                target = _resolve(self.store.directory, location, path)
+                if target.is_dir():
+                    raise ProjectError("Register explicit files, not directories; recursive scanning is not enabled")
+                name = target.name
             key = (location, os.path.normcase(path) if PLATFORM == "windows" else path)
             record = existing.get(key)
             if record in selected:
+                if managed:
+                    raise ProjectError("Managed file paths must identify distinct project files")
                 continue
-            values = _observe(self.store.directory, location, path)
+            if not managed:
+                values = _observe(self.store.directory, location, path)
             if record is None:
                 record = str(uuid4())
                 existing[key] = record
                 commands.append({"op": "add_record", "table_id": TABLE_ID, "id": record})
-                values.update(name=target.name, path=path, location=location)
+                values.update(name=name, path=path, location=location)
             commands.extend(self._commands(record, values))
             selected.append(record)
+        return commands, selected
+
+    def _apply_index(self, plan, expected_revision):
+        commands, selected = plan
         result = self.store.apply(commands, expected_revision=expected_revision)
         return {**result, "table_id": TABLE_ID, "record_ids": selected}
 

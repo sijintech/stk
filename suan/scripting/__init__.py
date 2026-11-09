@@ -955,11 +955,13 @@ class ProjectFiles:
         return self._call("project.files.resolve_path", {"handle": self.handle, "path": path,
                                                         "expected_revision": expected_revision})
 
-    def index(self, paths, *, expected_revision):
+    def index(self, paths, *, expected_revision, expected_files=None):
         if isinstance(paths, (str, bytes)):
             raise TypeError("paths must be a sequence of paths, not a single string")
-        return self._call("project.files.index", {"handle": self.handle, "paths": [str(path) for path in paths],
-                                                   "expected_revision": expected_revision})
+        params = {"handle": self.handle, "paths": [str(path) for path in paths], "expected_revision": expected_revision}
+        if expected_files is not None:
+            params["expected_files"] = expected_files
+        return self._call("project.files.index", params)
 
     def refresh(self, record_ids, *, expected_revision):
         return self._call("project.files.refresh", {"handle": self.handle, "record_ids": record_ids,

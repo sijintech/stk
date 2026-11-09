@@ -481,8 +481,12 @@ class WorkflowRunExecutor:
         chosen = template.final_state(sorted(names))
         if not 1 <= len(chosen) <= 100:
             raise ProjectError(f"The final state of this {template.name} run has {len(chosen)} files; analyses take 1 to 100")
-        paths = [str(job.store.directory / names[name]["path"]) for name in chosen]
-        indexed = self._edit(job, lambda revision: job.store.files.index(paths, expected_revision=revision))
+        paths = [names[name]["path"] for name in chosen]
+        managed = template.id == "muferro/1"
+        if not managed:
+            paths = [str(job.store.directory / path) for path in paths]
+        indexed = self._edit(job, lambda revision: job.store.files.index(paths, expected_revision=revision,
+                                                                        _project_only=managed))
         self.changed(job.store)
         record_ids = indexed["record_ids"]
         if len(record_ids) != len(chosen):

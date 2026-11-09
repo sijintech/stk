@@ -600,7 +600,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.upgrade` | `{handle, expected_revision}` | `{upgraded, revision, format_version, backup: object|null}` |
 | `project.undo` / `project.redo` | `{handle, expected_revision}` | `{revision, target_revision}` |
 | `project.files.list` | `{handle}` | `{revision, table_id, records}` |
-| `project.files.index` | `{handle, expected_revision, paths: [string]}` | `{revision, commands, table_id, record_ids}` |
+| `project.files.index` | `{handle, expected_revision, paths: [string], expected_files?: [{size, sha256}]}` | `{revision, commands, table_id, record_ids}` |
 | `project.files.refresh` | `{handle, expected_revision, record_ids: [uuid]}` | `{revision, commands, table_id, record_ids}` |
 | `project.files.resolve` | `{handle, expected_revision, record_id}` | `{revision, record_id, path, kind}` |
 | `project.files.children` | `{handle, expected_revision, path?: relative POSIX directory, offset?: 0, limit?: 200}` | one live directory page plus separate saved registrations; see schema |
@@ -1076,11 +1076,15 @@ for native navigation, explicit import into an empty shared Viewer, and project-
   edits made before format 3 cannot be undone. External files, Runtime jobs, scripts and UI drafts are
   outside this stack. No implicit side effects or script execution occur during restoration.
 - `project.files.*` requires format 3. Index/refresh accepts 1–100 explicit paths/record IDs and commits ordinary
-  edit commands atomically, emitting `project.changed`. Indexing observes metadata only and never copies/removes
+  edit commands atomically, emitting `project.changed`. Ordinary indexing observes metadata only and never copies/removes
   files. List reads saved observations; resolve rechecks a regular file at the requested revision without opening
   it. Project-relative locations cannot escape the project; external locations retain their OS path syntax.
   Missing future output files may be registered. Size/mtime are observations, not content hashes or immutable
   snapshots. See [file index guide](../project-files.md) for field names, state values and restore semantics.
+- The optional `project.files.index.expected_files` manifest verifies each `paths` entry before applying its batch.
+  Supply one byte size and lower-case SHA-256 per path, in the same order. Managed paths must be distinct canonical
+  project-relative POSIX paths. Every file must exist, with ordinary directory components and no symlinks or reparse points.
+  A mismatch refuses the batch before any file-index edit. The index still stores observations and does not freeze bytes.
 - Added 2026-10-14: `project.files.children` lists metadata for one real project directory, at most 4096 inspected entries and 200 entries per page. It does not recurse, register resources or open file contents. Hidden/internal paths and parent traversal are rejected. Link/reparse entries may be visible as links; they are never followed or opened, and link/reparse path components are rejected. Saved registration summaries (at most 200) are distinct from live observations; external registered paths are not automatically probed. Pagination is a live view, not a filesystem snapshot. `resolve_path` rechecks an explicitly selected relative regular file or real directory (including the empty root path); it does not execute or read file contents. The desktop retains at most 64 directories and 8192 entries per editor.
 - `project.snapshots.*` requires format 4 and explicitly manages frozen input bytes, distinct from
   `project.snapshot` (the current editable model). Capture selects 1–100 indexed files, default total budget

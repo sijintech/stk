@@ -651,6 +651,18 @@ class ProjectSessions:
             return {"preview": preview_workspace, "import": import_workspace, "open": open_workspace}[action](**args)
 
     def files(self, action, params):
+        if action == "index" and "expected_files" in params:
+            handle, revision = params["handle"], params["expected_revision"]
+            with self._operation():
+                store = self._get(handle)
+            # A manifest can require streaming large files. Keep other project sessions responsive.
+            with self._errors():
+                index = store.files
+                plan = index._plan_index(params["paths"], revision, params["expected_files"])
+            with self._operation():
+                if self._get(handle) is not store:
+                    raise BridgeError("conflict", "The project was reopened during managed file verification")
+                return index._apply_index(plan, revision)
         with self._operation():
             index = self._get(params["handle"]).files
             if action == "list":

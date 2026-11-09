@@ -18,6 +18,7 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from suan.connectors.files import open_regular
 from suan.connectors.mupro.inputs import dump_toml
+from suan.project.files import observe_managed_file
 from .common import (_canonical, _capture, _cells, _copy_input, _create_table, _directory, _folder,  # noqa: F401
                      _hash, _revision, _table)
 from suan.mupro.run import (_toml_document, read_case, check_case, verify_run, expected_frame_count, expected_frames,
@@ -152,11 +153,15 @@ def _successful_report_program(report, case, verified):
     raise ValueError("Collected MuFerro output does not match its input/completion/energy contract")
 
 
-def _check_local_result_inventory(folder, expected):
+def _check_local_result_inventory(root, folder, expected):
     """The managed case may contain notes alongside its verified native data."""
+    from suan.project.file_tree import _directory as open_directory
+
     native = (RESULT, *RUN_OUTPUTS, *OPTIONAL_RUN_OUTPUTS)
-    if any(path not in expected and (path.name in native or FRAME.search(path.name)) for path in folder.iterdir()):
-        raise ValueError("MuFerro case contains an unregistered result file; inspect the collected directory")
+    with open_directory(root, folder.relative_to(root).parts) as directory, os.scandir(directory) as entries:
+        if any(folder / entry.name not in expected and (entry.name in native or FRAME.search(entry.name))
+               for entry in entries):
+            raise ValueError("MuFerro case contains an unregistered result file; inspect the collected directory")
 
 
 def _matches_file(path, expected_sha256, *, expected_size=None, copy_to=None):
@@ -384,7 +389,7 @@ class MuFerro:
         root = _directory(self.stk, p)
         destination = _folder(root, "results", "muferro", str(UUID(run_id)))
         case_folder = _folder(destination, "case")
-        _check_local_result_inventory(case_folder, {destination / name for name in names})
+        _check_local_result_inventory(root, case_folder, {destination / name for name in names})
         paths = []
         report_bytes = bytearray()
         for name in names:
@@ -415,8 +420,11 @@ class MuFerro:
             if not observation["fields"] or any(field["shape"][:3] != case["grid"] for field in observation["fields"]):
                 raise ValueError("Collected MuPRO HDF5 fields are missing or do not match the frozen grid")
         revision = p.snapshot()["project"]["revision"]
+        relative = [path.relative_to(root).as_posix() for path in paths]
+        manifest = [{"size": artifacts[name]["size"], "sha256": artifacts[name]["sha256"]} for name in names]
         for offset in range(0, len(paths), 100):
-            revision = p.files.index(paths[offset:offset + 100], expected_revision=revision)["revision"]
+            revision = p.files.index(relative[offset:offset + 100], expected_revision=revision,
+                                     expected_files=manifest[offset:offset + 100])["revision"]
         model = _revision(p, revision)
         table = _table(model, RESULT_TABLE_ID, RESULT_FIELDS, RESULT_FIELD_IDS)
         commands = [] if table else _create_table(RESULT_TABLE_ID, "MuFerro results / 仿真结果", RESULT_FIELDS, RESULT_FIELD_IDS)
@@ -426,9 +434,13 @@ class MuFerro:
         values = {"run": run_id, "task": task["id"], "temperature": plan["parameters"]["values"][FIELD_IDS["temperature"]],
                   "step": verification["qoi"]["step"], "energy": verification["qoi"]["total_energy"],
                   "program": program_digest,
-                  "files": [{"path": path.relative_to(root).as_posix(), "sha256": artifacts[name]["sha256"]}
-                            for name, path in zip(names, paths)]}
+                  "files": [{"path": path, "sha256": expected_file["sha256"]}
+                            for path, expected_file in zip(relative, manifest)]}
         commands += _cells(RESULT_TABLE_ID, row_id, values, RESULT_FIELD_IDS)
+        # Earlier batches may have been edited while later ones were checked. Publish only the rechecked result.
+        _check_local_result_inventory(root, case_folder, set(paths))
+        for path, expected_file in zip(relative, manifest):
+            observe_managed_file(root, path, expected_file)
         p.apply(commands, expected_revision=revision)
         print("Collected MuFerro run:", run_id, "— final energy:", values["energy"], flush=True)
         return {"run_id": run_id, "table_id": RESULT_TABLE_ID, "record_id": row_id,
@@ -455,7 +467,7 @@ class MuFerro:
                 raise ValueError("Collected result changed locally; inspect its files before viewing")
             registered.add(path)
         folder = root / "results" / "muferro" / str(UUID(run_id)) / "case"
-        _check_local_result_inventory(folder, registered)
+        _check_local_result_inventory(root, folder, registered)
         preset = "muferro-collected-domains"
         if not any(entry["id"] == preset for entry in self.stk.graph.presets()):
             preset = "muferro-domains"
