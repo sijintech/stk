@@ -1,5 +1,19 @@
 # 开发交接记录
 
+## 2026-11-09 17:56 UTC · MuFerro HDF5 原生选择与 Cocoa 隐藏观测
+
+`c3061e78` 为现有严格图入口增加单容器元数据节点，缓存查找前及元数据解析前核对登记 SHA-256。项目根和固定相对路径限定访问范围，列表只返回明确的场和步号。扫描最多 4096 个链接，列表最多 256 项，超出时拒绝整份列表。`49140b04` 在仿真面板接入列表、明确选择和打开。校验并持有载荷后才接纳 Viewer。
+
+Linux X11/Xvfb 1440×1600，软件 OpenGL、缩放 1。固定起点为最大化 Project，Simulations 与 Simulation runs 已展开，选中唯一已成功并收集的运行，正例 Viewer 为空，Python 草稿隐藏。依次点击列表、下拉、`Polar · step 2`、打开，共四次，零滚动、零键入。Viewer 显示第 2 步 `Polar_x` 的 24 个体素，值域 `[0, 69]`。同大小容器改写后拒绝打开并保留原 Viewer。第三组在挂起成功答复时另点一次审阅页，放行后保留审阅页画面及原 Viewer。三组保留原 Runtime 任务、项目修订 8 和隐藏草稿。
+
+本地 Python 联测 165 项通过，1 项性能基准跳过。原生相邻 34/34。离线构建 wheel，并从隔离安装位置确认节点注册和安装版节点参考。 Linux 项目 CPU 广跑 1034 过，12 项 Peer 因初始环境缺少依赖或安装版 helper 失败。补齐后同源码 Peer 20/20 通过。 新头 `49140b04` 的隔离 Python 3.11 全量仍在运行。
+
+Claude59 在独立 worktree 交付 `239bcd8d` 的通用运行索引适配器作为对照。H1 采用只访问单个容器的专用路径。Claude60 已从 H1 产品头接手原生请求与回执的持久回归，root 负责审阅、集成与发布。
+
+`e9d0da9b` 新增两个非门禁 macOS 诊断，复用常规播放、seek 与真实切标签，在原一秒窗口内先读原生回执再尝试两次 DOM 采样。Linux 相关 29/29，Apple 条件语法与目标测试注册通过，实际目标机时序待下一轮。旧 `fd611652` 的新增无重复暂停对照 2/2。两例 WebKit 被动回复 `Playing`，同一隐藏会话两次 DOM 均为暂停，时间增量为零。主验收 4/6，两例在首次原生查询前因隐藏保持时媒体位置回到前一次 seek 而失败。macOS CPU 1524/1524、Metal 254/254。 [macOS 工件](https://github.com/sijintech/stk/actions/runs/42658246869/artifacts/13696087547)
+
+远端 `fd611652` Desktop `42658246869` 于 17:52:31 UTC 结束，5/6 个作业通过。Linux 主作业 2141/2141，Linux 打包及冷环境验证通过，Windows CPU 1465/1465。Windows 原生 6/6、零跳过，六项各 20 轮。PDF 160 张 OS 截图，20 次重准备，捕获启动最长 79 ms。PR #53 与 #54 的头未变化。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42658246869) · [Windows 工件](https://github.com/sijintech/stk/actions/runs/42658246869/artifacts/13696884487)
+
 ## 2026-11-09 17:28 UTC · HDF5 载荷接纳与项目根绑定
 
 `9e22e6ed` 提供明确授权的 Viewer 载荷替换。采用前核对项目、调用方、屏幕容量、文本编辑与 Viewer 版本。历史分析仍要求空 Viewer。内容寻址缓存共用有界解码，先检查每个唯一缓冲的长度和总预算，再读取并校验 Viewer 实际持有的独占字节。
