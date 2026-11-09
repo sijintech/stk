@@ -12,7 +12,7 @@ from conftest import finish
 from mupro_fake import make_fake_sdk, write_case
 from suan.mupro import muferro_spec
 from suan.scripting import API
-from suan.workflows.muferro import TABLE_ID, FIELD_IDS, LABEL, RESULT_TABLE_ID, native_action
+from suan.workflows.muferro import TABLE_ID, FIELD_IDS, LABEL, RESULT_TABLE_ID, describe_case, native_action
 from suan.workflows.native import native_action as desktop_action
 from test_desktop_scripts import scripts, execute  # noqa: F401
 from test_desktop_bridge import bridge_env, inproc, BridgeCallError  # noqa: F401
@@ -453,6 +453,65 @@ def test_generated_inputs_are_checked_again_after_freezing(project, scripts, run
     api._call = edit_generated_file
     with pytest.raises(ValueError, match='between generation and freezing'):
         api.muferro.prepare(row, connection, expected_revision=revision(p))
+    assert p.runs.list()['runs'] == [] and client.workspaces() == [] and client.tasks() == []
+
+
+def test_prepare_checks_the_bytes_copied_from_the_frozen_snapshot(project, scripts, runtime, tmp_path):
+    api, p = project
+    client, _, _, _ = runtime
+    connection = add_profile(scripts, runtime)
+    source = tmp_path / 'case'
+    write_case(source)
+    row = api.muferro.import_case(source, expected_revision=0)['record_id']
+    call = api._call
+    restored = []
+
+    def replace_material_after_resolve(operation, params):
+        result = call(operation, params)
+        if operation == 'project.snapshots.resolve' and result['name'] == 'material.toml' and not restored:
+            path = Path(result['path'])
+            data, info = path.read_bytes(), path.stat()
+            changed = data.replace(b'-7.3e7', b'-9.3e7')
+            assert len(data) == len(changed) and data != changed
+            path.chmod(0o600)
+            path.write_bytes(changed)
+            os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
+            restored.append(path)
+        return result
+
+    api._call = replace_material_after_resolve
+    before = revision(p)
+    with pytest.raises(ValueError, match='Frozen MuFerro input changed'):
+        api.muferro.prepare(row, connection, expected_revision=before)
+    assert len(restored) == 1 and revision(p) == before
+    assert p.runs.list()['runs'] == [] and client.workspaces() == [] and client.tasks() == []
+
+
+@pytest.mark.skipif(not hasattr(os, 'mkfifo'), reason='Named pipes are tested on POSIX')
+def test_prepare_refuses_a_fifo_in_the_existing_prepared_directory(project, scripts, runtime, tmp_path, monkeypatch):
+    api, p = project
+    client, _, _, _ = runtime
+    connection = add_profile(scripts, runtime)
+    source = tmp_path / 'case'
+    write_case(source)
+    row = api.muferro.import_case(source, expected_revision=0)['record_id']
+    _, _, label = describe_case(p.snapshot(), row, connection, {})
+    fingerprint = label.rsplit(' / ', 1)[1]
+    target = tmp_path / '项目 project' / 'inputs' / 'muferro-prepared' / fingerprint / 'input.toml'
+    target.parent.mkdir(parents=True)
+    os.mkfifo(target)
+    original_open = Path.open
+
+    def guard_fifo(path, *args, **kwargs):
+        if path == target:
+            pytest.fail('Prepare attempted a blocking open on the existing input FIFO')
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'open', guard_fifo)
+    before = revision(p)
+    with pytest.raises(ValueError, match='Prepared input changed locally'):
+        api.muferro.prepare(row, connection, expected_revision=before)
+    assert revision(p) == before
     assert p.runs.list()['runs'] == [] and client.workspaces() == [] and client.tasks() == []
 
 

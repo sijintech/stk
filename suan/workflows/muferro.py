@@ -105,6 +105,7 @@ def _restore(project, source, folder):
     bindings = source["bindings"]
     if not isinstance(bindings, dict) or not 1 <= len(bindings) <= 100:
         raise ValueError("Invalid MuFerro input bindings")
+    remaining = MAX_INPUT_BYTES
     for name, record_id in bindings.items():
         name = relative_path(name)
         if Path(name).suffix.lower() not in {".toml", ".in"} or "key" in Path(name).parts:
@@ -112,9 +113,13 @@ def _restore(project, source, folder):
         path = folder / name
         path.parent.mkdir(parents=True, exist_ok=True)
         resolved = project.snapshots.resolve(source["snapshot_id"], record_id)
-        with path.open("xb") as out, Path(resolved["path"]).open("rb") as inp:
-            shutil.copyfileobj(inp, out)
-    return sorted(folder.rglob("*"))
+        if resolved["size"] > remaining:
+            raise ValueError("Case exceeds the 256 MiB input limit")
+        with path.open("xb") as out:
+            if not _matches_file(Path(resolved["path"]), resolved["sha256"],
+                                 expected_size=resolved["size"], copy_to=out.write):
+                raise ValueError(f"Frozen MuFerro input changed or could not be restored: {name}")
+        remaining -= resolved["size"]
 
 
 def final_state(names):
@@ -154,8 +159,11 @@ def _check_local_result_inventory(folder, expected):
         raise ValueError("MuFerro case contains an unregistered result file; inspect the collected directory")
 
 
-def _matches_result(path, expected_sha256, *, expected_size=None, copy_to=None):
-    """Verify the bytes of a stable ordinary result without following its final path component."""
+def _matches_file(path, expected_sha256, *, expected_size=None, copy_to=None):
+    """Verify an ordinary file without following its final path component.
+
+    An optional sink receives the checked stream and may use it after verification succeeds.
+    """
     digest = hashlib.sha256()
     try:
         with open_regular(path, follow_symlinks=False) as stream:
@@ -169,14 +177,15 @@ def _matches_result(path, expected_sha256, *, expected_size=None, copy_to=None):
                     return False
                 digest.update(block)
                 if copy_to is not None:
-                    copy_to.extend(block)
+                    copy_to(block)
                 remaining -= len(block)
             after = os.fstat(stream.fileno())
             current = path.lstat()
     except OSError:
         return False
+    reparse = getattr(current, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
     # Compare ctime only between fstat calls. Windows path stat can report creation time.
-    return (os.path.samestat(after, current)
+    return (stat.S_ISREG(current.st_mode) and not reparse and os.path.samestat(after, current)
             and before.st_size == after.st_size == current.st_size
             and before.st_mtime_ns == after.st_mtime_ns == current.st_mtime_ns
             and before.st_ctime_ns == after.st_ctime_ns
@@ -306,14 +315,15 @@ class MuFerro:
                     continue
                 target = destination / source.relative_to(folder)
                 _folder(destination, *source.relative_to(folder).parts[:-1])
-                if target.exists():
-                    if target.is_symlink() or _hash(target) != _hash(source):
+                source_sha256 = _hash(source)
+                if target.exists() or target.is_symlink():
+                    if not _matches_file(target, source_sha256, expected_size=source.stat().st_size):
                         raise ValueError("Prepared input changed locally; inspect it before retrying")
                 else:
                     with target.open("xb") as out, source.open("rb") as inp:
                         shutil.copyfileobj(inp, out)
                 paths.append(target)
-                hashes.append(_hash(source))
+                hashes.append(source_sha256)
         indexed, captured = _capture(p, paths, hashes, expected_revision)
         snapshot_id = captured["snapshot"]["id"]
         bindings = dict(zip(["case/" + path.relative_to(destination).as_posix() for path in paths], indexed["record_ids"]))
@@ -388,8 +398,8 @@ class MuFerro:
                     expected_connection_identity=expected)
                 self._transfer(transfer)
             artifact = artifacts[name]
-            if not _matches_result(path, artifact["sha256"], expected_size=artifact["size"],
-                                   copy_to=report_bytes if name == RESULT else None):
+            if not _matches_file(path, artifact["sha256"], expected_size=artifact["size"],
+                                 copy_to=report_bytes.extend if name == RESULT else None):
                 raise ValueError(f"Result changed locally or was not downloaded: {name}; inspect Transfers before repairing")
             paths.append(path)
         report = _native_result_json(report_bytes.decode("utf-8"))
@@ -441,7 +451,7 @@ class MuFerro:
                 contained = path.resolve().is_relative_to(root.resolve())
             except (OSError, RuntimeError):
                 contained = False
-            if not contained or not _matches_result(path, file["sha256"]):
+            if not contained or not _matches_file(path, file["sha256"]):
                 raise ValueError("Collected result changed locally; inspect its files before viewing")
             registered.add(path)
         folder = root / "results" / "muferro" / str(UUID(run_id)) / "case"
