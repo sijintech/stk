@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · MuFerro 启动报告与 Cocoa
+
+root 提交 `64c55c4d`，内置图索引从同一份报告字节解析目录并生成摘要，执行时核对报告身份。已复验实际目录名为 `auto`、Runtime 暖缓存改写和 DAT 回退。macOS 隔离暂停已取得脚本回执与原生状态分歧的证据，已安排保持可见的独立对照。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · 精确读取和图内容键
 
 root 提交 `dd41ba5e`、`c95a6f26`，分别校验表格解析字节和 HDF5 Runtime 发布身份。 `49169e0e` 将现有 Hub 精确查询开放为桌面桥的可选契约。Claude39 首候选已复验，待入口计数与动作摘要收口。 [验收记录](runtime-validation.md)

@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · MuFerro 启动报告与 macOS 暂停对照
+
+本地 `64c55c4d` 绑定 MuFerro 图索引计划与执行读到的启动报告，覆盖换目录、改状态、增删、实际目录名为 `auto` 和 Runtime 暖缓存替换。源码和隔离 wheel 各 84 项通过，性能基准各跳过一项。
+
+远端 `3d2fcea7` 的 macOS 原生基线 4/6，三个隐藏对照各 0/2。隔离脚本已返回 paused，WebKit 原生仍连续返回 Playing。下一轮独立对照保持视图可见，沿用原生核验和截止。Windows 原生仍运行，本地批次待整轮终态。Claude39 收口已提交 `6a10a8ac`，root 正在独立验证组合候选。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · 实际表格字节、Runtime HDF5 和精确任务读取
 
 本地 `dd41ba5e` 绑定表格缓存键和实际解析字节，Runtime 用发布摘要，其他来源流式核对内容。 `c95a6f26` 让 MuPRO HDF5 发现、索引和字段读取核对 Runtime 发布摘要，拒绝暖缓存改写与下载清单漂移。隔离 wheel 的图与 HDF5 联跑 88 项通过。启动报告在规划后改变仍可影响 run-index，已独立复现，待核对实际报告字节的接线。
