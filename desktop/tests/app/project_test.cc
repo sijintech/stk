@@ -4396,6 +4396,7 @@ class Hdf5LookupSimulationPython : public SimulationPython {
  protected:
   void configure_bridge(bridge::ClientOptions &options, const std::string &python) override
   {
+    options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
     options.command = {python, std::string(STK_REPO_ROOT) + "/desktop/tests/app/simulation_fixture.py", dir.str(),
         "--stdio", "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
   }
