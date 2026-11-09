@@ -15,6 +15,7 @@ written to a temporary name and renamed.
 present, else from the array attributes, else ``unspecified`` units) and can
 read a region/stride of an image's point fields without loading the rest.
 """
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -45,15 +46,22 @@ def _h5py():
 
 
 def is_vtkhdf(path):
-    """True if ``path`` is an HDF5 file with a ``/VTKHDF`` group."""
+    """True if a path or seekable stream contains HDF5 with a ``/VTKHDF`` group."""
+    stream = path if hasattr(path, "read") else None
+    if stream is not None:
+        position = stream.tell()
+        stream.seek(0)
     try:
-        with open(path, "rb") as stream:
-            if stream.read(8) != b"\x89HDF\r\n\x1a\n":
+        with (open(path, "rb") if stream is None else nullcontext(stream)) as source:
+            if source.read(8) != b"\x89HDF\r\n\x1a\n":
                 return False
         with _h5py().File(path, "r") as handle:
             return "VTKHDF" in handle
     except OSError:
         return False
+    finally:
+        if stream is not None:
+            stream.seek(position)
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +281,38 @@ def _normalize_window(region, stride, dims):
     return window, stride
 
 
-def read_vtkhdf(path, *, fields=None, region=None, stride=None):
+class _ExternalStorage(ValueError):
+    """The container cannot be read as one content-addressed file."""
+
+
+def _require_single_file(handle, h5py, check):
+    # Walk physical links without opening soft or external targets. Checking the
+    # whole container also covers an internal soft link to a different group.
+    visited = set()
+    pending = [handle]
+    while pending:
+        group = pending.pop()
+        address = h5py.h5o.get_info(group.id).addr
+        if address in visited:
+            continue
+        visited.add(address)
+        for name in group:
+            if check is not None:
+                check()
+            link = group.get(name, getlink=True)
+            if isinstance(link, h5py.ExternalLink):
+                raise _ExternalStorage("A VTKHDF graph source cannot use external HDF5 links")
+            if isinstance(link, h5py.HardLink):
+                member = group[name]
+                if isinstance(member, h5py.Group):
+                    pending.append(member)
+                elif isinstance(member, h5py.Dataset):
+                    if member.external or (member.is_virtual and
+                                           any(source.file_name != "." for source in member.virtual_sources())):
+                        raise _ExternalStorage("A VTKHDF graph source cannot use datasets backed by other files")
+
+
+def read_vtkhdf(path, *, fields=None, region=None, stride=None, _binding_path=None, _check=None):
     """Read a VTKHDF file (image, polydata or table) as an in-memory STK dataset.
 
     ``fields`` limits the arrays read. For images, ``region`` (inclusive point
@@ -284,9 +323,13 @@ def read_vtkhdf(path, *, fields=None, region=None, stride=None):
     """
     from .model import CellArray, ImageData, PolyData, Table
     np = _np()
-    with _h5py().File(path, "r") as handle:
+    h5py = _h5py()
+    with h5py.File(path, "r") as handle:
+        if _binding_path is not None:
+            _require_single_file(handle, h5py, _check)
+        name_path = _binding_path if _binding_path is not None else path
         if "VTKHDF" not in handle:
-            raise ValueError(f"{Path(path).name} is not a VTKHDF file (no /VTKHDF group)")
+            raise ValueError(f"{Path(name_path).name} is not a VTKHDF file (no /VTKHDF group)")
         root = handle["VTKHDF"]
         kind = _text(root.attrs["Type"])
         descriptor = _descriptor(handle) or {}
@@ -294,7 +337,7 @@ def read_vtkhdf(path, *, fields=None, region=None, stride=None):
         geometry = descriptor.get("geometry") or {}
         common = _common(descriptor)
         wanted = None if fields is None else set(fields)
-        base_id = descriptor.get("id") or re.sub(r"[^A-Za-z0-9_]", "_", Path(path).name.split(".")[0]) or "dataset"
+        base_id = descriptor.get("id") or re.sub(r"[^A-Za-z0-9_]", "_", Path(name_path).name.split(".")[0]) or "dataset"
         if kind == "ImageData":
             extent = [int(v) for v in root.attrs["WholeExtent"]]
             dims = [extent[1] - extent[0] + 1, extent[3] - extent[2] + 1, extent[5] - extent[4] + 1]

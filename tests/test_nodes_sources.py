@@ -1,6 +1,9 @@
 """Source nodes stk.source.*@1, called directly with a minimal NodeContext (the evaluator is tested elsewhere)."""
 from pathlib import Path
+import hashlib
+import io
 import json
+import os
 
 import pytest
 
@@ -179,6 +182,181 @@ def test_file_source(tmp_path):
     with pytest.raises(NodeExecutionError) as error:
         call(sources.file_source, {"b": tmp_path}, {"binding": "b", "path": "bad.dat"})
     assert error.value.code == "invalid_data"
+
+
+def _npy_field(value):
+    stream = io.BytesIO()
+    np.save(stream, np.full((2, 2, 2), value, dtype=np.int16))
+    return stream.getvalue()
+
+
+def _file_graph(resolver, cache, on_event=None, path="field.npy"):
+    from suan.graph.catalog import default_registry
+    from suan.graph.evaluator import evaluate
+
+    graph = {"schema": "stk.graph/1", "nodes": [
+        {"id": "source", "type": "stk.source.file@1", "params": {"binding": "data", "path": path}},
+    ], "outputs": {"out": "source.out"}}
+    return evaluate(graph, registry=default_registry(), resolver=resolver, cache=cache, on_event=on_event)
+
+
+def _rewrite_field(path, data, *, preserve_mtime=True):
+    stamp = path.stat()
+    path.write_bytes(data)
+    mtime = stamp.st_mtime_ns if preserve_mtime else stamp.st_mtime_ns + 1_000_000_000
+    os.utime(path, ns=(stamp.st_atime_ns, mtime))
+    assert path.stat().st_size == stamp.st_size
+
+
+def test_file_source_cache_tracks_local_bytes_with_unchanged_metadata(tmp_path):
+    from suan.graph.cache import GraphCache
+    from suan.graph.resolve import LocalDirResolver
+
+    path = tmp_path / "field.npy"
+    path.write_bytes(_npy_field(3))
+    cache = GraphCache(tmp_path / "graph-cache")
+    first = _file_graph(LocalDirResolver({"data": tmp_path}), cache)
+    changed = _npy_field(9)
+    _rewrite_field(path, changed)
+    second = _file_graph(LocalDirResolver({"data": tmp_path}), cache)
+    image = second.outputs["out"]
+    assert second.keys != first.keys and second.evaluated == ["source"]
+    assert np.all(image.array("field") == 9)
+    assert image.provenance.used[0]["sha256"] == hashlib.sha256(changed).hexdigest()
+
+
+@pytest.mark.parametrize("source_kind", ["local", "local_same_mtime", "runtime"])
+def test_file_source_drift_never_publishes_an_old_disk_cache_key(tmp_path, source_kind):
+    from test_connectors_files import FakeClient
+    from suan.graph.cache import GraphCache
+    from suan.graph.evaluator import EvaluationFailed
+    from suan.graph.resolve import LocalDirResolver, RuntimeResolver
+
+    original = _npy_field(3)
+    path = tmp_path / "field.npy"
+    if source_kind == "runtime":
+        client = FakeClient({"field.npy": original})
+        resolver = RuntimeResolver(client, tmp_path / "downloads").bind({"data": {"task_id": "a" * 32}})
+        path = resolver.resolve("data").fetch("field.npy")
+    else:
+        path.write_bytes(original)
+        resolver = LocalDirResolver({"data": tmp_path})
+    before = _file_graph(resolver, GraphCache())
+    disk = tmp_path / "graph-cache"
+
+    def rewrite(event):
+        if event["type"] == "node.started":
+            _rewrite_field(path, _npy_field(9), preserve_mtime=source_kind != "local")
+
+    with pytest.raises(EvaluationFailed) as failure:
+        _file_graph(resolver, GraphCache(disk), rewrite)
+    assert failure.value.errors[0]["code"] == "invalid_data"
+    _rewrite_field(path, original)
+    restored = _file_graph(resolver, GraphCache(disk, memory_bytes=0))
+    assert restored.keys == before.keys and restored.evaluated == ["source"]
+    assert np.all(restored.outputs["out"].array("field") == 3)
+    assert _file_graph(resolver, GraphCache(disk, memory_bytes=0)).evaluated == []
+
+
+@pytest.mark.parametrize("storage", ["soft_link", "same_file_virtual"])
+def test_file_source_vtkhdf_uses_the_same_logical_id_for_local_and_runtime(tmp_path, storage):
+    from test_connectors_files import FakeClient
+    from suan.data.model import ImageData
+    from suan.data.vtkhdf import write_vtkhdf
+    from suan.graph.cache import GraphCache
+    from suan.graph.resolve import LocalDirResolver, RuntimeResolver
+
+    h5py = pytest.importorskip("h5py")
+    path = tmp_path / "logical.field.vtkhdf"
+    image = ImageData((2, 2, 2), id="described")
+    image.add_field("field", np.full((2, 2, 2), 3.0))
+    write_vtkhdf(path, image)
+    with h5py.File(path, "r+") as handle:
+        del handle["STK"]
+        fields = handle["VTKHDF/PointData"]
+        fields.move("field", "/internal")
+        if storage == "soft_link":
+            fields["field"] = h5py.SoftLink("/internal")
+        else:
+            target = handle["internal"]
+            layout = h5py.VirtualLayout(shape=target.shape, dtype=target.dtype)
+            layout[:] = h5py.VirtualSource(".", "/internal", shape=target.shape)
+            fields.create_virtual_dataset("field", layout)
+
+    local = LocalDirResolver({"data": tmp_path})
+    client = FakeClient({path.name: path.read_bytes()})
+    runtime = RuntimeResolver(client, tmp_path / "downloads").bind({"data": {"task_id": "a" * 32}})
+    for resolver in (local, runtime):
+        result = _file_graph(resolver, GraphCache(), path=path.name).outputs["out"]
+        assert result.id == "logical" and np.all(result.array("field") == 3)
+        assert result.provenance.used[0]["path"] == path.name
+
+
+@pytest.mark.parametrize("kind", ["vti", "vtk"])
+def test_file_source_preserves_named_vtk_reader_metadata(tmp_path, kind):
+    from suan.data.model import ImageData
+    from suan.data.vtkconv import image_to_vtk
+    from suan.graph.cache import GraphCache
+    from suan.graph.resolve import LocalDirResolver
+
+    vtk = pytest.importorskip("vtk")
+    name = f"logical.{kind}"
+    image = ImageData((2, 2, 2), spacing=(1.0, 2.0, 3.0), length_unit="nm")
+    image.add_field("field", np.full((2, 2, 2), 3.0), unit="K")
+    vtk_image = image_to_vtk(image)
+    for key, value in (("STK_units", "K"), ("STK_coordinate_units", "nm")):
+        annotation = vtk.vtkStringArray()
+        annotation.SetName(key)
+        annotation.InsertNextValue(value)
+        vtk_image.GetFieldData().AddArray(annotation)
+    writer = vtk.vtkXMLImageDataWriter() if kind == "vti" else vtk.vtkStructuredPointsWriter()
+    writer.SetFileName(str(tmp_path / name))
+    writer.SetInputData(vtk_image)
+    assert writer.Write()
+
+    resolver = LocalDirResolver({"data": tmp_path})
+    result = _file_graph(resolver, GraphCache(), path=name).outputs["out"]
+    assert result.id == "logical" and result.spacing == image.spacing and result.length_unit == "nm"
+    assert result.field("field").unit == "K" and np.all(result.array("field") == 3)
+
+
+@pytest.mark.parametrize("storage", ["link", "virtual", "raw"])
+def test_file_source_rejects_vtkhdf_storage_outside_the_verified_file(tmp_path, storage):
+    from suan.connectors.builtin import read_file
+    from suan.data.model import ImageData
+    from suan.data.vtkhdf import write_vtkhdf
+    from suan.graph.cache import GraphCache
+    from suan.graph.evaluator import EvaluationFailed
+    from suan.graph.resolve import LocalDirResolver
+
+    h5py = pytest.importorskip("h5py")
+    path = tmp_path / "field.vtkhdf"
+    sidecar = tmp_path / "sidecar"
+    values = np.full((2, 2, 2), 3.0)
+    image = ImageData((2, 2, 2), id="field")
+    image.add_field("field", values)
+    write_vtkhdf(path, image)
+    if storage != "raw":
+        with h5py.File(sidecar, "w") as handle:
+            handle["field"] = values
+    with h5py.File(path, "r+") as handle:
+        fields = handle["VTKHDF/PointData"]
+        del fields["field"]
+        if storage == "link":
+            fields["field"] = h5py.ExternalLink(str(sidecar), "/field")
+        elif storage == "virtual":
+            layout = h5py.VirtualLayout(shape=values.shape, dtype=values.dtype)
+            layout[:] = h5py.VirtualSource(str(sidecar), "/field", shape=values.shape)
+            fields.create_virtual_dataset("field", layout)
+        else:
+            fields.create_dataset("field", data=values, external=[(str(sidecar), 0, values.nbytes)])
+
+    assert np.all(read_file(LocalFiles(tmp_path), path.name).array("field") == 3)
+    resolver = LocalDirResolver({"data": tmp_path})
+    with pytest.raises(EvaluationFailed) as failure:
+        _file_graph(resolver, GraphCache(), path=path.name)
+    assert failure.value.errors[0]["code"] == "invalid_data"
+    assert not failure.value.partial.outputs
 
 
 def test_table_source(tmp_path):

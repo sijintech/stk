@@ -367,9 +367,10 @@ def _file_fingerprint(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
     from suan.connectors.builtin import detect_format
     source = _source(ctx, params["binding"])
+    path = params["path"]
     try:
-        return {"path": params["path"], "sha256": source.sha256(params["path"]),
-                "format": detect_format(params["path"], params["format"])}
+        return {"path": path, "sha256": _planned_file_sha256(source, path, ctx.check),
+                "format": detect_format(path, params["format"])}
     except ConnectorError as exc:
         raise _failure(exc) from None
 
@@ -385,7 +386,7 @@ def _with_geometry(image, origin, spacing, length_unit):
     return result
 
 
-@node("stk.source.file", title={"en": "Field file", "zh": "场文件"},
+@node("stk.source.file", impl_version=2, title={"en": "Field file", "zh": "场文件"},
       description={"en": "Read a field file inside a binding: MuPRO DAT, NPY, VTI, legacy VTK STRUCTURED_POINTS "
                          "or VTKHDF (image or polydata)."},
       outputs=[Port("out", "dataset", kind=["image", "polydata"])],
@@ -404,17 +405,32 @@ def _with_geometry(image, origin, spacing, length_unit):
       },
       cache="disk", fingerprint=_file_fingerprint)
 def file_source(ctx, inputs, params):
+    from contextlib import ExitStack
     from dataclasses import replace
+    from pathlib import Path
+    from tempfile import TemporaryDirectory, TemporaryFile
     from suan.connectors.api import ConnectorError
-    from suan.connectors.builtin import READERS, detect_format, read_file
+    from suan.connectors.builtin import READERS, _read_file_at
     from suan.data.model import Provenance, TimeInfo
     source = _source(ctx, params["binding"])
-    path = params["path"]
+    planned = ctx.source_fingerprint
+    path, kind = planned["path"], planned["format"]
     try:
-        kind = detect_format(path, params["format"])
-        dataset = read_file(source, path, format=kind, fields=params["fields"], association=params["association"],
-                            check=ctx.check)
-        sha = source.sha256(path)
+        with ExitStack() as resources:
+            if kind in ("vti", "vtk"):
+                folder = resources.enter_context(TemporaryDirectory(prefix="stk-field-", dir=ctx.cache_dir))
+                local = Path(folder) / f"field.{kind}"
+                with local.open("wb") as snapshot:
+                    sha = _stream_sha256(source, path, ctx.check, destination=snapshot)
+            else:
+                local = resources.enter_context(TemporaryFile(mode="w+b", prefix="stk-field-"))
+                sha = _stream_sha256(source, path, ctx.check, destination=local)
+                local.seek(0)
+            if sha != planned["sha256"]:
+                raise NodeExecutionError(f"Field file {path} changed after planning", code="invalid_data")
+            ctx.check()
+            dataset = _read_file_at(local, path, kind, fields=params["fields"], association=params["association"],
+                                    check=ctx.check, verified_snapshot=True)
     except (ConnectorError, ValueError) as exc:
         raise _failure(exc) from None
     if dataset.kind not in ("image", "polydata"):

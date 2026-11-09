@@ -130,7 +130,7 @@ def muferro_frame(ctx, inputs, params):
     _todo()
 
 
-@node("stk.source.file", title={"en": "Field file", "zh": "场文件"},
+@node("stk.source.file", impl_version=2, title={"en": "Field file", "zh": "场文件"},
       description={"en": "Read a field file inside a binding: MuPRO DAT, NPY, VTI, legacy VTK STRUCTURED_POINTS "
                          "or VTKHDF (image or polydata)."},
       outputs=[Port("out", "dataset", kind=["image", "polydata"])],

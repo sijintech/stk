@@ -70,7 +70,11 @@ def read_file(source, path, *, format="auto", fields=None, association="auto", c
     """
     from ..files import materialize
     kind = detect_format(path, format)
-    local = materialize(source, path)
+    return _read_file_at(materialize(source, path), path, kind, fields=fields, association=association, check=check)
+
+
+def _read_file_at(local, path, kind, *, fields=None, association="auto", check=None, verified_snapshot=False):
+    """Read materialized bytes using names and metadata from the logical source path."""
     name = dataset_id(path)
     if kind == "dat":
         from suan.data.dat import DatError, frame_name, read_dat_image
@@ -83,10 +87,14 @@ def read_file(source, path, *, format="auto", fields=None, association="auto", c
     elif kind == "npy":
         dataset = _npy_image(local, name)
     elif kind == "vtkhdf":
-        from suan.data.vtkhdf import is_vtkhdf, read_vtkhdf
+        from suan.data.vtkhdf import _ExternalStorage, is_vtkhdf, read_vtkhdf
         if not is_vtkhdf(local):
             raise ConnectorError(f"{path} is not a VTKHDF file (no /VTKHDF group)", "unsupported")
-        dataset = read_vtkhdf(local, fields=fields)
+        try:
+            dataset = read_vtkhdf(local, fields=fields, _binding_path=path if verified_snapshot else None,
+                                  _check=check)
+        except _ExternalStorage as exc:
+            raise ConnectorError(str(exc), "invalid_data") from None
     else:
         from .vtk import read_vtk_image
         dataset = read_vtk_image(local, kind, fields=fields, id=name)

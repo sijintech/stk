@@ -1379,7 +1379,12 @@ Unless stated otherwise: input fields are kept (zero-copy), coordinates are phys
   a `/VTKHDF` group). NPY holds `(x, y, z)` or `(x, y, z, c)` like today's `read_field`. VTI/VTK honour
   the `STK_units`, `STK_coordinate_units`, `STK_timestep` FieldData of `scene.load_grid`; VTKHDF
   honours the `/STK` descriptor. Default `length_unit`: `grid_index` for DAT/NPY, else from the file
-  or `unspecified`. `unit`/`quantity` override every loaded field. Fingerprint `{path, sha256, format}`.
+  or `unspecified`. `unit`/`quantity` override every loaded field. Fingerprint `{path, sha256, format}`
+  uses actual source bytes or the published Runtime digest. On a cache miss, the node parses a private
+  copy only after verifying that digest. A changed input returns `invalid_data`. A graph VTKHDF
+  input must be self-contained. External HDF5 links and datasets backed by other files
+  return `invalid_data`. Without a `/STK` descriptor ID, the VTKHDF dataset ID comes from the binding
+  path's basename.
 - `table`: `muferro_energy` (`kt: N energy: e1..e5` rows), `columns` (whitespace, optional header
   row, `#`/`!` comments), `csv` (header required), `progress_jsonl` (one object per line; columns =
   union of keys). Column units from `units`, else `unspecified` (`normalized` for muFerro energy).
