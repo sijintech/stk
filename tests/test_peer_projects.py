@@ -234,6 +234,111 @@ def test_current_authorized_file_index_content_is_identical_on_bridge_and_peer_u
     bridge.assert_clean()
 
 
+def _receipt_rows(store):
+    with sqlite3.connect(store.path.as_uri() + "?mode=ro", uri=True) as db:
+        return db.execute("SELECT scope, operation_id FROM project_edit_operations ORDER BY scope").fetchall()
+
+
+def test_bridge_and_peer_race_two_identities_at_one_revision_with_one_winner_and_no_loser_receipt(
+        access, inproc, monkeypatch, request):
+    """CP-0 F3/F11d: the strict local Bridge and the authenticated PeerProjects adapter, on one new project.
+
+    Both workers release from the same barrier and send apply_once at revision 0 with their own new
+    UUID. Without a held lock the Bridge won every sampled run, so the test holds the database write
+    lock until both calls have reached the store's write entry (ProjectStore._connect(write=True)). That
+    observation proves only arrival at the write entry, not that either call is already blocked in
+    SQLite; after release, SQLite's own locking decides the winner. Assertions are symmetric and do not
+    depend on which entry wins. Every wait in the test is bounded; the test itself never sleeps.
+    """
+    bridge = inproc()
+    handle = bridge.call("project.open", {"directory": str(access.store.directory)})["project"]["handle"]
+    apply, get = "project.edit_operations.apply_once", "project.edit_operations.get"
+    assert access.store.info()["revision"] == 0 and _receipt_rows(access.store) == []
+    names = {"bridge": "Bridge entry table", "peer": "Peer entry table"}
+    identities = {entry: str(uuid4()) for entry in names}
+    start = threading.Barrier(2, timeout=10)
+    arrived = {entry: threading.Event() for entry in names}
+    connect = ProjectStore._connect
+
+    def observed_connect(self, *, write=False):
+        if write:  # The Bridge runs each request on its own "stk-bridge-<method>" thread.
+            arrived["bridge" if threading.current_thread().name.startswith("stk-bridge-") else "peer"].set()
+        return connect(self, write=write)
+
+    monkeypatch.setattr(ProjectStore, "_connect", observed_connect)
+    holder = sqlite3.connect(access.store.path, isolation_level=None, timeout=10)
+    holder.execute("BEGIN IMMEDIATE")  # A writer that reaches BEGIN IMMEDIATE meanwhile waits (10 s busy timeout).
+
+    def bridge_write():
+        start.wait()
+        message = bridge.response(bridge.request(apply, {
+            "handle": handle, "operation_id": identities["bridge"], "expected_revision": 0,
+            "commands": [{"op": "create_table", "name": names["bridge"]}]}))
+        return ("error", message["error"]["code"]) if "error" in message else ("result", message["result"])
+
+    def peer_write():
+        start.wait()
+        try:
+            return "result", access.apply([{"op": "create_table", "name": names["peer"]}],
+                                          operation_id=identities["peer"], expected_revision=0)
+        except RevisionConflict:
+            return "error", "conflict"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {"bridge": pool.submit(bridge_write), "peer": pool.submit(peer_write)}
+        try:
+            assert all(event.wait(timeout=10) for event in arrived.values()), "both entries reach the write lock"
+        finally:
+            holder.execute("ROLLBACK")  # Release even on failure so neither writer waits out its timeout.
+            holder.close()
+        outcomes = {entry: future.result(timeout=60) for entry, future in futures.items()}
+    monkeypatch.setattr(ProjectStore, "_connect", connect)
+    winners =[entry for entry, (kind, _) in outcomes.items() if kind == "result"]
+    assert len(winners) == 1, outcomes
+    winner, = winners
+    loser, = set(names) - {winner}
+    request.node.user_properties.append(("race_winner", winner))  # JUnit evidence only; either entry may win
+    assert outcomes[loser] == ("error", "conflict")  # Bridge error code and peer RevisionConflict alike
+    won = outcomes[winner][1]
+    assert won["replayed"] is False and won["receipt"]["base_revision"] == 0
+    assert won["receipt"]["applied_revision"] == 1 and won["receipt"]["operation_id"] == identities[winner]
+    assert (won["receipt"]["scope"] == "local") == (winner == "bridge")
+
+    snapshot = access.store.snapshot()
+    assert snapshot["project"]["revision"] == 1 and [t["name"] for t in snapshot["tables"]] == [names[winner]]
+    assert len(access.store.history()) == 1
+    assert _receipt_rows(access.store) == [(won["receipt"]["scope"], identities[winner])]
+
+    def lookup(entry, identity):
+        """The receipt through one entry's own scope, or None when that entry reports not_found."""
+        if entry == "bridge":
+            message = bridge.response(bridge.request(get, {"handle": handle, "operation_id": identity}))
+            if "error" in message:
+                assert message["error"]["code"] == "not_found"
+                return None
+            return message["result"]["receipt"]
+        try:
+            return access.get(identity)
+        except OperationNotFound:
+            return None
+
+    assert lookup(winner, identities[winner]) == won["receipt"]
+    assert lookup(loser, identities[loser]) is None  # the failed attempt left no receipt in its own scope
+    assert lookup(loser, identities[winner]) is None  # and the winner's receipt belongs only to its scope
+
+    # F11d on the same project, through both entries: a first write with a new UUID at the stale
+    # revision conflicts, inserts no receipt and leaves nothing to look up.
+    before = unchanged(access.store)
+    stale = {entry: str(uuid4()) for entry in names}
+    assert bridge.error(apply, {"handle": handle, "operation_id": stale["bridge"], "expected_revision": 0,
+                                "commands": [{"op": "create_table", "name": "Stale bridge"}]})["code"] == "conflict"
+    with pytest.raises(RevisionConflict):
+        access.apply([{"op": "create_table", "name": "Stale peer"}], operation_id=stale["peer"], expected_revision=0)
+    assert lookup("bridge", stale["bridge"]) is None and lookup("peer", stale["peer"]) is None
+    assert unchanged(access.store) == before
+    bridge.assert_clean()
+
+
 def test_lost_reply_reconnect_and_authority_restart_keep_original_receipt_and_scope(access):
     from suan.peer.authority import PeerAuthority
     identity = str(uuid4())
@@ -468,22 +573,36 @@ def test_methods_do_not_accept_remote_identity_scope_path_handle_or_implicit_edi
         service.catalog(access.context, access.project_id, scope="local", **access.target)
 
 
-def test_shared_paging_and_serialized_response_budgets_are_not_relaxed(access, monkeypatch):
+def test_shared_paging_and_serialized_response_budgets_are_not_relaxed(access, monkeypatch, inproc):
+    """CP-0 F13: the same out-of-bounds reads fail on the authenticated peer adapter (ProjectError) and
+    on the strict local Bridge (invalid_params), with no state change through either entry. The Bridge
+    rejects limit 201/501 with its published params schema before dispatch; a continuation without
+    expected_revision and the 8 MiB result budget fail in the shared store on both entries."""
     table, _, _ = schema(access)
+    bridge = inproc()
+    handle = bridge.call("project.open", {"directory": str(access.store.directory)})["project"]["handle"]
     before = unchanged(access.store)
     service, target = access.projects, access.target
+    bounds = [("project.catalog", {"limit": 201}), ("project.catalog", {"offset": 1}),
+              ("project.table.read", {"table_id": table, "expected_revision": 1, "limit": 501})]
     for call in (lambda: service.catalog(access.context, access.project_id, limit=201, **target),
                  lambda: service.catalog(access.context, access.project_id, offset=1, **target),
                  lambda: service.read_table(access.context, access.project_id, table, expected_revision=1,
                                              limit=501, **target)):
         with pytest.raises(ProjectError):
             call()
+    for method, params in bounds:
+        assert bridge.error(method, {"handle": handle, **params})["code"] == "invalid_params", (method, params)
     monkeypatch.setattr(catalog_module, "MAX_READ_BYTES", 64)
     for call in (lambda: service.catalog(access.context, access.project_id, **target),
                  lambda: service.read_table(access.context, access.project_id, table, expected_revision=1, **target)):
         with pytest.raises(ProjectError, match="Project read exceeds 8 MiB"):
             call()
+    for method, params in (("project.catalog", {}), ("project.table.read", {"table_id": table, "expected_revision": 1})):
+        error = bridge.error(method, {"handle": handle, **params})
+        assert error["code"] == "invalid_params" and "Project read exceeds 8 MiB" in error["message"], method
     assert unchanged(access.store) == before
+    bridge.assert_clean()
 
 
 def test_original_core_command_and_utf8_request_limits_remain_atomic(access):
@@ -503,18 +622,29 @@ def test_original_core_command_and_utf8_request_limits_remain_atomic(access):
     assert unchanged(access.store) == before
 
 
-def test_legacy_project_reads_remain_supported_without_implicit_format_upgrade(access):
+def test_legacy_project_reads_remain_supported_without_implicit_format_upgrade(access, inproc):
+    """CP-0 F15: a format-14 project stays readable through both entries; the receipt API needs an
+    explicit upgrade (peer UnsupportedProjectFormat, Bridge unsupported) and nothing upgrades implicitly."""
     with sqlite3.connect(access.store.path) as db:
         db.execute("DROP TABLE project_edit_operations")
         db.execute("PRAGMA user_version=14")
     assert access.projects.catalog(access.context, access.project_id, **access.target)["format_version"] == 14
+    bridge = inproc()
+    handle = bridge.call("project.open", {"directory": str(access.store.directory)})["project"]["handle"]
+    assert bridge.call("project.catalog", {"handle": handle})["format_version"] == 14
     before = access.store.snapshot(), access.store.history()
     with pytest.raises(UnsupportedProjectFormat):
         access.apply()
     with pytest.raises(UnsupportedProjectFormat):
         access.get(str(uuid4()))
+    write = {"handle": handle, "operation_id": str(uuid4()), "expected_revision": 0,
+             "commands": [{"op": "create_table", "name": "Bridge legacy write"}]}
+    assert bridge.error("project.edit_operations.apply_once", write)["code"] == "unsupported"
+    assert bridge.error("project.edit_operations.get",
+                        {"handle": handle, "operation_id": write["operation_id"]})["code"] == "unsupported"
     assert (access.store.snapshot(), access.store.history()) == before
     assert access.store.info()["format_version"] == 14
+    bridge.assert_clean()
 
 
 # CP-0 F5b/F5c (docs/design/cloud-project-service.md): the two peer paths currently treat a physical hot
