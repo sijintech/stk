@@ -141,6 +141,30 @@ def test_prepare_collect_retry_and_reopen(project, scripts, runtime, tmp_path, m
     p = api.projects.open(directory)
     api._project_handle = p.handle
     assert api.muferro.collect(run['id']) == collected
+
+    case_folder = Path(collected['directory'])
+    (case_folder / 'notes.txt').write_text('synthetic notes', encoding='utf-8')
+    opened = []
+    monkeypatch.setattr(api.viewer, 'open', lambda path, *, preset: opened.append((path, preset)))
+    api.muferro.view(run['id'])
+    assert opened == [(case_folder, 'muferro-domains')]
+    before = revision(p)
+    for name, content in (
+        ('Polar.00000099.dat', (case_folder / 'Polar.00000000.dat').read_bytes()),
+        ('stk-mupro.json', b'{"case_dir":"nested"}'),
+        ('run.h5', b'synthetic unregistered container'),
+    ):
+        extra = case_folder / name
+        extra.write_bytes(content)
+        with pytest.raises(ValueError, match='unregistered result file'):
+            api.muferro.view(run['id'])
+        with pytest.raises(ValueError, match='unregistered result file'):
+            api.muferro.collect(run['id'])
+        assert opened == [(case_folder, 'muferro-domains')] and revision(p) == before
+        extra.unlink()
+    api.muferro.view(run['id'])
+    assert opened == [(case_folder, 'muferro-domains')] * 2
+
     edit(p, row, 'attempt', 2)
     second = api.muferro.prepare(row, connection, expected_revision=revision(p), launcher='none')
     assert second['id'] != run['id']

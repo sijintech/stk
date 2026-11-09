@@ -19,7 +19,8 @@ from suan.connectors.mupro.inputs import dump_toml
 from .common import (_canonical, _capture, _cells, _copy_input, _create_table, _directory, _folder,  # noqa: F401
                      _hash, _revision, _table)
 from suan.mupro.run import (_toml_document, read_case, check_case, verify_run, expected_frame_count, expected_frames,
-                            case_input_info, _native_result_json, _same_native_record, RUN_OUTPUTS, VERIFIER, tomllib)
+                            case_input_info, _native_result_json, _same_native_record, FRAME, RESULT, RUN_OUTPUTS,
+                            OPTIONAL_RUN_OUTPUTS, VERIFIER, tomllib)
 from suan.mupro.spec import muferro_spec
 from suan.runtime.models import TaskSpec, relative_path
 
@@ -142,6 +143,13 @@ def _successful_report_program(report, case, verified):
                 and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)):
             return digest
     raise ValueError("Collected MuFerro output does not match its input/completion/energy contract")
+
+
+def _check_local_result_inventory(folder, expected):
+    """The managed case may contain notes alongside its verified native data."""
+    native = (RESULT, *RUN_OUTPUTS, *OPTIONAL_RUN_OUTPUTS)
+    if any(path not in expected and (path.name in native or FRAME.search(path.name)) for path in folder.iterdir()):
+        raise ValueError("MuFerro case contains an unregistered result file; inspect the collected directory")
 
 
 def describe_case(model, record_id, connection, options, identity=None):
@@ -333,6 +341,8 @@ class MuFerro:
             raise ValueError("Task input bytes do not match the frozen run plan")
         root = _directory(self.stk, p)
         destination = _folder(root, "results", "muferro", str(UUID(run_id)))
+        case_folder = _folder(destination, "case")
+        _check_local_result_inventory(case_folder, {destination / name for name in names})
         paths = []
         for name in names:
             path = destination / relative_path(name)
@@ -376,7 +386,7 @@ class MuFerro:
         p.apply(commands, expected_revision=revision)
         print("Collected MuFerro run:", run_id, "— final energy:", values["energy"], flush=True)
         return {"run_id": run_id, "table_id": RESULT_TABLE_ID, "record_id": row_id,
-                "directory": str(destination / "case"), "qoi": verification["qoi"], "files": values["files"]}
+                "directory": str(case_folder), "qoi": verification["qoi"], "files": values["files"]}
 
     def view(self, run_id, *, project=None):
         """Recheck collected bytes and open the domain view; does not download or submit work."""
@@ -388,11 +398,14 @@ class MuFerro:
         if row is None:
             raise ValueError("Collect this MuFerro run before viewing it")
         root = _directory(self.stk, p)
+        registered = set()
         for file in row["values"][RESULT_FIELD_IDS["files"]]:
             path = root / relative_path(file["path"])
             if not path.resolve().is_relative_to(root.resolve()) or _hash(path) != file["sha256"]:
                 raise ValueError("Collected result changed locally; inspect its files before viewing")
+            registered.add(path)
         folder = root / "results" / "muferro" / str(UUID(run_id)) / "case"
+        _check_local_result_inventory(folder, registered)
         return self.stk.viewer.open(folder, preset="muferro-domains")
 
 
