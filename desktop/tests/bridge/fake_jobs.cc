@@ -26,6 +26,7 @@
  * Logs: stdout and stderr lines per task (CJK), then logs.end; events: a short monitoring run.
  */
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -62,6 +63,8 @@ struct Options {
   bool forget_inspected_once = false;
   bool local_uninitialized = false;
   bool f03 = false;
+  bool late_transfer_snapshots = false;
+  bool completed_transfer_list_first = false;
   int submit_fail = 0;
   int stale_workspace_lists = 0; /**< hub: new workspaces missing from the next N listings */
 } g_opt;
@@ -70,6 +73,9 @@ std::map<std::string, int> g_ws_hidden; /**< workspace id -> listings it is stil
 SendFn g_send;
 std::mutex g_m;
 Json g_model;               /* guarded by g_m */
+Json g_held_transfer_list;
+Json g_held_transfer_resume;
+Json g_held_transfer_event;
 std::set<std::string> g_inspected;
 std::map<std::string, Json> g_watches;  /* sub -> {connection, node, workspace_id, last} */
 std::set<std::string> g_hub_subs;
@@ -346,6 +352,11 @@ void emit_transfer(const Json &t)
 {
   Json pub = t;
   pub.erase("steps");
+  if (!g_held_transfer_resume.is_null() && pub["state"] == "completed" &&
+      pub["id"] == g_held_transfer_resume["result"]["transfer"]["id"]) {
+    g_held_transfer_event = {{"event", "transfer.updated"}, {"data", {{"transfer", pub}}}};
+    return;
+  }
   event("transfer.updated", {{"transfer", pub}});
 }
 
@@ -549,6 +560,12 @@ void init(const std::string &dir, std::vector<std::string> args, SendFn send)
     }
     else if (args[i] == "--f03") {
       g_opt.f03 = true;
+    }
+    else if (args[i] == "--late-transfer-snapshots") {
+      g_opt.late_transfer_snapshots = true;
+    }
+    else if (args[i] == "--completed-transfer-list-first") {
+      g_opt.completed_transfer_list_first = true;
     }
     else if (args[i] == "--stale-workspace-lists" && i + 1 < args.size()) {
       g_opt.stale_workspace_lists = std::atoi(args[++i].c_str());
@@ -902,7 +919,18 @@ bool handle(const Json &id, const std::string &method, const Json &p)
       pub.erase("steps");
       list.push_back(pub);
     }
-    respond(id, {{"transfers", list}});
+    if (g_opt.late_transfer_snapshots && std::any_of(list.begin(), list.end(), [](const Json &t) {
+          return t["state"] == "cancelled";
+        })) {
+      g_held_transfer_list = {{"id", id}, {"result", {{"transfers", list}}}};
+    }
+    else {
+      respond(id, {{"transfers", list}});
+    }
+    if (!g_held_transfer_resume.is_null()) {
+      g_send(g_held_transfer_resume);
+      g_held_transfer_resume = Json();
+    }
     return true;
   }
   if (method == "transfer.get" || method == "transfer.resume" || method == "transfer.cancel") {
@@ -936,7 +964,28 @@ bool handle(const Json &id, const std::string &method, const Json &p)
     Json pub = *t;
     pub.erase("files");
     pub.erase("steps");
+    if (g_opt.completed_transfer_list_first && method == "transfer.resume" && state == "cancelled") {
+      pub["state"] = "queued";
+      g_held_transfer_resume = {{"id", id}, {"result", {{"transfer", pub}}}};
+      emit_transfer(*t);
+      tick_transfers_locked();
+      return true;
+    }
+    const bool late = g_opt.late_transfer_snapshots && method == "transfer.resume" && state == "cancelled";
+    if (late) {
+      pub["state"] = "queued";
+      emit_transfer(*t);
+      tick_transfers_locked();
+    }
+    if (method == "transfer.get" && !g_held_transfer_event.is_null()) {
+      g_send(g_held_transfer_event);
+      g_held_transfer_event = Json();
+    }
     respond(id, {{"transfer", pub}});
+    if (late && !g_held_transfer_list.is_null()) {
+      g_send(g_held_transfer_list);
+      g_held_transfer_list = Json();
+    }
     return true;
   }
   if (method == "task.submit") {

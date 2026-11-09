@@ -1521,21 +1521,65 @@ const bridge::Transfer *JobsState::transfer(const std::string &id) const
   return nullptr;
 }
 
+uint64_t JobsState::transfer_observation(const std::string &id) const
+{
+  const auto it = transfer_observations_.find(id);
+  return it == transfer_observations_.end() ? 0 : it->second;
+}
+
 void JobsState::refresh_transfers()
 {
   if (!ready()) {
     return;
   }
-  on_bridge_read(client_->transfer_list(), [this](const bridge::Result<std::vector<bridge::Transfer>> &r) {
+  on_bridge_read(client_->transfer_list(), [this, since = transfer_sequence_, request = ++transfer_list_request_]
+                 (const bridge::Result<std::vector<bridge::Transfer>> &r) {
+    if (request != transfer_list_request_) {
+      return;
+    }
     if (!r) {
       fail(std::string(store_.tr("jobs.op.transfers")), r.error());
       return;
     }
     std::vector<bridge::Transfer> list = r.value();
+    std::map<std::string, const bridge::Transfer *> current;
+    std::set<std::string> finished;
+    for (const bridge::Transfer &t : transfers_) {
+      current.emplace(t.id, &t);
+    }
+    /* A list can be built before a transfer event and delivered after it. */
+    for (bridge::Transfer &t : list) {
+      const auto old = current.find(t.id);
+      if (old != current.end() && transfer_observation(t.id) > since) {
+        t = *old->second;
+      }
+      else if (old == current.end() || old->second->raw != t.raw) {
+        transfer_observations_[t.id] = ++transfer_sequence_;
+        if (old != current.end() && !old->second->finished() && t.finished()) {
+          finished.insert(t.id);
+        }
+      }
+      if (old != current.end()) {
+        current.erase(old);
+      }
+    }
+    for (const auto &[id, t] : current) {
+      if (transfer_observation(id) > since) {
+        list.push_back(*t);
+      }
+      else {
+        transfer_observations_.erase(id);
+      }
+    }
     std::stable_sort(list.begin(), list.end(), [](const bridge::Transfer &a, const bridge::Transfer &b) {
       return a.created_at > b.created_at;
     });
     transfers_ = std::move(list);
+    for (const bridge::Transfer &t : transfers_) {
+      if (finished.count(t.id)) {
+        transfer_finished(t);
+      }
+    }
     changed();
   });
 }
@@ -1547,33 +1591,21 @@ void JobsState::apply_transfer(const bridge::Transfer &t)
   for (bridge::Transfer &x : transfers_) {
     if (x.id == t.id) {
       was_finished = x.finished();
+      if (x.raw != t.raw) {
+        transfer_observations_[t.id] = ++transfer_sequence_;
+      }
       x = t;
       found = true;
     }
   }
   if (!found) {
     transfers_.insert(transfers_.begin(), t);
+    transfer_observations_[t.id] = ++transfer_sequence_;
   }
   if (t.finished() && !was_finished) {
-    if (t.kind == "download") {
-      download_done(t);
-    }
-    else if (t.kind == "upload") {
-      if (t.state == "completed") {
-        if (upload_ids_.count(t.id)) {
-          set_status(store_.catalog().format("jobs.status.uploaded", {{"count", std::to_string(t.files_total)}}),
-                     ui::ToastKind::Success);
-        }
-        if (t.workspace_id == workspace_) {
-          refresh_files();
-        }
-      }
-      else if (t.state == "failed" && t.error) {
-        fail(store_.catalog().format("jobs.op.upload", {{"file", file_name(t.local)}}), *t.error);
-      }
-    }
+    transfer_finished(t);
   }
-  else if (t.kind == "upload" && t.action && t.action->in_review() && upload_ids_.count(t.id)) {
+  else if (!t.finished() && t.kind == "upload" && t.action && t.action->in_review() && upload_ids_.count(t.id)) {
     set_status(store_.catalog().format("transfers.review", {{"id", t.action->id.substr(0, 12)}}),
                ui::ToastKind::Warning);
     refresh_actions();
@@ -1581,17 +1613,38 @@ void JobsState::apply_transfer(const bridge::Transfer &t)
   changed();
 }
 
+void JobsState::transfer_finished(const bridge::Transfer &t)
+{
+  if (t.kind == "download") {
+    download_done(t);
+  }
+  else if (t.kind == "upload" && t.state == "completed") {
+    if (upload_ids_.count(t.id)) {
+      set_status(store_.catalog().format("jobs.status.uploaded", {{"count", std::to_string(t.files_total)}}),
+                 ui::ToastKind::Success);
+    }
+    if (t.workspace_id == workspace_) {
+      refresh_files();
+    }
+  }
+  else if (t.kind == "upload" && t.state == "failed" && t.error) {
+    fail(store_.catalog().format("jobs.op.upload", {{"file", file_name(t.local)}}), *t.error);
+  }
+}
+
 void JobsState::resume_transfer(const std::string &id)
 {
   if (!ready()) {
     return;
   }
-  on(client_->transfer_resume(id), [this](const bridge::Result<bridge::Transfer> &r) {
+  on_bridge_read(client_->transfer_resume(id), [this, since = transfer_sequence_](const bridge::Result<bridge::Transfer> &r) {
     if (!r) {
       fail(std::string(store_.tr("jobs.op.resume")), r.error());
       return;
     }
-    apply_transfer(r.value());
+    if (transfer_observation(r.value().id) <= since) {
+      apply_transfer(r.value());
+    }
   });
 }
 
@@ -1600,12 +1653,14 @@ void JobsState::cancel_transfer(const std::string &id)
   if (!ready()) {
     return;
   }
-  on(client_->transfer_cancel(id), [this](const bridge::Result<bridge::Transfer> &r) {
+  on_bridge_read(client_->transfer_cancel(id), [this, since = transfer_sequence_](const bridge::Result<bridge::Transfer> &r) {
     if (!r) {
       fail(std::string(store_.tr("jobs.op.cancel_transfer")), r.error());
       return;
     }
-    apply_transfer(r.value());
+    if (transfer_observation(r.value().id) <= since) {
+      apply_transfer(r.value());
+    }
   });
 }
 

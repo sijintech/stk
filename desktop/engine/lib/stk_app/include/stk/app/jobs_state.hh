@@ -446,6 +446,8 @@ class JobsState {
   void submission_result(const bridge::Result<bridge::Submitted> &result);
   void maybe_resend_after_review();
   void on_hub_event(const bridge::HubEvent &event);
+  uint64_t transfer_observation(const std::string &id) const;
+  void transfer_finished(const bridge::Transfer &transfer);
   void download_done(const bridge::Transfer &t);
   void verify_download(ArtifactRow &row);
   void release_preview();
@@ -498,6 +500,8 @@ class JobsState {
   /* Transfers. */
   std::vector<std::string> pending_;
   std::vector<bridge::Transfer> transfers_;
+  uint64_t transfer_sequence_ = 0, transfer_list_request_ = 0;
+  std::map<std::string, uint64_t> transfer_observations_;
   std::set<std::string> upload_ids_; /**< uploads started from here (status messages) */
   std::map<std::string, std::string> download_for_; /**< transfer id -> artifact path */
   std::set<std::string> open_after_;                /**< downloads opened when verified */

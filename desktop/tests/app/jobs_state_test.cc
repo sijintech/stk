@@ -980,6 +980,57 @@ TEST_F(JobsFake, InputFilesDownloadToAChosenDestination)
   EXPECT_EQ(f.opened[0], dest);
 }
 
+TEST_F(JobsFake, CompletedResumeOutranksLateResumeAndListSnapshots)
+{
+  for (const bool list_first : {false, true}) {
+    SCOPED_TRACE(list_first);
+    FakeJobs f({list_first ? "--completed-transfer-list-first" : "--late-transfer-snapshots"});
+    JobsState &j = f.jobs();
+    ASSERT_TRUE(f.connect("runtime:lab"));
+    const std::string file = (f.dir.path() / "interrupted-upload.bin").string();
+    std::ofstream(file) << "resume";
+    j.upload({file});
+    ASSERT_TRUE(f.pump([&] { return j.transfers().size() == 1 && j.transfers()[0].state == "interrupted"; }));
+    const std::string id = j.transfers()[0].id;
+    j.cancel_transfer(id);
+    ASSERT_TRUE(f.pump([&] { return j.transfer(id) && j.transfer(id)->state == "cancelled"; }));
+
+    const auto before = f.methods();
+    const auto lists = std::count(before.begin(), before.end(), "transfer.list");
+    const auto files = std::count(before.begin(), before.end(), "workspace.files");
+    if (list_first) {
+      j.resume_transfer(id);
+      ASSERT_TRUE(f.pump([&] { return j.transfer(id) && j.transfer(id)->state == "running"; }));
+      j.refresh_transfers();
+      ASSERT_TRUE(f.pump([&] {
+        return j.transfer(id) && j.transfer(id)->state == "completed" && j.workspace_files().size() == 1;
+      }));
+    }
+    else {
+      j.refresh_transfers();
+      ASSERT_TRUE(f.pump([&] {
+        const auto methods = f.methods();
+        return std::count(methods.begin(), methods.end(), "transfer.list") == lists + 1;
+      }));
+      j.resume_transfer(id);
+    }
+
+    /* This reply follows the completed event and both snapshots on the same client. */
+    bool received = false;
+    f.client->transfer_get(id).then([&](const bridge::Result<bridge::Transfer> &reply) {
+      EXPECT_TRUE(reply && reply.value().state == "completed");
+      received = true;
+    });
+    ASSERT_TRUE(f.pump([&] { return received && j.workspace_files().size() == 1; }));
+    ASSERT_EQ(j.transfers().size(), 1u);
+    ASSERT_NE(j.transfer(id), nullptr);
+    EXPECT_EQ(j.transfer(id)->state, "completed");
+    EXPECT_EQ(j.transfer(id)->bytes_done, j.transfer(id)->bytes_total);
+    const auto after = f.methods();
+    EXPECT_EQ(std::count(after.begin(), after.end(), "workspace.files"), files + 1);
+  }
+}
+
 TEST_F(JobsFake, SwitchingConnectionDropsStaleResults)
 {
   FakeJobs f;
