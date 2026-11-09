@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · Claude39 集成与 Claude40 分工
+
+root 以 `07f2f2a9` 集成 Hub 停机自然完成两份候选，补阶段形状的旧假绿。Claude40 在独立 worktree 承接 C++ 桥的可选实时任务读取，root 负责平台对照、集成与推送。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · MuFerro 启动报告与 Cocoa
 
 root 提交 `64c55c4d`，内置图索引从同一份报告字节解析目录并生成摘要，执行时核对报告身份。已复验实际目录名为 `auto`、Runtime 暖缓存改写和 DAT 回退。macOS 隔离暂停已取得脚本回执与原生状态分歧的证据，已安排保持可见的独立对照。 [验收记录](runtime-validation.md)

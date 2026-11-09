@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · Hub 停机完成和 C++ 实时读取
+
+D1 X7 已补 Hub 进程停止期间原任务自然完成的单机证据。跨机网络分区及界面观察继续验收。Claude40 接手 D2 的 C++ 桥可选实时读取入口，使用已有桥协议及 Python 路径。 [验收记录](runtime-validation.md) [D1 矩阵](planning/d1-compatibility-gates.md)
+
 ## 2026-11-09 UTC · 启动报告身份和原生暂停
 
 MuFerro 内置图索引已核对报告实际字节及 Runtime 发布摘要，避免把变化后的目录或状态写入原键。macOS 下一步保持同一播放视图可见直至暂停回执与原生状态核验，单独检验隐藏时点。Claude39 已补进入 Runtime 提交的次数与原动作请求绑定，待 root 集成验证。 [验收记录](runtime-validation.md)
