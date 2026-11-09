@@ -230,7 +230,8 @@ def test_workflow_snapshot_refuses_changed_hdf5_after_collection(tmp_path, monke
 
     api = SimpleNamespace(project=store, muferro=SimpleNamespace(collect=collect))
     executor = WorkflowRunExecutor(None, scripting=lambda *_: api, changed=after_index)
-    monkeypatch.setattr(executor, "_progress", lambda *args, **kwargs: None)
+    # Model an admitted collection. A None reply now means a durable cancel blocked it.
+    monkeypatch.setattr(executor, "_progress", lambda *args, **kwargs: {"status": "running"})
     job = _Job(store, workflow_id)
     plan = {"steps": {"simulation": {"template": "muferro/1"}}}
     row = {"id": row_id}
