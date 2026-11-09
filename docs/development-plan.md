@@ -1,5 +1,15 @@
 # STK 开发计划
 
+## 2026-11-09 18:25 UTC · 原传输继续与 HDF5 回执回归
+
+`7cdaece6` 将已取消的传输纳入桌面继续操作。直连下载使用原传输 ID。Hub 上传仅在核对原导入确已拒绝后推进审阅编号，并在派发前持久化下一次尝试。若批准先到，继续跟踪原动作。`abaf0a31` 覆盖原动作在查询与同 ID 重放之间才被拒绝的时序。 [验收记录](runtime-validation.md)
+
+`a6681a6f` 将禁用 NumPy 和 h5py 时的图源注册测试改为核对七个必需的版本化 ID，相关三模块 48/48。隔离 Python 3.11 全量 `49140b04` 为 6473 通过、180 跳过、4 排除、1 失败，唯一失败为原六项断言。包含修复和首版传输变更的隔离 Python 3.11 全量 `7cdaece6` 已启动。
+
+root 从 Claude60 的独立 worktree 选择集成 `f1fc18b6` 为 `fa2ef209`。其 12 项请求与回执测试已由 root 用实际 CMake 目标注册和复验。加上 Transfers、Hub 上传和 MuFerro 按钮共 24/24，零跳过。 Claude61 的任务卡和启动器已备好，等待 Claude60 的独立全量原生测试和进程收尾后启动。
+
+远端 `15dff6ac` Runtime `42669507521` 已结束，8/13 个作业通过。Linux 三个矩阵和 Windows 两个矩阵的唯一失败均为六图源旧断言。两项 Windows 作业各 5249 通过、273 跳过、872 排除、1 失败，后续客户端检查未运行。Linux 3.11 和 3.14 各 6488 通过、165 跳过，3.12 为 6505 通过、148 跳过。三个 Linux 作业各 4 排除、1 失败。Desktop `42669507898` 仍在运行，本地交付等待整轮终态。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42669507521) · [Desktop CI](https://github.com/sijintech/stk/actions/runs/42669507898)
+
 ## 2026-11-09 18:07 UTC · MuFerro HDF5 查找重试与旧项目复验
 
 `0b9b1c90` 在已收集的 MuFerro 运行记录查找失败时提供显式重试。点击后重新读取该运行的结果行，列表与打开仍由用户分别触发。仿真指南同步补充操作入口。 [验收记录](runtime-validation.md)
