@@ -1845,7 +1845,7 @@ void ViewerState::close()
   m.prefetched_payloads.clear();
   m.visibility.clear();
   m.opacity.clear();
-  m.probe = ProbeState{};
+  m.probe = ProbeState{.serial = m.probe.serial + 1};
   m.playing = false;
   m.pending_reason.clear();
   m.pending_at = kInf;
@@ -2338,7 +2338,7 @@ void ViewerState::probe_position(const std::array<double, 3> &position)
 void ViewerState::clear_pick()
 {
   impl_->probe_future.cancel();
-  impl_->probe = ProbeState{};
+  impl_->probe = ProbeState{.serial = impl_->probe.serial + 1};
   impl_->changed();
 }
 

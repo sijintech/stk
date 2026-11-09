@@ -2,6 +2,7 @@
 /** Inert Viewer restore and independent per-window cameras, with the portable payload bridge. */
 #include <cmath>
 #include <limits>
+#include <mutex>
 
 #include <gtest/gtest.h>
 
@@ -22,6 +23,155 @@ void open_workspace_run(FakeViewer &f)
   f.vs->set_metadata(repo_presets(), repo_catalog());
   ASSERT_TRUE(f.vs->open_path(f.run_dir()));
   ASSERT_TRUE(f.pump_until([&] { return f.vs->payload() && !f.vs->evaluating(); })) << f.vs->eval_error();
+}
+
+/** Hold only main-loop continuations; the client still receives and fulfills bridge replies. */
+class ProbeCallbackGate {
+ public:
+  explicit ProbeCallbackGate(bridge::Executor next) : next_(std::move(next)) {}
+
+  bridge::Executor executor()
+  {
+    return [this](std::function<void()> task) {
+      {
+        std::lock_guard lock(mutex_);
+        if (holding_) {
+          held_.push_back(std::move(task));
+          return;
+        }
+      }
+      next_(std::move(task));
+    };
+  }
+
+  void hold()
+  {
+    std::lock_guard lock(mutex_);
+    holding_ = true;
+  }
+
+  std::vector<std::function<void()>> take()
+  {
+    std::lock_guard lock(mutex_);
+    holding_ = false;
+    std::vector<std::function<void()>> tasks;
+    tasks.swap(held_);
+    return tasks;
+  }
+
+ private:
+  bridge::Executor next_;
+  std::mutex mutex_;
+  bool holding_ = false;
+  std::vector<std::function<void()>> held_;
+};
+
+void completed_probe_cannot_overwrite_repick(const bool reopen)
+{
+  TempDir dir("probe-callback-race");
+  ManualLoop loop;
+  ProbeCallbackGate gate(loop.executor());
+  bridge::ClientOptions options;
+  options.command = {fake_bridge_path(), "--payload-dir", fixture_payload_dir().string(),
+                     "--blob-dir", (dir.path() / "blobs").string()};
+  options.executor = gate.executor();
+  auto client = bridge::Client::create(std::move(options));
+  std::string error;
+  ASSERT_TRUE(client->start(&error)) << error;
+  ASSERT_TRUE(client->wait_ready(30)) << client->bridge_log().text();
+  {
+    AppStore store;
+    store.set_bridge(client.get());
+    auto &viewer = store.viewer();
+    viewer.prefetch_neighbours = false;
+    viewer.set_metadata(repo_presets(), repo_catalog());
+    const auto open = [&](const char *name) {
+      const auto path = dir.path() / name;
+      std::filesystem::create_directories(path);
+      if (!write_text((path / "Polar.00000000.dat").string(), "1 1 1\n") ||
+          !viewer.open_path(path.string(), "muferro-domains")) {
+        return false;
+      }
+      if (!loop.pump_until([&] { return viewer.payload() && !viewer.evaluating(); },
+                           30, [&] { viewer.pump(); })) {
+        return false;
+      }
+      // Drain opening metadata continuations before isolating the probe callback.
+      const auto settled = client->call("stats").wait_for(std::chrono::seconds(30));
+      if (!settled || !settled->ok()) { return false; }
+      loop.run_ready();
+      return true;
+    };
+    ASSERT_TRUE(open("first")) << viewer.eval_error();
+    const auto first_source = viewer.source().key();
+    PickInfo a;
+    a.probe_node = "frame";
+    a.physical = {1.0, 2.0, 3.0};
+    gate.hold();
+    viewer.set_pick(a);
+    // This bridge handles stdin synchronously. Receiving stats proves the preceding probe
+    // response has fulfilled A's Future; cancel() can no longer replace that success.
+    const auto first_barrier = client->call("stats").wait_for(std::chrono::seconds(30));
+    ASSERT_TRUE(first_barrier.has_value());
+    ASSERT_TRUE(first_barrier->ok()) << first_barrier->error().describe();
+    ASSERT_EQ(first_barrier->value()["probe_requests"].size(), 1u);
+    auto a_callbacks = gate.take();
+    ASSERT_EQ(a_callbacks.size(), 1u);
+    ASSERT_EQ(viewer.probe().status, ProbeState::Status::Pending);
+
+    if (reopen) {
+      viewer.close();
+      ASSERT_TRUE(open("second")) << viewer.eval_error();
+      EXPECT_NE(viewer.source().key(), first_source);
+    }
+    else {
+      viewer.clear_pick();
+      EXPECT_EQ(viewer.source().key(), first_source);
+    }
+    PickInfo b = a;
+    b.physical = {4.0, 5.0, 6.0};
+    gate.hold();
+    viewer.set_pick(b);
+    const auto second_barrier = client->call("stats").wait_for(std::chrono::seconds(30));
+    ASSERT_TRUE(second_barrier.has_value());
+    ASSERT_TRUE(second_barrier->ok()) << second_barrier->error().describe();
+    ASSERT_EQ(second_barrier->value()["probe_requests"].size(), 2u);
+    auto b_callbacks = gate.take();
+    ASSERT_EQ(b_callbacks.size(), 1u);
+    const auto source = viewer.source().key();
+    const auto payload = viewer.base_payload();
+    const auto pending = viewer.save_workspace_state()["probe"];
+    ASSERT_EQ(viewer.probe().status, ProbeState::Status::Pending);
+    ASSERT_TRUE(viewer.probe().target.is_null());
+    ASSERT_TRUE(viewer.probe().sample.is_null());
+
+    // Deliver only completed A. B's own successful reply remains deliberately withheld.
+    a_callbacks.front()();
+    EXPECT_EQ(viewer.save_workspace_state()["probe"], pending);
+    EXPECT_EQ(viewer.source().key(), source);
+    EXPECT_EQ(viewer.base_payload(), payload);
+    EXPECT_EQ(viewer.probe().pick.physical, b.physical);
+
+    // The active B continuation still completes normally once released.
+    b_callbacks.front()();
+    EXPECT_EQ(viewer.probe().status, ProbeState::Status::Done);
+    EXPECT_FALSE(viewer.probe().target.is_null());
+    EXPECT_EQ(viewer.probe().sample["values"], Json::array({0.25, -0.5, 0.75}));
+    viewer.close();
+    store.set_bridge(nullptr);
+  }
+  client->close();
+  loop.run_ready();
+}
+
+TEST(ViewerWorkspace, CompletedProbeCannotOverwriteRepickAfterClear)
+{
+  ASSERT_NO_FATAL_FAILURE(completed_probe_cannot_overwrite_repick(false));
+}
+
+TEST(ViewerWorkspace, CompletedProbeCannotOverwriteRepickAfterReopen)
+{
+  ASSERT_NO_FATAL_FAILURE(completed_probe_cannot_overwrite_repick(true));
 }
 
 TEST(ViewerWorkspace, RestoresFrozenPayloadParametersLayersAndSettingsWithoutAnyReplay)

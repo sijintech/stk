@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <fstream>
 
 #include <gtest/gtest.h>
 
@@ -15,6 +16,7 @@
 #include "stk/gfx/offscreen.hh"
 #include "stk/app/editor_area.hh"
 #include "stk/app/shell.hh"
+#include "stk/core/sha256.hh"
 #include "stk/io/payload.hh"
 #include "stk/viewer_gpu/viewer.hh"
 #include "viewer_support.hh"
@@ -456,6 +458,119 @@ TEST(PythonViewer, ClientAndDataStagesStepSwitchAndProbe)
                 hit.layer_id.c_str(), hit.element, vs.probe().sample.dump().c_str());
     EXPECT_EQ(vs.probe().sample["values"].size(), 3u) << "Polar has three components";
     EXPECT_EQ(vs.probe().sample.value("source", ""), "original_point_data");
+    vs.close();
+    store.set_bridge(nullptr);
+  }
+  client->close();
+  loop.run_ready();
+}
+
+TEST(PythonViewer, CollectedFramesKeepTheirProofAcrossCachedStepsAndWorkspaceRestore)
+{
+  std::string reason;
+  const auto python = graph_python(reason);
+  if (python.empty()) { g_skipped_all = true; GTEST_SKIP() << reason; }
+  ASSERT_NE(g_gpu, nullptr);
+  TempDir dir("viewer-collected-python");
+  const auto run = dir.str() + "/run";
+  ASSERT_TRUE(write_fake_run(python, run));
+  Json files = Json::array();
+  for (const auto &entry : std::filesystem::recursive_directory_iterator(run)) {
+    if (entry.is_regular_file()) {
+      files.push_back({{"path", entry.path().lexically_relative(dir.path()).generic_string()},
+                       {"sha256", core::Sha256::hex(read_text(entry.path().string()))}});
+    }
+  }
+  const Json proof = {{"project_root", dir.str()}, {"case_path", "run"}, {"files", files}};
+  ManualLoop loop;
+  auto options = python_bridge_options(python, dir.str(), loop.executor());
+  options.strict = options.validate = true;
+  auto client = bridge::Client::create(std::move(options));
+  std::string error;
+  ASSERT_TRUE(client->start(&error)) << error;
+  ASSERT_TRUE(client->wait_ready(120)) << client->bridge_log().text();
+  {
+    app::AppStore store;
+    store.set_bridge(client.get());
+    auto &vs = store.viewer();
+    vs.prefetch_neighbours = false;
+    const auto wait = [&](const std::function<bool()> &condition) {
+      return loop.pump_until(condition, 120, [&] { vs.pump(); });
+    };
+    ASSERT_TRUE(vs.open_path(run, "muferro-collected-domains", Json(), proof));
+    ASSERT_TRUE(wait([&] { return vs.payload() && !vs.evaluating(); }))
+        << vs.eval_error() << client->bridge_log().text();
+    ASSERT_EQ(vs.shown_step(), Json(2));
+    ASSERT_EQ(vs.step_choices().size(), 3u);
+    const auto initial_payload = vs.base_payload();
+    const auto state = vs.save_workspace_state();
+    viewer_gpu::Viewer viewer(g_gpu->fonts());
+    viewer.set_payload(vs.payload());
+    const auto initial_image = render(viewer, 400, 300);
+    ASSERT_EQ(initial_image.rgba.size(), 400u * 300u * 4u);
+    app::PickInfo pick;
+    pick.probe_node = "polar";
+    pick.probe_dataset = "Polar";
+    pick.physical = {1.0, 1.0, 1.0};
+    vs.set_pick(pick);
+    ASSERT_TRUE(wait([&] { return vs.probe().status != app::ProbeState::Status::Pending; }));
+    ASSERT_EQ(vs.probe().status, app::ProbeState::Status::Done) << vs.probe().error;
+    const auto original_sample = vs.probe().sample;
+
+    // The latest frame is already in the native frame cache when this earlier frame is selected.
+    vs.set_step_index(0);
+    ASSERT_TRUE(wait([&] { return vs.shown_step() == Json(0) && !vs.evaluating(); })) << vs.eval_error();
+    const auto previous_payload = vs.base_payload();
+    const auto previous_serial = vs.payload_serial();
+    const auto frame = std::filesystem::path(run) / "Polar.00000002.dat";
+    const auto original = read_text(frame.string());
+    const auto modified = std::filesystem::last_write_time(frame);
+    auto replacement = original;
+    const auto digit = replacement.find_last_of("0123456789");
+    ASSERT_NE(digit, std::string::npos);
+    replacement[digit] = replacement[digit] == '0' ? '1' : '0';
+    const auto rewrite = [&](const std::string &bytes) {
+      std::fstream stream(frame, std::ios::in | std::ios::out | std::ios::binary);
+      stream.write(bytes.data(), std::streamsize(bytes.size()));
+      stream.close();
+      EXPECT_TRUE(stream.good());
+      std::filesystem::last_write_time(frame, modified);
+      EXPECT_EQ(std::filesystem::file_size(frame), original.size());
+      EXPECT_EQ(std::filesystem::last_write_time(frame), modified);
+    };
+    rewrite(replacement);
+    vs.set_step_index(2);
+    ASSERT_TRUE(wait([&] { return !vs.eval_error().empty() && !vs.evaluating(); }));
+    EXPECT_EQ(vs.base_payload(), previous_payload);
+    EXPECT_EQ(vs.payload_serial(), previous_serial);
+    EXPECT_EQ(vs.shown_step(), Json(0));
+    EXPECT_EQ(vs.source().source_proof, proof);
+
+    // Restore is inert, and its next explicit evaluation and probe still check the recorded bytes.
+    ASSERT_TRUE(vs.load_workspace_state(state, initial_payload));
+    EXPECT_TRUE(vs.workspace_suspended());
+    EXPECT_EQ(vs.source().source_proof, proof);
+    vs.evaluate_now();
+    ASSERT_TRUE(wait([&] { return !vs.eval_error().empty() && !vs.evaluating(); }));
+    EXPECT_EQ(vs.base_payload(), initial_payload);
+    vs.set_pick(pick);
+    ASSERT_TRUE(wait([&] { return vs.probe().status != app::ProbeState::Status::Pending; }));
+    EXPECT_EQ(vs.probe().status, app::ProbeState::Status::Failed);
+    EXPECT_TRUE(vs.probe().sample.is_null());
+
+    rewrite(original);
+    const auto restored_serial = vs.payload_serial();
+    vs.evaluate_now();
+    ASSERT_TRUE(wait([&] { return vs.payload_serial() != restored_serial && !vs.evaluating(); }))
+        << vs.eval_error() << client->bridge_log().text();
+    EXPECT_TRUE(vs.eval_error().empty());
+    EXPECT_EQ(vs.shown_step(), Json(2));
+    viewer.set_payload(vs.payload());
+    EXPECT_LT(differing_fraction(initial_image, render(viewer, 400, 300)), 0.001);
+    vs.set_pick(pick);
+    ASSERT_TRUE(wait([&] { return vs.probe().status != app::ProbeState::Status::Pending; }));
+    ASSERT_EQ(vs.probe().status, app::ProbeState::Status::Done) << vs.probe().error;
+    EXPECT_EQ(vs.probe().sample, original_sample);
     vs.close();
     store.set_bridge(nullptr);
   }
