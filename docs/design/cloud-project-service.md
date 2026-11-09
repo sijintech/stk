@@ -438,6 +438,8 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 
 **1g. F5b/F5c/F23 的隔离反例。** Claude26 在 `db9a7ed8` 的未改动导出上通过四项，随后在四份独立导出中各改变一个行为。F5b 允许所有者观察恢复热日志，两例均因原拒绝消失而失败。F5c 将 peer 目录读取换成只读所有者存储，普通库仍能读修订 0，实际热日志下目录读取在绑定检查处被拒，日志字节仍在，直接开该存储要求明确本机恢复。F23 的两个改动分别使授权路径内容在 peer 上漂移、使撤销不写入，各在内容等值与撤权断言处失败。root 核验原文件、单块补丁及 JUnit 摘要。证据见 `root-delivery-20261109-56/claude26/manifest.json` 与 `root-delivery-20261109-58/claude26-review.json`。反例由隔离改动构造，当前行为及未来选项仍按各行记录。
 
+**1h. F23 的真实线路。** Claude27 的最终测试经 root 审阅，以 `530df743` 集成 `test_real_authorized_file_index_content_crosses_the_native_wire_until_grant_revocation`。已认证 UDP WebRTC 和严格桥读取同一合成文件索引行，路径和平台位置作为授权单元格内容一致返回。响应与目录元数据均核对路径边界，比较使用 JSON 转义后的路径。项目 grant 撤销后，原连接的同一读取返回 `forbidden`，本机桥仍可读原行。Claude 源码联跑 299 项全过，root 在隔离 wheel 上复验通过，分别让路径内容漂移和撤销不写入，两个真实线路反例都在各自断言处失败。证据见 `root-delivery-20261109-59/closure.json`。
+
 **2. root 外部探针（仓库外，未提交）。** 证据记录在 `root-delivery-20261109-43/closure.json` 的 `cp0` 节：
 - 两个脚本：`cp0-parity-probe.py`（sha256 `23de877c…`）和 `cp0-hot-journal-probe.py`（sha256 `1d951c7c…`）；
 - 用合成项目，在 source 和同一份 Python 源码的中性隔离安装中运行；
@@ -459,7 +461,7 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 这些探针仍是有效的历史观察。F23 与 F5b/F5c 现在另有 1c 中的已提交测试，探针不再是这几行的唯一证据。
 
 **3. 仍待验证。**
-- **活 peer：** F12 和 F14 见 1d、1f。其余缺少真实通道证据的场景仍待 `PeerEndpoint` 与原生 helper 验收。
+- **活 peer：** F12、F14 和 F23 见 1d、1f、1h。其余缺少真实通道证据的场景仍待 `PeerEndpoint` 与原生 helper 验收。
 - **平台：** Windows、macOS 上这些行的复验。
 - **F14 配额监控：** 实际上限及拒绝路径见 1e、1f，监控仍待验证。
 - **F5c：** 保留现行恢复行为还是改为拒绝，仍由 root 决定。
@@ -502,7 +504,7 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 | F21 | c | 断开后重新认证 | 回执仍在（`test_peer_projects.py:249`）；`PeerCallUncertain` 保留原 ID 和修订（peer 规范第 250–259 行） | 满足 §4.4，调用方身份稳定（I4） | — |
 | F21' | d | 网络分区，或客户端换设备重连 | 本地没有对应场景 | 同 F21，加真实网络验证 | 网络适配器、R3、真实网络测试 |
 | F22 | d | 两个服务实例打开同一个库 | 本地没有对应场景。每个状态目录只有一个桥（`bridge.lock`，stk-desktop-bridge-v1 第 52–53 行），但外部 CLI 写入者仍可同时写，靠 SQLite 修订仲裁（`projects.py:1-4`） | 禁止；必须有单一归属，并检测重复打开（I14） | 归属锁设计 |
-| F23 | a | 授权读取含路径的用户内容 | peer 与桥都原样返回文件索引的 `path`/`location` 值。peer codec 只封闭元数据，不过滤单元格内容（`protocol.py:282-300`；peer 规范第 121–141 行）；桥直接返回 store 的结果（`projects.py:173-175`）。root 外部探针：合成的 `external:posix` 单元格原样出现在两个入口的响应中，也通过了 peer codec（§8.4 2）。已提交测试 `test_current_authorized_file_index_content_is_identical_on_bridge_and_peer_until_revoked`（`bd49fd40`）在桥、`PeerProjects` 与 peer codec 上固定这一现状，撤销 grant 后 peer 读取被拒（§8.4 1c） | 默认不开放文件索引表、写入它的命令及其原回执，或单独设计。负对照：网络适配器默认不返回这些值，也不改写任何已存的回执或摘要 | 内容策略设计与测试 |
+| F23 | a | 授权读取含路径的用户内容 | 同一项目的 `path`/`location` 授权单元格在本机桥和真实 WebRTC 中原样返回，协议元数据独立封闭。撤销项目 grant 后原连接读取返回 `forbidden`，本机桥仍可读（§8.4 1h）。适配器、编解码器和反例见 §8.4 1c、1g | 默认不开放文件索引表、写入它的命令及其原回执，或单独设计。负对照：网络适配器默认不返回这些值，也不改写任何已存的回执或摘要 | 内容策略设计与测试 |
 
 ## 10. 缺失资产清单
 
@@ -511,7 +513,7 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 3. 方案 B 的仓储端口与 PostgreSQL 适配：没有。
 4. 服务级的项目归属锁、重复打开检测、恢复运维流程：没有。
 5. 网络候选的内容策略（文件索引、含路径的命令与回执、快照清单）及其负对照：没有（F23）。
-6. CP-0 已提交的同进程测试涵盖 F1/F11b、F12、F5b/F5c、F23、F3/F11d、F13、F15、F14（§8.4 1b、1c）。Linux 隔离 wheel 已验证 F12 真实通道和 F14 的本机及真实线路配额（§8.4 1d–1f）。F5b/F5c/F23 的隔离反例见 §8.4 1g。仍待验证：
+6. CP-0 已提交的同进程测试涵盖 F1/F11b、F12、F5b/F5c、F23、F3/F11d、F13、F15、F14（§8.4 1b、1c）。Linux 隔离 wheel 已验证 F12、F14、F23 真实线路（§8.4 1d、1f、1h）。F5b/F5c/F23 的隔离反例见 §8.4 1g。仍待验证：
    - 其余场景经活 `PeerEndpoint` 与原生 helper 的线上行为；
    - Windows、macOS 复验；
    - F14 的配额监控（§8.4 3）。

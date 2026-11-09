@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · macOS 关闭已归因与三平台回归门
+
+Mac 原生报告 HTML 对照已确认由同会话暂停 watchdog 关闭。继续查已确认 ACK 后的实际查询及状态回调，并用暂停派发可见性核对单次按钮点击的两条路径。显式暂停时间回退与隐藏关闭分别验收。Windows 原生以固定 Mesa 资产的下载备用路径重新进入下一轮，同头 CPU 已通过。 [验收记录](runtime-validation.md)
+
+文献两种布局的八项 CPU 交互进入三平台必跑校验。目标原生文献实窗仍需 Windows/macOS 的可信 PDFium 与 E5 运行时及资产。D1 F23 已补真实 WebRTC 路径与撤权用例，云端内容策略和跨部署仍各按原设计门。 [CP-0 矩阵](design/cloud-project-service.md)
+
 ## 2026-11-09 UTC · CP-0 实际配额和隔离反例
 
 F14 本机桥与真实 WebRTC 的实际配额已验，后续按配额监控、目标 OS、跨部署和 R2/R3 分开推进。Claude26 补齐 F5b/F5c/F23 的隔离反例及 F5c 无热日志对照。Claude27 接续 F23 真实线路验收，覆盖授权内容与撤权。 [CP-0 矩阵](design/cloud-project-service.md)

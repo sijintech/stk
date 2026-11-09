@@ -1,5 +1,30 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · 39780e6d Desktop 终态、原生取证和 F23
+
+[Desktop 42564398378](https://github.com/sijintech/stk/actions/runs/42564398378) 对精确 `39780e6d68951047c73c4ff13945b23342b13718` 于 05:46:10Z 终态失败。
+
+| 任务 | 结果 |
+|---|---|
+| Linux Ubuntu 24.04 发行包 `128987632348` | 通过 |
+| Ubuntu 24.04 全新环境包冒烟 `128989634008` | 通过 |
+| Linux Ubuntu 26.04 `128987632533` | 通过 |
+| Windows CPU `128987632515` | 1,460/1,460 通过 |
+| macOS `128987632697` | CPU 1,516/1,516、Metal 254/254；原生原组 4/6、定位前对照 0/2 |
+| Windows 原生 `129002156977` | Mesa 下载失败，原生六项未执行 |
+
+Mac HTML 定位前对照的同会话在 0.753939 秒的 27 次采样中保持 0.181362 秒，取得一次隐藏画面匹配。播放样本返回后 1.168254 秒，`pause_watchdog` 关闭导航代次 1、媒体代次 4，记录 ACK 已收到、`verified=false`。原组独立视频与 HTML 分别在首次隐藏暂停读到 0.234 秒和 0.102 秒，低于各自下限，失败点的同会话关闭记录为空。独立视频定位前对照在首次显式暂停从 0.117290 到 0.046819 秒后失败。四份 JSON 经范围读取并核 CRC32，摘要见 `root-delivery-20261109-57/mac/mac-13652111396-evidence.json`。 [Mac 日志](https://github.com/sijintech/stk/actions/runs/42564398378/job/128987632697) [Mac 产物 13652111396](https://github.com/sijintech/stk/actions/runs/42564398378/artifacts/13652111396)
+
+`59183cd0` 记录暂停派发可见性、查询和匹配回复次数、Playing 回复次数、首发及末回时点。现有观测能确认 watchdog，仍需新字段区分未回调与持续报告 Playing。Linux 构建并通过 34 项资源、解析、像素与原生门禁检查，Cocoa 路径待下轮执行。
+
+Windows 同头候选包已下载，第 5 步固定 Mesa 26.2.4 URL 三次 HTTP 504 后退出，产物仅含环境快照。`46bab2cf` 加入 GitHub Release API 资产 `609112860` 作为备用。在本机观察到原路径 504，备用路径下载完整 70,257,286 字节并通过原固定 SHA-256。两条路径共用解包前的大小与摘要门禁。 [Windows 失败步骤](https://github.com/sijintech/stk/actions/runs/42564398378/job/129002156977#step:5:1) [Windows 产物 13652791298](https://github.com/sijintech/stk/actions/runs/42564398378/artifacts/13652791298)
+
+文献 `adc3c591` 用真实本地 CTest JUnit 验证三平台 CPU 门禁。四个文献交互用例在两种固定布局共 8 项通过，分别移除和标为跳过的 16 个反例都被拒。这组核对文献点击、草稿和来源变化的 CPU 回归。
+
+F23 `530df743` 与 Claude27 最终 `304b036e` 的测试文件字节相同。六文件联跑 299 项通过、零跳过，包含显式安装前缀的两项桌面桥验收。root 定向使用 `49837655` wheel 通过，两个隔离副本分别因内容漂移、撤权失效在预期处失败。证据见 `root-delivery-20261109-59/closure.json`。 [CP-0 矩阵](design/cloud-project-service.md)
+
+同头 Runtime `42564398339`、Docs `42564398406`、Secret scan `42564398623` 均通过。
+
 ## 2026-11-09 UTC · F14 真实配额线路、F5b/F5c/F23 反例
 
 F14 使用 `49837655` wheel、Python 3.14.4 / SQLite 3.46.1 与已安装 Linux 原生 helper。每个合成项目由严格 NDJSON 桥与已认证 UDP WebRTC 各提交一份原回执，其余成功编辑通过正常 store API 填入。六个相关 Python 模块的安装字节与 wheel 及当前主线一致。
