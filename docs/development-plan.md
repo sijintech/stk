@@ -1,5 +1,15 @@
 # STK 开发计划
 
+## 2026-11-09 23:23 UTC · 受约束打开保留 Viewer 与草稿
+
+`6333178e` 完成带来源证明的候选验证与失败时 Viewer/草稿保护；等待接口支持唯一打开请求。 [运行验收](runtime-validation.md)
+
+`83302698` 更新 MuFerro 固定派发测试，核对传入的完整来源证明。相关文件单独 30/30，最终已包含在上述联测。远端 `5cb7cdb9` Runtime `42712878022` 终态为 10/13 成功；三个 Linux 作业均仅在这一旧断言失败。3.11/3.14 各 6618 过、166 跳过，3.12 为 6635 过、149 跳过；均另有 1 失败和 4 排除。两个 Windows 客户端各 5296 过、275 跳过、936 排除。本地修正仍需下一远端头复验。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42712878022)
+
+截至 2026-11-09T23:22:58+00:00，同头 Desktop `42712877920` 仍运行，4/6 作业成功。Linux 主测 2162/2162、两个打包作业与 Windows CPU 已成功；macOS CPU、Metal 及构建已通过，主原生步骤失败后仍继续诊断，新增帧号结果待工件。独立 Windows 原生仍运行。本地新提交尚未推送，继续等待整轮 Desktop 终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42712877920)
+
+实际 Claude73 已从冻结 `6333178e` 在独立 worktree 接 `CL-MUPRO-GUARDED-SCRIPT-73`，仅补 `script_test.cc` 的真实 Python 面板到原生 UI 操作验证；候选待交付与 root 审阅。root 继续负责实现、公共契约、集成、回归、推送和 CI。
+
 ## 2026-11-09 22:32 UTC · Cocoa 帧号诊断与前一 Desktop 终态
 
 远端 `5cb7cdb9` 已推送，新 Desktop `42712877920` 与 Runtime `42712878022` 已启动。新查看来源校验、探针代次和帧编号诊断的目标平台结果随这两个精确头回执核对。 [当前 Desktop CI](https://github.com/sijintech/stk/actions/runs/42712877920) · [当前 Runtime CI](https://github.com/sijintech/stk/actions/runs/42712878022)
