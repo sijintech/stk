@@ -549,6 +549,59 @@ def test_real_bridge_then_peer_reuse_one_operation_uuid_in_isolated_receipt_scop
     bridge.assert_clean()
 
 
+def test_real_peer_catalog_physically_recovers_a_killed_writer_preimage_without_a_receipt(connected, sides):
+    """CP-0 F5c live, CURRENT behavior only: the first authenticated UDP project.catalog after a killed
+    synthetic writer's real hot rollback journal opens an ordinary ProjectStore, so SQLite rolls the journal
+    back and the old revision 0 is served. No cloud recovery or ownership policy is chosen here."""
+    from test_project_edit_operations import _physical, _spill
+    client, _ = connected()  # authenticated on the clean revision 0 project, before any journal exists
+    caller, owner = sides
+    store, target = owner.store, owner.target
+    journal = store.path.with_name(store.path.name + "-journal")
+
+    def read_only(path, sql, *args):
+        """mode=ro: only used where no hot journal exists, so it can never perform recovery itself."""
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
+            return db.execute(sql, args).fetchall()
+
+    def authority_state():
+        path = owner.authority.path
+        return (read_only(path, "SELECT active FROM grants WHERE grant_id=? AND peer_id=? AND project_id=?",
+                          target["grant_id"], caller.peer_id, target["project_id"]),
+                read_only(path, "SELECT revision, active FROM projects WHERE project_id=? AND generation=?",
+                          target["project_id"], target["database_generation"]))
+
+    assert authority_state() == ([(1,)], [(0, 1)])
+    before = store.snapshot(), store.history()
+    assert before[0]["project"]["revision"] == 0 and before[0]["tables"] == [] and before[1] == []
+    assert read_only(store.path, "SELECT count(*) FROM project_edit_operations") == [(0,)]
+
+    # _spill's child applies 800 tables at revision 0 under scope "local" and exits before commit. It already
+    # requires the journal magic, uncommitted rows in the database file and file growth. From here until the
+    # peer request only raw file bytes are read; no store or SQLite call could recover the journal locally.
+    operation, original = _spill(store)
+    hot = _physical(store)
+    assert set(original) == {str(store.path)} and set(hot) == {str(store.path), str(journal)}
+    assert hot[str(store.path)] != original[str(store.path)] and journal.stat().st_size > 0
+
+    page = client.request("project.catalog", target)  # the first project observation after the kill
+    assert page["project"] == {"id": target["project_id"], "name": "Authorized peer project", "revision": 0}
+    assert page["tables"] == [] and page["total"] == 0
+    assert _physical(store) == original and not journal.exists()  # byte-equal preimage, journal gone
+    assert (store.snapshot(), store.history()) == before
+    assert read_only(store.path, "SELECT count(*) FROM project_edit_operations") == [(0,)]  # no scope at all
+    assert read_only(store.path, "SELECT count(*) FROM project_edit_operations WHERE operation_id=?",
+                     operation) == [(0,)]
+    with pytest.raises(PeerProtocolError) as missing:
+        client.request("project.edit_operations.get", {**target, "operation_id": operation})
+    assert missing.value.code == "not_found"
+    assert authority_state() == ([(1,)], [(0, 1)])  # grant still active, registered watermark still 0
+
+    assert client.request("project.catalog", {**target, "expected_revision": 0}) == page
+    assert _physical(store) == original and store.info()["revision"] == 0
+    assert authority_state() == ([(1,)], [(0, 1)])
+
+
 def test_real_peer_and_bridge_read_a_format_14_project_and_refuse_receipts_without_implicit_upgrade(
         connected, sides, inproc):
     """CP-0 F15: the explicitly synthesized format-14 fixture of test_peer_projects (receipt table dropped,
