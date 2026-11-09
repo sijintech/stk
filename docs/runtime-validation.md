@@ -1,5 +1,21 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 17:12 UTC · 网页图谱接续、HDF5 选择核查与 Runtime 终态
+
+`84ab61c6` 让网页图谱复用任务面板已接受的节点、工作区及任务观测。快照之外的已核验任务会进入图谱绑定，精确终态结束原任务进度轮询。独立选择其他图谱数据源或显式清空绑定时保留该选择。
+
+生产 Chromium 1440×1100，固定起点已选节点、工作区和图谱页，能量预设已加载，Viewer 为空并有未发送草稿。输入 32 位原任务 ID 后点击一次，零滚轮和页面滚动。输入框为跟随光标有内部水平滚动。真实 Hub、NodeAgent 和 Runtime 保持在线，七次心跳均省略该任务。旧版读到原任务 running 但没有图谱选项或事件读取。新版选择原任务，用一次 `task.events` 显示 40%、第 4/10 步，精确终态后的 11.152 秒无后续事件读取。保留图谱参数、空 Viewer、草稿和重试记录，两轮各一个 Runtime 任务、零 Hub 动作。
+
+网页生产构建和测试 11/11。四项 Chromium 边界覆盖错误工作区、A→B→A 的迟到答复、仅具备事件能力的旧节点及独立或清空绑定。上一轮产物列表对迟到空答复的浏览器回归也通过。
+
+`2d488712` 修正上一批遗漏的 HDF5 快照测试替身，使其模拟允许收集。真实取消门控及摘要拒绝断言照常验证。定向 1/1。HDF5 与工作流组 110 项通过，性能基准和真实 MuFerro 许可环境各跳过一项。隔离 Python 3.11 全量基于 `2d488712` 运行中，已核对依赖及 suan 源码导入位置。
+
+root 以 `e70982f9` 选择集成 Claude58 `045fb476` 的设计和证据。实际收集的合成 HDF5 含两个场各两个步号。严格桥和 GraphWorker 按登记 SHA 读取指定非末帧，原地改写容器与错误选择器被拒绝。root 用作者探针独立复跑 1/1。复核确认原生 `open_path` 会在求值前清空 Viewer，设计改为先验证并解码载荷，再核对项目、选择和 Viewer 版本后接纳。原生界面与点击数仍待实现验证，真实许可与 HDF5-only 完成仍待证。 [设计核查](design/mupro-hdf5-result-selection.md)
+
+远端 `fd611652` Runtime `42658246715` 于 17:07:17 UTC 终态，八个作业通过，三项 Linux Python 与两项 Windows 客户端作业均因同一条 HDF5 测试替身提前抛出 `_Cancelled` 失败，五项各只有这一条失败。Desktop `42658246869` 仍在运行，本批本地提交等待整轮 Desktop 终态后推送。PR #53 和 #54 的头未变化。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42658246715) · [Desktop CI](https://github.com/sijintech/stk/actions/runs/42658246869)
+
+本机证据见 `root-delivery-20261109-101/`，包括 `web-graph-live/{red,green}/receipt.json`、固定起点及过程截图、`web-graph-edges/receipt.json`、`web-artifact-control/green-receipt.json`、`hdf5-root.xml`、`claude58-root/receipt.json`和 `runtime-failed-summary.txt`。
+
 ## 2026-11-09 16:57 UTC · 网页完成产物刷新与 Hub 动作回执
 
 `ef894f85` 在网页接受同一执行节点、项目和任务的 Runtime 精确终态后，自动只读刷新原任务产物。不同工作区的终态答复不会触发刷新。手动及自动读取共用答复顺序，已采用的新产物列表保留，迟到的旧空列表无法覆盖。
