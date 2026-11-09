@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import {ApiError, readNode} from './api';
-import {acceptsTaskFact, taskFact, type TaskFact, type TaskScope} from './taskFacts';
+import {acceptsTaskFact, isTerminalTaskState, taskFact, type TaskFact, type TaskScope} from './taskFacts';
 
 type Phase = 'checking' | 'verified' | 'unsupported' | 'unavailable' | 'unconfirmed';
 type Observation = {fact: TaskFact | null; phase: Phase};
@@ -19,7 +19,7 @@ export default function TaskObservation({scope, heartbeat, online, supported, re
   online: boolean;
   supported: boolean | null;
   refresh: number;
-  onVerified: (scope: TaskScope) => void;
+  onVerified: (scope: TaskScope, terminal?: boolean) => void;
   onAccessLost: () => void;
   onNodeGone: (scope: TaskScope) => void;
 }) {
@@ -63,6 +63,11 @@ export default function TaskObservation({scope, heartbeat, online, supported, re
   const phase = !online ? 'unavailable' : supported === false ? 'unsupported' :
     supported === null ? 'checking' : observation.phase;
   const current = observation.fact;
+  const exactTerminal = current?.exact === true && isTerminalTaskState(current.state);
+  useEffect(() => {
+    if (exactTerminal) onVerified(scope, true);
+  }, [exactTerminal, onVerified, scope]);
+
   return <section className="task-observation" aria-label="所选任务状态">
     <strong>{current?.name || task.slice(0, 8)}</strong>
     <p className="muted" role="status">

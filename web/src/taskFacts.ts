@@ -4,6 +4,8 @@ export type TaskFact = {name: string; state: string; updated: string; cancelRequ
 const terminal = new Set(['succeeded', 'failed', 'cancelled']);
 const states = new Set(['preparing', 'queued', 'submitting', 'running', 'unknown', ...terminal]);
 
+export const isTerminalTaskState = (state: string) => terminal.has(state);
+
 export function taskFact(value: unknown, scope: TaskScope, exact: boolean): TaskFact | null {
   if (!value || typeof value !== 'object') return null;
   const row = value as Record<string, unknown>;

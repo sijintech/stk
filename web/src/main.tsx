@@ -34,18 +34,21 @@ function Connect({connected}:{connected:()=>void}){
 function Workbench({disconnect}:{disconnect:()=>void}){
   const [devices,setDevices]=useState<Json[]>([]),[actions,setActions]=useState<Json[]>([]),[node,setNode]=useState(''),[workspace,setWorkspace]=useState('');
   const [selection,setSelection]=useState<TaskScope|null>(null),[artifacts,setArtifacts]=useState<Json[]>([]),[path,setPath]=useState(''),[scene,setScene]=useState<Json|null>(null);
-  const [verifiedTask,setVerifiedTask]=useState<TaskScope|null>(null);
+  const [verifiedTask,setVerifiedTask]=useState<{scope:TaskScope;terminal:boolean}|null>(null);
   const [readKinds,setReadKinds]=useState<string[]|null>(null),[taskRefresh,setTaskRefresh]=useState(0);
   const [analysis,setAnalysis]=useState<'file'|'graph'>('file'),[mode,setMode]=useState('slice'),[axis,setAxis]=useState(2),[index,setIndex]=useState(0),[level,setLevel]=useState(0),[probe,setProbe]=useState<number[]>([0,0,0]);
   const [session,setSession]=useState(()=>sessionStorage.getItem('stk-session')||uid()),[sessions,setSessions]=useState<Json[]>([]),[messages,setMessages]=useState<Json[]>([]),[chat,setChat]=useState('');
   const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState('tasks'),[online,setOnline]=useState(navigator.onLine);
   const generation=useRef(0),scopeVersion=useRef(0),activeScope=useRef<TaskScope|null>(null),refreshing=useRef(false),alive=useRef(true);
+  const artifactReads=useRef({started:0,applied:0});
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const selected=devices.find(d=>d.id===node&&!d.revoked);
   const tasks:Json[]=selected?.snapshot?.tasks||[];
   const task=selected&&selection?.node===node?selection.task:'';
   const heartbeat=task&&tasks.find(t=>t.id===task&&t.workspace_id===selection?.workspace);
-  const taskBound=!!task&&(!!heartbeat||selection===verifiedTask);
+  const verified=verifiedTask?.scope===selection?verifiedTask:null;
+  const taskBound=!!task&&(!!heartbeat||!!verified);
+  const exactTerminal=verified?.terminal===true;
   const shownScene=taskBound?scene:null;
   const features:unknown=selected?.snapshot?.features;
   const canRead=Array.isArray(features)&&features.includes('read');
@@ -59,6 +62,18 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   },[]);
   const clearNode=useCallback(()=>{clearTask();setNode('');setWorkspace('');},[clearTask]);
   const nodeGone=useCallback((scope:TaskScope)=>{if(activeScope.current===scope)clearNode();},[clearNode]);
+  const verifyTask=useCallback((scope:TaskScope,terminal=false)=>{
+    if(activeScope.current!==scope)return;
+    setVerifiedTask(known=>{
+      if(known?.scope===scope&&(known.terminal||!terminal))return known;
+      return {scope,terminal};
+    });
+  },[]);
+  const acceptArtifacts=useCallback((version:number,request:number,result:unknown)=>{
+    if(!alive.current||scopeVersion.current!==version||request<=artifactReads.current.applied||!Array.isArray(result))return;
+    artifactReads.current.applied=request;
+    setArtifacts(result);
+  },[]);
   function selectWorkspace(id:string){clearTask();setWorkspace(id);}
   const refresh=useCallback(async()=>{
     if(refreshing.current)return;refreshing.current=true;
@@ -83,20 +98,22 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     if(!taskBound||!taskOnline||!canReadArtifacts)return;
     const abort=new AbortController();
     const version=scopeVersion.current;
+    const request=++artifactReads.current.started;
     void readNode(node,'task.artifacts',{task_id:task},abort.signal).then(result=>{
-      if(!abort.signal.aborted&&scopeVersion.current===version&&Array.isArray(result))setArtifacts(result);
+      if(!abort.signal.aborted)acceptArtifacts(version,request,result);
     }).catch(error=>{
       if(!abort.signal.aborted&&lostAccess(error))disconnect();
     });
     return()=>abort.abort();
-  },[node,task,taskBound,taskOnline,canReadArtifacts,disconnect]);
+  },[node,task,taskBound,taskOnline,canReadArtifacts,exactTerminal,acceptArtifacts,disconnect]);
   async function run(fn:()=>Promise<void>){setBusy(true);setError('');try{await fn();if(alive.current)await refresh();}catch(error){if(alive.current){if(lostAccess(error))disconnect();else setError(String(error));}}finally{setBusy(false);}}
   const invoke=(kind:string,payload:Json)=>action(node,kind,payload,()=>setError('操作等待复核，请在任务面板查看完整参数。'));
   async function files(){
     const version=scopeVersion.current;
+    const request=++artifactReads.current.started;
     const result=canReadArtifacts?await readNode(node,'task.artifacts',{task_id:task}):
       (await invoke('task.artifacts',{task_id:task})).result;
-    if(scopeVersion.current===version&&Array.isArray(result))setArtifacts(result);
+    acceptArtifacts(version,request,result);
   }
   function selectTask(id:string,workspaceId:string){
     if(!workspaceId||!/^[0-9a-f]{32}$/.test(id))return;
@@ -136,7 +153,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       </form>}
       {task&&selection&&<TaskObservation key={`${node}/${selection.workspace}/${task}`} scope={selection}
         heartbeat={heartbeat} online={taskOnline} supported={canReadTask} refresh={taskRefresh}
-        onVerified={setVerifiedTask} onAccessLost={disconnect} onNodeGone={nodeGone}/>}
+        onVerified={verifyTask} onAccessLost={disconnect} onNodeGone={nodeGone}/>}
       {taskBound&&<div className="inline"><button disabled={busy} onClick={()=>void run(readLogs)}>读取日志</button><button disabled={busy} onClick={()=>void run(files)}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
       {actions.filter(a=>a.state==='review').map(a=><article className="review" key={a.id}><strong>等待执行复核</strong><p>{a.review_reason}</p><pre>{JSON.stringify(a.request.payload,null,2)}</pre>{[true,false].map(approved=><button key={String(approved)} disabled={busy} onClick={()=>void run(async()=>{await api(`actions/${a.id}/review`,'POST',{approved});})}>{approved?'批准执行':'拒绝'}</button>)}</article>)}
       <details><summary>最近操作与重试</summary>{actions.filter(a=>a.request.kind!=='task.events').slice(0,20).map(a=><p key={a.id}><small>{a.request.kind} · {a.state}<br/>{a.error}</small></p>)}<button onClick={()=>void run(async()=>{const saved=sessionStorage.getItem('stk-last-action');if(saved)await api('actions','POST',JSON.parse(saved));})}>以相同 ID 重试上次操作</button></details>
