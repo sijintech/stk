@@ -704,16 +704,17 @@ class JobsEditor final : public Editor {
       return;
     }
     const std::vector<TaskRow> &tasks = jobs.tasks();
-    const TaskRow *sel = jobs.selected_task();
     ui::Layout &row = p->row(false);
     row.button("cancel_task", ctx.tr("jobs.task.cancel"), [this, &jobs]() {
-         cancel_id_ = jobs.selected();
-         open_dialog(Dialog::CancelTask);
+         cancel_confirmation_ = jobs.confirm_selected_task_cancel();
+         if (cancel_confirmation_) {
+           open_dialog(Dialog::CancelTask);
+         }
        })
-        .disable(!jobs.ready() || !sel || sel->terminal() || sel->cancel_requested)
+        .disable(!jobs.can_cancel_selected_task())
         .tip(ctx.tr("jobs.task.cancel.tip"));
     row.button("open_viewer", ctx.tr("jobs.task.open_viewer"), [&jobs]() { jobs.open_in_viewer(); })
-        .disable(jobs.selected().empty())
+        .disable(jobs.selected().empty() || jobs.selected_task_observation() == TaskObservation::Denied)
         .tip(ctx.tr("jobs.task.open_viewer.tip"));
 
     ui::TableSpec t;
@@ -759,7 +760,8 @@ class JobsEditor final : public Editor {
     t.data_version = jobs.version();
     p->table("tasks", std::move(t));
     if (tasks.empty()) {
-      p->label(ctx.tr(jobs.workspace().empty() ? "jobs.tasks.no_workspace" : "jobs.tasks.none")).disable();
+      p->label(ctx.tr(jobs.workspace().empty() ? "jobs.tasks.no_workspace" :
+                      (jobs.hub() ? "jobs.tasks.heartbeat_empty" : "jobs.tasks.none"))).disable();
     }
   }
 
@@ -776,6 +778,21 @@ class JobsEditor final : public Editor {
     ui::Layout *p = l.panel("detail", title);
     if (!p) {
       return;
+    }
+    if (jobs.hub()) {
+      p->label(ctx.store.catalog().format("jobs.detail.last_fact", {{"state", std::string(ctx.tr(
+          task ? task_state_key(task->state) : "jobs.detail.fact_unknown"))}}));
+      const char *observation = "jobs.detail.observation.snapshot";
+      switch (jobs.selected_task_observation()) {
+        case TaskObservation::Snapshot: break;
+        case TaskObservation::Checking: observation = "jobs.detail.observation.checking"; break;
+        case TaskObservation::Verified: observation = "jobs.detail.observation.verified"; break;
+        case TaskObservation::Unavailable: observation = "jobs.detail.observation.unavailable"; break;
+        case TaskObservation::Unsupported: observation = "jobs.detail.observation.unsupported"; break;
+        case TaskObservation::Unconfirmed: observation = "jobs.detail.observation.unconfirmed"; break;
+        case TaskObservation::Denied: observation = "jobs.detail.observation.denied"; break;
+      }
+      p->label(ctx.tr(observation));
     }
     p->tabs("detail_tabs",
             {std::string(ctx.tr("jobs.detail.logs")), std::string(ctx.tr("jobs.detail.monitor")),
@@ -794,7 +811,10 @@ class JobsEditor final : public Editor {
     ui::Layout &row = p.row(true);
     row.dropdown("log_stream",
                  {std::string(ctx.tr("jobs.logs.all")), "stdout", "stderr"}, ui::bind(log_stream_));
-    row.label(ctx.tr(jobs.logs_ended() ? "jobs.logs.ended" : "jobs.logs.live")).disable();
+    const bool unavailable = jobs.selected_task_observation() == TaskObservation::Unavailable ||
+                             jobs.selected_task_observation() == TaskObservation::Denied;
+    row.label(ctx.tr(jobs.logs_ended() ? "jobs.logs.ended" :
+                     (unavailable ? "jobs.logs.unavailable" : "jobs.logs.live"))).disable();
     ui::LogBuffer &log = log_stream_ == 1 ? jobs.log_stdout() : (log_stream_ == 2 ? jobs.log_stderr() : jobs.log_all());
     p.log_view("task_log", log, 10.0f);
   }
@@ -958,7 +978,9 @@ class JobsEditor final : public Editor {
     };
     line("jobs.info.id", jobs.selected());
     if (!task) {
-      p.label(ctx.tr("jobs.info.not_listed")).disable();
+      if (!jobs.hub()) {
+        p.label(ctx.tr("jobs.info.not_listed")).disable();
+      }
       return;
     }
     line("jobs.info.name", task->name);
@@ -1310,11 +1332,20 @@ class JobsEditor final : public Editor {
       }
       case Dialog::CancelTask: {
         ui::Layout &m = ctx.ui->modal(key, ctx.tr("jobs.task.cancel.title"), close, mo);
-        m.paragraph(cat.format("jobs.task.cancel.body", {{"id", cancel_id_.substr(0, 12)}}));
+        const bool eligible = cancel_confirmation_ && jobs.can_cancel_task(*cancel_confirmation_);
+        if (eligible) {
+          m.paragraph(cat.format("jobs.task.cancel.body", {{"id", cancel_confirmation_->task_id.substr(0, 12)}}));
+        }
+        else {
+          m.paragraph(ctx.tr("jobs.task.cancel.stale"));
+        }
         dialog_footer(m, ctx, [this, &jobs]() {
-          jobs.cancel_task(cancel_id_);
+          if (cancel_confirmation_) {
+            jobs.cancel_task(*cancel_confirmation_);
+            cancel_confirmation_.reset();
+          }
           dialog_ = Dialog::None;
-        }, "jobs.task.cancel.confirm");
+        }, "jobs.task.cancel.confirm", eligible);
         break;
       }
       case Dialog::Paths: {
@@ -1343,7 +1374,8 @@ class JobsEditor final : public Editor {
     }
   }
 
-  void dialog_footer(ui::Layout &m, EditorContext &ctx, std::function<void()> ok, const char *ok_key = "ui.ok")
+  void dialog_footer(ui::Layout &m, EditorContext &ctx, std::function<void()> ok, const char *ok_key = "ui.ok",
+                     bool enabled = true)
   {
     if (!dialog_error_.empty()) {
       m.paragraph(dialog_error_);
@@ -1352,7 +1384,7 @@ class JobsEditor final : public Editor {
       m.label(ctx.tr("jobs.dialog.busy")).disable();
     }
     ui::Layout &r = m.row().alignment(ui::LayoutAlign::Right);
-    r.button("ok", ctx.tr(ok_key), std::move(ok)).disable(dialog_busy_);
+    r.button("ok", ctx.tr(ok_key), std::move(ok)).disable(dialog_busy_ || !enabled);
     r.button("cancel", ctx.tr("ui.cancel"), [this]() { dialog_ = Dialog::None; });
   }
 
@@ -1379,7 +1411,8 @@ class JobsEditor final : public Editor {
   bool add_ssh_ = false;
   bool add_check_ = true;
   std::string pair_name_, pair_url_, pair_code_, pair_device_;
-  std::string remove_id_, cancel_id_, new_workspace_;
+  std::string remove_id_, new_workspace_;
+  std::optional<TaskCancelConfirmation> cancel_confirmation_;
   PathPurpose purpose_ = PathPurpose::UploadFiles;
   std::string path_text_, path_error_;
   std::string artifact_path_, input_path_;

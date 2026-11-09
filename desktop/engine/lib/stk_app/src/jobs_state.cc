@@ -33,6 +33,22 @@ std::string get_str(const Json &j, const char *key)
   return {};
 }
 
+int compare_task_facts(const TaskRow &candidate, const TaskRow &known)
+{
+  // On one Runtime a terminal state and an observed cancellation request do not roll back.
+  if (candidate.terminal() != known.terminal()) {
+    return candidate.terminal() ? 1 : -1;
+  }
+  if (known.terminal() && candidate.state != known.state) {
+    return -1;
+  }
+  if (!known.terminal() && candidate.cancel_requested != known.cancel_requested) {
+    return candidate.cancel_requested ? 1 : -1;
+  }
+  // Runtime timestamps use the same UTC representation for heartbeat and exact records.
+  return candidate.updated_at.compare(known.updated_at);
+}
+
 std::string file_name(const std::string &path)
 {
   std::string p = path;
@@ -280,6 +296,15 @@ template<class T, class F> void JobsState::on(bridge::Future<T> future, F fn)
   });
 }
 
+template<class T, class F> void JobsState::on_bridge_read(bridge::Future<T> future, F fn)
+{
+  on(std::move(future), [this, epoch = bridge_epoch_, fn = std::move(fn)](const bridge::Result<T> &result) mutable {
+    if (epoch == bridge_epoch_) {
+      fn(result);
+    }
+  });
+}
+
 JobsState::JobsState(AppStore &store) : store_(store), alive_(std::make_shared<Alive>(Alive{this}))
 {
   open_external = [](const std::string &path, std::string *error) {
@@ -332,6 +357,17 @@ void JobsState::attach(bridge::Client *client)
   if (client == client_) {
     return;
   }
+  const uint64_t epoch = ++bridge_epoch_;
+  ++conn_epoch_;
+  ++epoch_;
+  ++detail_epoch_;
+  if (client_ && hub()) {
+    nodes_.clear(); // A different bridge must supply its own node authorization facts.
+    selected_.clear();
+    tasks_.clear();
+    clear_task_observation();
+    clear_task_detail();
+  }
   state_listener_.reset();
   transfer_listener_.reset();
   watch_.unsubscribe();
@@ -346,13 +382,13 @@ void JobsState::attach(bridge::Client *client)
     return;
   }
   std::weak_ptr<Alive> weak = alive_;
-  state_listener_ = client_->on_state([weak](bridge::BridgeState s, const std::optional<Error> &) {
-    if (auto a = weak.lock()) {
+  state_listener_ = client_->on_state([weak, epoch](bridge::BridgeState s, const std::optional<Error> &) {
+    if (auto a = weak.lock(); a && a->self->bridge_epoch_ == epoch) {
       a->self->on_state(s);
     }
   });
-  transfer_listener_ = client_->on_transfer([weak](const bridge::Transfer &t) {
-    if (auto a = weak.lock()) {
+  transfer_listener_ = client_->on_transfer([weak, epoch](const bridge::Transfer &t) {
+    if (auto a = weak.lock(); a && a->self->bridge_epoch_ == epoch) {
       a->self->apply_transfer(t);
     }
   });
@@ -364,7 +400,15 @@ void JobsState::on_state(const bridge::BridgeState state)
   if (state == bridge_state_) {
     return;
   }
+  if (bridge_state_ == bridge::BridgeState::Ready) {
+    ++ready_epoch_;
+  }
   bridge_state_ = state;
+  if (state != bridge::BridgeState::Ready && hub() && !selected_.empty() &&
+      task_observation_ != TaskObservation::Denied) {
+    ++selected_task_read_;
+    task_observation_ = TaskObservation::Unavailable;
+  }
   if (state == bridge::BridgeState::Restarting || state == bridge::BridgeState::Failed) {
     /* A new bridge process has read no hub action: approvals need hub.action again. */
     inspected_.clear();
@@ -390,6 +434,7 @@ void JobsState::on_ready(const bool restarted)
       check_connection(active_);
       if (hub()) {
         refresh_actions();
+        refresh_selected_task();
       }
     }
     if (submission_ && submission_->state == SubmitState::Sending) {
@@ -447,7 +492,7 @@ void JobsState::refresh_connections()
   if (!ready()) {
     return;
   }
-  on(client_->connections_list(), [this](const bridge::Result<std::vector<bridge::ConnectionInfo>> &r) {
+  on_bridge_read(client_->connections_list(), [this](const bridge::Result<std::vector<bridge::ConnectionInfo>> &r) {
     if (!r) {
       fail(std::string(store_.tr("jobs.op.connections")), r.error());
       return;
@@ -543,6 +588,7 @@ void JobsState::select_connection(const std::string &id)
   tasks_.clear();
   snapshot_time_ = 0.0;
   selected_.clear();
+  clear_task_observation();
   log_all_.clear();
   log_out_.clear();
   log_err_.clear();
@@ -647,7 +693,7 @@ void JobsState::check_connection(const std::string &id)
   }
   publish_connection();
   changed();
-  on(client_->connections_check(id), [this, id](const bridge::Result<bridge::ConnectionCheck> &r) {
+  on_bridge_read(client_->connections_check(id), [this, id](const bridge::Result<bridge::ConnectionCheck> &r) {
     if (r) {
       apply_check(r.value());
     }
@@ -845,7 +891,7 @@ void JobsState::refresh_local()
   if (!ready()) {
     return;
   }
-  on(client_->connections_local(), [this](const bridge::Result<bridge::LocalRuntimeStatus> &r) {
+  on_bridge_read(client_->connections_local(), [this](const bridge::Result<bridge::LocalRuntimeStatus> &r) {
     if (r) {
       local_ = r.value();
       changed();
@@ -893,25 +939,40 @@ void JobsState::start_local()
 
 void JobsState::apply_nodes(const Json &devices)
 {
-  nodes_.clear();
   const Json &list = devices.is_object() && devices.contains("devices") ? devices["devices"] : devices;
-  if (list.is_array()) {
-    for (const Json &d : list) {
-      if (get_str(d, "role") != "node") {
-        continue;
-      }
-      NodeRow n;
-      n.id = get_str(d, "id");
-      n.name = get_str(d, "name");
-      n.online = d.contains("online") && d["online"].is_boolean() && d["online"].get<bool>();
-      nodes_.push_back(std::move(n));
+  if (!list.is_array()) {
+    return;
+  }
+  nodes_.clear();
+  for (const Json &d : list) {
+    if (get_str(d, "role") != "node") {
+      continue;
     }
+    NodeRow n;
+    n.id = get_str(d, "id");
+    n.name = get_str(d, "name");
+    n.online = d.contains("online") && d["online"].is_boolean() && d["online"].get<bool>();
+    if (const auto revoked = d.find("revoked"); revoked != d.end()) {
+      n.revoked = revoked->is_boolean() ? revoked->get<bool>() :
+                  revoked->is_number_integer() && revoked->get<int>() != 0;
+    }
+    nodes_.push_back(std::move(n));
   }
-  bool listed = false;
-  for (const NodeRow &n : nodes_) {
-    listed |= n.id == node_;
+  const NodeRow *node = active_node_row();
+  if (!node_.empty() && (!node || node->revoked)) {
+    // hub.devices filters revoked nodes. A disconnected node remains listed as offline.
+    deny_task_observation();
   }
-  if (!listed) {
+  else if (node && selected_.empty() && task_observation_ == TaskObservation::Denied) {
+    // Current device listing restores this scope. There is no selected fact to reauthorize.
+    clear_task_observation();
+    refresh_tasks(); // Reload the list and restart its watch after denial unsubscribed it.
+  }
+  else if (node && !node->online && !selected_.empty() && task_observation_ != TaskObservation::Denied) {
+    ++selected_task_read_;
+    task_observation_ = TaskObservation::Unavailable;
+  }
+  else if (!node) {
     std::string pick;
     for (const NodeRow &n : nodes_) {
       if (n.id == preferred_node_) {
@@ -954,6 +1015,7 @@ void JobsState::select_node(const std::string &id)
   files_.clear();
   tasks_.clear();
   selected_.clear();
+  clear_task_observation();
   artifacts_.clear();
   refresh_workspaces();
   publish_connection();
@@ -1211,7 +1273,9 @@ void JobsState::apply_workspaces(const Json &workspaces)
   for (const WorkspaceRow &w : workspaces_) {
     listed |= w.id == workspace_;
   }
-  if (!listed) {
+  // A heartbeat workspace listing can be incomplete. Keep an actively observed Hub task in its
+  // original workspace until the user chooses a different one.
+  if (!listed && !(hub() && !workspace_.empty() && !selected_.empty())) {
     std::string pick;
     for (const WorkspaceRow &w : workspaces_) {
       if (w.id == preferred_workspace_) {
@@ -1221,7 +1285,6 @@ void JobsState::apply_workspaces(const Json &workspaces)
     if (pick.empty() && !workspaces_.empty()) {
       pick = workspaces_.front().id;
     }
-    workspace_.clear();
     select_workspace(pick);
   }
   if (relist && schedule) { /* never re-list at once: that would spin while the snapshot is stale */
@@ -1240,6 +1303,11 @@ void JobsState::select_workspace(const std::string &id)
   if (id == workspace_ && (id.empty() || watch_.active())) {
     return;
   }
+  if (hub() && id == workspace_) {
+    rewatch();
+    refresh_files();
+    return;
+  }
   epoch_++;
   detail_epoch_++;
   workspace_ = id;
@@ -1250,6 +1318,7 @@ void JobsState::select_workspace(const std::string &id)
   tasks_.clear();
   snapshot_time_ = 0.0;
   selected_.clear();
+  clear_task_observation();
   logs_sub_.unsubscribe();
   events_sub_.unsubscribe();
   log_all_.clear();
@@ -1285,7 +1354,13 @@ void JobsState::rewatch()
   };
   h.on_error = [weak, epoch](const Error &e, bool final) {
     if (auto a = weak.lock(); a && a->self->epoch_ == epoch) {
-      a->self->fail(std::string(a->self->store_.tr("jobs.op.watch")), e);
+      JobsState &s = *a->self;
+      // A workspace watch can return an old heartbeat. Its transport result cannot
+      // date or replace the exact selected-task observation.
+      if (s.hub() && e.code == ErrorCode::Unauthorized) {
+        s.deny_task_observation();
+      }
+      s.fail(std::string(s.store_.tr("jobs.op.watch")), e);
     }
   };
   watch_ = client_->watch(p, std::move(h));
@@ -1451,7 +1526,7 @@ void JobsState::refresh_transfers()
   if (!ready()) {
     return;
   }
-  on(client_->transfer_list(), [this](const bridge::Result<std::vector<bridge::Transfer>> &r) {
+  on_bridge_read(client_->transfer_list(), [this](const bridge::Result<std::vector<bridge::Transfer>> &r) {
     if (!r) {
       fail(std::string(store_.tr("jobs.op.transfers")), r.error());
       return;
@@ -1643,7 +1718,10 @@ void JobsState::submission_result(const bridge::Result<bridge::Submitted> &r)
       s.state = SubmitState::Done;
       s.task_id = get_str(v.object, "id");
       set_status(store_.catalog().format("jobs.status.submitted", {{"id", s.task_id}}), ui::ToastKind::Success);
-      if (s.params.target.connection == active_) {
+      const std::string submitted_workspace = s.params.workspace_id.empty() ?
+          get_str(s.params.spec, "workspace_id") : s.params.workspace_id;
+      if (s.params.target.connection == active_ &&
+          (!hub() || (s.params.target.node == node_ && submitted_workspace == workspace_))) {
         select_task(s.task_id);
       }
     }
@@ -1705,13 +1783,14 @@ void JobsState::submission_result(const bridge::Result<bridge::Submitted> &r)
 void JobsState::apply_snapshot(const Json &tasks, const double time)
 {
   std::vector<TaskRow> rows;
-  if (tasks.is_array()) {
+  if (tasks.is_array() && !(hub() && (node_revoked() || task_observation_ == TaskObservation::Denied))) {
     for (const Json &t : tasks) {
       rows.push_back(TaskRow::from_json(t));
     }
   }
   tasks_ = std::move(rows);
   snapshot_time_ = time;
+  remember_selected_heartbeat();
   if (const TaskRow *sel = selected_task()) {
     /* Artifacts appear once the task is finished (the Runtime lists them only then). */
     if (sel->terminal() && artifacts_for_state_ != sel->state) {
@@ -1723,6 +1802,9 @@ void JobsState::apply_snapshot(const Json &tasks, const double time)
 
 const TaskRow *JobsState::selected_task() const
 {
+  if (hub()) {
+    return selected_hub_fact_ ? &*selected_hub_fact_ : nullptr;
+  }
   for (const TaskRow &t : tasks_) {
     if (t.id == selected_) {
       return &t;
@@ -1738,6 +1820,26 @@ void JobsState::select_task(const std::string &id)
   }
   detail_epoch_++;
   selected_ = id;
+  const bool denied = task_observation_ == TaskObservation::Denied;
+  clear_task_observation();
+  clear_task_detail();
+  if (hub() && node_revoked()) {
+    deny_task_observation();
+    return;
+  }
+  if (denied) {
+    task_observation_ = TaskObservation::Denied;
+  }
+  else {
+    remember_selected_heartbeat();
+    resubscribe_detail();
+  }
+  refresh_selected_task();
+  changed();
+}
+
+void JobsState::clear_task_detail()
+{
   logs_sub_.unsubscribe();
   events_sub_.unsubscribe();
   log_all_.clear();
@@ -1748,7 +1850,124 @@ void JobsState::select_task(const std::string &id)
   artifacts_.clear();
   artifacts_for_state_.clear();
   release_preview();
-  resubscribe_detail();
+}
+
+void JobsState::clear_task_observation()
+{
+  ++selected_task_read_;
+  selected_hub_fact_.reset();
+  selected_hub_exact_ = false;
+  task_observation_ = TaskObservation::Snapshot;
+}
+
+void JobsState::deny_task_observation()
+{
+  ++epoch_;
+  ++detail_epoch_;
+  watch_.unsubscribe();
+  clear_task_observation();
+  task_observation_ = TaskObservation::Denied;
+  tasks_.clear();
+  clear_task_detail();
+  changed();
+}
+
+const NodeRow *JobsState::active_node_row() const
+{
+  const auto node = std::find_if(nodes_.begin(), nodes_.end(), [this](const NodeRow &row) {
+    return !node_.empty() && row.id == node_;
+  });
+  return node == nodes_.end() ? nullptr : &*node;
+}
+
+bool JobsState::node_revoked() const
+{
+  const NodeRow *node = active_node_row();
+  return node && node->revoked;
+}
+
+void JobsState::remember_selected_heartbeat()
+{
+  if (!hub() || selected_.empty() || node_.empty() || workspace_.empty() ||
+      task_observation_ == TaskObservation::Denied || node_revoked()) {
+    return;
+  }
+  for (const TaskRow &row : tasks_) {
+    if (row.id == selected_ && row.workspace_id == workspace_) {
+      const bool known = selected_hub_fact_.has_value();
+      const int order = known ? compare_task_facts(row, *selected_hub_fact_) : 0;
+      if (!known || order > 0 || (order == 0 && !selected_hub_exact_)) {
+        selected_hub_fact_ = row;
+        selected_hub_exact_ = false;
+      }
+      if (known && order > 0 && task_observation_ != TaskObservation::Snapshot &&
+          task_observation_ != TaskObservation::Unsupported) {
+        // Invalidate even an in-flight read. It began before the newer fact arrived.
+        refresh_selected_task();
+      }
+      break;
+    }
+  }
+}
+
+void JobsState::refresh_selected_task()
+{
+  const NodeRow *node = active_node_row();
+  if (!ready() || !hub() || !node || node->revoked || workspace_.empty() || selected_.empty()) {
+    return;
+  }
+  if (!node->online) {
+    if (task_observation_ != TaskObservation::Denied) {
+      ++selected_task_read_;
+      task_observation_ = TaskObservation::Unavailable;
+      changed();
+    }
+    return;
+  }
+  const uint64_t request = ++selected_task_read_;
+  const bool denied = task_observation_ == TaskObservation::Denied;
+  if (!denied) {
+    task_observation_ = TaskObservation::Checking;
+  }
+  on(client_->task_get(target(), selected_, true), [this, request, denied](const bridge::Result<Json> &r) {
+    if (request != selected_task_read_) {
+      return;
+    }
+    if (!r) {
+      switch (r.error().code) {
+        case ErrorCode::Unauthorized: deny_task_observation(); return;
+        case ErrorCode::Unavailable:
+        case ErrorCode::Timeout: task_observation_ = TaskObservation::Unavailable; break;
+        case ErrorCode::Unsupported: task_observation_ = TaskObservation::Unsupported; break;
+        default: task_observation_ = TaskObservation::Unconfirmed; break;
+      }
+    }
+    else {
+      const auto task = r.value().find("task");
+      const TaskRow row = task == r.value().end() ? TaskRow{} : TaskRow::from_json(*task);
+      if (row.id == selected_ && row.workspace_id == workspace_ && !row.state.empty() &&
+          (!selected_hub_fact_ || compare_task_facts(row, *selected_hub_fact_) >= 0)) {
+        selected_hub_fact_ = row;
+        selected_hub_exact_ = true;
+        task_observation_ = TaskObservation::Verified;
+        if (denied) {
+          resubscribe_detail();
+          rewatch();
+          refresh_files();
+        }
+        else if (row.terminal() && artifacts_for_state_ != row.state) {
+          refresh_artifacts();
+        }
+        changed();
+        return;
+      }
+      task_observation_ = TaskObservation::Unconfirmed;
+    }
+    if (denied) {
+      task_observation_ = TaskObservation::Denied;
+    }
+    changed();
+  });
   changed();
 }
 
@@ -1854,12 +2073,50 @@ void JobsState::resubscribe_detail()
   refresh_artifacts();
 }
 
-void JobsState::cancel_task(const std::string &id)
+bool JobsState::can_cancel_selected_task() const
 {
-  if (!ready() || id.empty()) {
+  const TaskRow *task = selected_task();
+  const NodeRow *node = active_node_row();
+  const bool hub_eligible = node && node->online && !node->revoked &&
+      (task_observation_ == TaskObservation::Verified || task_observation_ == TaskObservation::Unsupported);
+  if (!ready() || workspace_.empty() || !task || task->workspace_id != workspace_ || task->terminal() ||
+      task->cancel_requested || (hub() && !hub_eligible)) {
+    return false;
+  }
+  return std::any_of(tasks_.begin(), tasks_.end(), [this](const TaskRow &row) {
+    return row.id == selected_ && row.workspace_id == workspace_ && !row.terminal() && !row.cancel_requested;
+  });
+}
+
+std::optional<TaskCancelConfirmation> JobsState::confirm_selected_task_cancel() const
+{
+  if (!can_cancel_selected_task()) {
+    return std::nullopt;
+  }
+  return TaskCancelConfirmation{target(), workspace_, selected_, detail_epoch_, ready_epoch_};
+}
+
+bool JobsState::can_cancel_task(const TaskCancelConfirmation &confirmation) const
+{
+  const auto current = target();
+  return confirmation.detail_epoch == detail_epoch_ && confirmation.ready_epoch == ready_epoch_ &&
+         confirmation.target.connection == current.connection &&
+         confirmation.target.node == current.node && confirmation.workspace_id == workspace_ &&
+         confirmation.task_id == selected_ && can_cancel_selected_task();
+}
+
+void JobsState::cancel_task(const TaskCancelConfirmation &confirmation)
+{
+  if (!can_cancel_task(confirmation)) {
     return;
   }
-  on(client_->task_cancel(target(), id, new_idempotency_key()), [this, id](const bridge::Result<bridge::Submitted> &r) {
+  const std::string id = confirmation.task_id;
+  const uint64_t epoch = epoch_;
+  on(client_->task_cancel(confirmation.target, id, new_idempotency_key()),
+     [this, id, epoch](const bridge::Result<bridge::Submitted> &r) {
+    if (epoch != epoch_) {
+      return;
+    }
     if (!r) {
       fail(std::string(store_.tr("jobs.op.cancel")), r.error());
       return;
@@ -1881,11 +2138,39 @@ void JobsState::refresh_tasks()
     return;
   }
   const uint64_t epoch = epoch_;
+  const NodeRow *node = active_node_row();
+  if (hub() && (!node || node->revoked ||
+                (selected_.empty() ? task_observation_ == TaskObservation::Denied : !node->online))) {
+    on(client_->hub_devices(active_), [this, epoch](const bridge::Result<Json> &r) {
+      if (epoch != epoch_) {
+        return;
+      }
+      if (!r) {
+        fail(std::string(store_.tr("jobs.op.nodes")), r.error());
+        return;
+      }
+      const bool restores_list = selected_.empty() && task_observation_ == TaskObservation::Denied;
+      apply_nodes(r.value());
+      const NodeRow *current = active_node_row();
+      if (!restores_list && epoch == epoch_ && current && !current->revoked &&
+          (selected_.empty() || current->online)) {
+        refresh_tasks();
+      }
+    });
+    return;
+  }
+  refresh_selected_task();
+  if (hub() && task_observation_ == TaskObservation::Denied) {
+    return; // Reopen observation through the exact scoped read before requesting cached rows.
+  }
   on(client_->task_list(target(), workspace_), [this, epoch](const bridge::Result<Json> &r) {
     if (epoch != epoch_) {
       return;
     }
     if (!r) {
+      if (hub() && r.error().code == ErrorCode::Unauthorized) {
+        deny_task_observation();
+      }
       fail(std::string(store_.tr("jobs.op.tasks")), r.error());
       return;
     }
@@ -1899,7 +2184,7 @@ void JobsState::refresh_tasks()
 
 void JobsState::refresh_artifacts()
 {
-  if (!ready() || selected_.empty()) {
+  if (!ready() || selected_.empty() || (hub() && task_observation_ == TaskObservation::Denied)) {
     return;
   }
   const TaskRow *t = selected_task();
@@ -1939,7 +2224,7 @@ void JobsState::apply_artifacts(const std::vector<bridge::FileEntry> &files)
 
 void JobsState::download_artifact(const std::string &path, const std::string &dest)
 {
-  if (!ready() || selected_.empty()) {
+  if (!ready() || selected_.empty() || (hub() && task_observation_ == TaskObservation::Denied)) {
     return;
   }
   bridge::DownloadParams p;
@@ -2111,7 +2396,7 @@ void JobsState::open_local(const std::string &local_path)
 
 void JobsState::open_in_viewer()
 {
-  if (selected_.empty()) {
+  if (selected_.empty() || (hub() && (task_observation_ == TaskObservation::Denied || node_revoked()))) {
     return;
   }
   OpenResultRequest req;

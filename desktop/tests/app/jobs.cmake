@@ -130,4 +130,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND Python3_Interpreter_FOUND AND _jobs_ba
       RESOURCE_LOCK display_${_server} PASS_REGULAR_EXPRESSION "PASS"
       FAIL_REGULAR_EXPRESSION "FAIL|leaked|Error: Not freed memory")
   endforeach()
+  add_test(NAME jobs_f03_live_xvfb
+    COMMAND ${Python3_EXECUTABLE} ${_jobs_runner} --server xvfb --size 1280x1100
+            --workdir ${CMAKE_CURRENT_BINARY_DIR}/d_f03_xvfb ${_jobs_sysroot_arg}
+            -- $<TARGET_FILE:stk-jobs-live> --gpu-backend ${_be} --fake-bridge $<TARGET_FILE:stk-bridge-fake>
+               --work ${_jobs_out}/live_f03_xvfb --screenshot ${_jobs_out}/jobs_f03_xvfb.png --f03)
+  set_tests_properties(jobs_f03_live_xvfb PROPERTIES
+    LABELS "window;jobs" TIMEOUT 180 SKIP_RETURN_CODE 77 ENVIRONMENT "${_jobs_env}"
+    RESOURCE_LOCK display_xvfb PASS_REGULAR_EXPRESSION "PASS"
+    FAIL_REGULAR_EXPRESSION "FAIL|leaked|Error: Not freed memory")
 endif()

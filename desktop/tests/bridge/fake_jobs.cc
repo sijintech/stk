@@ -61,6 +61,7 @@ struct Options {
   bool review_refuse = false;
   bool forget_inspected_once = false;
   bool local_uninitialized = false;
+  bool f03 = false;
   int submit_fail = 0;
   int stale_workspace_lists = 0; /**< hub: new workspaces missing from the next N listings */
 } g_opt;
@@ -268,9 +269,35 @@ Json public_task(const Json &task, bool hub)
   return out;
 }
 
+std::string f03_phase()
+{
+  std::string phase;
+  std::ifstream in(g_opt.dir + "/f03-phase");
+  std::getline(in, phase);
+  return phase.empty() ? "listed" : phase;
+}
+
+constexpr char kF03Workspace[] = "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1";
+
+Json f03_task(const std::string &phase)
+{
+  const bool terminal = phase == "recovered" || phase == "terminal";
+  return {{"id", kF03Task}, {"name", "Original Hub task"},
+          {"state", terminal ? "succeeded" : "running"},
+          {"updated_at", terminal ? "2026-11-09T12:00:01+00:00" : "2026-11-09T12:00:00+00:00"},
+          {"workspace_id", phase == "wrong-workspace" ? "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0" : kF03Workspace}};
+}
+
 Json tasks_for_locked(const std::string &sc, const std::string &ws)
 {
   Json list = Json::array();
+  if (g_opt.f03 && sc == "hub:mesh|node1" && (ws.empty() || ws == kF03Workspace)) {
+    const std::string phase = f03_phase();
+    if (phase == "listed" || phase == "terminal" || phase == "deny-list" || phase == "hold-running" ||
+        phase == "unsupported-listed" || phase == "node-offline" || phase == "filtered") {
+      list.push_back(f03_task(phase));
+    }
+  }
   const bool hub = sc.rfind("hub:", 0) == 0;
   for (auto it = g_model["tasks"].rbegin(); it != g_model["tasks"].rend(); ++it) {
     Json &t = *it;
@@ -301,12 +328,12 @@ Json action_summary(const Json &a)
   return s;
 }
 
-void hub_changed_locked()
+void hub_changed_locked(std::string_view kind = "actions.changed")
 {
   static int64_t cursor = 0;
   cursor++;
   for (const std::string &sub : g_hub_subs) {
-    event("hub.event", {{"sub", sub}, {"cursor", cursor}, {"kind", "actions.changed"}, {"payload", Json::object()}});
+    event("hub.event", {{"sub", sub}, {"cursor", cursor}, {"kind", kind}, {"payload", Json::object()}});
   }
 }
 
@@ -407,9 +434,18 @@ void tick_transfers_locked()
 
 void ticker()
 {
+  std::string device_phase;
   while (!g_stop.load()) {
     {
       std::lock_guard lock(g_m);
+      if (g_opt.f03) {
+        const std::string phase = f03_phase();
+        const std::string current = phase == "node-offline" || phase == "filtered" ? phase : "listed";
+        if (device_phase != current) {
+          device_phase = current;
+          hub_changed_locked("devices.changed");
+        }
+      }
       for (auto &[sub, w] : g_watches) {
         const Json tasks = tasks_for_locked(w["scope"].get<std::string>(), w["workspace_id"].get<std::string>());
         if (!w.contains("last") || w["last"] != tasks) {
@@ -510,6 +546,9 @@ void init(const std::string &dir, std::vector<std::string> args, SendFn send)
     }
     else if (args[i] == "--local-uninitialized") {
       g_opt.local_uninitialized = true;
+    }
+    else if (args[i] == "--f03") {
+      g_opt.f03 = true;
     }
     else if (args[i] == "--stale-workspace-lists" && i + 1 < args.size()) {
       g_opt.stale_workspace_lists = std::atoi(args[++i].c_str());
@@ -672,7 +711,10 @@ bool handle(const Json &id, const std::string &method, const Json &p)
     return true;
   }
   if (method == "hub.devices") {
-    respond(id, {{"devices", Json::array({{{"id", "node1"}, {"name", "gpu-node"}, {"role", "node"}, {"online", true},
+    const std::string phase = g_opt.f03 ? f03_phase() : "listed";
+    const bool revoked = phase == "revoked", filtered = phase == "filtered";
+    respond(id, {{"devices", Json::array({{{"id", filtered ? "node2" : "node1"}, {"name", "gpu-node"}, {"role", "node"},
+                                           {"online", !revoked && phase != "node-offline"}, {"revoked", revoked},
                                            {"snapshot", Json::object()}},
                                           {{"id", "dev1"}, {"name", "STK Desktop"}, {"role", "client"}, {"online", true},
                                            {"snapshot", Json::object()}}})}});
@@ -956,7 +998,57 @@ bool handle(const Json &id, const std::string &method, const Json &p)
     return true;
   }
   if (method == "task.list") {
+    if (g_opt.f03 && sc == "hub:mesh|node1" && f03_phase() == "deny-list") {
+      error(id, "unauthorized", "Original execution scope refused");
+      return true;
+    }
     respond(id, {{"tasks", tasks_for_locked(sc, p.value("workspace_id", std::string()))}});
+    return true;
+  }
+  if (g_opt.f03 && sc == "hub:mesh|node1" && method == "task.get" &&
+      p.value("task_id", std::string()) == kF03Task) {
+    const std::string phase = f03_phase();
+    if (!p.value("require_live", false) && phase != "listed") {
+      error(id, "not_found", "Task absent from heartbeat");
+    }
+    else if (phase == "hold-running" || phase == "hold-unavailable") {
+      std::ofstream(g_opt.dir + "/f03-held") << phase;
+      g_threads.emplace_back([id, phase]() {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!g_stop.load() && std::chrono::steady_clock::now() < deadline) {
+          if (fs::exists(g_opt.dir + "/f03-release")) {
+            if (phase == "hold-unavailable") {
+              error(id, "unavailable", "Earlier exact read failed", nullptr, true);
+            }
+            else {
+              respond(id, {{"task", f03_task("listed")}});
+            }
+            std::ofstream(g_opt.dir + "/f03-replied") << phase;
+            return;
+          }
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+      });
+    }
+    else if (phase == "offline" || phase == "revoked" || phase == "node-offline" || phase == "filtered") {
+      error(id, "unavailable", "Original execution node unavailable", nullptr, true);
+    }
+    else if (phase == "denied") {
+      error(id, "unauthorized", "Original execution scope refused");
+    }
+    else if (phase == "unsupported" || phase == "unsupported-listed") {
+      error(id, "unsupported", "Exact task lookup unavailable");
+    }
+    else {
+      respond(id, {{"task", f03_task(phase)}});
+    }
+    return true;
+  }
+  if (g_opt.f03 && sc == "hub:mesh|node1" && method == "task.cancel" &&
+      p.value("task_id", std::string()) == kF03Task && f03_phase() == "unsupported-listed") {
+    Json task = f03_task("listed");
+    task["cancel_requested"] = true;
+    respond(id, {{"task", task}});
     return true;
   }
   if (method == "task.get" || method == "task.cancel" || method == "task.artifacts") {

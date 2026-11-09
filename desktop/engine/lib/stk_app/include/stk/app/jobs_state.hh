@@ -79,6 +79,17 @@ struct ConnectionRow {
 struct NodeRow {
   std::string id, name;
   bool online = false;
+  bool revoked = false;
+};
+
+/** The outcome of observing a selected Hub task, independent of its last known execution state. */
+enum class TaskObservation : uint8_t { Snapshot, Checking, Verified, Unavailable, Unsupported, Unconfirmed, Denied };
+
+/** The selected task and scope at the time its explicit cancellation was requested in the UI. */
+struct TaskCancelConfirmation {
+  bridge::Target target;
+  std::string workspace_id, task_id;
+  uint64_t detail_epoch = 0, ready_epoch = 0;
 };
 
 struct WorkspaceRow {
@@ -347,8 +358,12 @@ class JobsState {
     return selected_;
   }
   const TaskRow *selected_task() const;
+  TaskObservation selected_task_observation() const { return task_observation_; }
   void select_task(const std::string &id);
-  void cancel_task(const std::string &id);
+  bool can_cancel_selected_task() const;
+  std::optional<TaskCancelConfirmation> confirm_selected_task_cancel() const;
+  bool can_cancel_task(const TaskCancelConfirmation &confirmation) const;
+  void cancel_task(const TaskCancelConfirmation &confirmation);
   /** One task.list now (the watch keeps the list current by itself). */
   void refresh_tasks();
 
@@ -412,6 +427,7 @@ class JobsState {
  private:
   struct Alive;
   template<class T, class F> void on(bridge::Future<T> future, F fn);
+  template<class T, class F> void on_bridge_read(bridge::Future<T> future, F fn);
   void changed();
   void fail(const std::string &what, const bridge::Error &error);
   void on_state(bridge::BridgeState state);
@@ -419,6 +435,13 @@ class JobsState {
   void connect_active();
   void rewatch();
   void resubscribe_detail();
+  void clear_task_detail();
+  void clear_task_observation();
+  void deny_task_observation();
+  const NodeRow *active_node_row() const;
+  bool node_revoked() const;
+  void remember_selected_heartbeat();
+  void refresh_selected_task();
   void send_submission();
   void submission_result(const bridge::Result<bridge::Submitted> &result);
   void maybe_resend_after_review();
@@ -436,6 +459,8 @@ class JobsState {
   bridge::Client *client_ = nullptr;
   bridge::ListenerHandle state_listener_, transfer_listener_;
   bridge::BridgeState bridge_state_ = bridge::BridgeState::Stopped;
+  uint64_t bridge_epoch_ = 0;
+  uint64_t ready_epoch_ = 0;
   bool seen_ready_ = false;
   uint64_t version_ = 0;
   JobsStatus status_;
@@ -487,6 +512,10 @@ class JobsState {
   bridge::Subscription watch_;
   std::string selected_;
   uint64_t detail_epoch_ = 0;
+  std::optional<TaskRow> selected_hub_fact_;
+  TaskObservation task_observation_ = TaskObservation::Snapshot;
+  bool selected_hub_exact_ = false;
+  uint64_t selected_task_read_ = 0;
   std::string artifacts_for_state_; /**< the task state artifacts were listed in */
 
   /* Detail. */

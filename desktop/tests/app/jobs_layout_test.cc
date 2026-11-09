@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include "../wm/support.hh"
+#include "../bridge/fake_jobs.hh"
 #include "jobs_support.hh"
 #include "stk/app/jobs_state.hh"
 #include "stk/platform/file_dialog.hh"
@@ -101,9 +102,13 @@ struct UiOnFake {
   AppFixture f{"en", 1.0f, 1280, 900};
   std::unique_ptr<bridge::Client> client;
 
-  UiOnFake()
+  explicit UiOnFake(bool f03 = false)
   {
-    client = bridge::Client::create(bridge::test::fake_options({"--jobs", dir.str() + "/model"}, loop.executor()));
+    std::vector<std::string> args{"--jobs", dir.str() + "/model"};
+    if (f03) {
+      args.push_back("--f03");
+    }
+    client = bridge::Client::create(bridge::test::fake_options(args, loop.executor()));
     f.shell->store().set_bridge(client.get());
     jobs().open_external = [](const std::string &, std::string *) { return true; };
     jobs().attach(client.get());
@@ -155,6 +160,44 @@ struct UiOnFake {
     f.drv->frame();
   }
 };
+
+TEST(JobsLayout, OpenCancelDialogDisablesDispatchAfterItsTaskOrScopeChanges)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  for (const std::string_view change : {"terminal", "revoked", "scope"}) {
+    SCOPED_TRACE(change);
+    UiOnFake u(true);
+    app::JobsState &jobs = u.jobs();
+    ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+    jobs.select_connection("hub:mesh");
+    ASSERT_TRUE(u.pump([&] { return !jobs.tasks().empty(); }));
+    jobs.select_task(fake_jobs::kF03Task);
+    ASSERT_TRUE(u.pump([&] { return jobs.selected_task_observation() == app::TaskObservation::Verified; }));
+    u.click("a1/main/tasks/cancel_task");
+    ASSERT_NE(u.find("jobs_dialog_a1/ok"), nullptr);
+    ASSERT_TRUE(u.find("jobs_dialog_a1/ok")->enabled);
+
+    if (change == "terminal") {
+      jobs.apply_snapshot(io::Json::array({{{"id", jobs.selected()}, {"workspace_id", jobs.workspace()},
+                                             {"state", "succeeded"}}}), 100.0);
+    }
+    else if (change == "revoked") {
+      jobs.apply_nodes(io::Json::array({{{"id", jobs.node()}, {"role", "node"}, {"revoked", 1}}}));
+    }
+    else {
+      jobs.select_connection("runtime:lab");
+    }
+    ASSERT_NE(u.find("jobs_dialog_a1/ok"), nullptr);
+    EXPECT_FALSE(u.find("jobs_dialog_a1/ok")->enabled);
+    u.click("jobs_dialog_a1/ok");
+    bool drained = false;
+    u.client->call("connections.list").then([&](const bridge::Result<io::Json> &) { drained = true; });
+    ASSERT_TRUE(u.pump([&] { return drained; }));
+    EXPECT_EQ(wmtest::read_text(u.dir.str() + "/model/methods.log").find("task.cancel\n"), std::string::npos);
+  }
+}
 
 TEST(JobsLayout, AddRuntimeDialogAndThePathFieldFallback)
 {

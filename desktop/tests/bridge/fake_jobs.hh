@@ -10,6 +10,8 @@
 
 namespace fake_jobs {
 
+inline constexpr char kF03Task[] = "22222222222222222222222222222222";
+
 using SendFn = std::function<void(const stk::io::Json &)>;
 
 /** Loads (or creates) DIR/model.json; `args` are the fake's command-line arguments. */

@@ -13,6 +13,7 @@
  */
 
 #include <cstdio>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -25,6 +26,8 @@
 #include "stk/gfx/gpu.hh"
 #include "stk/gfx/image.hh"
 #include "stk/wm/window.hh"
+
+#include "../bridge/fake_jobs.hh"
 
 using namespace stk;
 
@@ -41,16 +44,17 @@ void check(const bool ok, const char *what, const std::string &detail = {})
   }
 }
 
-int run(const gfx::Backend backend, const std::string &fake, const std::string &work, const std::string &shot)
+int run(const gfx::Backend backend, const std::string &fake, const std::string &work, const std::string &shot,
+        bool f03)
 {
   app::ShellOptions so;
-  so.language = "zh_CN";
+  so.language = f03 ? "en" : "zh_CN";
   app::AppShell shell(so);
   check(shell.catalogs_loaded(), "catalogs", shell.options().i18n_dir);
 
   wm::WmOptions opts;
   opts.gpu.backend = backend;
-  opts.window = {"STK jobs live", 1100, 740, false};
+  opts.window = {"STK jobs live", 1100, f03 ? 980 : 740, false};
   std::string err;
   std::unique_ptr<wm::WindowManager> wm = wm::WindowManager::create(opts, err);
   if (!wm) {
@@ -69,6 +73,9 @@ int run(const gfx::Backend backend, const std::string &fake, const std::string &
   jobs.schedule = [&wm](double s, std::function<void()> fn) { wm->add_timer(uint64_t(s * 1000.0), 0, std::move(fn)); };
   bridge::ClientOptions bo;
   bo.command = {fake, "--jobs", work};
+  if (f03) {
+    bo.command.push_back("--f03");
+  }
   bo.executor = wm->executor();
   std::unique_ptr<bridge::Client> client = bridge::Client::create(std::move(bo));
   shell.store().set_bridge(client.get());
@@ -99,11 +106,7 @@ int run(const gfx::Backend backend, const std::string &fake, const std::string &
     y = win->height() - 1 - int(w->rect.cy());
     return true;
   };
-  auto click = [&](const std::string &key) {
-    int x, y;
-    if (!widget_pos(key, x, y)) {
-      return false;
-    }
+  auto click_position = [&](int x, int y) {
     wm::Event e;
     e.x = x;
     e.y = y;
@@ -114,6 +117,13 @@ int run(const gfx::Backend backend, const std::string &fake, const std::string &
     send(e);
     e.type = wm::EventType::MouseUp;
     send(e);
+  };
+  auto click = [&](const std::string &key) {
+    int x, y;
+    if (!widget_pos(key, x, y)) {
+      return false;
+    }
+    click_position(x, y);
     return true;
   };
   auto key_text = [&](const std::string &text, wm::Key k = wm::Key::Unknown) {
@@ -142,12 +152,102 @@ int run(const gfx::Backend backend, const std::string &fake, const std::string &
     }
     return false;
   };
+  int f03_clicks = 0;
+  std::string f03_workspace;
+  auto phase = [&](const char *value) {
+    std::ofstream(work + "/f03-phase.next") << value;
+    std::filesystem::rename(work + "/f03-phase.next", work + "/f03-phase");
+  };
+  auto visible_label = [&](const std::string &text) {
+    if (!screen.ui()) return false;
+    for (const auto &block : screen.ui()->blocks()) {
+      for (const auto &widget : block->widgets()) {
+        if (widget.text == text && !widget.rect.intersect(widget.clip).empty()) return true;
+      }
+    }
+    return false;
+  };
+  auto picture = [&](const std::string &path) {
+    if (path.empty()) return;
+    gfx::Image img;
+    if (win->read_pixels(img, err)) {
+      gfx::png_write(path, img);
+      printf("screenshot %s\n", path.c_str());
+    }
+    else {
+      check(false, "screenshot", err);
+    }
+  };
   wm->add_timer(30, 30, [&] {
+    if (f03 && step >= 2) {
+      using app::TaskObservation;
+      const auto refresh = [&] {
+        check(click("a1/header/refresh"), "click existing Jobs Refresh");
+        ++f03_clicks;
+        next();
+      };
+      switch (step) {
+        case 2: {
+          const ui::Widget *table = screen.ui() ? screen.ui()->find("a1/main/tasks/tasks") : nullptr;
+          if (!table || !table->table || jobs.tasks().size() != 1) {
+            timeout(5000, "Jobs table and original task");
+            break;
+          }
+          f03_workspace = jobs.workspace();
+          check(jobs.selected().empty() && jobs.node() == "node1" && !f03_workspace.empty(), "fixed starting scope");
+          const auto &style = screen.ui()->style();
+          const auto row_height = std::round(table->table->row_height * style.unit);
+          const float x = table->rect.x + 2 * style.unit;
+          const float y = table->rect.y + style.pixel + 1.5f * row_height;
+          check(table->clip.contains({x, y}), "first task row is visible");
+          click_position(int(x), win->height() - 1 - int(y));
+          ++f03_clicks;
+          next();
+          break;
+        }
+        case 3:
+          if (jobs.selected() == fake_jobs::kF03Task && jobs.selected_task_observation() == TaskObservation::Verified &&
+              visible_label("Last known task state: running") && visible_label("Live observation: last check succeeded")) {
+            phase("offline");
+            next();
+          }
+          else { timeout(5000, "selected running fact and verified observation"); }
+          break;
+        case 4:
+          if (jobs.tasks().empty()) { refresh(); }
+          else { timeout(5000, "original task leaves the heartbeat window"); }
+          break;
+        case 5:
+          if (jobs.selected_task_observation() == TaskObservation::Unavailable &&
+              visible_label("Last known task state: running") && visible_label("Live observation: unavailable") &&
+              visible_label("No tasks in the current heartbeat list")) {
+            if (!shot.empty()) picture(shot + ".offline.png");
+            phase("recovered");
+            refresh();
+          }
+          else { timeout(5000, "separate running fact and unavailable observation"); }
+          break;
+        case 6:
+          if (jobs.selected_task_observation() == TaskObservation::Verified &&
+              visible_label("Last known task state: succeeded") && visible_label("Live observation: last check succeeded")) {
+            check(jobs.selected() == fake_jobs::kF03Task && jobs.node() == "node1" &&
+                  jobs.workspace() == f03_workspace && jobs.tasks().empty(), "recovered original scope outside heartbeat");
+            check(f03_clicks == 3, "one task click and two Refresh clicks");
+            picture(shot);
+            wm->quit(0);
+            next();
+          }
+          else { timeout(5000, "exact original success shown after Refresh"); }
+          break;
+        default: break;
+      }
+      return;
+    }
     switch (step) {
       case 0:
         if (win->frames_drawn() > 0 && jobs.ready() && jobs.connections().size() >= 2) {
           check(true, "first frame, bridge ready");
-          jobs.select_connection("runtime:lab");
+          jobs.select_connection(f03 ? "hub:mesh" : "runtime:lab");
           next();
         }
         else {
@@ -156,7 +256,7 @@ int run(const gfx::Backend backend, const std::string &fake, const std::string &
         break;
       case 1:
         if (!jobs.workspace().empty() && jobs.snapshot_time() > 0) {
-          check(shell.store().connection().find("lab") != std::string::npos, "status bar connection",
+          check(shell.store().connection().find(f03 ? "mesh" : "lab") != std::string::npos, "status bar connection",
                 shell.store().connection());
           if (auto *area = dynamic_cast<app::EditorArea *>(screen.find_area("a1"))) {
             // The default layout opens on the Workspace tab; show the Jobs tab like a user would.
@@ -258,9 +358,15 @@ int run(const gfx::Backend backend, const std::string &fake, const std::string &
   std::ifstream log(work + "/methods.log");
   std::string line, last;
   bool cancel = false;
+  int exact_reads = 0, submits = 0;
   while (std::getline(log, line)) {
     cancel |= line == "task.cancel";
+    exact_reads += line == "task.get";
+    submits += line == "task.submit";
     last = line;
+  }
+  if (f03) {
+    check(exact_reads == 3 && submits == 0, "three selected-task reads and zero submissions", std::to_string(exact_reads));
   }
   check(!cancel, "closing did not cancel tasks");
   check(last == "EOF", "the bridge got EOF", last);
@@ -277,6 +383,7 @@ int run(const gfx::Backend backend, const std::string &fake, const std::string &
 int main(int argc, char **argv)
 {
   std::string backend_name, fake, work, shot;
+  bool f03 = false;
   for (int i = 1; i < argc; i++) {
     const std::string a = argv[i];
     auto next = [&]() { return i + 1 < argc ? std::string(argv[++i]) : std::string(); };
@@ -292,9 +399,12 @@ int main(int argc, char **argv)
     else if (a == "--screenshot") {
       shot = next();
     }
+    else if (a == "--f03") {
+      f03 = true;
+    }
   }
   if (fake.empty() || work.empty()) {
-    fprintf(stderr, "usage: stk-jobs-live [--gpu-backend B] --fake-bridge PATH --work DIR [--screenshot out.png]\n");
+    fprintf(stderr, "usage: stk-jobs-live [--gpu-backend B] --fake-bridge PATH --work DIR [--screenshot out.png] [--f03]\n");
     return 2;
   }
   std::error_code ec;
@@ -308,7 +418,7 @@ int main(int argc, char **argv)
   int rc;
   {
     gfx::Runtime runtime;
-    rc = run(backend, fake, work, shot);
+    rc = run(backend, fake, work, shot, f03);
   }
   if (rc == 77) {
     return 77;

@@ -12,6 +12,7 @@
 #include "stk/io/png.hh"
 
 #include "jobs_support.hh"
+#include "../bridge/fake_jobs.hh"
 
 namespace stk::jobstest {
 namespace {
@@ -23,6 +24,12 @@ using io::Json;
 bool has(const std::vector<std::string> &v, const std::string &s)
 {
   return std::find(v.begin(), v.end(), s) != v.end();
+}
+
+void set_f03_phase(const FakeJobs &fixture, const char *value)
+{
+  std::ofstream(fixture.jobs_dir() + "/f03-phase.next") << value;
+  std::filesystem::rename(fixture.jobs_dir() + "/f03-phase.next", fixture.jobs_dir() + "/f03-phase");
 }
 
 const app::TaskRow *task_named(JobsState &j, const std::string &name)
@@ -79,6 +86,387 @@ TEST_F(JobsFake, ConnectsChecksHealthAndWatchesTheWorkspace)
     return false;
   }));
   EXPECT_TRUE(has(f.methods(), "watch"));
+}
+
+TEST_F(JobsFake, SelectedHubTaskKeepsLastKnownFactOutsideHeartbeatWindow)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("hub:mesh"));
+  const std::string task = "22222222222222222222222222222222";
+  j.apply_snapshot(Json::array({{{"id", task}, {"name", "original task"}, {"state", "running"},
+                                 {"workspace_id", j.workspace()}}}), 100.0);
+  j.select_task(task);
+  j.apply_snapshot(Json::array(), 101.0);
+
+  EXPECT_TRUE(j.tasks().empty());
+  EXPECT_EQ(j.selected(), task);
+  ASSERT_NE(j.selected_task(), nullptr);
+  EXPECT_EQ(j.selected_task()->state, "running");
+  EXPECT_EQ(j.selected_task()->name, "original task");
+}
+
+TEST_F(JobsFake, ExactHubObservationRecoversOriginalTaskAndClearsDeniedFacts)
+{
+  using app::TaskObservation;
+  FakeJobs f({"--f03"});
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("hub:mesh"));
+  ASSERT_EQ(j.tasks().size(), 1u);
+  const std::string original = fake_jobs::kF03Task;
+  const auto phase = [&](const char *value) {
+    set_f03_phase(f, value);
+  };
+  const auto wait_for = [&](TaskObservation wanted) {
+    return f.pump([&] { return j.selected_task_observation() == wanted; });
+  };
+  j.select_task(original);
+  ASSERT_TRUE(wait_for(TaskObservation::Verified));
+  ASSERT_NE(j.selected_task(), nullptr);
+  EXPECT_EQ(j.selected_task()->state, "running");
+
+  phase("offline");
+  ASSERT_TRUE(f.pump([&] { return j.tasks().empty(); }));
+  j.refresh_tasks();
+  ASSERT_TRUE(wait_for(TaskObservation::Unavailable));
+  ASSERT_NE(j.selected_task(), nullptr);
+  EXPECT_EQ(j.selected_task()->state, "running");
+  const std::string workspace = j.workspace();
+  j.apply_workspaces(Json::array({{{"id", "different workspace"}, {"name", "another workspace"}}}));
+  EXPECT_EQ(j.workspace(), workspace);
+  EXPECT_EQ(j.selected(), original);
+
+  phase("unsupported");
+  j.refresh_tasks();
+  ASSERT_TRUE(wait_for(TaskObservation::Unsupported));
+  ASSERT_NE(j.selected_task(), nullptr);
+  EXPECT_EQ(j.selected_task()->state, "running");
+
+  phase("wrong-workspace");
+  j.refresh_tasks();
+  ASSERT_TRUE(wait_for(TaskObservation::Unconfirmed));
+  ASSERT_NE(j.selected_task(), nullptr);
+  EXPECT_EQ(j.selected_task()->workspace_id, j.workspace());
+
+  phase("recovered");
+  j.refresh_tasks();
+  ASSERT_TRUE(wait_for(TaskObservation::Verified));
+  ASSERT_NE(j.selected_task(), nullptr);
+  EXPECT_EQ(j.selected(), original);
+  EXPECT_EQ(j.selected_task()->id, original);
+  EXPECT_EQ(j.selected_task()->state, "succeeded");
+  EXPECT_TRUE(j.tasks().empty());
+  j.apply_snapshot(Json::array({{{"id", original}, {"state", "running"}, {"workspace_id", j.workspace()}}}), 123.0);
+  EXPECT_EQ(j.selected_task()->state, "succeeded");
+
+  phase("denied");
+  j.refresh_tasks();
+  ASSERT_TRUE(wait_for(TaskObservation::Denied));
+  EXPECT_EQ(j.selected_task(), nullptr);
+  j.open_in_viewer();
+  EXPECT_FALSE(f.store.has_open_result());
+  j.apply_snapshot(Json::array({{{"id", original}, {"state", "running"}, {"workspace_id", j.workspace()}}}), 124.0);
+  EXPECT_EQ(j.selected_task(), nullptr);
+  EXPECT_TRUE(j.tasks().empty());
+
+  phase("recovered");
+  j.refresh_tasks();
+  ASSERT_TRUE(wait_for(TaskObservation::Verified));
+  j.apply_nodes(Json::array({{{"id", j.node()}, {"name", "original node"}, {"role", "node"}, {"revoked", 1}}}));
+  EXPECT_EQ(j.selected_task_observation(), TaskObservation::Denied);
+  EXPECT_EQ(j.selected_task(), nullptr);
+  EXPECT_EQ(j.selected(), original);
+  j.apply_nodes(Json::array({{{"id", j.node()}, {"name", "original node"}, {"role", "node"}, {"online", true}}}));
+  EXPECT_EQ(j.selected_task_observation(), TaskObservation::Denied);
+  j.apply_snapshot(Json::array({{{"id", original}, {"state", "running"}, {"workspace_id", j.workspace()}}}), 125.0);
+  EXPECT_EQ(j.selected_task(), nullptr);
+  EXPECT_TRUE(j.tasks().empty());
+
+  j.refresh_tasks();
+  j.select_connection("runtime:lab");
+  f.settle(0.25);
+  EXPECT_TRUE(j.selected().empty());
+  EXPECT_EQ(j.selected_task(), nullptr);
+  const auto methods = f.methods();
+  EXPECT_FALSE(has(methods, "task.submit"));
+  EXPECT_FALSE(has(methods, "task.cancel"));
+}
+
+TEST_F(JobsFake, NewerTerminalHeartbeatOutranksAnExactReplyAlreadyInFlight)
+{
+  using app::TaskObservation;
+  for (const char *late : {"hold-running", "hold-unavailable"}) {
+    SCOPED_TRACE(late);
+    FakeJobs f({"--f03"});
+    JobsState &j = f.jobs();
+    ASSERT_TRUE(f.connect("hub:mesh"));
+    j.select_task(fake_jobs::kF03Task);
+    ASSERT_TRUE(f.pump([&] { return j.selected_task_observation() == TaskObservation::Verified; }));
+    ASSERT_EQ(j.selected_task()->state, "running");
+    set_f03_phase(f, late);
+    j.refresh_tasks();
+    ASSERT_TRUE(f.pump([&] { return std::filesystem::exists(f.jobs_dir() + "/f03-held"); }, 3));
+    set_f03_phase(f, "terminal");
+    ASSERT_TRUE(f.pump([&] { return !j.tasks().empty() && j.tasks().front().terminal(); }, 3));
+    EXPECT_TRUE(f.pump([&] {
+      return j.selected_task() && j.selected_task()->terminal() &&
+             j.selected_task_observation() == TaskObservation::Verified;
+    }, 3));
+    std::ofstream(f.jobs_dir() + "/f03-release") << "release\n";
+    ASSERT_TRUE(f.pump([&] { return std::filesystem::exists(f.jobs_dir() + "/f03-replied"); }, 3));
+    f.settle(0.15);
+    ASSERT_NE(j.selected_task(), nullptr);
+    EXPECT_EQ(j.selected_task()->state, "succeeded");
+    EXPECT_EQ(j.selected_task_observation(), TaskObservation::Verified);
+  }
+}
+
+TEST_F(JobsFake, CancelConfirmationCannotDispatchForChangedScopeOrIneligibleTask)
+{
+  for (const char *change : {"terminal", "denied", "scope", "selection"}) {
+    SCOPED_TRACE(change);
+    FakeJobs f({"--f03"});
+    JobsState &j = f.jobs();
+    ASSERT_TRUE(f.connect("hub:mesh"));
+    j.select_task(fake_jobs::kF03Task);
+    ASSERT_TRUE(f.pump([&] { return j.selected_task_observation() == app::TaskObservation::Verified; }));
+    const auto confirmation = j.confirm_selected_task_cancel();
+    ASSERT_TRUE(confirmation);
+    if (std::string_view(change) == "terminal") {
+      set_f03_phase(f, "terminal");
+      ASSERT_TRUE(f.pump([&] { return !j.tasks().empty() && j.tasks().front().terminal(); }, 3));
+    }
+    else if (std::string_view(change) == "denied") {
+      j.apply_nodes(Json::array({{{"id", j.node()}, {"role", "node"}, {"revoked", 1}}}));
+      ASSERT_EQ(j.selected_task_observation(), app::TaskObservation::Denied);
+    }
+    else if (std::string_view(change) == "scope") {
+      ASSERT_TRUE(f.connect("runtime:lab"));
+    }
+    else {
+      j.select_task("");
+      j.select_task(fake_jobs::kF03Task);
+      ASSERT_TRUE(f.pump([&] { return j.can_cancel_selected_task(); }));
+    }
+    EXPECT_FALSE(j.can_cancel_task(*confirmation));
+    j.cancel_task(*confirmation);
+    f.settle(0.15);
+    EXPECT_FALSE(has(f.methods(), "task.cancel"));
+  }
+}
+
+TEST_F(JobsFake, ReattachingBridgeDiscardsOldTaskListCallback)
+{
+  FakeJobs replacement({"--f03"});
+  ASSERT_TRUE(replacement.pump([&] { return replacement.jobs().ready(); }));
+  set_f03_phase(replacement, "terminal");
+  FakeJobs old({"--f03"});
+  JobsState &j = old.jobs();
+  ASSERT_TRUE(old.connect("hub:mesh"));
+  ASSERT_EQ(j.tasks().size(), 1u);
+  const auto before = old.methods();
+  j.refresh_tasks();
+  old.store.set_bridge(replacement.client.get());
+  j.attach(replacement.client.get());
+  ASSERT_TRUE(j.tasks().empty());
+  ASSERT_TRUE(old.pump([&] {
+    const auto methods = old.methods();
+    return std::count(methods.begin(), methods.end(), "task.list") >
+           std::count(before.begin(), before.end(), "task.list");
+  }, 3));
+  old.settle(0.15);
+  EXPECT_TRUE(j.tasks().empty());
+
+  j.refresh_tasks();
+  ASSERT_TRUE(replacement.pump([&] { return j.tasks().size() == 1u && j.tasks().front().terminal(); }, 3));
+  j.select_task(fake_jobs::kF03Task);
+  ASSERT_TRUE(replacement.pump([&] {
+    return j.selected_task_observation() == app::TaskObservation::Verified;
+  }, 3));
+  ASSERT_NE(j.selected_task(), nullptr);
+  EXPECT_EQ(j.selected_task()->state, "succeeded");
+  EXPECT_EQ(j.active_id(), "hub:mesh");
+  ASSERT_EQ(j.nodes().size(), 1u);
+  EXPECT_EQ(j.nodes().front().id, j.node());
+  set_f03_phase(replacement, "listed");
+  ASSERT_TRUE(replacement.pump([&] { return j.tasks().size() == 1u && j.tasks().front().state == "running"; }, 3));
+  EXPECT_EQ(j.selected_task()->state, "succeeded");
+}
+
+TEST_F(JobsFake, CancelConfirmationExpiresAcrossBridgeProcessRestart)
+{
+  using app::TaskObservation;
+  FakeJobs f({"--f03"});
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("hub:mesh"));
+  j.select_task(fake_jobs::kF03Task);
+  ASSERT_TRUE(f.pump([&] { return j.selected_task_observation() == TaskObservation::Verified; }));
+  const auto confirmation = j.confirm_selected_task_cancel();
+  ASSERT_TRUE(confirmation);
+
+  set_f03_phase(f, "hold-running");
+  const int64_t pid = f.client->bridge_pid();
+  bridge::test::kill_hard(pid);
+  ASSERT_TRUE(f.pump([&] {
+    return j.ready() && f.client->bridge_pid() != pid && j.selected_task_observation() == TaskObservation::Checking &&
+           std::filesystem::exists(f.jobs_dir() + "/f03-held");
+  }, 4));
+  ASSERT_FALSE(j.tasks().empty()); // Replay returns the same cached running row while exact verification waits.
+  EXPECT_FALSE(j.can_cancel_selected_task());
+  EXPECT_FALSE(j.can_cancel_task(*confirmation));
+  j.cancel_task(*confirmation);
+
+  std::ofstream(f.jobs_dir() + "/f03-release") << "release\n";
+  ASSERT_TRUE(f.pump([&] { return j.selected_task_observation() == TaskObservation::Verified; }, 3));
+  EXPECT_TRUE(j.can_cancel_selected_task());
+  EXPECT_FALSE(j.can_cancel_task(*confirmation));
+  EXPECT_FALSE(has(f.methods(), "task.cancel"));
+}
+
+TEST_F(JobsFake, UnrevokedNodeWithoutSelectionGetsFreshTaskList)
+{
+  using app::TaskObservation;
+  FakeJobs f({"--f03"});
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("hub:mesh"));
+  const std::string node = j.node(), workspace = j.workspace();
+  ASSERT_TRUE(j.selected().empty());
+  ASSERT_EQ(j.tasks().size(), 1u);
+  j.apply_nodes(Json::array({{{"id", node}, {"role", "node"}, {"revoked", true}}}));
+  ASSERT_EQ(j.selected_task_observation(), TaskObservation::Denied);
+  EXPECT_TRUE(j.tasks().empty());
+  j.apply_nodes(Json::array({{{"id", node}, {"role", "node"}, {"online", true}, {"revoked", false}}}));
+  ASSERT_TRUE(f.pump([&] { return j.tasks().size() == 1u; }, 3));
+  EXPECT_EQ(j.selected_task_observation(), TaskObservation::Snapshot);
+  EXPECT_EQ(j.node(), node);
+  EXPECT_EQ(j.workspace(), workspace);
+  EXPECT_TRUE(j.selected().empty());
+  EXPECT_EQ(j.tasks().front().id, fake_jobs::kF03Task);
+
+  set_f03_phase(f, "deny-list");
+  j.refresh_tasks();
+  ASSERT_TRUE(f.pump([&] { return j.selected_task_observation() == TaskObservation::Denied; }, 3));
+  EXPECT_TRUE(j.tasks().empty());
+  const auto before_refresh = f.methods();
+  set_f03_phase(f, "listed");
+  j.refresh_tasks(); // Both fixture phases leave the device list unchanged and emit no devices.changed.
+  ASSERT_TRUE(f.pump([&] { return j.tasks().size() == 1u; }, 3));
+  EXPECT_EQ(j.selected_task_observation(), TaskObservation::Snapshot);
+  EXPECT_EQ(j.node(), node);
+  EXPECT_EQ(j.workspace(), workspace);
+  EXPECT_TRUE(j.selected().empty());
+
+  set_f03_phase(f, "terminal");
+  ASSERT_TRUE(f.pump([&] { return j.tasks().size() == 1u && j.tasks().front().terminal(); }, 3));
+  EXPECT_TRUE(j.selected().empty()); // The restored subscription delivered the later change.
+  const auto after_watch = f.methods();
+  for (const std::string method : {"hub.devices", "task.list", "watch"}) {
+    EXPECT_EQ(std::count(after_watch.begin(), after_watch.end(), method),
+              std::count(before_refresh.begin(), before_refresh.end(), method) + 1) << method;
+  }
+}
+
+TEST_F(JobsFake, LegacyHubCanCancelOnlyWithAnEligibleHeartbeatRow)
+{
+  FakeJobs f({"--f03"});
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("hub:mesh"));
+  set_f03_phase(f, "unsupported-listed");
+  j.select_task(fake_jobs::kF03Task);
+  ASSERT_TRUE(f.pump([&] { return j.selected_task_observation() == app::TaskObservation::Unsupported; }));
+  const auto confirmation = j.confirm_selected_task_cancel();
+  ASSERT_TRUE(confirmation);
+
+  set_f03_phase(f, "unsupported");
+  ASSERT_TRUE(f.pump([&] { return j.tasks().empty(); }));
+  EXPECT_FALSE(j.can_cancel_task(*confirmation));
+  j.cancel_task(*confirmation);
+  EXPECT_FALSE(has(f.methods(), "task.cancel"));
+
+  set_f03_phase(f, "node-offline");
+  ASSERT_TRUE(f.pump([&] { return !j.tasks().empty() && !j.nodes().empty() && !j.nodes().front().online; }));
+  EXPECT_FALSE(j.can_cancel_task(*confirmation));
+  j.cancel_task(*confirmation);
+  EXPECT_FALSE(has(f.methods(), "task.cancel"));
+
+  set_f03_phase(f, "unsupported-listed");
+  ASSERT_TRUE(f.pump([&] { return !j.nodes().empty() && j.nodes().front().online; }));
+  j.refresh_tasks();
+  ASSERT_TRUE(f.pump([&] { return j.can_cancel_selected_task(); }));
+  const auto eligible = j.confirm_selected_task_cancel();
+  ASSERT_TRUE(eligible);
+  j.cancel_task(*eligible);
+  ASSERT_TRUE(f.pump([&] { return has(f.methods(), "task.cancel"); }));
+  const auto methods = f.methods();
+  EXPECT_EQ(std::count(methods.begin(), methods.end(), "task.cancel"), 1);
+}
+
+TEST_F(JobsFake, FilteredRevocationClearsTheOriginalNodeFactAndDetails)
+{
+  using app::TaskObservation;
+  FakeJobs f({"--f03"});
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("hub:mesh"));
+  const std::string node = j.node(), workspace = j.workspace();
+  j.select_task(fake_jobs::kF03Task);
+  ASSERT_TRUE(f.pump([&] { return j.selected_task_observation() == TaskObservation::Verified && j.logs_ended(); }));
+  const auto confirmation = j.confirm_selected_task_cancel();
+  ASSERT_TRUE(confirmation);
+  ASSERT_GT(j.log_all().line_count(), 0u);
+  j.apply_artifacts({bridge::FileEntry{"out.txt", std::string(64, 'a'), "text/plain", 1}});
+  ASSERT_FALSE(j.artifacts().empty());
+
+  set_f03_phase(f, "hold-running");
+  j.refresh_tasks();
+  ASSERT_TRUE(f.pump([&] { return std::filesystem::exists(f.jobs_dir() + "/f03-held"); }, 3));
+  set_f03_phase(f, "node-offline");
+  ASSERT_TRUE(f.pump([&] { return j.nodes().size() == 1u && j.nodes().front().id == node && !j.nodes().front().online; }));
+  EXPECT_EQ(j.selected_task_observation(), TaskObservation::Unavailable);
+  std::ofstream(f.jobs_dir() + "/f03-release") << "release\n";
+  ASSERT_TRUE(f.pump([&] { return std::filesystem::exists(f.jobs_dir() + "/f03-replied"); }, 3));
+  f.settle(0.1);
+  EXPECT_EQ(j.selected_task_observation(), TaskObservation::Unavailable);
+  ASSERT_NE(j.selected_task(), nullptr);
+  EXPECT_EQ(j.selected_task()->state, "running");
+  EXPECT_GT(j.log_all().line_count(), 0u);
+  EXPECT_FALSE(j.artifacts().empty());
+  EXPECT_FALSE(j.can_cancel_task(*confirmation));
+  j.cancel_task(*confirmation);
+  EXPECT_FALSE(has(f.methods(), "task.cancel"));
+
+  set_f03_phase(f, "listed");
+  ASSERT_TRUE(f.pump([&] { return j.nodes().size() == 1u && j.nodes().front().id == node && j.nodes().front().online; }));
+  EXPECT_EQ(j.selected_task_observation(), TaskObservation::Unavailable);
+  j.refresh_tasks();
+  ASSERT_TRUE(f.pump([&] { return j.selected_task_observation() == TaskObservation::Verified; }));
+
+  set_f03_phase(f, "filtered");
+  ASSERT_TRUE(f.pump([&] { return j.nodes().size() == 1u && j.nodes().front().id == "node2"; }));
+  EXPECT_EQ(j.node(), node);
+  EXPECT_EQ(j.workspace(), workspace);
+  EXPECT_EQ(j.selected(), fake_jobs::kF03Task);
+  EXPECT_EQ(j.selected_task_observation(), TaskObservation::Denied);
+  EXPECT_EQ(j.selected_task(), nullptr);
+  EXPECT_TRUE(j.tasks().empty());
+  EXPECT_EQ(j.log_all().line_count(), 0u);
+  EXPECT_TRUE(j.artifacts().empty());
+  const auto before = f.methods();
+  j.refresh_artifacts();
+  j.download_artifact("out.txt");
+  f.settle(0.1);
+  const auto after = f.methods();
+  EXPECT_EQ(std::count(before.begin(), before.end(), "task.artifacts"),
+            std::count(after.begin(), after.end(), "task.artifacts"));
+  EXPECT_FALSE(has(after, "download.start"));
+
+  set_f03_phase(f, "listed");
+  ASSERT_TRUE(f.pump([&] { return j.nodes().size() == 1u && j.nodes().front().id == node; }));
+  EXPECT_EQ(j.selected_task_observation(), TaskObservation::Denied);
+  EXPECT_EQ(j.selected_task(), nullptr);
+  j.refresh_tasks();
+  ASSERT_TRUE(f.pump([&] { return j.selected_task_observation() == TaskObservation::Verified; }));
+  ASSERT_NE(j.selected_task(), nullptr);
+  EXPECT_EQ(j.selected_task()->id, fake_jobs::kF03Task);
 }
 
 TEST_F(JobsFake, SubmitRunsStreamsLogsEventsAndListsArtifacts)
@@ -268,9 +656,11 @@ TEST_F(JobsFake, CancelShowsCancellingThenCancelled)
   ASSERT_TRUE(j.submit());
   ASSERT_TRUE(f.pump([&] {
     const app::TaskRow *t = task_named(j, "slow job");
-    return t && t->state == "running";
+    return t && t->state == "running" && j.selected() == t->id;
   }));
-  j.cancel_task(task_named(j, "slow job")->id);
+  const auto confirmation = j.confirm_selected_task_cancel();
+  ASSERT_TRUE(confirmation);
+  j.cancel_task(*confirmation);
   ASSERT_TRUE(f.pump([&] {
     const app::TaskRow *t = task_named(j, "slow job");
     return t && t->state == "cancelled";
