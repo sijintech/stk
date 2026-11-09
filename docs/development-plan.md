@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-09 UTC · 平台验收与可见暂停基线
+
+Windows 原生 6/6 已取得远端终态。macOS 新增首轮播放后的可见暂停基线，用原截止区分可见请求的原生回执与后续 DOM 观测。首轮可见诊断和已有隐藏对照各自留证。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · Hub 停机完成和 C++ 实时读取
 
 D1 X7 已补 Hub 进程停止期间原任务自然完成的单机证据。跨机网络分区及界面观察继续验收。Claude40 接手 D2 的 C++ 桥可选实时读取入口，使用已有桥协议及 Python 路径。 [验收记录](runtime-validation.md) [D1 矩阵](planning/d1-compatibility-gates.md)

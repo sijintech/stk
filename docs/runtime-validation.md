@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · Windows 原生终态和 Cocoa 首轮可见对照
+
+远端 `3d2fcea7fa25ef1c210b453f63a32c37494ad846` Desktop 于 10:32:33Z 终态 failure。Windows 原生作业 10:32:32Z 终态 success，六项必需 CTest 与零跳过检查通过，工件上传通过。Windows CPU 与 Linux 三项成功。macOS CPU 1516/1516、Metal 254/254，原生基线 4/6、三个隐藏对照各 0/2。Runtime 13 项、Docs 和 Secret scan 成功。 [Desktop](https://github.com/sijintech/stk/actions/runs/42593218935) [Windows 作业](https://github.com/sijintech/stk/actions/runs/42593218935/job/129097962786) [Runtime](https://github.com/sijintech/stk/actions/runs/42593219053)
+
+`2308c680216b99e6026e005edec77e52802b55ed` 在原生报告视频和 HTML 视频各加入首轮播放后的可见暂停诊断。调用同一生产暂停入口和原一秒看门狗，等候期间泵送事件，之后再做 DOM 采样。工件记录媒体与导航代次、各阶段可见性、原始 WebKit 状态、关闭前可见性和播放时间差。基线的暂停历史与隐藏对照不同，结果分别解释。Linux 原生报告目标构建、Apple 条件分支的纯 C++ 语法、19 项 CTest 及两项新 CTest 注册检查通过。Cocoa 编译和实际 WebKit 结果待目标 CI。证据见本机 `root-delivery-20261109-82`。
+
 ## 2026-11-09 UTC · X7 Hub 进程停止期间完成
 
 `07f2f2a940ac83a4a30181e49f75b8bdd8a2c106` 集成 Claude39 `af9addabb99732a16dde891d6171a81af9dc9f09` 与 `6a10a8ac6f6fa70d8c94c8f5ed19239023616d73`。真实单机先冻结已成功的提交动作，终止并回收 Hub 进程后让同一任务自然完成，再恢复同配置 Hub。停机期间精确读拒绝，恢复后首个精确答复为同一任务成功，固定产物及日志校验通过。核对一个 Runtime 提交入口、匹配成功返回和前后绑定的动作请求。root 增加已知阶段的字段类型检查，旧版接受的缺字段和布尔型调用序号现计入无效记录。

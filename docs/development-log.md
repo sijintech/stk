@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · Windows 原生与 Cocoa 首轮诊断
+
+root 核对 `3d2fcea7` Desktop 整轮终态，Windows 原生六项通过。 `2308c680` 加入独立的 Cocoa 首轮可见暂停基线，补关闭前的原生代次和可见性。Linux 相关 19 项通过，目标结果待新头。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · Claude39 集成与 Claude40 分工
 
 root 以 `07f2f2a9` 集成 Hub 停机自然完成两份候选，补阶段形状的旧假绿。Claude40 在独立 worktree 承接 C++ 桥的可选实时任务读取，root 负责平台对照、集成与推送。 [验收记录](runtime-validation.md)

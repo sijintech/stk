@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · Windows 原生通过与 Cocoa 可见基线
+
+远端 `3d2fcea7` Desktop 于 10:32:33Z 整轮结束。Windows 原生 6/6，Windows CPU 与 Linux 三项通过，macOS 原生失败。Runtime 13 项通过。上一轮终态已核对，本批可推送。
+
+本地 `2308c680` 加入视频和 HTML 视频在首轮播放后的可见暂停诊断，记录派发、回执、原生状态和关闭前可见性。Linux 原生目标构建和相关 19 项通过，Cocoa 编译及 WebKit 结果待目标 CI。Claude40 继续 C++ 桥实时入口。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · Hub 停机完成与 C++ 读取接续
 
 本地 `07f2f2a9` 集成 Claude39 的 `af9addab` 和 `6a10a8ac`。真实单机在 Hub 进程停止期间让原任务完成，恢复后首个精确读取拿到原任务成功，固定产物和日志校验通过。root 补阶段字段类型检查。源码相关 323 项，源码及隔离安装停机完成各 13/13、默认丢回执各 11/11。
