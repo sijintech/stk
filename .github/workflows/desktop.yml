@@ -558,6 +558,15 @@ jobs:
           python3 desktop/tests/check_required_tests.py build/ctest-native-fresh-visible-dom.xml 'reports_fresh_native_visible_dom_video_metal' 'reports_fresh_native_visible_dom_html-video_metal' || status=$?
           exit "$status"
 
+      - name: Native WKWebView visible frame IDs and playback clock
+        if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          status=0
+          ctest --test-dir build --output-on-failure -R '^reports_visible_frame_clock_(video|html-video)_metal$' --timeout 180 --output-junit "$PWD/build/ctest-native-frame-clock.xml" || status=$?
+          python3 desktop/tests/check_required_tests.py build/ctest-native-frame-clock.xml 'reports_visible_frame_clock_video_metal' 'reports_visible_frame_clock_html-video_metal' || status=$?
+          exit "$status"
+
       - name: Upload rendered frames
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -585,6 +594,7 @@ jobs:
             build/ctest-native-hide-without-repeat-pause-dom.xml
             build/ctest-native-fresh-hide-dom.xml
             build/ctest-native-fresh-visible-dom.xml
+            build/ctest-native-frame-clock.xml
             build/spike/document_preview/native-evidence/**
             build/tests/app/reports-native-markdown/**
             build/tests/app/reports-native-html/**
@@ -611,6 +621,8 @@ jobs:
             build/tests/app/reports-fresh-native-hide-dom-html-video/**
             build/tests/app/reports-fresh-native-visible-dom-video/**
             build/tests/app/reports-fresh-native-visible-dom-html-video/**
+            build/tests/app/reports-visible-frame-clock-video/**
+            build/tests/app/reports-visible-frame-clock-html-video/**
             build/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
           retention-days: 14

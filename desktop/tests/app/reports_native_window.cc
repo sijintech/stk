@@ -32,6 +32,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -42,6 +43,8 @@
 #include <stdexcept>
 #include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
 using namespace stk;
 using io::Json;
@@ -49,6 +52,12 @@ namespace fs = std::filesystem;
 namespace {
 constexpr const char *kReport = "a1111111-1111-4111-8111-111111111111";
 constexpr const char *kMediaSha256 = "a54fb5baf8ca34545a8e31ea46c8801347db722cc9c876279186ab8c94f860d1";
+constexpr size_t kMediaSize = 41558;
+// Only --visible-frame-clock-control reads this separate public synthetic clip, generated and
+// verified by spike/document_preview/fixtures/make_frame_clock_fixture.py. Same geometry, rate,
+// codecs and red/blue halves as frozen-preview.mp4, plus a per-frame ID marker.
+constexpr const char *kFrameClockMediaSha256 = "c2bbcb873b7628c22b512051443adde6ff2e6c8688c6d84f0307d6bab2a34eef";
+constexpr size_t kFrameClockMediaSize = 44339;
 using Clock = std::chrono::steady_clock;
 void require(bool ok, const std::string &message) { if (!ok) { throw std::runtime_error(message); } }
 void write(const fs::path &path, const std::string &text)
@@ -71,6 +80,8 @@ struct Options {
   bool retain_visible_pause_control = false;
   bool hidden_dom_tail_control = false;
   FreshPause fresh_pause = FreshPause::None;
+  // Runs the fresh-visible sequence with the frame-clock clip; adds OS frame-ID captures only.
+  bool frame_clock_control = false;
   bool fresh_pause_diagnostic() const { return fresh_pause != FreshPause::None; }
   bool pause_order_diagnostic() const { return visible_pause_diagnostic() || hide_after_verified_pause_control; }
   int reading_cycles() const
@@ -148,7 +159,7 @@ void log_last_media_observation(const Json &result) noexcept
 {
   try {
     for (const auto *key : {"last_hidden_media_observation", "last_explicit_pause_observation",
-                            "hidden_media_native_close"}) {
+                            "hidden_media_native_close", "frame_clock_verdict"}) {
       const auto item = result.find(key);
       if (item == result.end() || !item->is_object()) continue;
       // These objects contain only fixed phase names, hashes and numerical probe facts.
@@ -159,6 +170,169 @@ void log_last_media_observation(const Json &result) noexcept
   }
   catch (...) { std::fputs("STK_NATIVE_LAST_MEDIA_OBSERVATION unavailable\n", stderr); }
 }
+// Marker of frame-clock-preview.mp4; the generator documents the same layout. Two rows of eight
+// 25x16 source-pixel cells in the top-left band (x 0-200, y 0-32 of 320x180), above the central
+// red/blue sample and clear of the WebKit inline controls. Row 0: guard white, ID bits b5..b0,
+// even parity; row 1 complements every column. Any inconsistency is ambiguous, never another ID.
+namespace frame_clock {
+constexpr int kSourceWidth = 320, kSourceHeight = 180, kCellWidth = 25, kCellHeight = 16;
+constexpr int kColumns = 8, kIdBits = 6, kFrames = 60, kFps = 10;
+struct Reading {
+  std::optional<int> id;     // Unambiguous marker whose ordinal also matches the central half.
+  std::optional<int> marker; // Self-consistent marker value before the red/blue cross-check.
+  const char *reason = "ok";
+  double red_fraction = 0, blue_fraction = 0;
+  const char *half = "neither";
+  size_t min_cell_samples = 0;
+};
+// picture: decoded 320x180 video picture in client pixels, top-left origin (media_rectangle).
+[[maybe_unused]] Reading read(const io::Image &pixels, ui::Rect picture)
+{
+  Reading out;
+  if (pixels.channels != 4 || !(picture.w >= 32 && picture.h >= 18) || picture.x < 0 || picture.y < 0 ||
+      picture.x + picture.w > float(pixels.width) || picture.y + picture.h > float(pixels.height)) {
+    out.reason = "picture_outside_client";
+    return out;
+  }
+  // Same region, stride and thresholds as Exercise::media_capture.
+  const int cx = int(std::ceil(picture.x + picture.w * 0.15f)), cy = int(std::ceil(picture.y + picture.h * 0.20f));
+  const int cr = int(std::floor(picture.x + picture.w * 0.85f)), cb = int(std::floor(picture.y + picture.h * 0.65f));
+  size_t red = 0, blue = 0, total = 0;
+  for (int row = cy; row < cb; row += 2) for (int column = cx; column < cr; column += 2) {
+    const auto *p = pixels.pixel(uint32_t(column), uint32_t(row)); ++total;
+    if (p[0] >= 120 && p[0] >= int(p[1]) * 2 + 30 && p[0] >= int(p[2]) * 2 + 30) { ++red; }
+    if (p[2] >= 120 && p[2] >= int(p[0]) * 2 + 30 && p[2] >= int(p[1]) * 2 + 30) { ++blue; }
+  }
+  out.red_fraction = total ? double(red) / double(total) : 0;
+  out.blue_fraction = total ? double(blue) / double(total) : 0;
+  out.half = out.red_fraction >= 0.80 && out.blue_fraction <= 0.05 ? "red" :
+             out.blue_fraction >= 0.80 && out.red_fraction <= 0.05 ? "blue" : "neither";
+  std::array<int, 2 * kColumns> cells{};
+  out.min_cell_samples = SIZE_MAX;
+  for (int row = 0; row < 2; ++row) for (int column = 0; column < kColumns; ++column) {
+    // Central half of each cell only; edges may blend under scaling and 4:2:0 chroma.
+    const double left = picture.x + (column * kCellWidth + kCellWidth * 0.25) / kSourceWidth * picture.w;
+    const double right = picture.x + (column * kCellWidth + kCellWidth * 0.75) / kSourceWidth * picture.w;
+    const double top = picture.y + (row * kCellHeight + kCellHeight * 0.25) / kSourceHeight * picture.h;
+    const double bottom = picture.y + (row * kCellHeight + kCellHeight * 0.75) / kSourceHeight * picture.h;
+    size_t white = 0, black = 0, samples = 0;
+    for (int y = int(std::ceil(top - 0.5)); y + 0.5 < bottom; ++y) {
+      for (int x = int(std::ceil(left - 0.5)); x + 0.5 < right; ++x) {
+        const auto *p = pixels.pixel(uint32_t(x), uint32_t(y));
+        const int low = std::min({int(p[0]), int(p[1]), int(p[2])});
+        const int high = std::max({int(p[0]), int(p[1]), int(p[2])});
+        ++samples;
+        if (low >= 170 && high - low <= 60) { ++white; }
+        else if (high <= 80 && high - low <= 50) { ++black; }
+      }
+    }
+    out.min_cell_samples = std::min(out.min_cell_samples, samples);
+    if (samples < 4) { out.reason = "cell_too_small"; return out; }
+    if (double(white) >= 0.85 * double(samples)) { cells[size_t(row * kColumns + column)] = 1; }
+    else if (double(black) >= 0.85 * double(samples)) { cells[size_t(row * kColumns + column)] = 0; }
+    else { out.reason = "ambiguous_cell"; return out; }
+  }
+  for (int column = 0; column < kColumns; ++column) {
+    if (cells[size_t(column)] == cells[size_t(kColumns + column)]) { out.reason = "complement_mismatch"; return out; }
+  }
+  if (cells[0] != 1) { out.reason = "guard_mismatch"; return out; }
+  int ordinal = 0, parity = 0;
+  for (int bit = 1; bit <= kIdBits; ++bit) { ordinal = ordinal * 2 + cells[size_t(bit)]; parity ^= cells[size_t(bit)]; }
+  if (parity != cells[size_t(kColumns - 1)]) { out.reason = "parity_mismatch"; return out; }
+  if (ordinal >= kFrames) { out.reason = "out_of_range"; return out; }
+  out.marker = ordinal;
+  if (std::string_view(out.half) != (ordinal < kFrames / 2 ? "red" : "blue")) { out.reason = "half_mismatch"; return out; }
+  out.id = ordinal;
+  return out;
+}
+// DOM currentTime expressed as the 10 fps frame it falls in, for comparison with picture IDs.
+[[maybe_unused]] int dom_frame(double seconds) { return int(std::floor(seconds * kFps + 1e-6)); }
+struct Verdict { const char *outcome, *reason; };
+// last_playing: ID of the last completed baseline capture during playback. stable_paused: ID of
+// two consecutive completed post-pause captures. dom_paused_times: the bounded DOM samples.
+[[maybe_unused]] Verdict classify(int last_playing, int stable_paused, double playing_time,
+                                  const std::vector<std::pair<bool, double>> &dom)
+{
+  if (stable_paused < last_playing) {
+    return {"picture_backward", "stable paused picture ID is below the last completed playing picture ID"};
+  }
+  if (dom.size() != 2 || !std::isfinite(playing_time) ||
+      std::any_of(dom.begin(), dom.end(), [](const auto &s) { return !s.first || !std::isfinite(s.second); })) {
+    return {"inconclusive", "DOM did not report paused in every bounded sample"};
+  }
+  const auto below = std::count_if(dom.begin(), dom.end(), [&](const auto &s) { return dom_frame(s.second) < last_playing; });
+  const auto temporal_below = std::count_if(dom.begin(), dom.end(), [&](const auto &s) {
+    return s.second < playing_time - 0.05; // Same temporal floor recorded by the bounded DOM observations.
+  });
+  if (temporal_below == std::ptrdiff_t(dom.size())) {
+    return {"clock_reset_within_observation",
+        "both paused DOM times fell below the earlier playing DOM time while the observed picture did not move backward; uncaptured transients are not excluded"};
+  }
+  if (temporal_below == 0 && below == 0) {
+    return {"no_clock_reset_observed", "neither bounded DOM sample nor the stable visible picture shows a rollback"};
+  }
+  return {"inconclusive", "the bounded observations do not establish a temporal clock rollback or a consistent forward position"};
+}
+// Bounds of the two OS-capture arms. A capture completing after its arm deadline is late.
+constexpr auto kPlayingBudget = std::chrono::milliseconds(2000); // From the play() return.
+constexpr auto kPausedBudget = std::chrono::milliseconds(3000);  // From the end of native settle.
+constexpr int kMaxCapturesPerArm = 8;
+constexpr int kPlayingMaxId = 24; // Playing baseline must stay well before the 3 s colour boundary.
+struct Plan {
+  ui::Rect picture;               // media_rectangle of the play() snapshot; no new DOM read.
+  ui::Rect viewport;              // Native viewport layout that picture was mapped through.
+  Clock::time_point play_returned;
+  std::string source_sha256;
+};
+struct Capture {
+  std::string arm;
+  int index = 0;
+  Clock::time_point requested, completed;
+  // completed: delivered before the arm deadline and bound at request and completion.
+  const char *status = "pending"; // completed | unbound | late | capture_error
+  std::string backend, error;
+  Reading reading;
+  io::Image crop; // Picture region only; written after all timed observations.
+  std::array<int, 4> crop_top_left{};
+  std::string file, sha256;
+};
+[[maybe_unused]] bool audit_complete(const std::vector<Capture> &captures)
+{
+  for (const auto arm : {"playing", "paused"}) {
+    int checked = 0;
+    for (auto it = captures.rbegin(); it != captures.rend() && checked < 2; ++it) {
+      if (it->arm != arm) { continue; }
+      if (std::string_view(it->status) != "completed" || !it->reading.id || it->file.empty() ||
+          !core::is_sha256_hex(it->sha256)) { return false; }
+      ++checked;
+    }
+    if (checked != 2) { return false; }
+  }
+  return true;
+}
+[[maybe_unused]] Json capture_json(const Capture &c, Clock::time_point origin,
+                                   const std::optional<Clock::time_point> &pause_dispatched)
+{
+  const auto seconds = [](Clock::time_point a, Clock::time_point b) { return std::chrono::duration<double>(b - a).count(); };
+  return {{"arm", c.arm}, {"index", c.index}, {"status", c.status},
+      {"requested_seconds_from_play_return", seconds(origin, c.requested)},
+      {"completed_seconds_from_play_return", seconds(origin, c.completed)},
+      {"requested_seconds_from_pause_dispatch", pause_dispatched ? Json(seconds(*pause_dispatched, c.requested)) : Json(nullptr)},
+      {"completed_seconds_from_pause_dispatch", pause_dispatched ? Json(seconds(*pause_dispatched, c.completed)) : Json(nullptr)},
+      {"latency_seconds", seconds(c.requested, c.completed)},
+      {"backend", c.backend.empty() ? Json(nullptr) : Json(c.backend)},
+      {"error", c.error.empty() ? Json(nullptr) : Json(c.error)},
+      {"frame_id", c.reading.id ? Json(*c.reading.id) : Json(nullptr)},
+      {"marker_value", c.reading.marker ? Json(*c.reading.marker) : Json(nullptr)},
+      {"reason", std::string(std::string_view(c.status) == "completed" ? c.reading.reason : c.status)},
+      {"central_half", c.reading.half}, {"red_fraction", c.reading.red_fraction},
+      {"blue_fraction", c.reading.blue_fraction},
+      {"min_cell_samples", c.reading.min_cell_samples == SIZE_MAX ? Json(nullptr) : Json(c.reading.min_cell_samples)},
+      {"picture_crop_top_left", c.crop.width ? Json(c.crop_top_left) : Json(nullptr)},
+      {"file", c.file.empty() ? Json(nullptr) : Json(c.file)},
+      {"sha256", c.sha256.empty() ? Json(nullptr) : Json(c.sha256)}};
+}
+}  // namespace frame_clock
 #  ifdef __APPLE__
 Json ax_progress_json(const std::optional<reports_native_test::ax::Progress> &value)
 {
@@ -967,9 +1141,10 @@ class Exercise {
   void fresh_native_pause_dom_diagnostic(app::EditorArea &area, const std::string &session,
                                          const Media &playing, const Media &last_seek, const NativePause &previous,
                                          const std::shared_ptr<document_preview::ResourceSession> &resources,
-                                         bool keep_visible)
+                                         bool keep_visible, const frame_clock::Plan *plan = nullptr)
   {
     using namespace document_preview;
+    require(!plan || keep_visible, "The frame-clock diagnostic only extends the visible sequence");
     constexpr auto budget = detail::MediaPauseVerification::timeout;
     constexpr auto first_sample_offset = std::chrono::milliseconds(200);
     constexpr auto interval = std::chrono::milliseconds(400);
@@ -980,7 +1155,10 @@ class Exercise {
     const auto &trace = *close->hide_pause;
     require(trace.media_generation == previous.media_generation + 1, "Fresh control must observe the next pause");
     const char *reply_key = keep_visible ? "first_visible_native_reply" : "first_hidden_native_reply";
-    auto &evidence = result_[keep_visible ? "fresh_native_visible_dom" : "fresh_native_hide_dom"];
+    // ordered_json objects are vector-backed: later result_ insertions (trace, close, verdict)
+    // must not reallocate under the evidence reference below.
+    result_.get_ref<Json::object_t &>().reserve(result_.size() + 16);
+    auto &evidence = result_[plan ? "visible_frame_clock" : keep_visible ? "fresh_native_visible_dom" : "fresh_native_hide_dom"];
     evidence = {{"session_sha256", core::Sha256::hex(session)}, {"media_generation", trace.media_generation},
         {"navigation_generation", trace.navigation_generation},
         {keep_visible ? "playing_before_pause" : "playing_before_hide", media_json(playing)},
@@ -990,8 +1168,111 @@ class Exercise {
         {"budget_seconds", std::chrono::duration<double>(budget).count()},
         {"first_sample_min_seconds_from_dispatch", std::chrono::duration<double>(first_sample_offset).count()},
         {"sample_interval_seconds", std::chrono::duration<double>(interval).count()}};
+    std::vector<frame_clock::Capture> clock_captures;
+    std::optional<int> last_playing_id, stable_paused_id;
+    std::optional<Clock::time_point> clock_pause_dispatched;
+    const auto *clock_viewport = widget("reports_document_viewport");
+    const auto clock_layout = clock_viewport ? clock_viewport->rect : ui::Rect{};
+    const int clock_width = window_.width(), clock_height = window_.height();
+    // No resize, scroll, tab or popup between the geometry source and every capture.
+    const auto clock_layout_same = [&] {
+      const auto *v = widget("reports_document_viewport");
+      return clock_viewport && v && visible(v) && v->rect.x == clock_layout.x && v->rect.y == clock_layout.y &&
+          v->rect.w == clock_layout.w && v->rect.h == clock_layout.h && window_.width() == clock_width &&
+          window_.height() == clock_height && screen_.ui() && !screen_.ui()->native_view_interaction_blocked();
+    };
+    const auto clock_record = [&](const char *outcome, const char *reason) noexcept {
+      try {
+        frame_clock_write(clock_captures);
+        if (std::string_view(outcome) != "inconclusive" && !frame_clock::audit_complete(clock_captures)) {
+          outcome = "inconclusive";
+          reason = "the final two playing and paused OS captures were not all persisted with their SHA-256";
+        }
+        Json captures = Json::array(), playing_ids = Json::array(), paused_ids = Json::array();
+        for (const auto &capture : clock_captures) {
+          captures.push_back(frame_clock::capture_json(capture, plan->play_returned, clock_pause_dispatched));
+          const Json id = capture.reading.id ? Json(*capture.reading.id) : Json(nullptr);
+          (capture.arm == "playing" ? playing_ids : paused_ids).push_back(id);
+        }
+        Json dom_frames = Json::array();
+        for (const auto &sample : evidence.at("samples")) {
+          dom_frames.push_back(frame_clock::dom_frame(sample.at("media").at("current_time").get<double>()));
+        }
+        evidence["captures"] = std::move(captures);
+        evidence["last_playing_frame_id"] = last_playing_id ? Json(*last_playing_id) : Json(nullptr);
+        evidence["stable_paused_frame_id"] = stable_paused_id ? Json(*stable_paused_id) : Json(nullptr);
+        evidence["outcome"] = outcome; evidence["outcome_reason"] = reason;
+        result_["frame_clock_verdict"] = {{"outcome", outcome}, {"reason", reason}, {"stage", evidence.at("stage")},
+            {"session_sha256", evidence.at("session_sha256")},
+            {"navigation_generation", evidence.at("navigation_generation")},
+            {"playing_ids", std::move(playing_ids)}, {"paused_ids", std::move(paused_ids)},
+            {"dom_frames", std::move(dom_frames)}, {"last_playing_frame_id", evidence.at("last_playing_frame_id")},
+            {"stable_paused_frame_id", evidence.at("stable_paused_frame_id")}};
+        save();
+        return std::string_view(outcome) != "inconclusive";
+      }
+      catch (...) { return false; } // Keep any original observation failure.
+    };
+    const auto clock_fail = [&](const char *reason) {
+      clock_record("inconclusive", reason);
+      throw std::runtime_error(std::string("Visible frame clock inconclusive: ") + reason);
+    };
+    const auto clock_status = [&](const frame_clock::Capture &capture, const char *late, const char *unbound,
+                                  const char *failed) {
+      const std::string_view status = capture.status;
+      if (status == "late") { clock_fail(late); }
+      if (status == "unbound") { clock_fail(unbound); }
+      if (status != "completed") { clock_fail(failed); }
+    };
+    if (plan) {
+      evidence["fixture"] = {{"name", "frame-clock-preview.mp4"}, {"size", kFrameClockMediaSize},
+          {"sha256", kFrameClockMediaSha256}};
+      evidence["source_sha256"] = plan->source_sha256;
+      evidence["picture_rect_client_top_left"] = {plan->picture.x, plan->picture.y, plan->picture.w, plan->picture.h};
+      evidence["marker"] = "Top-left 2x8 luma cells of 25x16 source px: guard, ID b5..b0, even parity; row 1 complements";
+      evidence["binding"] = "Every capture: same session resources active, no native close, exact layout and client size, "
+          "no DOM probe. Playing arm: next-pause trace still empty, Reports tab active; the exact navigation is then "
+          "required by the visible pause request. Paused arm: exact verified visible pause target";
+      evidence["limits"] = {{"playing_budget_seconds_from_play_return", std::chrono::duration<double>(frame_clock::kPlayingBudget).count()},
+          {"paused_budget_seconds_after_settle", std::chrono::duration<double>(frame_clock::kPausedBudget).count()},
+          {"max_captures_per_arm", frame_clock::kMaxCapturesPerArm}, {"playing_max_frame_id", frame_clock::kPlayingMaxId},
+          {"late", "a capture not delivered before its arm budget"}};
+      evidence["stage"] = "playing-baseline";
+      if (!clock_viewport || plan->viewport.x != clock_layout.x || plan->viewport.y != clock_layout.y ||
+          plan->viewport.w != clock_layout.w || plan->viewport.h != clock_layout.h) {
+        clock_fail("native viewport layout changed after the picture geometry was taken");
+      }
+      const auto prior_dom = last_media_probe_;
+      const auto playing_deadline = plan->play_returned + frame_clock::kPlayingBudget;
+      const auto bound = [&] {
+        return resources->active() && close->reason.empty() && !trace.overflow && trace.event_count == 0 &&
+            area.active_tab() == 0 && clock_layout_same() && last_media_probe_ == prior_dom;
+      };
+      std::optional<int> prior_id, highest;
+      bool increasing = false;
+      for (int index = 1; index <= frame_clock::kMaxCapturesPerArm && !increasing; ++index) {
+        clock_captures.push_back(frame_clock_capture("playing", index, plan->picture, playing_deadline, bound));
+        const auto &capture = clock_captures.back();
+        clock_status(capture, "a playing capture was late", "a playing capture lost its exact binding",
+                     "a playing OS capture failed");
+        const auto id = capture.reading.id;
+        if (!id) { prior_id.reset(); continue; } // An ambiguous capture breaks the consecutive pair.
+        if (*id > frame_clock::kPlayingMaxId) { clock_fail("playing baseline ran past its early-range frame guard"); }
+        if (highest && *id < *highest) { clock_fail("playing picture IDs decreased during the baseline"); }
+        increasing = prior_id && *id > *prior_id;
+        prior_id = id; highest = id;
+      }
+      if (!increasing) { clock_fail("no two consecutive completed unambiguous playing captures with increasing IDs"); }
+      last_playing_id = prior_id;
+      evidence["stage"] = "pause";
+      save();
+    }
     std::shared_ptr<const test::VisiblePauseObservation> visible_pause;
     const auto requested = Clock::now();
+    if (plan) {
+      // Stated deviation from the matched fresh-visible control: playback runs longer before the pause.
+      evidence["play_return_to_pause_request_seconds"] = media_seconds(plan->play_returned, requested);
+    }
     // Both observation arms start their budget before the native actuator is dispatched.
     const auto deadline = requested + budget;
     const auto poll = [&](const auto &predicate) {
@@ -1068,6 +1349,11 @@ class Exercise {
             {"delta_from_playing_seconds", observed.current_time - playing.current_time},
             {"delta_from_last_seek_seconds", observed.current_time - last_seek.current_time},
             {"below_baseline_playback_floor", observed.current_time < playing.current_time - 0.05}});
+        if (plan) {
+          evidence["samples"].back()["dom_frame"] = frame_clock::dom_frame(observed.current_time);
+          evidence["samples"].back()["dom_frame_below_last_playing_picture"] =
+              frame_clock::dom_frame(observed.current_time) < *last_playing_id;
+        }
         return observed;
       };
       evidence["stage"] = "first-dom-window";
@@ -1104,9 +1390,42 @@ class Exercise {
         evidence["native_pause_after_sampling"] = final_pause ? native_pause_json(*final_pause) : Json(nullptr);
       }
       evidence["session_active_after_sampling"] = resources->active();
+      if (plan) {
+        // After the unchanged DOM samples and native settle: no new pause, seek, play, DOM probe,
+        // visibility or layout change. Only completed captures of the same verified target count.
+        clock_pause_dispatched = trace.dispatched;
+        evidence["stage"] = "paused-pictures";
+        if (!visible_pause->verified) { clock_fail("native visible pause was not verified within its original deadline"); }
+        const auto settled_dom = last_media_probe_;
+        const auto paused_deadline = Clock::now() + frame_clock::kPausedBudget;
+        const auto bound = [&] {
+          return same_target() && visible_pause->verified && clock_layout_same() && last_media_probe_ == settled_dom;
+        };
+        std::optional<int> prior_id;
+        for (int index = 1; index <= frame_clock::kMaxCapturesPerArm && !stable_paused_id; ++index) {
+          clock_captures.push_back(frame_clock_capture("paused", index, plan->picture, paused_deadline, bound));
+          const auto &capture = clock_captures.back();
+          clock_status(capture, "a paused capture was late", "a paused capture lost the exact visible pause target",
+                       "a paused OS capture failed");
+          const auto id = capture.reading.id;
+          if (!id) { prior_id.reset(); continue; }
+          if (prior_id && *id == *prior_id) { stable_paused_id = id; }
+          prior_id = id;
+        }
+        if (!stable_paused_id) { clock_fail("no two consecutive completed unambiguous paused captures with one ID"); }
+        const auto verdict = frame_clock::classify(*last_playing_id, *stable_paused_id, playing.current_time,
+            {{paused(before), before.current_time}, {paused(after), after.current_time}});
+        evidence["stage"] = "classified";
+        if (!clock_record(verdict.outcome, verdict.reason)) {
+          throw std::runtime_error("Visible frame clock classification or its persisted OS evidence is inconclusive");
+        }
+      }
     }
     catch (...) {
       try { record(); } catch (...) {} // Keep the original observation failure.
+      if (plan && !evidence.contains("outcome")) {
+        clock_record("inconclusive", "the visible pause sequence failed before frame-clock classification");
+      }
       throw;
     }
     record();
@@ -1642,6 +1961,68 @@ class Exercise {
       save(); return consecutive >= 2;
     }, "Independent OS media pixels " + phase, 25);
   }
+  // One own-window OS capture for the frame-clock diagnostic. Unlike media_capture it neither
+  // requires a paused DOM state nor reads the DOM. It only pumps the UI loop, never later than
+  // the arm's absolute deadline; the in-flight capture is cancelled on return. Decoding is in
+  // memory; PNG encoding is deferred so it cannot delay the timed native/DOM observations.
+  frame_clock::Capture frame_clock_capture(const char *arm, int index, ui::Rect picture,
+                                           Clock::time_point deadline, const std::function<bool()> &bound)
+  {
+    frame_clock::Capture out;
+    out.arm = arm; out.index = index;
+    out.requested = Clock::now();
+    if (out.requested >= deadline) { out.completed = out.requested; out.status = "late"; return out; }
+    if (!bound()) { out.completed = out.requested; out.status = "unbound"; return out; }
+    auto pending = document_preview::capture_window_evidence(window_.native_window_handle());
+    std::optional<document_preview::WindowEvidence> image;
+    const bool delivered = reports_native_test::poll_before<Clock>(deadline, [&] {
+      if (!image) { image = pending->poll(); }
+      return image.has_value();
+    }, [this](bool wait_for_event) { process(wait_for_event); }, [] {});
+    out.completed = Clock::now();
+    pending.reset();
+    if (!delivered) { out.status = "late"; return out; }
+    out.backend = image->backend;
+    if (!image->error.empty()) { out.status = "capture_error"; out.error = image->error; return out; }
+    const auto &pixels = image->image;
+    if (pixels.channels != 4 || pixels.width != uint32_t(window_.width()) || pixels.height != uint32_t(window_.height())) {
+      out.status = "capture_error"; out.error = "OS capture does not match this STK client framebuffer"; return out;
+    }
+    if (!bound()) { out.status = "unbound"; return out; }
+    out.reading = frame_clock::read(pixels, picture);
+    const int x = std::max(0, int(std::floor(picture.x))), y = std::max(0, int(std::floor(picture.y)));
+    const int right = std::min(int(pixels.width), int(std::ceil(picture.x + picture.w)));
+    const int bottom = std::min(int(pixels.height), int(std::ceil(picture.y + picture.h)));
+    if (right > x && bottom > y) {
+      out.crop = io::Image(uint32_t(right - x), uint32_t(bottom - y));
+      for (int row = y; row < bottom; ++row) {
+        std::copy_n(pixels.pixel(uint32_t(x), uint32_t(row)), size_t(right - x) * 4, out.crop.row(uint32_t(row - y)));
+      }
+      out.crop_top_left = {x, y, right - x, bottom - y};
+    }
+    out.status = "completed";
+    return out;
+  }
+  void frame_clock_write(std::vector<frame_clock::Capture> &captures) noexcept
+  {
+    try {
+      // Separate from the required screenshots and result["images"]; picture-region crops only.
+      const auto folder = directory_ / "frame-clock";
+      fs::create_directories(folder);
+      for (auto &capture : captures) {
+        if (!capture.crop.width || !capture.file.empty()) { continue; }
+        const auto name = "frame-clock-" + capture.arm + "-" + std::to_string(capture.index) + ".png";
+        const auto png = io::encode_png(capture.crop);
+        write(folder / name, std::string(png.begin(), png.end()));
+        std::ifstream saved(folder / name, std::ios::binary);
+        const std::string bytes{std::istreambuf_iterator<char>(saved), {}};
+        require(!saved.bad() && bytes.size() == png.size() && core::Sha256::hex(bytes) == core::Sha256::hex(png),
+                "Frame-clock OS evidence was not persisted completely");
+        capture.file = "frame-clock/" + name; capture.sha256 = core::Sha256::hex(png);
+      }
+    }
+    catch (...) {} // Optional crops never replace the measured outcome or the original failure.
+  }
 #endif
   int clicks = 0, wheels = 0, layout_drags = 0, pointer_moves = 0;
  private:
@@ -1808,11 +2189,14 @@ raise SystemExit(main())
   const bool video = options.source == "video" || options.source == "html-video";
   const bool html_video = options.source == "html-video";
   std::string media_bytes;
+  // The frame-clock diagnostic alone selects its separately pinned clip; all other modes are unchanged.
+  const size_t media_size = options.frame_clock_control ? kFrameClockMediaSize : kMediaSize;
+  const std::string media_sha256 = options.frame_clock_control ? kFrameClockMediaSha256 : kMediaSha256;
   if (video) {
     std::ifstream file(options.media_fixture, std::ios::binary);
     require(file.good(), "Pinned public MP4 fixture is required");
     media_bytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
-    require(media_bytes.size() == 41558 && core::Sha256::hex(media_bytes) == kMediaSha256,
+    require(media_bytes.size() == media_size && core::Sha256::hex(media_bytes) == media_sha256,
         "Public MP4 fixture must match the complete pinned H264/AAC bytes");
   }
   const std::string entry = pdf ? "report.pdf" : video ? html_video ? "report.html" : "clip.mp4" :
@@ -1904,7 +2288,7 @@ raise SystemExit(main())
   ui::Rect final_media_rectangle;
   Media final_media_observed;
   if (video) {
-    result["media_fixture"] = {{"size", media_bytes.size()}, {"sha256", kMediaSha256},
+    result["media_fixture"] = {{"size", media_bytes.size()}, {"sha256", media_sha256},
         {"container", "MP4"}, {"video_codec", "H264 Baseline"}, {"audio_codec", "AAC"},
         {"duration_seconds", 6}, {"live_source_deleted_before_prepare", true}};
     if (!options.visible_pause_control) {
@@ -1989,11 +2373,12 @@ raise SystemExit(main())
           report.at("source_sha256").get<std::string>(), "Observed native session must bind this frozen report");
       const auto old_url = resources->url("clip.mp4");
       const auto complete = resources->read(old_url);
-      require(complete.status == 200 && complete.mime == "video/mp4" && complete.content_length == 41558 &&
-          core::Sha256::hex(complete.bytes) == kMediaSha256 && !resources->allows_navigation(old_url),
+      require(complete.status == 200 && complete.mime == "video/mp4" && complete.content_length == media_size &&
+          core::Sha256::hex(complete.bytes) == media_sha256 && !resources->allows_navigation(old_url),
           "Actual native session must contain the exact verified MP4 and deny its top-level navigation");
       const auto slice = resources->read(old_url, "GET", "bytes=0-31");
-      require(slice.status == 206 && slice.content_length == 32 && slice.content_range == "bytes 0-31/41558" &&
+      require(slice.status == 206 && slice.content_length == 32 &&
+          slice.content_range == "bytes 0-31/" + std::to_string(media_size) &&
           slice.bytes == std::vector<uint8_t>(complete.bytes.begin(), complete.bytes.begin() + 32),
           "Actual native session single Range must retain the verified full MP4 identity");
       auto initial = ui.media(session);
@@ -2075,8 +2460,15 @@ raise SystemExit(main())
       if (options.fresh_pause_diagnostic()) {
         require(last_seek && before_hide_pause && last_seek->navigation_generation == playing.navigation_generation &&
             result.at("images").size() == required_images, "Fresh pause needs the full baseline seek history");
+        std::optional<frame_clock::Plan> clock_plan;
+        if (options.frame_clock_control) {
+          // Geometry of the play() snapshot; the frame-clock arms add no DOM read of their own.
+          clock_plan = frame_clock::Plan{ui.media_rectangle(bounds, playing), bounds, playing_returned,
+                                         report.at("source_sha256").get<std::string>()};
+        }
         ui.fresh_native_pause_dom_diagnostic(*area, session, playing, *last_seek, (*before_hide_pause)[1], resources,
-                                             options.fresh_pause == Options::FreshPause::Visible);
+                                             options.fresh_pause == Options::FreshPause::Visible,
+                                             clock_plan ? &*clock_plan : nullptr);
         require(area->tab(1).save_workspace_state() == draft_state && area->tab(1).has_unsaved_changes() &&
             shell.store().scripts().history().empty(), "Fresh pause preserves the unexecuted Python draft");
         require(viewer.save_workspace_state() == viewer_state && viewer.camera_serial() == camera &&
@@ -2380,6 +2772,13 @@ int main(int argc, char **argv)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
 #if defined(__APPLE__) && defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES)
+    if (arg == "--visible-frame-clock-control") {
+      // Rides the fresh-visible sequence; every other control mode is rejected below.
+      if (options.fresh_pause_diagnostic()) { return 2; }
+      options.fresh_pause = Options::FreshPause::Visible;
+      options.frame_clock_control = true;
+      continue;
+    }
     if (arg == "--fresh-native-hide-dom-control" || arg == "--fresh-native-visible-dom-control") {
       if (options.fresh_pause_diagnostic()) { return 2; }
       options.fresh_pause = arg == "--fresh-native-visible-dom-control" ? Options::FreshPause::Visible :
@@ -2424,7 +2823,7 @@ int main(int argc, char **argv)
        && options.source != "video" && options.source != "html-video"
 #endif
       )) {
-    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control|--visible-native-pause-control|--second-visible-native-pause-control|--hide-after-verified-native-pause-control|--hide-without-repeat-native-pause-control|--hide-without-repeat-native-pause-dom-control|--fresh-native-hide-dom-control|--fresh-native-visible-dom-control]\n"); return 2;
+    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control|--visible-native-pause-control|--second-visible-native-pause-control|--hide-after-verified-native-pause-control|--hide-without-repeat-native-pause-control|--hide-without-repeat-native-pause-dom-control|--fresh-native-hide-dom-control|--fresh-native-visible-dom-control|--visible-frame-clock-control]\n"); return 2;
   }
   Json result = {{"format", "stk.reports-native-evidence/1"}, {"status", "running"}, {"required_cycles", options.reading_cycles()},
       {"completed_cycles", 0}, {"images", Json::array()}, {"native_scroll_requests", Json::array()},
@@ -2466,6 +2865,13 @@ int main(int argc, char **argv)
                                                "reports_native_" + options.source + "_metal";
     result["production_ui_acceptance"] = false;
   }
+  if (options.frame_clock_control) {
+    result["scenario"] = "visible-frame-clock-control";
+    result["claim"] = "Fresh-visible sequence on a separately pinned frame-ID clip: OS picture IDs during playback and "
+        "after the same visible native pause, compared with the bounded DOM currentTime samples";
+    result["matched_control"] = "reports_fresh_native_visible_dom_" + options.source + "_metal";
+    result["not_a_gate"] = "Non-gating diagnostic; frame-ID captures are kept out of images and required_images";
+  }
   if (options.pre_seek_hide_control) {
     result["scenario"] = options.isolated_pause_control ? "isolated-quiet-pre-seek-hide-control" :
         (options.quiet_hidden_hold ? "quiet-pre-seek-hide-control" : "pre-seek-hide-control");
@@ -2486,8 +2892,20 @@ int main(int argc, char **argv)
     }
     // The window, bridge, manager and Runtime have now returned from normal destruction.
     // Engine static destructors and the final guarded leak gate belong to the separate spike.
+    std::string outcome;
+    if (options.frame_clock_control) {
+      const auto evidence = result.find("visible_frame_clock");
+      outcome = evidence != result.end() && evidence->is_object() ? evidence->value("outcome", "") : "";
+      require(outcome == "picture_backward" || outcome == "clock_reset_within_observation" ||
+          outcome == "no_clock_reset_observed", "Visible frame clock finished without a conclusive outcome");
+    }
     result["status"] = "passed";
     write(directory / "result.json", result.dump(2));
+    if (options.frame_clock_control) {
+      std::fprintf(stdout, "PASS: Cocoa visible frame clock diagnostic; outcome=%s; cycles=%d; %s\n",
+          outcome.c_str(), options.reading_cycles(), core::path_to_utf8(directory).c_str());
+      return 0;
+    }
     if (options.fresh_pause_diagnostic()) {
       std::fprintf(stdout, "PASS: Cocoa fresh native %s dom diagnostic; cycles=%d; %s\n",
           options.fresh_pause == Options::FreshPause::Visible ? "visible" : "hide",
