@@ -22,7 +22,7 @@ using bridge::ErrorCode;
 
 const std::map<std::string, std::set<std::string>> operations = {
     {"viewer.status", {}}, {"viewer.presets", {}}, {"viewer.graph_configuration", {"displayed"}},
-    {"viewer.open", {"path", "preset", "parameters", "focus"}},
+    {"viewer.open", {"path", "preset", "parameters", "focus", "source_proof"}},
     {"viewer.close", {"expected_source"}},
     {"viewer.configure", {"parameters", "auto_evaluate", "overlays", "prefetch", "fps", "loop", "expected_source"}},
     {"viewer.preset", {"id", "expected_source"}}, {"viewer.evaluate", {"expected_source"}},
@@ -118,6 +118,9 @@ void AppShell::perform_viewer_request(wm::Screen &screen, const std::string &ope
                       {"series", source.series}}},
           {"preset_id", configuration->preset_id}, {"graph", configuration->graph},
           {"parameters", configuration->parameters}, {"requested_outputs", configuration->requested_outputs}};
+      if (!source.source_proof.is_null()) {
+        result["configuration"]["source"]["source_proof"] = source.source_proof;
+      }
     }
     // Export one copied snapshot. Unlike status(), this read never services pending Viewer work
     // or refreshes metadata, moves focus, changes the project, or tags the UI for redraw.
@@ -156,7 +159,7 @@ void AppShell::perform_viewer_request(wm::Screen &screen, const std::string &ope
     const auto source = classify_path(path, &why, preset_id);
     require(source.kind != SourceKind::None, why);
     require(source.evaluates() || (preset_id.empty() && parameters.empty()), "Payload/result sources do not accept a graph preset or parameters");
-    if (!viewer.open_path(path, preset_id, parameters)) {
+    if (!viewer.open_path(path, preset_id, parameters, params.value("source_proof", Json()))) {
       complete(Error::make(ErrorCode::InvalidParams, viewer.open_error())); return;
     }
     if (params.value("focus", true)) { focus_viewer(screen); }

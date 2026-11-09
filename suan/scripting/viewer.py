@@ -30,13 +30,16 @@ class Viewer:
             raise TypeError("displayed must be a boolean")
         return self._operation("graph_configuration", {"displayed": displayed})
 
-    def open(self, path, *, preset=None, parameters=None, focus=True):
+    def open(self, path, *, preset=None, parameters=None, focus=True, source_proof=None):
         """Open a payload, result/run directory or scientific field file. Evaluation is asynchronous; use status/wait."""
-        params = {"path": str(Path(path).expanduser().resolve()), "focus": focus}
+        target = Path(path).expanduser()
+        params = {"path": str(target.resolve() if source_proof is None else target.absolute()), "focus": focus}
         if preset is not None:
             params["preset"] = preset
         if parameters is not None:
             params["parameters"] = parameters
+        if source_proof is not None:
+            params["source_proof"] = source_proof
         return self._operation("open", params)
 
     def close(self, *, expected_source=None):

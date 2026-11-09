@@ -112,7 +112,12 @@ def test_collect_hdf5_sidecar_is_verified_registered_and_not_resubmitted(project
     assert len(client.tasks()) == 1
     path = Path(collected["directory"]) / "run.h5"
     opened = []
-    monkeypatch.setattr(api.viewer, "open", lambda folder, *, preset: opened.append((folder, preset)))
+    def open_viewer(folder, *, preset, source_proof):
+        assert source_proof["case_path"] == f"results/muferro/{run['id']}/case"
+        registered = next(file for file in collected["files"] if file["path"].endswith("/case/run.h5"))
+        assert registered in source_proof["files"]
+        opened.append((folder, preset))
+    monkeypatch.setattr(api.viewer, "open", open_viewer)
     params = {"project_id": p.snapshot()["project"]["id"], "run_id": run["id"]}
     native_action(api, "view", params)
     assert opened == [(path.parent, "muferro-collected-domains")]

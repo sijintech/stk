@@ -11,6 +11,8 @@ from collections import OrderedDict
 import hashlib
 from pathlib import Path
 import re
+import shutil
+import tempfile
 import threading
 
 from .backends import HubBackend, action_id, summary
@@ -203,7 +205,7 @@ class GraphService:
         if params.get("mode", "local") == "hub":
             if not str(params.get("connection", "")).startswith("hub:") or not params.get("node"):
                 raise BridgeError("invalid_params", "Hub evaluation needs a hub connection and node")
-            if params.get("local_bindings"):
+            if params.get("local_bindings") or params.get("local_proofs"):
                 raise BridgeError("invalid_params", "Hub evaluation cannot read local directory bindings")
         if interrupted is not None and interrupted.is_set():
             raise BridgeError("cancelled", "Script execution interrupted before graph evaluation")
@@ -222,7 +224,7 @@ class GraphService:
         for name, root in local.items():
             if not Path(root).is_absolute() or not Path(root).is_dir():
                 raise BridgeError("invalid_params", f"Local binding '{name}' must name an existing absolute directory")
-        work = {"request": request, "local_bindings": local}
+        work = {"request": request, "local_bindings": local, "local_proofs": params.get("local_proofs")}
         if params.get("connection"):
             backend = self.connections.backend(params["connection"], params.get("node"))
             if backend.kind != "runtime":
@@ -302,6 +304,13 @@ class GraphService:
                 raise _graph_error(exc) from None
         context = params.get("context") or {}
         local = params.get("local_bindings") or {}
+        from suan.graph.collected import local_resolver
+        from suan.graph.registry import GraphError
+        try:
+            proofs = params.get("local_proofs") or {}
+            resolver = local_resolver({name: root for name, root in local.items() if name in proofs}, proofs)
+        except GraphError as exc:
+            raise _graph_error(exc) from None
         bindings = {**(context.get("bindings") or {}), **{name: "local" for name in local}}
         artifacts = context.get("artifacts")
         target = resolve_probe_target(graph, params.get("pick"), bindings=bindings, values=context.get("values"),
@@ -309,11 +318,27 @@ class GraphService:
         if "error" in target:
             raise BridgeError("not_found", target["error"], data={"probe_error": True})
         local_root = local.get(target["binding"])
+        guarded = target["binding"] in (params.get("local_proofs") or {})
         if local_root is not None:
             target.pop("task_id", None)
-            if artifacts is None and FRAME.search(target["path"]):
+            if artifacts is None and FRAME.search(target["path"]) and not guarded:
                 target["path"] = _local_frame(Path(local_root), target["path"])
         out = {"target": target}
+        if guarded:
+            try:
+                source = resolver.resolve(target["binding"])
+                # Even a target-only probe checks that its registered field still exists unchanged.
+                with source.open(target["path"]) as stream:
+                    if params.get("position") is not None:
+                        with tempfile.TemporaryDirectory(prefix="stk-collected-probe-") as directory:
+                            path = Path(directory) / Path(target["path"]).name
+                            with path.open("wb") as destination:
+                                shutil.copyfileobj(stream, destination)
+                            out["sample"] = self._sample(path, target["path"], dict(target.get("metadata") or {}),
+                                                         params["position"])
+                return out
+            except GraphError as exc:
+                raise _graph_error(exc) from None
         position = params.get("position")
         if position is None:
             return out

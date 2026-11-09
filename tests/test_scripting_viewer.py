@@ -41,6 +41,17 @@ def test_wait_uses_only_status_and_does_not_return_old_payload_while_pending():
     assert answer == status() and calls == ["ui.viewer.status"] * 3
 
 
+def test_collected_open_preserves_the_lexical_path_and_source_proof(tmp_path):
+    calls = []
+    viewer = API(lambda name, params: calls.append((name, params))).viewer
+    root = tmp_path / "case"
+    root.mkdir()
+    proof = {"project_root": str(tmp_path), "case_path": "case",
+             "files": [{"path": "case/a.dat", "sha256": "a" * 64}]}
+    viewer.open(root, source_proof=proof)
+    assert calls[-1] == ("ui.viewer.open", {"path": str(root), "focus": True, "source_proof": proof})
+
+
 def test_wait_timeout_change_and_error_preserve_viewer_work():
     calls = []
     def call(name, params):

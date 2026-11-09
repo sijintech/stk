@@ -439,9 +439,9 @@ on every state change and at most every 250 ms while bytes move.
 | `graph.catalog` | – | `{catalog}` (`stk.catalog/1`) |
 | `graph.presets` | – | `{presets: [{id, name, description, graph, bindings, parameters}]}` |
 | `graph.validate` | `graph, parameters?` | `{ok, issues: [{code, message, path, node, hint, severity}]}` |
-| `graph.evaluate` | `eval_id, request, mode?=local \| hub, local_bindings?, connection?, node?, wait?` | `{result, blob_dir, action?}` |
+| `graph.evaluate` | `eval_id, request, mode?=local \| hub, local_bindings?, local_proofs?, connection?, node?, wait?` | `{result, blob_dir, action?}` |
 | `graph.cancel` | `eval_id, connection?, node?` | `{cancelled, action?, error?}` |
-| `probe` | `graph \| preset, pick: {node, dataset?}, context?: {bindings, values, result, artifacts}, local_bindings?, connection?, node?, position?` | `{target: {binding, task_id?, path, node, metadata?}, sample?}` |
+| `probe` | `graph \| preset, pick: {node, dataset?}, context?: {bindings, values, result, artifacts}, local_bindings?, local_proofs?, connection?, node?, position?` | `{target: {binding, task_id?, path, node, metadata?}, sample?}` |
 | `colormaps.list` | – | `{colormaps: [{name, lut_rgba8}], aliases, categorical_palettes, reserved_colors, nan_color}` |
 
 - `request` is the `graph.evaluate` payload of stk-graph-v1 §9 (`graph | preset, bindings,
@@ -461,6 +461,13 @@ on every state change and at most every 250 ms while bytes move.
   discards in-memory cache entries; disk cache and blobs remain available to the next worker.
   Worker crashes answer `unavailable`; requests are not automatically replayed, and the next request
   starts a fresh worker. Bridge shutdown stops the worker; loss of the parent's pipe also ends it.
+- Optional `local_proofs: {binding: {project_root, case_path, files}}` binds a local directory to a collected
+  manifest. The absolute lexical `project_root` joined with canonical relative `case_path` must equal
+  that local binding. Each of at most 10,000 `files` entries contains a project-relative `path` inside
+  the case and its lowercase `sha256`. File and directory links or reparse points are refused.
+  Reads verify current bytes and create private snapshots, limited to 1 GiB per file. This also
+  applies before a graph cache hit and to probe reads. The source only lists registered files.
+  Proofs are local-only and hub evaluation rejects them.
 - **Hub mode** sends a `graph.evaluate` action to `node` with id
   `sha256("graph.evaluate\0<node>\0<eval_id>")[:32]` and waits up to `wait` seconds (default 600).
   Requests over the automatic budget return with `action.state: "review"` and `result: null`;
@@ -1593,7 +1600,8 @@ Viewer inspection snapshot. Both the parameter and its boolean type are required
 It returns exactly `{viewer_version, displayed, displayed_graph_verified: boolean|null, configuration}`.
 `configuration` is null when the selected definition is unavailable, including an imported result without its
 original graph. Otherwise it is `{source, preset_id, graph, parameters, requested_outputs}`, where source is
-`{key, kind, path, field_file, connection, node, workspace_id, task_id, series}`. Source kind is one of
+`{key, kind, path, field_file, connection, node, workspace_id, task_id, series}`, with optional
+`source_proof` for a collected local source. Source kind is one of
 `none`, `payload`, `result`, `run`, `task`; these are provenance hints, not frozen file contents or access grants.
 The graph and submitted parameters are detached copies from the desired configuration (`displayed=false`) or
 the configuration associated locally with the displayed result (`displayed=true`). Resolved values and result

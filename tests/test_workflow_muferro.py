@@ -147,7 +147,13 @@ def test_prepare_collect_retry_and_reopen(project, scripts, runtime, tmp_path, m
     case_folder = Path(collected['directory'])
     (case_folder / 'notes.txt').write_text('synthetic notes', encoding='utf-8')
     opened = []
-    monkeypatch.setattr(api.viewer, 'open', lambda path, *, preset: opened.append((path, preset)))
+    def open_viewer(path, *, preset, source_proof):
+        case_path = f"results/muferro/{run['id']}/case"
+        assert source_proof == {'project_root': str(directory), 'case_path': case_path,
+                                'files': [file for file in collected['files']
+                                          if file['path'].startswith(case_path + '/')]}
+        opened.append((path, preset))
+    monkeypatch.setattr(api.viewer, 'open', open_viewer)
     api.muferro.view(run['id'])
     assert opened == [(case_folder, 'muferro-collected-domains')]
     before = revision(p)

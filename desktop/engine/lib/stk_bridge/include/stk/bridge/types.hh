@@ -317,6 +317,7 @@ struct EvaluateParams {
   Json request;
   std::string mode = "local"; /* local | hub */
   std::map<std::string, std::string> local_bindings;
+  Json local_proofs; /* Local collected-file manifests, keyed by binding. */
   Target target; /* Runtime task bindings (local mode) or the hub node */
   std::optional<double> wait;
   Json to_json() const;
@@ -328,6 +329,7 @@ struct ProbeParams {
   std::string node, dataset;
   Json context; /* {bindings, values, result, artifacts}; null: absent */
   std::map<std::string, std::string> local_bindings;
+  Json local_proofs;
   Target target;
   std::optional<std::array<double, 3>> position;
   Json to_json() const;

@@ -519,7 +519,11 @@ class MuFerro:
         preset = "muferro-collected-domains"
         if not any(entry["id"] == preset for entry in self.stk.graph.presets()):
             preset = "muferro-domains"
-        return self.stk.viewer.open(folder, preset=preset)
+        case_path = folder.relative_to(root).as_posix()
+        proof = {"project_root": str(root), "case_path": case_path,
+                 "files": [file for file in row["values"][RESULT_FIELD_IDS["files"]]
+                           if file["path"].startswith(case_path + "/")]}
+        return self.stk.viewer.open(folder, preset=preset, source_proof=proof)
 
 
 def native_action(stk, action, params):

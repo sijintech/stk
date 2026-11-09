@@ -56,6 +56,8 @@ struct ViewerSource {
   std::string path;
   /** Explicit field filename inside a run directory; empty for ordinary folder sources. */
   std::string field_file;
+  /** Registered project manifest for collected local files; independent of editable graph parameters. */
+  io::Json source_proof;
   /** Tasks: bridge connection ("runtime:<name>", "hub:<name>"), hub node, workspace, task. */
   std::string connection, node, workspace_id, task_id;
   /** Result directories: series.json (steps) instead of result.json. */
@@ -238,7 +240,8 @@ class ViewerState {
   /** Jobs "Open in viewer" and File > Open. False (with #open_error) when nothing can be opened. */
   bool open(const OpenResultRequest &request);
   /** `parameters` ({name: value}) override the preset defaults of an evaluated source. */
-  bool open_path(const std::string &path, const std::string &preset = {}, const io::Json &parameters = io::Json());
+  bool open_path(const std::string &path, const std::string &preset = {}, const io::Json &parameters = io::Json(),
+                 const io::Json &source_proof = io::Json());
   /** Shows an in-memory payload (tests, tools). */
   void open_payload(std::shared_ptr<const io::Payload> payload, std::string label);
   void close();

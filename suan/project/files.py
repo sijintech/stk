@@ -105,8 +105,8 @@ def _check_database_path(root, candidate):
         raise ProjectError("The live project database and its transaction files are not indexable resources")
 
 
-def _read_managed_file(root, path, expected=None):
-    """Return the verified file's stat and native change time."""
+def _read_managed_file(root, path, expected=None, *, copy_to=None):
+    """Return verified metadata, optionally copying manifest-bound bytes from the same descriptor."""
     from suan.connectors.files import file_change_time, open_regular
     from suan.runtime.models import relative_path
     from .file_tree import _directory, _link
@@ -135,6 +135,8 @@ def _read_managed_file(root, path, expected=None):
                         if not block:
                             raise ProjectError(f"Managed file was truncated: {path}")
                         digest.update(block)
+                        if copy_to is not None:
+                            copy_to.write(block)
                         remaining -= len(block)
                     if stream.read(1) or digest.hexdigest() != expected["sha256"]:
                         raise ProjectError(f"Managed file digest changed: {path}")

@@ -11,15 +11,16 @@ from .protocol import BridgeError, MAX_LINE_BYTES, decode_line, encode_message
 def evaluate(params, cache_dir, progress, cancel):
     from suan.graph.catalog import default_registry
     from suan.graph.registry import GraphError
-    from suan.graph.resolve import BindingResolver, LocalDirResolver, RuntimeResolver
+    from suan.graph.collected import local_resolver
+    from suan.graph.resolve import BindingResolver, RuntimeResolver
     from suan.graph.service import DirectoryBlobSink, evaluate_request
     from suan.runtime.client import RuntimeClient
     from .graphs import _graph_error
 
     resolvers = []
     try:
-        if params.get("local_bindings"):
-            resolvers.append(LocalDirResolver(params["local_bindings"]))
+        if params.get("local_bindings") or params.get("local_proofs"):
+            resolvers.append(local_resolver(params.get("local_bindings") or {}, params.get("local_proofs")))
         if params.get("runtime"):
             runtime = params["runtime"]
             client = RuntimeClient(runtime["url"], runtime["token"], timeout=runtime["timeout"])

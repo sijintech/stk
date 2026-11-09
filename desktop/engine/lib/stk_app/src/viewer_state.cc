@@ -13,6 +13,7 @@
 
 #include "stk/bridge/client.hh"
 #include "stk/core/paths.hh"
+#include "stk/core/sha256.hh"
 #include "stk/io/blob_cache.hh"
 #include "stk/io/catalog.hh"
 #include "stk/io/graph.hh"
@@ -35,12 +36,45 @@ std::string dumps(const Json &j)
   return io::python_json_dumps(j, true, true);
 }
 
+void set_source_proof(ViewerSource &source, const Json &proof)
+{
+  if (proof.is_null()) { return; }
+  const auto require = [](bool valid) {
+    if (!valid) { throw std::invalid_argument("Invalid collected Viewer source proof"); }
+  };
+  require(source.kind == SourceKind::RunDir && source.field_file.empty());
+  require(proof.is_object() && proof.size() == 3 && proof.contains("project_root") &&
+          proof.contains("case_path") && proof.contains("files"));
+  require(proof.at("project_root").is_string() && proof.at("case_path").is_string() &&
+          proof.at("files").is_array() && !proof.at("files").empty() && proof.at("files").size() <= 10000);
+  const auto root = proof.at("project_root").get<std::string>();
+  const auto prefix = proof.at("case_path").get<std::string>();
+  const auto canonical = [](const std::string &path) {
+    return core::is_safe_relative_path(path) && path.back() != '/' && path != "." &&
+           path.rfind("./", 0) != 0 && path.find("//") == std::string::npos &&
+           path.find("/./") == std::string::npos && !path.ends_with("/.");
+  };
+  require(!root.empty() && root.size() <= 32767 && root.find('\0') == std::string::npos &&
+          fs::path(core::path_from_utf8(root)).is_absolute() && prefix.size() <= 4096 && canonical(prefix));
+  require((fs::path(core::path_from_utf8(root)) / core::path_from_utf8(prefix)).lexically_normal() ==
+          fs::path(core::path_from_utf8(source.path)).lexically_normal());
+  std::set<std::string> paths;
+  for (const auto &file : proof.at("files")) {
+    require(file.is_object() && file.size() == 2 && file.contains("path") && file.contains("sha256") &&
+            file.at("path").is_string() && file.at("sha256").is_string());
+    const auto path = file.at("path").get<std::string>();
+    require(path.size() <= 4096 && canonical(path) && path.rfind(prefix + "/", 0) == 0 &&
+            paths.insert(path).second && core::is_sha256_hex(file.at("sha256").get<std::string>()));
+  }
+  source.source_proof = proof;
+}
+
 bool same_graph_configuration(const ViewerGraphConfiguration &a, const ViewerGraphConfiguration &b)
 {
   const auto &x = a.source, &y = b.source;
   return x.kind == y.kind && x.path == y.path && x.field_file == y.field_file &&
       x.connection == y.connection && x.node == y.node && x.workspace_id == y.workspace_id &&
-      x.task_id == y.task_id && x.series == y.series && a.preset_id == b.preset_id &&
+      x.task_id == y.task_id && x.series == y.series && x.source_proof == y.source_proof && a.preset_id == b.preset_id &&
       a.requested_outputs == b.requested_outputs && dumps(a.graph) == dumps(b.graph) &&
       dumps(a.parameters) == dumps(b.parameters);
 }
@@ -156,7 +190,8 @@ std::string ViewerSource::label() const
 std::string ViewerSource::key() const
 {
   return std::string(source_kind_name(kind)) + "|" + path + "|" + connection + "|" + node + "|" + task_id +
-         (field_file.empty() ? "" : "|field:" + field_file);
+         (field_file.empty() ? "" : "|field:" + field_file) +
+         (source_proof.is_null() ? "" : "|collected:" + core::Sha256::hex(dumps(source_proof)));
 }
 
 ViewerSource classify_path(const std::string &path, std::string *r_error, const std::string &preset)
@@ -990,7 +1025,7 @@ struct ViewerState::Impl {
     if (!is_prefetch) {
       pending_reason.clear();
       pending_at = kInf;
-      if (auto it = cache.find(key); it != cache.end()) {
+      if (auto it = cache.find(key); source.source_proof.is_null() && it != cache.end()) {
         cancel_main();
         show_cached(it->second, reason);
         schedule_prefetch();
@@ -999,7 +1034,7 @@ struct ViewerState::Impl {
       if (main && main->key == key) {
         return; /* already on its way */
       }
-      if (prefetch && prefetch->key == key) {
+      if (source.source_proof.is_null() && prefetch && prefetch->key == key) {
         /* The neighbour being prefetched is what is wanted now: promote it. */
         main = std::move(prefetch);
         prefetch.reset();
@@ -1042,6 +1077,9 @@ struct ViewerState::Impl {
     const std::string binding = binding_name();
     if (source.kind == SourceKind::RunDir) {
       ep.local_bindings[binding] = source.path;
+      if (!source.source_proof.is_null()) {
+        ep.local_proofs = Json::object({{binding, source.source_proof}});
+      }
     }
     else {
       request["bindings"] = Json::object({{binding, Json::object({{"task_id", source.task_id}})}});
@@ -1373,6 +1411,9 @@ struct ViewerState::Impl {
     }
     else {
       pp.local_bindings[binding] = source.path;
+      if (!source.source_proof.is_null()) {
+        pp.local_proofs = Json::object({{binding, source.source_proof}});
+      }
     }
     context["values"] = shown_params.is_object() ? shown_params : parameters();
     if (result) {
@@ -1654,7 +1695,8 @@ bool ViewerState::open(const OpenResultRequest &request)
   return false;
 }
 
-bool ViewerState::open_path(const std::string &path, const std::string &preset, const Json &parameters)
+bool ViewerState::open_path(const std::string &path, const std::string &preset, const Json &parameters,
+                            const Json &source_proof)
 {
   Impl &m = *impl_;
   std::string err;
@@ -1662,6 +1704,14 @@ bool ViewerState::open_path(const std::string &path, const std::string &preset, 
   if (s.kind == SourceKind::None) {
     m.open_error = err;
     store_.log(store_.catalog().format("viewer.log.open_failed", {{"path", path}, {"error", err}}));
+    m.changed();
+    return false;
+  }
+  try {
+    set_source_proof(s, source_proof);
+  }
+  catch (const std::invalid_argument &error) {
+    m.open_error = error.what();
     m.changed();
     return false;
   }
@@ -2441,14 +2491,19 @@ bool workspace_boolean(const Json &value)
 
 Json workspace_source(const ViewerSource &source)
 {
-  return {{"kind", source_kind_name(source.kind)}, {"path", source.path}, {"field_file", source.field_file},
+  Json value = {{"kind", source_kind_name(source.kind)}, {"path", source.path}, {"field_file", source.field_file},
           {"connection", source.connection}, {"node", source.node}, {"workspace_id", source.workspace_id},
           {"task_id", source.task_id}, {"series", source.series}};
+  if (!source.source_proof.is_null()) { value["source_proof"] = source.source_proof; }
+  return value;
 }
 
 ViewerSource workspace_source(const Json &value)
 {
-  workspace_keys(value, {"kind", "path", "field_file", "connection", "node", "workspace_id", "task_id", "series"});
+  Json original = value;
+  const Json proof = original.is_object() ? original.value("source_proof", Json()) : Json();
+  if (original.is_object()) { original.erase("source_proof"); }
+  workspace_keys(original, {"kind", "path", "field_file", "connection", "node", "workspace_id", "task_id", "series"});
   ViewerSource source;
   const auto kind = workspace_text(value.at("kind"), 16);
   bool found = false;
@@ -2464,6 +2519,7 @@ ViewerSource workspace_source(const Json &value)
   source.workspace_id = workspace_text(value.at("workspace_id"));
   source.task_id = workspace_text(value.at("task_id"));
   source.series = workspace_boolean(value.at("series"));
+  set_source_proof(source, proof);
   return source;
 }
 

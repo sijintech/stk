@@ -15,6 +15,38 @@
     }
   ],
   "$defs": {
+    "collectedSource": {
+      "type": "object",
+      "properties": {
+        "project_root": {"$ref": "#/$defs/absPath"},
+        "case_path": {"$ref": "#/$defs/relPath"},
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {"$ref": "#/$defs/relPath"},
+              "sha256": {"$ref": "#/$defs/sha256"}
+            },
+            "required": ["path", "sha256"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["project_root", "case_path", "files"],
+      "additionalProperties": false
+    },
+    "localProofs": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]{0,63}$": {"$ref": "#/$defs/collectedSource"}
+      },
+      "maxProperties": 64
+    },
     "id": {
       "oneOf": [
         {
@@ -1183,6 +1215,7 @@
               },
               "maxProperties": 64
             },
+            "local_proofs": {"$ref": "#/$defs/localProofs"},
             "connection": {
               "$ref": "#/$defs/connectionId"
             },
@@ -1878,6 +1911,7 @@
               },
               "maxProperties": 64
             },
+            "local_proofs": {"$ref": "#/$defs/localProofs"},
             "connection": {
               "$ref": "#/$defs/connectionId"
             },

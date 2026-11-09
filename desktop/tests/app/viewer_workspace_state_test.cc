@@ -58,6 +58,54 @@ TEST(ViewerWorkspace, RestoresFrozenPayloadParametersLayersAndSettingsWithoutAny
   EXPECT_FALSE(f.vs->graph_inspection()->shown_matches_desired.has_value());
 }
 
+TEST(ViewerWorkspace, CollectedSourceProofSurvivesRestoreAndReachesEveryExplicitRead)
+{
+  FakeViewer f;
+  f.vs->prefetch_neighbours = false;
+  f.vs->set_metadata(repo_presets(), repo_catalog());
+  const auto path = f.run_dir();
+  const Json proof = {{"project_root", f.dir.str()}, {"case_path", "run"},
+                      {"files", {{{"path", "run/Polar.00000000.dat"}, {"sha256", std::string(64, 'a')}}}}};
+  ASSERT_TRUE(f.vs->open_path(path, "muferro-domains", Json(), proof));
+  ASSERT_TRUE(f.pump_until([&] { return f.vs->payload() && !f.vs->evaluating(); }));
+  const auto key = f.vs->source().key();
+  EXPECT_NE(key, classify_path(path).key());
+  EXPECT_EQ(f.stats()["evaluate_requests"].back()["local_proofs"], Json({{"run", proof}}));
+
+  const auto count = f.stats()["evaluate_requests"].size();
+  f.vs->evaluate_now();
+  ASSERT_TRUE(f.pump_until([&] { return !f.vs->evaluating(); }));
+  EXPECT_EQ(f.stats()["evaluate_requests"].size(), count + 1);  // The native cache cannot bypass a new proof check.
+  EXPECT_EQ(f.stats()["evaluate_requests"].back()["local_proofs"], Json({{"run", proof}}));
+
+  PickInfo pick;
+  pick.probe_node = "frame";
+  pick.physical = {0.0, 0.0, 0.0};
+  f.vs->set_pick(pick);
+  ASSERT_TRUE(f.pump_until([&] { return f.vs->probe().status == ProbeState::Status::Done; }));
+  EXPECT_EQ(f.stats()["probe_requests"].back()["local_proofs"], Json({{"run", proof}}));
+
+  const auto state = f.vs->save_workspace_state();
+  const auto payload = f.vs->base_payload();
+  const auto before = f.stats();
+  ASSERT_TRUE(f.vs->load_workspace_state(state, payload));
+  EXPECT_EQ(f.vs->source().source_proof, proof);
+  EXPECT_EQ(f.vs->source().key(), key);
+  EXPECT_EQ(f.stats(), before);
+  f.vs->evaluate_now();
+  ASSERT_TRUE(f.pump_until([&] { return !f.vs->evaluating(); }));
+  EXPECT_EQ(f.stats()["evaluate_requests"].back()["local_proofs"], Json({{"run", proof}}));
+
+  auto invalid = proof;
+  invalid["files"][0]["path"] = "run/../foreign.dat";
+  EXPECT_FALSE(f.vs->open_path(path, "muferro-domains", Json(), invalid));
+  EXPECT_EQ(f.vs->source().key(), key);
+  auto invalid_state = state;
+  invalid_state["source"]["source_proof"] = invalid;
+  EXPECT_FALSE(f.vs->load_workspace_state(invalid_state, payload));
+  EXPECT_EQ(f.vs->source().key(), key);
+}
+
 TEST(ViewerWorkspace, PreservesAutomaticPreferenceAndRawDraftButRequiresExplicitRun)
 {
   FakeViewer f;

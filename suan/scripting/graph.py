@@ -23,7 +23,7 @@ class Graph:
         return self._call("graph.validate", params)
 
     def evaluate(self, request, *, eval_id, local_bindings=None, connection=None, node=None,
-                 mode="local", wait=None):
+                 mode="local", wait=None, local_proofs=None):
         """Execute explicitly and return the full result/Hub-action envelope.
 
         eval_id belongs to the caller. Local IDs identify active work, not durable idempotency;
@@ -32,6 +32,8 @@ class Graph:
         params = {"request": request, "eval_id": eval_id, "mode": mode}
         if local_bindings is not None:
             params["local_bindings"] = _directories(local_bindings)
+        if local_proofs is not None:
+            params["local_proofs"] = local_proofs
         for key, value in (("connection", connection), ("node", node), ("wait", wait)):
             if value is not None:
                 params[key] = value
@@ -54,11 +56,13 @@ class Graph:
         return self._call("blob.ensure", params)
 
     def probe(self, pick, *, graph=None, preset=None, context=None, position=None,
-              local_bindings=None, connection=None, node=None):
+              local_bindings=None, connection=None, node=None, local_proofs=None):
         """Resolve a payload pick and optionally sample its original grid at a world position."""
         params = {"pick": pick}
         if local_bindings is not None:
             params["local_bindings"] = _directories(local_bindings)
+        if local_proofs is not None:
+            params["local_proofs"] = local_proofs
         for key, value in (("graph", graph), ("preset", preset), ("context", context), ("position", position),
                            ("connection", connection), ("node", node)):
             if value is not None:

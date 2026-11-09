@@ -449,6 +449,9 @@ Json EvaluateParams::to_json() const
   if (!local_bindings.empty()) {
     p["local_bindings"] = bindings_json(local_bindings);
   }
+  if (!local_proofs.is_null()) {
+    p["local_proofs"] = local_proofs;
+  }
   if (!target.connection.empty()) {
     target.apply(p);
   }
@@ -478,6 +481,9 @@ Json ProbeParams::to_json() const
   }
   if (!local_bindings.empty()) {
     p["local_bindings"] = bindings_json(local_bindings);
+  }
+  if (!local_proofs.is_null()) {
+    p["local_proofs"] = local_proofs;
   }
   if (!target.connection.empty()) {
     target.apply(p);
