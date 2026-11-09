@@ -1,5 +1,19 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 18:07 UTC · MuFerro HDF5 查找重试与旧项目复验
+
+`0b9b1c90` 在已收集的 MuFerro 运行记录查找失败时提供显式重试。点击后重新读取该运行的结果行，列表与打开仍由用户分别触发。仿真指南同步补充操作入口。
+
+Linux X11/Xvfb 1440×1600，软件 OpenGL。固定起点为最大化 Project、已展开仿真运行记录、已选中原成功任务，Viewer 为空。通过严格桥在第一次真实结果行查询后返回可重试错误。旧版在刷新并重新展开后仍只有第一次查询。候选版一次重试仅补一次结果行查询。随后四次点击列出、展开选项、选择 Polar 第 2 步并打开，Viewer 显示 24 个体素，值域为 [0, 69]。两版均正常退出，项目修订 8，项目与 Runtime 记录和文件哈希保持一致。
+
+同一显示环境以 `15dff6ac` 实窗复验。冷启动重开已收集项目，选中原成功运行后，HDF5 项目在空 Viewer 起点四次点击、零滚动打开原任务的 Polar 第 2 步。旧 DAT-only 项目在相同起点一次点击、零滚动打开普通畴 Viewer 的原末帧第 2 步。在同一会话从 HDF5 项目切到 DAT 项目再切回，之前的 HDF5 选择清空。显式重新列出时恢复四个选项，期间 Viewer、未发送草稿、项目修订和原 Runtime 任务保持原状。
+
+原生构建及相邻 CTest 34/34 通过，零跳过。 `49140b04` 的隔离 Python 3.11 全量仍在运行。
+
+远端 `15dff6ac` Desktop `42669507898` 仍在运行，1 个作业已通过。Runtime `42669507521` 已通过 8/13 个作业。本地修复等待前一 Desktop 运行的完整终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42669507898) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42669507521)
+
+本机证据见 `root-delivery-20261109-104/` 的 `h1-retry-{released,green}/receipt.json`、`hdf5-compat/{hdf5,dat,switch}/evidence/receipt.json`、固定起点与结果截图及 `native-adjacent.xml`。MuFerro 本次使用公开合成算例，实际许可环境和合作方样例仍待验收。
+
 ## 2026-11-09 17:56 UTC · MuFerro HDF5 原生选择与 Cocoa 隐藏观测
 
 `c3061e78` 为现有严格图入口增加单容器元数据节点，缓存查找前及元数据解析前核对登记 SHA-256。项目根和固定相对路径限定访问范围，列表只返回明确的场和步号。扫描最多 4096 个链接，列表最多 256 项，超出时拒绝整份列表。`49140b04` 在仿真面板接入列表、明确选择和打开。校验并持有载荷后才接纳 Viewer。
