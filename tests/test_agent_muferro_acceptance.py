@@ -1062,38 +1062,31 @@ def test_offline_finished_task_is_recovered_by_hand_then_adopted_by_an_explicit_
         indent=2, default=str), encoding="utf-8")
 
 
-def test_running_task_is_recovered_by_hand_then_followed_live_by_an_explicit_workflow_start(
-        scan, runtime, monkeypatch, request):
-    """The live counterpart of the offline case above: the strict bridge process is killed after the person's approval
-    is durable and the Runtime runs the gated synthetic solver, which stays held throughout. A fresh bridge only
-    observes. In a third bridge, a non-forced ``recover`` and an explicit ``start`` make attempt 2 follow the same
-    running Runtime task, simulation run and solver process (exact PID and birth) without submitting, cancelling or
-    collecting; a repeated manual start while it follows claims nothing. Only after the desktop observed the running
-    phase is the gate opened: the run collects once and binds output, snapshot and analysis to the original task, with
-    one Runtime submission in total and the original approval envelope."""
-    s = scan
-    store, client = s["store"], s["client"]
-    use_energy_trace(s)
-    k = held_solver_killed(s, runtime, monkeypatch, request)
-    run_id, task_id, held, envelope = k["run_id"], k["task_id"], k["held"], k["envelope"]
-    submissions, cancels = k["submissions"], k["cancels"]
+def still_held(s, k):
+    """The original solver process, unreleased and unreplaced; its Runtime task running; nothing new submitted,
+    cancelled or collected."""
+    held, task_id = k["held"], k["task_id"]
+    assert solver_alive(held) and not k["release"].exists()
+    assert json.loads(k["marker"].read_text(encoding="utf-8")) == held
+    assert [(t["id"], t["state"]) for t in s["client"].tasks()] == [(task_id, "running")]
+    assert len(k["submissions"]) == 1 and k["cancels"] == []
+    no_collected_result(s["store"], f"results/muferro/{k['simulate']['progress']['simulation_run_id']}")
+
+
+def followed_live(request, s, k):
+    """After ``held_solver_killed``: a fresh bridge only observes; in a third bridge a non-forced ``recover`` and an
+    explicit ``start`` make attempt 2 follow the same running Runtime task, simulation run and held solver process,
+    and a repeated manual start claims nothing. The gate stays held. Returns the fresh observation, the manual bridge,
+    its recovery and what the desktop saw while attempt 2 followed the task."""
+    store = s["store"]
+    run_id, task_id, envelope = k["run_id"], k["task_id"], k["envelope"]
     original_run = k["simulate"]["progress"]["simulation_run_id"]
-
-    def still_held():
-        """The original solver process, unreleased and unreplaced; its Runtime task running; nothing new submitted,
-        cancelled or collected."""
-        assert solver_alive(held) and not k["release"].exists()
-        assert json.loads(k["marker"].read_text(encoding="utf-8")) == held
-        assert [(t["id"], t["state"]) for t in client.tasks()] == [(task_id, "running")]
-        assert len(submissions) == 1 and cancels == []
-        no_collected_result(store, f"results/muferro/{original_run}")
-
-    still_held()
+    still_held(s, k)
     f = observed_only(request, s, k, "running")
-    still_held()
+    still_held(s, k)
     m = manual_bridge(request, s, k)
     r = recovered_by_hand(s, k, m, "running")
-    still_held()
+    still_held(s, k)
 
     # An explicit manual start (no approval): attempt 2 adopts the original simulation run and follows its task.
     manual, calls = m["bridge"], m["calls"]
@@ -1132,7 +1125,30 @@ def test_running_task_is_recovered_by_hand_then_followed_live_by_an_explicit_wor
     assert again["status"] == "running" and again["executor_id"] == manual_identity["executor_id"]
     assert calls()[-1] == "WorkflowRunExecutor.start" and calls().count("WorkflowRuns.start") == 1
     assert started_events(store, run_id) == started
-    still_held()
+    still_held(s, k)
+    return f, m, r, {"manual_identity": manual_identity, "running": running, "live": live, "started": started,
+                     "observed": observed, "again": again}
+
+
+def test_running_task_is_recovered_by_hand_then_followed_live_by_an_explicit_workflow_start(
+        scan, runtime, monkeypatch, request):
+    """The live counterpart of the offline case above: the strict bridge process is killed after the person's approval
+    is durable and the Runtime runs the gated synthetic solver, which stays held throughout. A fresh bridge only
+    observes. In a third bridge, a non-forced ``recover`` and an explicit ``start`` make attempt 2 follow the same
+    running Runtime task, simulation run and solver process (exact PID and birth) without submitting, cancelling or
+    collecting; a repeated manual start while it follows claims nothing. Only after the desktop observed the running
+    phase is the gate opened: the run collects once and binds output, snapshot and analysis to the original task, with
+    one Runtime submission in total and the original approval envelope."""
+    s = scan
+    client = s["client"]
+    use_energy_trace(s)
+    k = held_solver_killed(s, runtime, monkeypatch, request)
+    run_id, task_id, held = k["run_id"], k["task_id"], k["held"]
+    submissions, cancels = k["submissions"], k["cancels"]
+    original_run = k["simulate"]["progress"]["simulation_run_id"]
+    f, m, r, w = followed_live(request, s, k)
+    calls, manual_identity, started, live = m["calls"], w["manual_identity"], w["started"], w["live"]
+    observed, again = w["observed"], w["again"]
 
     # Only now is the gate opened: the Runtime finishes the same task and this bridge collects it once.
     k["release"].touch()
@@ -1161,6 +1177,149 @@ def test_running_task_is_recovered_by_hand_then_followed_live_by_an_explicit_wor
         **{key: a[key] for key in ("adopted_progress", "simulate", "energy", "snapshot", "result_files_sha256",
                                    "analysis_run", "analysis_energy_output", "graph_workers")}, **c,
         "runtime_submissions": len(submissions), "runtime_cancels": len(cancels)}, indent=2, default=str),
+        encoding="utf-8")
+
+
+def test_running_task_followed_after_recovery_is_cancelled_by_hand_without_collecting(
+        scan, runtime, monkeypatch, request):
+    """The live adoption above up to attempt 2 following the same held solver and Runtime task, then an explicit
+    person's ``project.workflow_runs.cancel`` from that bridge, with the gate never opened (docs/project-workflows.md
+    "MuFerro 步骤": cancelling a workflow run cancels its followed Runtime task). Exactly one Runtime cancel names the
+    original task, the held solver process exits, attempt 2 ends cancelled and the run stops without collecting: no
+    output snapshot, result, analysis or new submission. A repeated cancel makes no Runtime action. The person's
+    original first-start approval and executor stay distinct from the cancellation; repeated observation, a reviewed
+    repeat decision and a cold reopen read them without starting, cancelling or submitting anything."""
+    s = scan
+    store, client, supervisor = s["store"], s["client"], s["supervisor"]
+    use_energy_trace(s)
+    k = held_solver_killed(s, runtime, monkeypatch, request)
+    run_id, task_id, held, envelope, item = k["run_id"], k["task_id"], k["held"], k["envelope"], k["item"]
+    submissions, cancels = k["submissions"], k["cancels"]
+    original_run = k["simulate"]["progress"]["simulation_run_id"]
+    f, m, r, w = followed_live(request, s, k)
+    manual, calls, manual_identity, started = m["bridge"], m["calls"], w["manual_identity"], w["started"]
+    followed_calls = ["WorkflowRunExecutor.recover", "WorkflowRuns.interrupt", "WorkflowRunExecutor.start",
+                      "WorkflowRuns.start", "WorkflowRunExecutor.start"]
+    assert calls() == followed_calls
+    snapshots = store.snapshots.list()["snapshots"]
+    with store._connect() as db:
+        _, before = store.workflow_runs._read(db, run_id)
+
+    # The person cancels the workflow run from this bridge while the solver is still held at its gate.
+    requested = manual.call("project.workflow_runs.cancel", m["run_args"])["run"]
+    assert requested["status"] in ("cancel_requested", "stopped")
+
+    def stopped():
+        supervisor.tick()
+        run = manual.call("project.workflow_runs.get", m["run_args"])["run"]
+        return run if run["status"] == "stopped" else None
+
+    cancelled = until_true(stopped, 60, "the cancelled workflow run to stop")
+
+    def solver_exited():
+        supervisor.tick()
+        task = client.task(task_id)
+        return task if task["state"] in TERMINAL and not solver_alive(held) else None
+
+    terminal = until_true(solver_exited, 60, "the Runtime task's held solver to exit")
+    assert not k["release"].exists()  # the gate was never opened: the solver exited because the task was cancelled
+    assert terminal["state"] == "cancelled" and terminal["reason"] == "Cancelled by user", terminal
+    assert cancels == [task_id] and len(submissions) == 1  # one Runtime cancel, naming the original task
+    assert [(t["id"], t["state"]) for t in client.tasks()] == [(task_id, "cancelled")]
+    assert calls() == followed_calls + ["WorkflowRunExecutor.cancel", "WorkflowRuns.request_cancel"]
+
+    # Attempt 2 ends cancelled; nothing is collected, frozen or analysed.
+    assert cancelled["executor_id"] is None and cancelled["complete"] is False
+    by_step = {t["step"]: t for t in cancelled["tasks"]}
+    simulate, energy = by_step["simulate"], by_step["energy"]
+    assert simulate["status"] == "cancelled" and simulate["attempt"] == 2 and simulate["error"]["code"] == "cancelled"
+    assert simulate["progress"]["task_id"] == task_id and simulate["progress"]["simulation_run_id"] == original_run
+    assert not simulate.get("produced")
+    assert energy["status"] == "pending" and energy["attempt"] == 0 and not energy.get("produced")
+    with store._connect() as db:
+        _, after = store.workflow_runs._read(db, run_id)
+    added = after[len(before):]
+    assert after[:len(before)] == before
+    assert [(e["step"], e["attempt"], e["status"]) for e in added] == [
+        ("", 0, "cancel_requested"), ("simulate", 2, "cancelled"), ("", 0, "stopped")]
+    assert "approval" not in added[0] and added[2]["executor_id"] == manual_identity["executor_id"]
+    assert not any(e.get("progress", {}).get("stage") == "collecting" for e in after)
+    assert store.snapshots.list()["snapshots"] == snapshots
+    no_collected_result(store, f"results/muferro/{original_run}")
+    assert store.runs.get(original_run)["status"]["task"]["id"] == task_id
+    assert not any(a["path"].endswith(("energy_out.dat", "mupro_completion.json")) for a in client.artifacts(task_id))
+
+    # A repeated cancel on the stopped run records nothing and makes no Runtime action.
+    repeated = manual.call("project.workflow_runs.cancel", m["run_args"])["run"]
+    assert repeated["status"] == "stopped" and repeated["tasks"] == cancelled["tasks"]
+    supervisor.tick()
+    assert cancels == [task_id] and len(submissions) == 1 and [t["id"] for t in client.tasks()] == [task_id]
+    with store._connect() as db:
+        _, repeat_events = store.workflow_runs._read(db, run_id)
+    assert repeat_events == after
+    cancel_calls = followed_calls + ["WorkflowRunExecutor.cancel", "WorkflowRuns.request_cancel"] * 2
+    assert calls() == cancel_calls
+
+    # The original approval and executor, distinct from the present cancellation, read repeatedly and observationally.
+    assert started_events(store, run_id) == started and started[0] == k["started"][0]
+    assert started[0]["approval"] == envelope and "approval" not in started[1]
+    observed = [manual.call("project.agent.run_observe", m["args"])["receipt"] for _ in range(2)]
+    assert observed[0] == observed[1]
+    receipt = observed[0]
+    assert receipt["outcome"] == "started" and receipt["approval"] == envelope and receipt["run_id"] == run_id
+    assert receipt["executor_id"] == k["identity"]["executor_id"] != manual_identity["executor_id"]
+    assert receipt["run_status"] == "stopped"
+    assert manual.call("project.agent.run_plan", m["args"])["item"] == item
+    replay = manual.call("project.agent.run_decide", m["decision"])["receipt"]
+    assert replay == receipt  # the approval is spent: a reviewed repeat replays it and restarts nothing
+    assert calls() == cancel_calls + ["AgentExecutor.decide_run"]
+    view = manual.call("project.agent.get", m["params"])
+    assert [e["item_id"] for e in view["events"] if e["kind"] == "approval_decided"] == [item["item_id"]]
+    assert manual.call("project.agent.verify", m["params"])["ok"]
+    assert manual.close() == 0
+    assert not manual.violations, manual.violations
+
+    # A cold reopen in a fourth bridge process reads the same history and changes nothing.
+    cold = probe_bridge(request, s, k["state"], "cold")
+    cold_pid = cold.process.pid
+    handle = cold.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    params = {"handle": handle, "session_id": k["sid"]}
+    reopened = cold.call("project.agent.get", params)
+    assert [card["item"] for card in reopened["run_approvals"]] == [item] and reopened["awaiting"] == []
+    cold_receipt = cold.call("project.agent.run_observe", {**params, "item_id": item["item_id"]})["receipt"]
+    assert cold_receipt == receipt
+    cold_run = cold.call("project.workflow_runs.get", {"handle": handle, "run_id": run_id})["run"]
+    assert cold_run["status"] == "stopped" and cold_run["tasks"] == cancelled["tasks"]
+    assert cold.call("project.agent.verify", params)["ok"]
+    assert cold.close() == 0
+    cold_records = probe_records(s, cold_pid)
+    cold_identity = next(r["value"] for r in cold_records if r["name"] == "identity")
+    assert [r for r in cold_records if r["name"] != "identity"] == []  # nothing decided, started, recovered, cancelled
+    supervisor.tick()
+    assert cancels == [task_id] and len(submissions) == 1
+    assert [(t["id"], t["state"]) for t in client.tasks()] == [(task_id, "cancelled")]
+    with store._connect() as db:
+        _, cold_events = store.workflow_runs._read(db, run_id)
+    assert cold_events == after and started_events(store, run_id) == started
+    assert store.snapshots.list()["snapshots"] == snapshots
+    no_collected_result(store, f"results/muferro/{original_run}")
+    (s["tmp"] / "live-cancel-summary.json").write_text(json.dumps({
+        "first_pid": k["first_pid"], "first_returncode": k["first"].process.returncode, "fresh_pid": f["fresh_pid"],
+        "manual_pid": m["pid"], "cold_pid": cold_pid, "first_executor_id": k["identity"]["executor_id"],
+        "fresh_executor_id": f["fresh_identity"]["executor_id"], "manual_executor_id": manual_identity["executor_id"],
+        "cold_executor_id": cold_identity["executor_id"], "run_id": run_id, "item_id": item["item_id"],
+        "runtime_task": task_id, "simulation_run_id": original_run, "held_solver": held,
+        "fresh_observe": f["observe"], **r, "following_progress": w["live"], "observe_while_following": w["observed"],
+        "cancel_reply_status": requested["status"], "runtime_cancels": cancels,
+        "runtime_terminal": {key: terminal.get(key) for key in ("state", "exit_code", "reason", "finished_at")},
+        "gate_released": k["release"].exists(), "cancel_events": [
+            {key: e.get(key) for key in ("step", "attempt", "status", "executor_id", "error")} for e in added],
+        "cancelled_tasks": [{key: t.get(key) for key in ("step", "status", "attempt", "error", "progress", "produced")}
+                            for t in cancelled["tasks"]], "repeat_cancel_status": repeated["status"],
+        "started_events": started, "observe_after_cancel": receipt, "repeat_decision_replay": replay,
+        "cold_observe": cold_receipt, "manual_calls": calls(),
+        "cold_calls": [r["value"] for r in cold_records if r["name"] == "call"],
+        "snapshots": len(snapshots), "runtime_submissions": len(submissions)}, indent=2, default=str),
         encoding="utf-8")
 
 
