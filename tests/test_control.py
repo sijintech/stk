@@ -88,6 +88,32 @@ def test_live_read_checks_revocation_before_returning_a_reply(tmp_path, monkeypa
         assert http.get("/api/v1/actions", headers=AUTH).json() == []
 
 
+def test_event_stream_ends_before_publishing_the_rest_of_a_batch_after_revocation(tmp_path, monkeypatch):
+    monkeypatch.setattr("suan.control.store.secrets.token_urlsafe", lambda _: "a" * 32)
+    app = create_app(tmp_path, OWNER)
+    store = app.state.store
+    with TestClient(app) as http:
+        viewer, _ = paired(http, "client")
+    cursor = store.events()[-1]["id"]
+    with store.db() as db:
+        store.event(db, "devices.changed", {"device_id": "before-revocation"})
+        store.event(db, "devices.changed", {"device_id": "after-revocation"})
+
+    async def revoke_after_first(scope, receive, send):
+        async def on_send(message):
+            await send(message)
+            if message["type"] == "http.response.body" and b"before-revocation" in message.get("body", b""):
+                store.revoke(viewer["device_id"])
+        await app(scope, receive, on_send)
+
+    auth = {"Authorization": "Bearer " + viewer["token"]}
+    with TestClient(revoke_after_first) as http:
+        response = http.get("/api/v1/events", params={"after": cursor}, headers=auth)
+        assert response.status_code == 200
+        assert "before-revocation" in response.text and "after-revocation" not in response.text
+        assert http.get("/api/v1/events", headers=auth).status_code == 401
+
+
 def test_action_review_and_idempotency(tmp_path):
     with TestClient(create_app(tmp_path, OWNER, {"demo-field": DEMO_TEMPLATE})) as c:
         node, _ = paired(c)

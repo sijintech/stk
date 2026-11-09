@@ -570,17 +570,25 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
 
         async def stream():
             nonlocal cursor
-            while not await request.is_disconnected():
-                current = identity(request.headers.get("authorization", ""))
-                rows = store.events(cursor)
-                for row in rows:
-                    cursor = row["id"]
-                    if not federation.visible_event(row, current):
-                        continue
-                    yield f'id: {cursor}\nevent: {row["kind"]}\ndata: {encode(row["payload"])}\n\n'
-                if not rows:
-                    yield ": heartbeat\n\n"
-                    await asyncio.sleep(2)
+            authorization = request.headers.get("authorization", "")
+            try:
+                while not await request.is_disconnected():
+                    current = client(authorization)
+                    rows = store.events(cursor)
+                    for row in rows:
+                        cursor = row["id"]
+                        if not federation.visible_event(row, current):
+                            continue
+                        yield f'id: {cursor}\nevent: {row["kind"]}\ndata: {encode(row["payload"])}\n\n'
+                        # Sending a chunk yields control before the next event in this batch.
+                        current = client(authorization)
+                    if not rows:
+                        yield ": heartbeat\n\n"
+                        await asyncio.sleep(2)
+            except HTTPException as error:
+                if error.status_code not in (401, 403):
+                    raise
+                # The HTTP response already started. End the stream without another status.
         return StreamingResponse(stream(), media_type="text/event-stream", headers={
             "Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
