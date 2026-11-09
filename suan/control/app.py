@@ -476,6 +476,12 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
 
     # -- reads forwarded to a node without an action row ---------------------------------------
 
+    def require_read_node(node_id):
+        node = store.device(node_id)
+        if node is None or node["role"] != "node" or node["revoked"]:
+            raise HTTPException(404, "Execution node not found")
+        return node
+
     @app.post("/api/v1/nodes/{node_id}/read")
     async def node_read(node_id: str, request: Request, who=Depends(client)):
         """A review-free read (logs, events, artifacts, file chunks, workspace inputs) answered by the node live.
@@ -496,9 +502,7 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
             raise HTTPException(400, "The request is nested too deeply") from None
         except (ValueError, TypeError, KeyError) as exc:
             raise request_error(exc) from exc
-        node = store.device(node_id)
-        if node is None or node["role"] != "node" or node["revoked"]:
-            raise HTTPException(404, "Execution node not found")
+        node = require_read_node(node_id)
         if "read" not in (node["snapshot"].get("features") or ()):
             raise HTTPException(501, "This node agent has no read path; upgrade suan-node")
         link = links.get(node_id)
@@ -525,6 +529,9 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
             raise HTTPException(503, "The execution node disconnected; retry") from exc
         finally:
             link.pending.pop(read_id, None)
+        # The forwarded read can outlive either device's authorization.
+        client(request.headers.get("authorization", ""))
+        require_read_node(node_id)
         if reply.get("error"):
             raise HTTPException(422, str(reply["error"])[:2000])
         return {"result": reply.get("result")}

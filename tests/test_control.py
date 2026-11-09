@@ -2,6 +2,7 @@ import asyncio
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 pytest.importorskip("fastapi")
@@ -41,6 +42,50 @@ def test_pairing_auth_revocation_and_replay(tmp_path):
         assert [e["id"] for e in app.state.store.events(events[0]["id"])] == [e["id"] for e in events[1:]]
         reopened = ControlStore(tmp_path)
         assert reopened.events() == events
+
+
+@pytest.mark.parametrize(("revoked_role", "expected_status"), [("client", 401), ("node", 404)])
+def test_live_read_checks_revocation_before_returning_a_reply(tmp_path, monkeypatch, revoked_role, expected_status):
+    placeholders = iter(character * 32 for character in "abcd")
+    monkeypatch.setattr("suan.control.store.secrets.token_urlsafe", lambda _: next(placeholders))
+    with TestClient(create_app(tmp_path, OWNER)) as http:
+        node, _ = paired(http)
+        viewer, _ = paired(http, "client")
+        node_auth = {"Authorization": "Bearer " + node["token"]}
+        viewer_auth = {"Authorization": "Bearer " + viewer["token"]}
+        route = f"/api/v1/nodes/{node['device_id']}/read"
+        task = {"id": "e" * 32, "workspace_id": "f" * 32, "state": "succeeded"}
+        body = {"kind": "task.get", "payload": {"task_id": task["id"]}}
+
+        with http.websocket_connect("/api/v1/nodes/connect", headers=node_auth) as ws, ThreadPoolExecutor(1) as pool:
+            ws.send_json({"type": "snapshot", "snapshot": {"features": ["read", "task.get"]}})
+            deadline = time.monotonic() + 5
+            while not any("task.get" in device["snapshot"].get("features", [])
+                          for device in http.get("/api/v1/devices", headers=AUTH).json()):
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+
+            def read_reply(headers, revoked_device=None):
+                pending = pool.submit(http.post, route, headers=headers, json=body)
+                sent = ws.receive_json()
+                assert sent == {"type": "read", "id": sent["id"], **body}
+                if revoked_device is not None:
+                    revoked = http.delete(f"/api/v1/devices/{revoked_device}", headers=AUTH)
+                    assert revoked.status_code == 200
+                ws.send_json({"type": "read_result", "id": sent["id"], "result": task})
+                return pending.result(timeout=10)
+
+            before = read_reply(viewer_auth)
+            assert before.status_code == 200 and before.json() == {"result": task}
+            revoked_device = viewer if revoked_role == "client" else node
+            late = read_reply(viewer_auth, revoked_device["device_id"])
+            after = http.post(route, headers=viewer_auth, json=body)
+            assert late.status_code == after.status_code == expected_status
+            assert late.json() == after.json() and "result" not in late.json()
+            if revoked_role == "client":
+                owner_read = read_reply(AUTH)
+                assert owner_read.status_code == 200 and owner_read.json() == {"result": task}
+        assert http.get("/api/v1/actions", headers=AUTH).json() == []
 
 
 def test_action_review_and_idempotency(tmp_path):
