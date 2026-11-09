@@ -1,5 +1,11 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · 密钥扫描下载恢复与协作任务
+
+主线 `a8872719` 首次 Secret scan 在安装器下载收到 HTTP 504，重跑同一提交通过。root 以 `f8d2f79e` 固定备用下载的 release asset ID 和 SHA-256，四个本机安装场景符合预期。Claude28 在独立分支 `claude/report-pause-28` 从 `d7ece658` 接手报告宿主的重复暂停，写入范围限宿主和相应测试。
+
+复核开放的 #53 `c9f13994` 与 #54 `2dd3e4ee`。#53 和主线已验的 worker 退场修复冲突，并扩展恢复契约。#54 新增与 `handoff.md` 大小写冲突的文件，所列五个历史标签已在远端核对。本轮未合入。 [PR #53](https://github.com/sijintech/stk/pull/53) [PR #54](https://github.com/sijintech/stk/pull/54)
+
 ## 2026-11-09 UTC · Mac watchdog、Windows Mesa 与 F23
 
 核验远端 `39780e6d` 四份原生媒体 JSON。HTML 定位前对照已证明同一原生会话由暂停 watchdog 关闭，关闭时 ACK 已到且状态核验未通过。`59183cd0` 加入匹配请求的查询、回复、Playing 回复计数和时点。本地 Linux 34 项通过。Windows 原生因固定 Mesa URL 三次 504 退出。`46bab2cf` 新增同一资产的 API 备用路径，实际下载并核对完整字节数和原摘要。

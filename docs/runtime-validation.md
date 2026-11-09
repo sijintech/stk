@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · a8872719 密钥扫描重跑与下载验证
+
+`a88727199d25a5651789d79e2e6650547145e5ee` 的 Secret scan 首次在安装步骤收到 HTTP 504，扫描被跳过。第二次同头执行于 06:07:29Z 完成，安装和实际扫描均通过。Docs 已部署，Desktop 和 Runtime 在本次核对时仍运行。 [Secret scan 第 2 次](https://github.com/sijintech/stk/actions/runs/42570072800/attempts/2) [Docs](https://github.com/sijintech/stk/actions/runs/42570072760) [Desktop](https://github.com/sijintech/stk/actions/runs/42570072786) [Runtime](https://github.com/sijintech/stk/actions/runs/42570072715)
+
+`f8d2f79ed59f19de5b0a1dd94a8cd138b358a284` 为固定 gitleaks 8.30.1 Linux x64 加入 GitHub Release API 资产 `378332058` 作为备用。按工作流原脚本本机执行四个场景。公开路径和模拟公开路径 504 后的真实 API 下载均通过同一 SHA-256，解包得到字节相同的 8.30.1。错误内容在校验阶段拒绝，两条下载路径均不可用时退出，两个反例均未解包。暂存扫描零发现。 [上游发行](https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1)
+
 ## 2026-11-09 UTC · 39780e6d Desktop 终态、原生取证和 F23
 
 [Desktop 42564398378](https://github.com/sijintech/stk/actions/runs/42564398378) 对精确 `39780e6d68951047c73c4ff13945b23342b13718` 于 05:46:10Z 终态失败。

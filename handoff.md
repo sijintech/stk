@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · Claude28 和 Secret scan 重跑
+
+`a8872719` 的 Secret scan 同头第二次已通过，第一次安装遇 HTTP 504。root 已提交固定 gitleaks 备用下载 `f8d2f79e`，正常下载、真实 API 备用、损坏内容和双路不可用四个场景符合预期。上一轮 Desktop 仍运行，本地提交待整轮终态后推送。 [验收记录](docs/runtime-validation.md)
+
+Claude28 在 `stk-claude` 的 `claude/report-pause-28` 从 `d7ece658` 接手报告宿主重复暂停，候选待审。任务卡与会话证据见本机 `root-delivery-20261109-60`。root 继续核新 Cocoa 与 Windows 结果。
+
 ## 2026-11-09 UTC · AOCI 使用约定
 
 所有者已采纳 Claude 的提案。新会话和压缩后从交接、相关源码和发布契约继续，按需查询 AOCI。root 在里程碑维护 main 的索引。详见 [AGENTS.md](AGENTS.md)。
