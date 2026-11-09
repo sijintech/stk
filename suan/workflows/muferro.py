@@ -7,9 +7,9 @@ All project changes use the public revisioned facade, never a second SQLite conn
 """
 from copy import deepcopy
 import hashlib
-import json
 import math
 from pathlib import Path
+import re
 import shutil
 import stat
 from tempfile import TemporaryDirectory
@@ -19,7 +19,7 @@ from suan.connectors.mupro.inputs import dump_toml
 from .common import (_canonical, _capture, _cells, _copy_input, _create_table, _directory, _folder,  # noqa: F401
                      _hash, _revision, _table)
 from suan.mupro.run import (_toml_document, read_case, check_case, verify_run, expected_frame_count, expected_frames,
-                            case_input_info, RUN_OUTPUTS, VERIFIER, tomllib)
+                            case_input_info, _native_result_json, _same_native_record, RUN_OUTPUTS, VERIFIER, tomllib)
 from suan.mupro.spec import muferro_spec
 from suan.runtime.models import TaskSpec, relative_path
 
@@ -128,6 +128,20 @@ def final_state(names):
         elif name == "stk-mupro.json" or (len(parts) >= 2 and parts[0] == "case"):
             chosen.append(name)
     return sorted(chosen + [name for _, name in frames.values()])
+
+
+def _successful_report_program(report, case, verified):
+    expected = {"schema_version": 1, "app": "muFerro", "state": "succeeded", "case_dir": "case",
+                "classification": None, "reason": "", "exit_code": 0}
+    if isinstance(report, dict) and _same_native_record({key: report[key] for key in expected if key in report}, expected):
+        verification, program = report.get("verification"), report.get("program")
+        digest = program.get("sha256") if isinstance(program, dict) else None
+        if (isinstance(verification, dict) and verification.get("verifier") == VERIFIER
+                and verification.get("status") == "passed" and verified["verification"]["status"] == "passed"
+                and verified["qoi"] == report.get("qoi") and report.get("case") == case
+                and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)):
+            return digest
+    raise ValueError("Collected MuFerro output does not match its input/completion/energy contract")
 
 
 def describe_case(model, record_id, connection, options, identity=None):
@@ -332,14 +346,9 @@ class MuFerro:
             if not path.is_file() or path.stat().st_size != artifacts[name]["size"] or _hash(path) != artifacts[name]["sha256"]:
                 raise ValueError(f"Result changed locally or was not downloaded: {name}; inspect Transfers before repairing")
             paths.append(path)
-        report = json.loads((destination / "stk-mupro.json").read_text(encoding="utf-8"))
+        report = _native_result_json((destination / "stk-mupro.json").read_text(encoding="utf-8"))
         verification = verify_run(destination, "case")
-        if (report.get("app") != "muFerro" or report.get("state") != "succeeded" or report.get("case_dir") != "case"
-                or report.get("verification", {}).get("verifier") != VERIFIER
-                or report.get("verification", {}).get("status") != "passed"
-                or verification["verification"]["status"] != "passed" or verification["qoi"] != report.get("qoi")
-                or report.get("case") != case):
-            raise ValueError("Collected MuFerro output does not match its input/completion/energy contract")
+        program_digest = _successful_report_program(report, case, verification)
         if "case/run.h5" in artifacts:
             from suan.connectors.files import LocalFiles
             from suan.connectors.mupro.results import descriptors
@@ -360,7 +369,7 @@ class MuFerro:
             commands.append({"op": "add_record", "id": row_id, "table_id": RESULT_TABLE_ID})
         values = {"run": run_id, "task": task["id"], "temperature": plan["parameters"]["values"][FIELD_IDS["temperature"]],
                   "step": verification["qoi"]["step"], "energy": verification["qoi"]["total_energy"],
-                  "program": report.get("program", {}).get("sha256"),
+                  "program": program_digest,
                   "files": [{"path": path.relative_to(root).as_posix(), "sha256": artifacts[name]["sha256"]}
                             for name, path in zip(names, paths)]}
         commands += _cells(RESULT_TABLE_ID, row_id, values, RESULT_FIELD_IDS)

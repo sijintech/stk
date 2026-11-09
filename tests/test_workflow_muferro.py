@@ -1,4 +1,5 @@
 """Real project/bridge/Runtime workflow; the CI solver fixture is explicitly synthetic."""
+import json
 from pathlib import Path
 import os
 import stat
@@ -153,6 +154,42 @@ def test_prepare_collect_retry_and_reopen(project, scripts, runtime, tmp_path, m
     assert len(client.tasks()) == 1
 
 
+@pytest.mark.parametrize('changes', [
+    pytest.param({'exit_code': 7}, id='solver-exit'),
+    pytest.param({'exit_code': False}, id='boolean-exit'),
+    pytest.param({'classification': 'solver_failed', 'reason': 'synthetic fixture'}, id='failure-classification'),
+    pytest.param({'program': {'sha256': 'synthetic-invalid'}}, id='invalid-program-digest'),
+])
+def test_collect_rejects_inconsistent_success_report_before_registering_results(
+        project, scripts, runtime, tmp_path, monkeypatch, changes):
+    api, p = project
+    client, supervisor, server, _ = runtime
+    connection = add_profile(scripts, runtime)
+    sdk = make_fake_sdk(tmp_path / 'synthetic-sdk')
+    for name in ('STK_MUPRO_ENV_SCRIPTS', 'MUPROROOT', 'STK_MUPRO_ALLOW_LOCAL_MPI', 'SLURM_JOB_ID', 'PBS_JOBID'):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv('MUPRO_SDK_PREFIX', str(sdk))
+    source = sdk / 'share/mupro/skills/mupro-muferro/examples'
+    row = api.muferro.import_case(source, expected_revision=revision(p))['record_id']
+    run = api.muferro.prepare(row, connection, expected_revision=revision(p), launcher='none')
+    task_id = p.runs.submit(run['id'])['status']['task']['id']
+    assert finish(client, supervisor, task_id)['state'] == 'succeeded'
+
+    # Publish the synthetic bad report before Runtime first hashes its artifact bytes.
+    task_root = server.service.task_dir(task_id)
+    assert not (task_root / 'artifacts.json').exists()
+    path = task_root / 'work' / 'stk-mupro.json'
+    report = json.loads(path.read_text(encoding='utf-8'))
+    assert report['exit_code'] == 0 and report['classification'] is None
+    assert report['verification']['status'] == 'passed'
+    path.write_text(json.dumps({**report, **changes}), encoding='utf-8')
+    before = revision(p)
+    with pytest.raises(ValueError, match='Collected MuFerro output does not match'):
+        api.muferro.collect(run['id'])
+    assert revision(p) == before and not any(table['id'] == RESULT_TABLE_ID for table in p.snapshot()['tables'])
+    assert [task['id'] for task in client.tasks()] == [task_id]
+
+
 def test_bad_parameters_and_revision_fail_before_remote_side_effects(project, scripts, runtime, tmp_path):
     api, p = project
     client, _, _, _ = runtime
@@ -243,8 +280,6 @@ def test_native_action_rejects_a_switched_project(project, tmp_path):
 @pytest.mark.server
 def test_real_muferro_project_workflow(project, scripts, runtime, tmp_path, monkeypatch):
     """Opt-in installed Release solver; never reads or copies its licence files."""
-    import os
-    import json
     prefix = os.environ.get('STK_TEST_MUPRO_PREFIX')
     if not prefix:
         pytest.skip('Set STK_TEST_MUPRO_PREFIX for the real installed MuFerro workflow')
