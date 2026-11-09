@@ -553,6 +553,28 @@ def _hash_file(path):
     return digest.hexdigest()
 
 
+def _stream_sha256(source, path, check=None, *, limit=None, destination=None):
+    """Hash FileSource bytes, optionally copying the same bytes to a caller-owned stream."""
+    digest = hashlib.sha256()
+    remaining = limit
+    with source.open(path) as stream:
+        while True:
+            if check is not None:
+                check()
+            size = min(_BLOCK, remaining + 1) if remaining is not None else _BLOCK
+            chunk = stream.read(size)
+            if not chunk:
+                break
+            if remaining is not None:
+                remaining -= len(chunk)
+                if remaining < 0:
+                    raise ConnectorError(f"{path} is larger than {limit} bytes", "budget_exceeded")
+            digest.update(chunk)
+            if destination is not None:
+                destination.write(chunk)
+    return digest.hexdigest()
+
+
 def materialize(source, path, cache_dir=None):
     """A local filesystem path for ``path`` of any file source (zero copy when local).
 

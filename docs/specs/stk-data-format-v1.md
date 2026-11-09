@@ -353,7 +353,9 @@ Registration: when two connectors claim one id the higher `priority` wins (priva
   (`quantity: polarization`) and force/field stems; 6-component stems (`Strain`, `Stress`,
   `Eigen_St`, `Elast_St`) are `tensor: "array"` until MuPRO confirms the Voigt order. Units
   `unspecified` (Polar = P·p0 in C/m² is an open owner question). Reader `mupro.dat@1`; values are
-  point samples.
+  point samples. Direct frame reads and statistics use a private copy of the bytes read from the
+  binding. The frame provenance and statistics cache use that copy's digest. Runtime artifacts
+  and other remote streams must match the digest reported by the source.
 - `energy_out.dat` → table `energy` (reader `mupro.energy@1`): `step` (int64, role index) plus the
   native header names (`Elastic Energy`, `Electric Energy`, `Landau Energy`, `Gradient P Energy`,
   `Total Energy`; the same names without a header or before the first row), float64,

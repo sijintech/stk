@@ -17,6 +17,7 @@ energy rows appended by a live run do not invalidate frame-derived nodes.
 """
 from hashlib import sha256
 
+from suan.connectors.files import _stream_sha256
 from suan.graph.registry import (NodeExecutionError, Port, array, binding, enum, int3, integer, json_param, node,
                                  rel_path, step, string, string_list, vector3)
 
@@ -532,26 +533,6 @@ def _planned_file_sha256(source, path, check, *, limit=None):
         return source.sha256(path).lower()
     # A rewrite can preserve every field of the FileSource hash memo key.
     return _stream_sha256(source, path, check, limit=limit)
-
-
-def _stream_sha256(source, path, check, *, limit=None, destination=None):
-    digest = sha256()
-    remaining = limit
-    with source.open(path) as stream:
-        while True:
-            check()
-            size = min(1 << 20, remaining + 1) if remaining is not None else 1 << 20
-            chunk = stream.read(size)
-            if not chunk:
-                break
-            if remaining is not None:
-                remaining -= len(chunk)
-                if remaining < 0:
-                    raise NodeExecutionError(f"{path} is larger than {limit} bytes", code="budget_exceeded")
-            digest.update(chunk)
-            if destination is not None:
-                destination.write(chunk)
-    return digest.hexdigest()
 
 
 def _table_fingerprint(ctx, inputs, params):

@@ -2,13 +2,14 @@
 import hashlib
 import json
 import math
+import os
 import tomllib
 
 import pytest
 
 np = pytest.importorskip("numpy")
 
-from mupro_fake import write_case, write_outputs  # noqa: E402
+from mupro_fake import _frame, write_case, write_outputs  # noqa: E402
 from suan.connectors.api import ConnectorError, DatasetHandle, InputConnector  # noqa: E402
 from suan.connectors.files import LocalFiles, RuntimeFiles  # noqa: E402
 from suan.connectors.mupro import MuFerroConnector, frame_rows, stem_field  # noqa: E402
@@ -123,6 +124,58 @@ def test_open_frames_and_tables(tmp_path):
     assert error.value.code == "not_found"
 
 
+def _polar_frame(root, seed=0):
+    write_case(root, grid=(2, 2, 2))
+    path = root / "Polar.00000000.dat"
+    _frame(path, (2, 2, 2), 3, seed)
+    return path
+
+
+def _rewrite_polar(path, seed, *, same_mtime=True):
+    stamp = path.stat()
+    _frame(path, (2, 2, 2), 3, seed)
+    mtime = stamp.st_mtime_ns if same_mtime else stamp.st_mtime_ns + 1_000_000_000
+    os.utime(path, ns=(stamp.st_atime_ns, mtime))
+    assert path.stat().st_size == stamp.st_size
+
+
+def test_frame_handle_reports_and_caches_the_actual_local_content(tmp_path):
+    path = _polar_frame(tmp_path)
+    source = LocalFiles(tmp_path)
+    handle = MuFerroConnector().open(source, "Polar")
+    assert handle.read().array("Polar")[0, 0, 0, 0] == 1111
+    assert handle.stats()["components"][0]["min"] == 1111
+    _rewrite_polar(path, 7)
+
+    image = handle.read()
+    assert image.array("Polar")[0, 0, 0, 0] == 1118
+    assert image.provenance.used[0]["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert handle.stats()["components"][0]["min"] == 1118
+
+
+def test_frame_handle_stats_do_not_fill_an_older_hash_key(tmp_path):
+    path = _polar_frame(tmp_path)
+    original, stamp = path.read_bytes(), path.stat()
+
+    class RewritingLocalFiles(LocalFiles):
+        rewrite_on_hash = False
+
+        def sha256(self, name):
+            digest = super().sha256(name)
+            if self.rewrite_on_hash and name == path.name:
+                self.rewrite_on_hash = False
+                _rewrite_polar(path, 5, same_mtime=False)
+            return digest
+
+    source = RewritingLocalFiles(tmp_path)
+    handle = MuFerroConnector().open(source, "Polar")
+    source.rewrite_on_hash = True
+    handle.stats()
+    path.write_bytes(original)
+    os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert handle.stats()["components"][0]["min"] == 1111
+
+
 def test_tables_parse_live_and_headerless_traces():
     header = "      step         " + "".join(f"{h:>18}" for h in ("Elastic Energy", "Electric Energy", "Landau Energy",
                                                                  "Gradient P Energy", "Total Energy"))
@@ -206,6 +259,50 @@ def test_describe_and_read_through_the_runtime(tmp_path):
     assert result["verification"] is None and not any(p.endswith(".dat") and "Polar" in p for p in client.downloads)
     image = connector.open(source, "Polar").read(frame={"step": 4})
     assert image.time.step == 4 and client.downloads.count("case16/Polar.00000004.dat") == 1
+
+
+def test_frame_handle_checks_warm_runtime_bytes_before_read_or_stats(tmp_path):
+    path = _polar_frame(tmp_path / "run")
+    client = FakeClient(path.parent)
+    source = RuntimeFiles(client, "t" * 32, tmp_path / "cache")
+    handle = MuFerroConnector().open(source, "Polar")
+    assert handle.stats()["components"][0]["min"] == 1111
+    cached = source.fetch(path.name)
+    stamp = cached.stat()
+    _rewrite_polar(cached, 7)
+    for operation in (handle.read, handle.stats):
+        with pytest.raises(ConnectorError) as error:
+            operation()
+        assert error.value.code == "invalid_data"
+
+    cached.write_bytes(path.read_bytes())
+    os.utime(cached, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert handle.stats()["components"][0]["min"] == 1111
+    assert client.downloads.count(path.name) == 1
+
+
+@pytest.mark.parametrize("invalid_local_path", [False, True])
+def test_frame_handle_preserves_custom_remote_source_errors(tmp_path, invalid_local_path):
+    path = _polar_frame(tmp_path)
+    source = LocalFiles(tmp_path)
+    connector = MuFerroConnector()
+    result = connector.describe(source)
+    original = source.sha256(path.name)
+
+    class Remote(LocalFiles):
+        def local_path(self, name):
+            if invalid_local_path:
+                raise ValueError("Invalid materialized path")
+            return None
+
+        def sha256(self, name):
+            assert name == path.name
+            return original
+
+    _rewrite_polar(path, 7)
+    with pytest.raises(ConnectorError) as error:
+        connector.open(Remote(tmp_path), "Polar", result=result).read()
+    assert error.value.code == "invalid_data"
 
 
 def test_inputs_light_half(tmp_path):

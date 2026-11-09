@@ -26,7 +26,7 @@ The full muFerro input schema, exact thresholds and label maps belong to the
 private ``stk-mupro`` package (priority 10); the light half here
 (:mod:`.inputs`) ships a minimal schema.
 """
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from hashlib import sha256
 from importlib.metadata import PackageNotFoundError, version as _package_version
 from io import BytesIO
@@ -706,25 +706,62 @@ class FrameHandle:
 
     def read(self, *, frame=None, fields=None, region=None, stride=None, dtype="float64", check=None,
              spacing=None, origin=None, length_unit="grid_index", unit=None, quantity=None):
-        from suan.data.dat import DatError, read_dat_image
-        from suan.data.model import Provenance
-        from ..files import materialize
         chosen = self.frame(frame)
         entry = self.descriptor["fields"][0]
         if fields is not None and entry["name"] not in fields:
             raise ConnectorError(f"Dataset {self.descriptor['id']!r} has only the field {entry['name']!r}",
                                  "invalid_param")
         _require_numpy()
-        sha = self.run.sha256(chosen["path"])
+        with self._snapshot(chosen["path"], check) as (stream, digest):
+            image = self._read_image(stream, chosen, digest, dtype=dtype, spacing=spacing, origin=origin,
+                                     length_unit=length_unit, unit=unit, quantity=quantity, check=check)
+        return crop_sample(image, region, stride)
+
+    @contextmanager
+    def _snapshot(self, path, check=None):
+        from ..files import RuntimeFiles, _SHA_RE, _stream_sha256
+
+        try:
+            remote = isinstance(self.run, RuntimeFiles) or self.run.local_path(path) is None
+        except ConnectorError:
+            raise
+        except ValueError as exc:
+            raise ConnectorError(f"{path}: {exc}", "invalid_data") from None
+        expected = None
+        if remote:
+            try:
+                expected = self.run.sha256(path)
+            except KeyError:
+                pass
+            if not isinstance(expected, str) or not _SHA_RE.fullmatch(expected):
+                raise ConnectorError(f"The source reported no sha256 for {path}", "invalid_data")
+        with tempfile.TemporaryFile(mode="w+b", prefix="stk-muferro-frame-") as stream:
+            try:
+                digest = _stream_sha256(self.run, path, check, destination=stream)
+            except ConnectorError:
+                raise
+            except ValueError as exc:
+                raise ConnectorError(f"{path}: {exc}", "invalid_data") from None
+            if expected is not None and digest != expected:
+                raise ConnectorError(f"MuFerro frame {path} does not match the source sha256", "invalid_data")
+            if check is not None:
+                check()
+            stream.seek(0)
+            yield stream, digest
+
+    def _read_image(self, stream, chosen, digest, *, unit=None, quantity=None, **options):
+        from suan.data.dat import DatError, read_dat_image
+        from suan.data.model import Provenance
+
+        entry = self.descriptor["fields"][0]
         provenance = Provenance(activity={"kind": "run", "id": None},
                                 agent={"connector": f"{CONNECTOR_ID}@{VERSION}", "reader": READER},
-                                used=[{"path": chosen["path"], "sha256": sha, "role": "input"}])
+                                used=[{"path": chosen["path"], "sha256": digest, "role": "input"}])
         try:
-            image = read_dat_image(materialize(self.run, chosen["path"]), name=entry["name"], id=self.descriptor["id"],
-                                   dtype=dtype, spacing=spacing, origin=origin, length_unit=length_unit,
+            image = read_dat_image(stream, name=entry["name"], id=self.descriptor["id"],
                                    unit=unit or entry["unit"], quantity=quantity or entry.get("quantity"),
                                    tensor=entry["tensor"], component_names=entry.get("component_names"),
-                                   step=chosen["step"], provenance=provenance, check=check)
+                                   step=chosen["step"], provenance=provenance, **options)
         except DatError as exc:
             raise ConnectorError(f"{chosen['path']}: {exc}", "invalid_data") from None
         except ValueError as exc:
@@ -737,15 +774,16 @@ class FrameHandle:
             raise ConnectorError(f"{chosen['path']} has grid {list(image.dimensions)} x "
                                  f"{image.field(entry['name']).components}; the run declares {expected} x "
                                  f"{entry['components']}", "invalid_data")
-        return crop_sample(image, region, stride)
+        return image
 
     def stats(self, *, frame=None, field=None):
         chosen = self.frame(frame)
         _require_numpy()
-        key = (chosen["path"], self.run.sha256(chosen["path"]))
-        if key not in self._stats:
-            self._stats[key] = field_stats(self.read(frame={"step": chosen["step"], "policy": "exact"}),
-                                           self.descriptor["fields"][0]["name"])
+        with self._snapshot(chosen["path"]) as (stream, digest):
+            key = (chosen["path"], digest)
+            if key not in self._stats:
+                self._stats[key] = field_stats(self._read_image(stream, chosen, digest),
+                                               self.descriptor["fields"][0]["name"])
         return self._stats[key]
 
 
