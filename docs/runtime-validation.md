@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-09 UTC · MuPRO 大步数空结果与 F5c 实线
+
+`1cd5bbbd2a019426f73f25d0dbc884151c238925` 逐行校验实际能量和进度，按需生成缺帧诊断，并在收集展开名单前检查现有文件数上限。999,999 步、间隔 1 的合法合成布局有 14,999,986 个预期 DAT 帧。空结果目录在旧源码和 224 MiB 地址空间上限下，直接核验、连接器和收集探针触发 `MemoryError`，CLI 退出 1 且无结构化输出。修复后直接核验与 CLI 返回四项检查、`invalid_result` 和前五个缺帧，连接器返回前五十个，合成成功任务收集按 10,000 文件上限拒绝。四次独立进程峰值 RSS 约 26 至 29 MiB，只覆盖空结果探针。
+
+Linux 源码联合 119 项通过，3 项按 Windows junction 和真实许可条件跳过。隔离 wheel 启动器 62 项通过，2 项按平台和许可条件跳过。Python 3.11、3.12、3.14 的 Linux 定向各 26 项通过。证据在本机 `root-delivery-20261109-69`。 [MuPRO 运行校验](runtime-mupro.md)
+
+`aa3d1890d6fbe9c6b2fc65b9574dc17579ccf7fc` 集成 Claude32 `19654d4b9402f9422accad545c81542400321c58`。真实 UDP peer 首次读取实际热日志后的项目时恢复原数据库字节，修订、历史、原操作回执和授权水位均符合现行行为。同一连接后续读取成功。Linux 源码 170 项和隔离 wheel 定向一项通过，零跳过。隔离反例绕过恢复后在首次项目读取处失败。 [CP-0 矩阵](design/cloud-project-service.md)
+
+远端 `bb4cea9d` 的 macOS CPU 1516/1516，Metal 254/254，原生主组 4/6，定位前隐藏 0/2。两视频显式暂停首次采样均见可见时派发的代次 1 已 ACK，随后各在隐藏期失败。定位前对照分别收到 24 和 26 次 Playing，均已 ACK、未核验，最终分别由迟到回复和 watchdog 关闭。Linux 三项、Windows CPU 和 Runtime 13 项已过。Windows 原生仍在运行。本地 Cocoa 静默对照等待整轮终态后推送。 [macOS 作业](https://github.com/sijintech/stk/actions/runs/42576437438/job/129025111974) [原生证据](https://github.com/sijintech/stk/actions/runs/42576437438/artifacts/13657571015) [Desktop](https://github.com/sijintech/stk/actions/runs/42576437438)
+
 ## 2026-11-09 UTC · 原生 JSON 解码、F11b 与 Synthrix 观察
 
 `d9bfc7e1d502ea5e4b8a4ba3d6c21dac93bf4bc1` 修正 MuPRO 完成文件及进度 JSONL 触发解码器嵌套上限时的错误出口。Linux Python 3.11 真实解码反例在旧代码仅有文本错误并退出 1，修复后返回结构化 `invalid_result`、退出 3，QoI 为空且对应校验失败。版本无关的注入回归也在旧代码两项失败、修复后通过。Linux 源码联合 109 项通过，3 项为 Windows junction 和两个真实许可用例。隔离 wheel 启动器 61 项通过，2 项按平台或许可条件跳过。Linux Python 3.11、3.12、3.14 客户端各 39 项通过，各跳过 Windows junction 一项。junction 夹具使用真实目录连接，验证拒绝先于案例内容读取与连接，待 Windows 矩阵执行。

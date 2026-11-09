@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-09 UTC · 稀疏结果核验与真实热日志
+
+root 提交 `1cd5bbbd`，用 999,999 步案例复现空结果目录核验、连接器和收集预判的高内存失败，恢复结构化错误和已有诊断及文件上限。root 以 `aa3d1890` 集成 Claude32 `19654d4b` 的真实线路热日志回归。Claude33 已在独立 worktree 接手 F10。 [验收记录](runtime-validation.md)
+
 ## 2026-11-09 UTC · MuPRO 失败报告和 D1 观察
 
 root 提交 `d9bfc7e1`，复现两个原生终态文件的解码器嵌套失败并恢复结构化错误，同时加入 Windows 原生 junction 回归。root 以 `b27375f2` 集成 Claude31 `bcfff105`。另用隔离 Synthrix 类型与 STK 源码跑两次真实 worker 丢失和只读观察。Claude32 已在独立分支开始 F5c。 [验收记录](runtime-validation.md)

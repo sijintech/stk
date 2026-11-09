@@ -448,6 +448,8 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 
 **1l. F11a/F11b 的真实 scope 隔离。** root 以 `b27375f2` 集成 Claude31 的 `bcfff105`。同一 SQLite 项目和操作 UUID 先在严格本机桥以 `local` 写入，再在已认证 UDP WebRTC 以绑定的 `peer/1/…` 写入，两次分别推进修订 0→1 和 1→2。第一笔写入后，peer 对同一 UUID 查询得到 `not_found`。两笔写入后，各自查询和重放原回执，项目、历史与两份持久回执保持。Linux 源码 169 项和隔离 wheel 定向一项均通过。隔离副本把 peer scope 改为 `local` 后，第一次 peer 查询在预期断言处失败。证据见 `root-delivery-20261109-67/claude31` 与 `root-delivery-20261109-68`。
 
+**1m. F5c 的真实线路。** root 以 `aa3d1890` 集成 Claude32 的 `19654d4b`。已认证 UDP WebRTC 的首次项目读取触发 SQLite 回滚。读取前核对已终止写入者留下的热日志和未提交的数据库变更。读取后数据库恢复到原始字节，修订为 0，热日志、编辑历史和回执均为空。原操作 UUID 查询得到 `not_found`，授权和修订水位保持，同一连接仍可读取。Linux 源码 170 项和隔离 wheel 定向一项通过。移除恢复的隔离反例在首次目录读取处失败。证据见 `root-delivery-20261109-68/claude32` 与 `root-delivery-20261109-69`。F5c 记录当前行为，策略裁决独立进行。
+
 **2. root 外部探针（仓库外，未提交）。** 证据记录在 `root-delivery-20261109-43/closure.json` 的 `cp0` 节：
 - 两个脚本：`cp0-parity-probe.py`（sha256 `23de877c…`）和 `cp0-hot-journal-probe.py`（sha256 `1d951c7c…`）；
 - 用合成项目，在 source 和同一份 Python 源码的中性隔离安装中运行；
@@ -469,7 +471,7 @@ root 隔离安装复验使用 `49837655` 构建的 wheel，以及 `74ee8b4e` 导
 这些探针仍是有效的历史观察。F23 与 F5b/F5c 现在另有 1c 中的已提交测试，探针不再是这几行的唯一证据。
 
 **3. 仍待验证。**
-- **活 peer：** F3/F11d、F11a/F11b、F12–F15 和 F23 见 1d、1f、1h–1l。其余缺少真实通道证据的场景仍待 `PeerEndpoint` 与原生 helper 验收。
+- **活 peer：** F3/F11d、F5c、F11a/F11b、F12–F15 和 F23 见 1d、1f、1h–1m。其余缺少真实通道证据的场景仍待 `PeerEndpoint` 与原生 helper 验收。
 - **平台：** Windows、macOS 上这些行的复验。
 - **F14 配额监控：** 实际上限及拒绝路径见 1e、1f，监控仍待验证。
 - **F5c：** 保留现行恢复行为还是改为拒绝，仍由 root 决定。

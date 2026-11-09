@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-09 UTC · MuPRO 大步数核验、F5c 与 macOS 回执
+
+本地 `1cd5bbbd` 逐行核验 MuPRO 能量和进度，按名称顺序只收集有限缺帧提示。项目收集先检查 10,000 文件预算。999,999 步空结果的四条受限探针已复验，Linux 源码 119 项、隔离 wheel 62 项通过。
+
+Claude32 `19654d4b` 已集成为 `aa3d1890`。真实 peer 首次读到热日志时恢复原数据库字节，原操作无回执。Linux 源码 170 项和隔离安装定向通过。Claude33 在独立 `claude/cp0-f10-wire-33` 接手撤权与已获准编辑的真实线路并发验收。
+
+远端 `bb4cea9d` macOS 原生 4/6，定位前隐藏 0/2。两种素材显式暂停已通过 DOM 检查，失败集中在隐藏期。Windows CPU 与 Linux 三项通过，Windows 原生仍在运行。整轮终态后推送包含 Cocoa 静默对照的本地批次。 [验收记录](docs/runtime-validation.md)
+
 ## 2026-11-09 UTC · MuPRO 解码边界、D1 同 UUID 与 Synthrix 实测
 
 本地 `d9bfc7e1` 把终态 JSON 解码器的嵌套失败归入 `invalid_result`，保留结构化校验结果。MuPRO Linux 源码 109 项通过，隔离 wheel 61 项通过。新增的真 junction 用例由现有 Windows 客户端矩阵执行，真实许可用例仍需资产。
