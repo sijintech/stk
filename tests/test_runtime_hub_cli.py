@@ -11,6 +11,7 @@ import pytest
 from click.testing import CliRunner
 
 from suan.runtime.cli import connect, jobs, workspaces
+from suan.runtime.models import TaskSpec
 from suan.desktop_bridge.backends import HubBackend, action_id
 from suan.desktop_bridge.hub import HubClient, HubResponseError
 from suan.desktop_bridge.protocol import BridgeError
@@ -88,6 +89,42 @@ def test_cli_template_trace_logs_events_artifact_download_and_original_key(live,
     assert len(live.actions()) == before  # Reads never create action rows.
     retried = value(invoke(jobs, target + ["submit", "--workspace", workspace, "--template", "echo", "--key", key]))
     assert retried["task"]["id"] == task and len(live.client.tasks()) == 1
+
+
+@pytest.mark.parametrize("transport", ["direct", "hub"])
+def test_cli_log_follow_drains_a_late_tail_from_an_older_runtime(transport, live, paired, runtime, monkeypatch):
+    client, _, server, _ = runtime
+    workspace = client.create_workspace("log follow")["id"]
+    task = client.submit(TaskSpec(workspace, ["{python}", "-c", "print('ready'); print('末尾')"]))["id"]
+    assert client.wait(task, timeout=10)["state"] == "succeeded"
+    if transport == "direct":
+        monkeypatch.setenv("STK_RUNTIME_URL", client.url)
+        monkeypatch.setenv("STK_RUNTIME_TOKEN", client.token)
+    target = paired[0] if transport == "hub" else []
+    actions_before = live.actions()
+    read_logs = server.service.logs
+    offsets = []
+
+    def legacy_read(task_id, stream="stdout", offset=0, limit=1024 * 1024):
+        assert task_id == task and stream == "stdout"
+        offsets.append(offset)
+        assert len(offsets) <= 5
+        if len(offsets) == 1:
+            return {"data": "", "offset": offset, "next_offset": offset, "terminal": True}
+        return read_logs(task_id, stream, offset, 1 if len(offsets) == 2 else limit)
+
+    monkeypatch.setattr(server.service, "logs", legacy_read)
+    start = len(b"ready\n")
+    end = start + len("末尾\n".encode())
+    args = target + ["logs", task, "--offset", str(start), "--show-offset"]
+    once = invoke(jobs, args)
+    assert once.stdout == "" and once.stderr == f"Next offset: {start}\n"
+    assert offsets == [start]
+    offsets.clear()
+    followed = invoke(jobs, args + ["--follow"])
+    assert followed.stdout == "末尾\n" and followed.stderr == f"Next offset: {end}\n"
+    assert offsets == [start, start, start + 1, end, end]
+    assert live.actions() == actions_before
 
 
 def test_cli_review_and_lost_reply_are_recovered_without_resubmission(live, paired, monkeypatch):  # noqa: F811

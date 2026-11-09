@@ -215,6 +215,8 @@ class RuntimeService:
             raise ValueError("Unknown log stream")
         if offset < 0 or not 1 <= limit <= CHUNK_SIZE:
             raise ValueError("Invalid log range")
+        # A read that races the final write must not report the newer terminal state.
+        terminal = self.store.task(task_id)["state"] in TERMINAL
         name = stream if stream.startswith("scheduler.") else stream + ".log"
         path = inside(self.task_dir(task_id), name)
         if not path.exists():
@@ -227,7 +229,7 @@ class RuntimeService:
                 data = file.read(limit)
         # Byte offsets + base64 preserve UTF-8 characters split across chunks.
         return {"data": base64.b64encode(data).decode("ascii"), "offset": offset,
-                "next_offset": offset + len(data), "terminal": self.store.task(task_id)["state"] in TERMINAL}
+                "next_offset": offset + len(data), "terminal": terminal}
 
     def events(self, task_id, offset=0, limit=CHUNK_SIZE):
         """Monitoring events from whole lines of <task_dir>/events.jsonl (docs/specs/stk-events-v1.md §5)."""

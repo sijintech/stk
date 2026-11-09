@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 import base64
 import errno
@@ -14,6 +15,7 @@ import time
 import pytest
 
 from conftest import finish
+from suan.runtime import service as runtime_service
 from suan.runtime.client import RuntimeClient, RuntimeErrorResponse
 from suan.runtime.models import TaskSpec
 from suan.runtime.common import alive, atomic_json, instance_lock, read_json, sha256
@@ -144,6 +146,46 @@ def test_reconnect_and_supervisor_reconstruction(runtime):
     logs = reconnected.logs(task['id'])
     assert logs['bytes'] == b'before\nafter\n'
     assert reconnected.logs(task['id'], offset=logs['next_offset'])['bytes'] == b''
+
+
+def test_log_read_before_the_final_write_does_not_claim_terminal(runtime, monkeypatch):
+    client, supervisor, server, _ = runtime
+    workspace = client.create_workspace("log tail")['id']
+    program = """from pathlib import Path
+import time
+print('ready', flush=True)
+deadline = time.monotonic() + 15
+while not Path('release').exists():
+    if time.monotonic() >= deadline:
+        raise TimeoutError('log tail was not released')
+    time.sleep(0.02)
+print('末尾', flush=True)
+"""
+    task_id = client.submit(TaskSpec(workspace, ['{python}', '-c', program]))['id']
+    supervisor.tick()
+    deadline = time.monotonic() + 10
+    while not client.logs(task_id)['bytes']:
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+    run_dir = server.service.task_dir(task_id)
+    offset = len(b'ready\n')
+
+    @contextmanager
+    def read_before_final_write(path, mode):
+        with open(path, mode) as stream:
+            yield stream
+        assert path == run_dir / 'stdout.log'
+        (run_dir / 'work' / 'release').touch()
+        assert finish(client, supervisor, task_id)['state'] == 'succeeded'
+
+    with monkeypatch.context() as patch:
+        patch.setattr(runtime_service, 'open', read_before_final_write, raising=False)
+        early = client.logs(task_id, offset=offset)
+    assert early['bytes'] == b'' and early['next_offset'] == offset
+    assert early['terminal'] is False
+    final = client.logs(task_id, offset=offset)
+    assert final['bytes'] == '末尾\n'.encode() and final['terminal'] is True
+    assert final['next_offset'] == offset + len(final['bytes'])
 
 
 def test_memory_limit_and_input_checksum_rejection(runtime, tmp_path):

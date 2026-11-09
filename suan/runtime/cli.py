@@ -835,15 +835,20 @@ def watch_job(client, task_id, interval, timeout):
 @click.pass_obj
 def logs(client, task_id, stream, offset, follow, show_offset):
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    previous_empty_terminal = False
     try:
         while True:
             chunk = client.logs(task_id, stream, offset)
-            click.echo(decoder.decode(chunk["bytes"]), nl=False)
+            data = chunk["bytes"]
+            click.echo(decoder.decode(data), nl=False)
             offset = chunk["next_offset"]
-            if not follow or (chunk["terminal"] and not chunk["bytes"]):
+            # Older runtimes can report terminal after an empty read raced the final write.
+            empty_terminal = follow and chunk["terminal"] and not data
+            if not follow or (empty_terminal and previous_empty_terminal):
                 click.echo(decoder.decode(b"", final=True), nl=False)
                 break
-            if not chunk["bytes"]:
+            previous_empty_terminal = empty_terminal
+            if not data:
                 time.sleep(0.5)
     finally:
         if show_offset:
