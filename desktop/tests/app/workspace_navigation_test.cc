@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <gtest/gtest.h>
+#include "stk/app/project_agent.hh"
 #include "stk/app/project_archive.hh"
 #include "stk/app/project_attention.hh"
 #include "stk/app/project_discussion.hh"
@@ -700,6 +701,41 @@ TEST_F(SavedConversationNavigationPython, AttentionRefusesSourceABAAndTheReopene
   f.screen.run_deferred();
   EXPECT_EQ(f.screen.maximized(), &home());
   EXPECT_TRUE(project().discussion().exchange_id().empty());
+}
+
+TEST_F(SavedConversationNavigationPython, UnreadAgentSessionCannotSendOrSetATarget)
+{
+  go("conversation");
+  auto &agent = project().agent();
+  ASSERT_TRUE(agent.supported());
+  const auto intent = "ai_intent/" + handle();
+  const auto text = "ai_agent_text/" + handle();
+  ASSERT_NE(widget(intent), nullptr);
+  widget(intent)->index.assign(3);
+  // An ID can outlive its saved session in a history menu. Keep the draft while confirming it.
+  agent.select(kFirst);
+  f.drv->frame();
+  ASSERT_NE(widget(text), nullptr);
+  widget(text)->string.assign("An unsent agent draft");
+  const auto verify = [&] {
+    ASSERT_NE(widget("ai_agent_send"), nullptr);
+    EXPECT_FALSE(widget("ai_agent_send")->enabled);
+    widget("ai_agent_send")->on_click();
+    if (agent.runs_supported()) {
+      ASSERT_NE(widget("ai_agent_set_target"), nullptr);
+      EXPECT_FALSE(widget("ai_agent_set_target")->enabled);
+      widget("ai_agent_set_target")->on_click();
+    }
+    EXPECT_EQ(widget(text)->string.value(), "An unsent agent draft");
+    EXPECT_EQ(agent.selected(), kFirst);
+    EXPECT_FALSE(agent.busy());
+  };
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(verify());
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return !agent.error().empty(); }, 30));
+  EXPECT_TRUE(agent.view().empty());
+  ASSERT_NO_FATAL_FAILURE(verify());
+  EXPECT_EQ(project().project()->revision, 0);
 }
 
 TEST_F(SavedConversationNavigationPython, RecentQuestionsOpenFromTasksAndResultsAtBothWidths)

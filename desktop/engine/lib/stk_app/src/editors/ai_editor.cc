@@ -1257,6 +1257,14 @@ class AIEditor final : public Editor {
   }
 
  private:
+  static bool selected_agent_loaded(const ProjectAgent &agent)
+  {
+    const auto &view = agent.view();
+    const auto session = view.find("session");
+    return !agent.selected().empty() && session != view.end() &&
+           io::get_string(*session, "id") == agent.selected();
+  }
+
   static void poll_agent(EditorContext &ctx, ProjectAgent &agent)
   {
     const double now = clock_seconds(), wake = agent.pump(now);
@@ -1371,7 +1379,8 @@ class AIEditor final : public Editor {
     const auto &view = agent.view();
     const auto state_name = io::get_string(view, "state");
     const bool running = agent.running();
-    if (!agent.selected().empty() && !view.empty()) {
+    const bool session_loaded = selected_agent_loaded(agent);
+    if (session_loaded) {
       layout.paragraph(running ? std::string(ctx.tr("ai.agent.running")) :
           std::string(catalog.tr_or("ai.agent.state." + state_name, state_name)));
       const float unit = ctx.ui ? ctx.ui->style().unit : 20.0f;
@@ -1443,10 +1452,11 @@ class AIEditor final : public Editor {
         const auto session = agent.selected();
         layout.button("ai_agent_set_target", ctx.tr(draft.allow_prepare ? "ai.agent.run.set_target" : "ai.agent.run.clear_target"),
             [&agent, &state, &draft, store = &ctx.store, handle, session, simulation, connection, options] {
-          if (!state.project() || state.project()->handle != handle || agent.selected() != session) { return; }
+          if (!state.project() || state.project()->handle != handle || agent.selected() != session ||
+              !selected_agent_loaded(agent)) { return; }
           if (!simulation.is_null() && (!draft.allow_prepare || !draft.run_target.matches(store->jobs(), connection, options))) { return; }
           agent.set_run_target(simulation);
-        }).disable(!enabled || running || !target_valid);
+        }).disable(!enabled || !session_loaded || running || !target_valid);
       }
     }
     // A message the service saved is no longer a draft (the same words typed again stay in the box).
@@ -1459,7 +1469,8 @@ class AIEditor final : public Editor {
     const bool with_target = agent.runs_supported();
     layout.button("ai_agent_send", ctx.tr(new_session ? "ai.agent.start" : "ai.agent.say"),
         [&agent, &state, store = &ctx.store, handle, session, &draft, with_target, simulation, connection, options] {
-      if (!state.project() || state.project()->handle != handle || agent.selected() != session) { return; }
+      if (!state.project() || state.project()->handle != handle || agent.selected() != session ||
+          (!session.empty() && !selected_agent_loaded(agent))) { return; }
       if (with_target) {
         if (draft.allow_prepare != !simulation.is_null() ||
             (!simulation.is_null() && !draft.run_target.matches(store->jobs(), connection, options))) { return; }
@@ -1467,7 +1478,7 @@ class AIEditor final : public Editor {
       }
       else { agent.ask(draft.agent_text); }
     }).disable(!enabled || !has_text || running || state_name == "ready" || state_name == "ended" ||
-               !target_valid || (new_session && !choice.is_object()));
+               !target_valid || (new_session ? !choice.is_object() : !session_loaded));
   }
 
   void agent_run_cards(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
