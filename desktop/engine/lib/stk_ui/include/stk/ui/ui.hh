@@ -127,6 +127,7 @@ struct NativeViewportState {
 enum class Align : uint8_t { Left, Center, Right };
 enum class LayoutAlign : uint8_t { Expand, Left, Center, Right };
 enum class ToastKind : uint8_t { Info, Success, Warning, Error };
+enum class ButtonAppearance : uint8_t { Standard, Navigation, CurrentPage };
 
 struct ColormapItem {
   std::string name;
@@ -289,6 +290,7 @@ struct Widget {
   std::string text;
   std::string tooltip;
   Align align = Align::Left;
+  ButtonAppearance button_appearance = ButtonAppearance::Standard;
   bool enabled = true;
   bool label_backdrop = false; /**< Label only: opaque tooltip-theme background, paired text. */
   bool layout_region = false; /**< Invisible container geometry; never obscures child controls. */

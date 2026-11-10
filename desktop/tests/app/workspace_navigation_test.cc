@@ -12,6 +12,7 @@
 #include "../bridge/support.hh"
 #include "../wm/support.hh"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -100,6 +101,26 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
     f.screen.run_deferred();
     f.drv->frame();
   };
+  const auto expect_nav_paint = [&](const std::string &key, bool current) {
+    auto &ctx = *f.screen.ui();
+    const auto *button = ctx.find(key);
+    ASSERT_NE(button, nullptr);
+    const auto &commands = ctx.draw_list().cmds;
+    const auto box = std::find_if(commands.begin(), commands.end(), [&](const ui::DrawCmd &cmd) {
+      return cmd.type == ui::CmdType::RoundBox && cmd.rect == button->rect;
+    });
+    ASSERT_NE(box, commands.end());
+    const auto &theme = ctx.theme();
+    EXPECT_EQ(box->color, current ? theme.menu_item.inner_sel.blend(theme.header_back, 0.6f) : theme.pulldown.inner);
+    EXPECT_EQ(box->outline, current ? theme.link : theme.pulldown.outline);
+    if (current) {
+      const auto label = std::find_if(commands.begin(), commands.end(), [&](const ui::DrawCmd &cmd) {
+        return cmd.type == ui::CmdType::Text && cmd.text == button->text;
+      });
+      ASSERT_NE(label, commands.end());
+      EXPECT_EQ(label->color, theme.menu_item.text_sel);
+    }
+  };
   f.drv->frame();
   const auto shown = state.payload();
   const auto camera = state.camera_serial();
@@ -121,6 +142,8 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
   const auto *home_button = f.screen.ui()->find("workbench_home");
   ASSERT_NE(home_button, nullptr);
   EXPECT_FALSE(home_button->enabled);
+  expect_nav_paint("workbench_home", true);
+  expect_nav_paint("workbench_split", false);
 
   click("workbench_tasks");
   auto *tasks = dynamic_cast<EditorArea *>(f.screen.maximized());
@@ -132,6 +155,7 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
   EXPECT_EQ(f.screen.maximized(), tasks);
   EXPECT_TRUE(tasks->find_region("workbench_rail")->rect().empty());
   EXPECT_FALSE(tasks->find_region("workbench_strip")->rect().empty());
+  expect_nav_paint("workbench_tasks", true);
   EXPECT_EQ(f.screen.ui()->find("editor_type"), nullptr);
   EXPECT_EQ(f.screen.ui()->find("area_menu"), nullptr);
   EXPECT_EQ(f.screen.ui()->find(tasks->id() + "/header/submit"), nullptr);

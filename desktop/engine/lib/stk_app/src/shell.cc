@@ -911,12 +911,14 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
     auto &nav = rail_ ? block.layout().column() : block.layout().row();
     for (int i = 0; i < int(std::size(workbench_sections)); ++i) {
       const auto &section = workbench_sections[i];
-      nav.button(section.key, mark(i == current, shell_.store_.tr(section.label)),
-                 shell_.workbench_navigation_action(s, section.editor)).disable(i == current);
+      const bool active = i == current;
+      auto &button = nav.button(section.key, mark(active, shell_.store_.tr(section.label)),
+                                shell_.workbench_navigation_action(s, section.editor)).disable(active);
+      button.button_appearance = active ? ui::ButtonAppearance::CurrentPage : ui::ButtonAppearance::Navigation;
     }
     if (rail_) { nav.separator(); }
     nav.button("workbench_split", shell_.store_.tr("workbench.nav.split"),
-               shell_.workbench_navigation_action(s, nullptr));
+               shell_.workbench_navigation_action(s, nullptr)).button_appearance = ui::ButtonAppearance::Navigation;
     auto &project = shell_.store_.project();
     if (rail_) {
       nav.separator();

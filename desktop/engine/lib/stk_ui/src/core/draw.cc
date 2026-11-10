@@ -312,6 +312,17 @@ void Context::draw_widget(const Widget &w)
       break;
     }
     case WidgetType::Button: {
+      if (w.button_appearance != ButtonAppearance::Standard) {
+        const bool current = w.button_appearance == ButtonAppearance::CurrentPage;
+        WidgetColors c = current ? state_colors(th.menu_item, true, false, false) : th.pulldown;
+        if (current) { c.inner = c.inner.blend(th.header_back, 0.6f); }
+        else if (pressed || hover || focused) { c.inner = c.inner_sel; }
+        if (current || focused) { c.outline = th.link; }
+        c = state_colors(c, false, false, disabled && !current);
+        box(r, c, w.corners, false);
+        text_in(r.inset(st.text_margin, 0), w.text, Align::Center, c.text);
+        break;
+      }
       const WidgetColors c = state_colors(th.regular, pressed, hover || focused, disabled);
       box(r, c, w.corners);
       text_in(r.inset(st.text_margin, 0), w.text, Align::Center, c.text);
