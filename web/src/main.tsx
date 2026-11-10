@@ -1,7 +1,8 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {flushSync} from 'react-dom';
 import {createRoot} from 'react-dom/client';
-import {action,api,ApiError,events,hasToken,Json,readNode,setToken,uid} from './api';
+import {action,api,ApiError,events,hasToken,Json,readNode,setToken} from './api';
+import {type Entry,useConversations} from './conversations';
 import ErrorBoundary from './ErrorBoundary';
 import TaskObservation from './TaskObservation';
 import {isTerminalTaskState,type TaskFact,type TaskScope} from './taskFacts';
@@ -15,6 +16,15 @@ type ObservedTask = {scope:TaskScope;name:string;state:string;verifiedIdentity:b
 // Persistent sections: 工作台 is the conversation home. All three stay mounted; only the active one is shown.
 type Section='workbench'|'tasks'|'results';
 const SECTIONS:readonly (readonly [Section,string])[]=[['workbench','工作台'],['tasks','任务'],['results','结果']];
+// Up to this width the conversation history is opened on demand over the active section instead of a fixed column.
+const COMPACT='(max-width: 1050px)';
+// The secondary line of a history entry: what it is, then any unsent draft or message it holds.
+function entryNote(entry:Entry){
+  const kind=entry.kind==='local'?'未保存':entry.kind==='missing'?`已不存在 · ${entry.id.slice(0,6)}`:entry.kind==='unconfirmed'?`正在确认 · ${entry.id.slice(0,6)}`:
+    [created(entry.created),entry.id.slice(0,6)].filter(Boolean).join(' · ');
+  return kind+(entry.draft?' · 有草稿':'')+(entry.outgoing==='sending'?' · 发送中':entry.outgoing==='failed'?' · 发送失败':'');
+}
+const created=(seconds:number)=>seconds?new Date(seconds*1000).toLocaleString(undefined,{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
 
 function App(){
   const [connected,setConnected]=useState(hasToken());
@@ -42,7 +52,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const [observedTask,setObservedTask]=useState<ObservedTask|null>(null);
   const [readKinds,setReadKinds]=useState<string[]|null>(null),[taskRefresh,setTaskRefresh]=useState(0);
   const [analysis,setAnalysis]=useState<'file'|'graph'>('file'),[mode,setMode]=useState('slice'),[axis,setAxis]=useState(2),[index,setIndex]=useState(0),[level,setLevel]=useState(0),[probe,setProbe]=useState<number[]>([0,0,0]);
-  const [session,setSession]=useState(()=>sessionStorage.getItem('stk-session')||uid()),[sessions,setSessions]=useState<Json[]>([]),[messages,setMessages]=useState<Json[]>([]),[chat,setChat]=useState('');
+  // Conversations are Hub sessions, independent of the selected node, Runtime workspace and task.
+  const refreshNow=useRef(()=>{});
+  const conv=useConversations(disconnect,()=>refreshNow.current());
+  const {mergeList}=conv;
+  const [wide,setWide]=useState(()=>!matchMedia(COMPACT).matches),[historyOpen,setHistoryOpen]=useState(false);
+  // overlay: the compact history is open over the active section, which then takes no input until it closes.
+  const historyShown=wide||historyOpen,overlay=!wide&&historyOpen;
+  const historyPanel=useRef<HTMLElement>(null),historyToggle=useRef<HTMLButtonElement>(null),messageList=useRef<HTMLDivElement>(null),composer=useRef<HTMLTextAreaElement>(null);
   const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
   const generation=useRef(0),scopeVersion=useRef(0),activeScope=useRef<TaskScope|null>(null),refreshing=useRef(false),alive=useRef(true);
   const artifactReads=useRef({started:0,applied:0});
@@ -98,16 +115,31 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         return error instanceof ApiError&&(error.status===404||error.status===501)?{}:null;
       })]);
       if(!alive.current)return;
-      setDevices(d);setActions(a);setSessions(s);setOnline(true);
+      setDevices(d);setActions(a);mergeList(s);setOnline(true);
       if(p!==null)setReadKinds(Array.isArray(p?.read_kinds)?p.read_kinds:[]);
     }catch(error){
       if(!alive.current)return;
       if(lostAccess(error))disconnect();
       else{setOnline(false);setError(String(error));}
     }finally{refreshing.current=false;}
-  },[disconnect]);
+  },[disconnect,mergeList]);
+  refreshNow.current=()=>void refresh();
+  // Across the compact width the history keeps the keyboard focus: focus inside it keeps it open as the overlay when
+  // the page narrows, and focus on the 历史 toggle, which only the compact page has, moves into the column when it widens.
+  const keepHistoryFocus=useRef(false);
+  useEffect(()=>{const query=matchMedia(COMPACT);const change=()=>{
+    const focus=document.activeElement,inside=!!historyPanel.current?.contains(focus);
+    keepHistoryFocus.current=!query.matches&&!!focus&&focus===historyToggle.current;
+    setWide(!query.matches);setHistoryOpen(query.matches&&inside);
+  };change();query.addEventListener('change',change);return()=>query.removeEventListener('change',change);},[]);
+  useEffect(()=>{if(wide&&keepHistoryFocus.current){keepHistoryFocus.current=false;focusHistory();}},[wide]);
+  // Escape closes the overlay from anywhere on the page and returns the focus to the 历史 toggle.
+  useEffect(()=>{
+    if(!overlay)return;
+    const key=(e:KeyboardEvent)=>{if(e.key==='Escape'){e.preventDefault();closeHistory();}};
+    window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);
+  },[overlay]);
   useEffect(()=>{void refresh();const abort=new AbortController();void events(()=>void refresh(),abort.signal);const timer=setInterval(()=>void refresh(),5000);return()=>{abort.abort();clearInterval(timer);};},[refresh]);
-  useEffect(()=>{sessionStorage.setItem('stk-session',session);void api(`sessions/${session}`).then(s=>setMessages(s.messages)).catch(e=>setError(String(e)));},[session]);
   useEffect(()=>{if(node&&!selected)clearNode();},[node,selected,clearNode]);
   useEffect(()=>{
     if(!taskBound||!taskOnline||!canReadArtifacts)return;
@@ -153,6 +185,31 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     const element=target==='logs'?pane?.querySelector('summary'):analysis==='file'?fileChoice.current:modeChoice.current?.querySelector<HTMLElement>('[aria-selected="true"]');
     (target==='logs'?pane:element)?.scrollIntoView({block:'nearest'});element?.focus({preventScroll:true});
   }
+  // Choosing a conversation (or a new one) is one explicit action: it opens 工作台 with that conversation's own
+  // transcript and draft, and changes nothing in 任务 or 结果. On a compact page the history closes again.
+  function openConversation(id:string|null){
+    flushSync(()=>{setTab('workbench');setHistoryOpen(false);if(id)conv.select(id);else conv.startNew();});
+    if(!id)composer.current?.focus({preventScroll:true});
+    else if(!wide)messageList.current?.focus({preventScroll:true});
+  }
+  function focusHistory(){
+    const panel=historyPanel.current;
+    const target=panel?.querySelector<HTMLElement>('.conversation[aria-current="true"]')??panel?.querySelector<HTMLElement>('button');
+    target?.focus({preventScroll:true});
+    target?.scrollIntoView({block:'nearest'});
+  }
+  function closeHistory(){setHistoryOpen(false);historyToggle.current?.focus({preventScroll:true});}
+  function toggleHistory(){
+    if(historyOpen){setHistoryOpen(false);return;}
+    flushSync(()=>setHistoryOpen(true));
+    focusHistory();
+  }
+  // The unsent text of a conversation the Hub no longer has goes to a new local conversation, ready to send there.
+  function moveDraft(){flushSync(()=>conv.moveDraft());composer.current?.focus({preventScroll:true});}
+  const sessionRow=conv.saved[conv.session];
+  const sessionLabel=conv.missing.has(conv.session)?`已不存在 · ${conv.session.slice(0,6)}`:sessionRow?`${sessionRow.name} · ${conv.session.slice(0,6)}`:
+    conv.own.has(conv.session)?'新对话 · 未保存':`正在确认 · ${conv.session.slice(0,6)}`;
+  const thread=conv.thread,pending=conv.pending&&!thread.messages.some(m=>m.id===conv.pending!.id)?conv.pending:null;
   async function probeValue(){
     const version=generation.current;
     const result=await invoke('view.probe',{task_id:task,path,position:probe});
@@ -160,9 +217,18 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   }
   return <div className="app"><header><div className="wordmark">STK <span>科学工作台</span></div><span className={online?'connection':'connection offline'}>{online?'控制服务已连接':'连接中断 · 显示最近状态'}</span><button className="quiet" onClick={disconnect}>断开</button></header>
     {error&&<div className="notice" role="alert">{error}<button onClick={()=>setError('')}>关闭</button></div>}
-    <div className="workspace">
-    <nav className="section-nav" aria-label="工作区">{SECTIONS.map(([key,label])=><button type="button" className={tab===key?'active':''} aria-current={tab===key?'page':undefined} key={key} onClick={()=>setTab(key)}>{label}</button>)}</nav>
-    <aside className={`tasks panel surface${tab==='tasks'?'':' surface-hidden'}`} inert={tab!=='tasks'}><div className="section-title"><h2>项目与任务</h2><button className="quiet" onClick={()=>{setTaskRefresh(value=>value+1);void refresh();}}>刷新</button></div>
+    <div className={wide?'workspace with-history':'workspace'}>
+    <nav className="section-nav" aria-label="工作区">{SECTIONS.map(([key,label])=><button type="button" className={tab===key?'active':''} aria-current={tab===key?'page':undefined} key={key} onClick={()=>{setTab(key);setHistoryOpen(false);}}>{label}</button>)}
+      {!wide&&<button type="button" ref={historyToggle} className={historyOpen?'history-toggle open':'history-toggle'} aria-expanded={historyOpen} aria-controls="conversation-history" aria-label="对话历史" onClick={toggleHistory}>历史</button>}</nav>
+    <section id="conversation-history" ref={historyPanel} aria-label="对话历史" className={`history${wide?'':' history-overlay'}${historyShown?'':' surface-hidden'}`} inert={!historyShown}>
+      <div className="history-head"><h2>对话</h2><button type="button" className="new-conversation" onClick={()=>openConversation(null)}>新对话</button></div>
+      <ul className="history-list">
+        {conv.entries.map(entry=><li key={entry.id}><button type="button" className="conversation" aria-current={entry.id===conv.session?'true':undefined} onClick={()=>openConversation(entry.id)}><span>{entry.name}</span><small>{entryNote(entry)}</small></button></li>)}
+      </ul>
+      {!conv.entries.some(entry=>entry.kind==='saved')&&<p className="muted">还没有保存的对话。</p>}
+    </section>
+    {overlay&&<div className="history-backdrop" aria-hidden="true" onClick={closeHistory}/>}
+    <aside className={`tasks panel surface${tab==='tasks'?'':' surface-hidden'}`} inert={tab!=='tasks'||overlay}><div className="section-title"><h2>项目与任务</h2><button className="quiet" onClick={()=>{setTaskRefresh(value=>value+1);void refresh();}}>刷新</button></div>
       <label>执行节点<select value={node} onChange={e=>{clearTask();setNode(e.target.value);setWorkspace('');}}><option value="">选择节点</option>{devices.filter(d=>d.role==='node'&&!d.revoked).map(d=><option key={d.id} value={d.id}>{d.online?'●':'○'} {d.name}</option>)}</select></label>
       {selected&&<p className="muted">{selected.online?'在线':'离线'} · 最近更新 {selected.last_seen?new Date(selected.last_seen*1000).toLocaleString():'尚未连接'}{selected.snapshot.cpu_percent!==undefined&&<><br/>CPU {selected.snapshot.cpu_percent}% · 内存 {selected.snapshot.memory_percent}%</>}</p>}
       <label>项目<select value={workspace} onChange={e=>selectWorkspace(e.target.value)}><option value="">选择项目</option>{(selected?.snapshot?.workspaces||[]).map((w:Json)=><option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
@@ -184,7 +250,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       {actions.filter(a=>a.state==='review').map(a=><article className="review" key={a.id}><strong>等待执行复核</strong><p>{a.review_reason}</p><pre>{JSON.stringify(a.request.payload,null,2)}</pre>{[true,false].map(approved=><button key={String(approved)} disabled={busy} onClick={()=>void run(async()=>{await api(`actions/${a.id}/review`,'POST',{approved});})}>{approved?'批准执行':'拒绝'}</button>)}</article>)}
       <details><summary>最近操作与重试</summary>{actions.filter(a=>a.request.kind!=='task.events').slice(0,20).map(a=><p key={a.id}><small>{a.request.kind} · {a.state}<br/>{a.error}</small></p>)}<button onClick={()=>void run(async()=>{const saved=sessionStorage.getItem('stk-last-action');if(saved)await api('actions','POST',JSON.parse(saved));})}>以相同 ID 重试上次操作</button></details>
     </aside>
-    <section className={`analysis surface${tab==='results'?'':' surface-hidden'}`} inert={tab!=='results'}><div className="view-title"><div><span className="eyebrow">RESULT EXPLORER</span><h1>{analysis==='graph'?'图谱视图':shownScene?.manifest.field||'科学结果'}</h1></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span></div>
+    <section className={`analysis surface${tab==='results'?'':' surface-hidden'}`} inert={tab!=='results'||overlay}><div className="view-title"><div><span className="eyebrow">RESULT EXPLORER</span><h1>{analysis==='graph'?'图谱视图':shownScene?.manifest.field||'科学结果'}</h1></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span></div>
       <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>setAnalysis(key)}>{label}</button>)}</div>
       {analysis==='graph'?<React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={selected?.id||''} node={selected?node:''} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} canReadEvents={canReadEvents&&taskOnline} onError={setError} onLog={setLogs}/></React.Suspense>:<>
       <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{setPath(e.target.value);generation.current++;}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(a=>/\.(vti|vtk|npy|dat)$/.test(a.path)).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
@@ -197,10 +263,23 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       <div className="probe"><strong>物理坐标探针</strong>{probe.map((v,i)=><input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={v} onChange={e=>setProbe(probe.map((n,j)=>i===j?Number(e.target.value):n))}/>)}<button disabled={busy||!shownScene} onClick={()=>void run(probeValue)}>查询原始值</button></div></>}
       <details className={logRoom?'logs log-room':'logs'} ref={logPane} open><summary>日志 / 探针结果</summary><pre>{(selected&&logs)||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
     </section>
-    <aside className={`chat panel surface${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'}><div className="section-title"><h2>AI 对话</h2><button className="quiet" onClick={()=>{setSession(uid());setMessages([]);}}>新会话</button></div><select aria-label="恢复会话" value={session} onChange={e=>setSession(e.target.value)}><option value={session}>当前会话</option>{sessions.filter(s=>s.id!==session).map(s=><option key={s.id} value={s.id}>{s.name} · {s.id.slice(0,6)}</option>)}</select>
-      <div className="messages">{!messages.length&&<div className="chat-intro"><h3>从一个科学问题开始</h3><p>描述你要执行的任务。命令、资源与执行状态会在任务面板中明确展示。</p></div>}{messages.map(m=><article key={m.id} className={m.role}><small>{m.role==='user'?'你':'STK'}</small><p>{m.content}</p></article>)}</div>
-      <form onSubmit={e=>{e.preventDefault();const content=chat;setChat('');void run(async()=>{const result=await api(`sessions/${session}/messages`,'POST',{id:uid(),content});setMessages(result.messages);});}}><label className="sr-only" htmlFor="chat-input">对话内容</label><textarea id="chat-input" value={chat} onChange={e=>setChat(e.target.value)} placeholder="描述计算任务…"/><button className="primary wide" disabled={busy||!chat.trim()}>发送</button></form><small className="muted">常规模板自动执行；新脚本及高资源任务需复核。</small></aside>
-    </div><footer>{busy?'正在处理请求…':'就绪'}<span>STK · 计算持续运行，视图随处可达</span></footer>
+    <aside className={`chat panel surface${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'||overlay}><div className="section-title"><h2>AI 对话</h2><span className="muted conversation-name">{sessionLabel}</span></div>
+      <div className="messages" ref={messageList} tabIndex={-1} role="log" aria-label="对话记录">
+        {thread.status==='loading'&&!thread.messages.length&&<p className="muted">正在读取对话…</p>}
+        {thread.status==='missing'&&<div className="chat-intro"><h3>这个对话已不存在</h3><p>控制服务中没有这个对话，未创建新会话。{conv.draft.trim()?'未发送的草稿仍在这里，可以移到新对话再发送。':'可以从「新对话」重新开始。'}</p>
+          {!!conv.draft.trim()&&<button type="button" onClick={moveDraft}>移到新对话</button>}</div>}
+        {thread.status==='error'&&<p className="muted">读取对话失败：{thread.error} <button type="button" className="quiet" onClick={conv.retry}>重新读取</button></p>}
+        {thread.status==='ready'&&!thread.messages.length&&!pending&&<div className="chat-intro"><h3>从一个科学问题开始</h3><p>描述你要执行的任务。命令、资源与执行状态会在任务面板中明确展示。</p></div>}
+        {thread.messages.map(m=><article key={m.id} className={m.role}><small>{m.role==='user'?'你':'STK'}</small><p>{m.content}</p></article>)}
+        {pending&&<article className="user pending"><small>你 · 发送中</small><p>{pending.content}</p></article>}
+      </div>
+      {conv.failure&&<div className="send-failure" role="alert"><p>{conv.recorded?'消息已记录，回复尚未确认。':'发送未完成，草稿已保留。'}{conv.failure.error}</p>
+        {!conv.recorded&&conv.failure.content!==conv.draft&&<p className="failed-text">未发送：{conv.failure.content}</p>}
+        {conv.canResend&&conv.draft.trim()&&conv.failure.content!==conv.draft&&<p>请先重试上一条消息，当前草稿会保留。</p>}
+        <button type="button" className="quiet" disabled={!conv.canResend} onClick={()=>void conv.resend()}>重新发送</button></div>}
+      {conv.draftTooLong&&<p className="muted" role="status">单条消息最多 12,000 字符，请缩短后发送。</p>}
+      <form onSubmit={e=>{e.preventDefault();void conv.send();}}><label className="sr-only" htmlFor="chat-input">对话内容</label><textarea id="chat-input" ref={composer} value={conv.draft} onChange={e=>conv.setDraft(e.target.value)} placeholder="描述计算任务…"/><button className="primary wide" disabled={!conv.canSend}>发送</button></form><small className="muted">常规模板自动执行；新脚本及高资源任务需复核。</small></aside>
+    </div><footer>{busy||conv.sendingCount?'正在处理请求…':'就绪'}<span>STK · 计算持续运行，视图随处可达</span></footer>
   </div>;
 }
 createRoot(document.getElementById('root')!).render(ExampleView?<React.Suspense fallback={null}><ExampleView/></React.Suspense>:<App/>);
