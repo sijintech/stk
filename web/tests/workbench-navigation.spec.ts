@@ -81,6 +81,8 @@ class Hub {
   later = false;
   // When set, task.artifacts lists exactly these paths instead of scalar-0.vti (and scalar-1.vti once `later`).
   artifactPaths?: string[];
+  readonly artifactPathsByTask = new Map<string, string[]>();
+  readKinds = ['task.get', 'task.artifacts', 'task.events'];
   readonly hdf5Artifacts = new Map<string, typeof HDF5_ARTIFACT>();
   hdf5Fault?: 'wrong-digest' | 'invalid_data' | 'wrong-step';
   field = 'phi';
@@ -122,6 +124,16 @@ class Hub {
     const held = this.pending.get(kind);
     if (held) { this.reached.add(kind); await held; }
   }
+  private async publishedArtifacts(taskId: string) {
+    const later = this.later;
+    await this.gate(`task.artifacts ${taskId}`);
+    await this.gate('task.artifacts');
+    const hdf5 = this.hdf5Artifacts.get(taskId);
+    if (hdf5) return [hdf5, {path: 'case/Polar.00000002.dat', size: 1024}];
+    const paths = this.artifactPathsByTask.get(taskId) ?? this.artifactPaths ??
+      ['scalar-0.vti', ...(later ? ['scalar-1.vti'] : [])];
+    return paths.map(path => ({path, size: 10}));
+  }
   async install(page: Page) {
     await page.addInitScript(() => sessionStorage.setItem('stk-token', 'abcdefghijklmnopqrstu'));
     // An aborted read cannot be fulfilled any more; that is expected and ignored.
@@ -160,7 +172,7 @@ class Hub {
       return json(this.queueGraph ? {id: polled[1], state: 'queued'} : {id: polled[1], state: 'succeeded', result: this.queuedResults.get(polled[1])});
     }
     if (path === 'sessions') return json(this.rows);
-    if (path === 'policy') return json({read_kinds: ['task.get', 'task.artifacts', 'task.events']});
+    if (path === 'policy') return json({read_kinds: this.readKinds});
     if (path === 'graphs/presets') return json(this.presets);
     const stored = /^blobs\/([0-9a-f]{64})$/.exec(path);
     if (stored) {
@@ -216,14 +228,7 @@ class Hub {
       }
       // The running task's event log: no new events yet.
       if (kind === 'task.events') return json({result: {events: [], next_offset: 0, size: 0, terminal: false}});
-      if (kind === 'task.artifacts') {
-        const later = this.later;
-        await this.gate(kind);
-        const hdf5 = this.hdf5Artifacts.get(request.postDataJSON().payload?.task_id);
-        if (hdf5) return json({result: [hdf5, {path: 'case/Polar.00000002.dat', size: 1024}]});
-        if (this.artifactPaths) return json({result: this.artifactPaths.map(path => ({path, size: 10}))});
-        return json({result: [{path: 'scalar-0.vti', size: 10}, ...(later ? [{path: 'scalar-1.vti', size: 10}] : [])]});
-      }
+      if (kind === 'task.artifacts') return json({result: await this.publishedArtifacts(request.postDataJSON().payload?.task_id)});
     }
     if (path === 'actions' && request.method() === 'POST') {
       const body = request.postDataJSON();
@@ -242,6 +247,8 @@ class Hub {
       if (body.kind === 'view.probe') {
         return json({id: body.id, state: 'succeeded', result: {position: body.payload.position, values: [0.5], units: 'V'}});
       }
+      if (body.kind === 'task.artifacts') return json({id: body.id, state: 'succeeded',
+        result: await this.publishedArtifacts(body.payload.task_id)});
       if (body.kind === 'task.submit') {
         if (!this.review) return json({id: body.id, state: 'succeeded', result: {id: task}});
         const item = {id: body.id, state: 'review', review_reason: '新命令需要执行复核', request: {kind: body.kind, payload: body.payload}};
@@ -3830,6 +3837,103 @@ for (const viewport of viewports) {
   });
 }
 
+const rawGraphProbe = (page: Page) => graphPane(page).getByRole('button', {name: '查询原始值'});
+async function pickGraphDomain(page: Page) {
+  const canvas = vtkCanvas(graphPane(page));
+  await canvas.scrollIntoViewIfNeeded();
+  const box = (await canvas.boundingBox())!;
+  const picked = graphPane(page).locator('.probe small');
+  for (const [x, y] of [[.5, .52], [.45, .55], [.55, .55], [.42, .48], [.5, .63]]) {
+    await page.mouse.click(box.x + box.width * x, box.y + box.height * y);
+    if ((await picked.textContent())?.includes('Domains')) break;
+  }
+  await expect(picked).toContainText('Domains');
+}
+
+const datPreset = {...PRESET, graph: {nodes: [
+  {id: 'run', type: 'stk.source.muferro_run@1', params: {binding: 'field'}},
+  {id: 'src', type: 'stk.source.muferro_frame@1', inputs: {frames: {from: 'run.frames'}},
+    params: {dataset: 'Polar', step: {$param: 'step'}}},
+]}};
+const datName = 'Polar.00001000.dat', datPath = `case/${datName}`;
+for (const viewport of viewports) {
+  test(`${viewport.name} DAT probe resolves the shown binding's published frame only on explicit query`, async ({page}) => {
+    await page.setViewportSize({width: viewport.width, height: viewport.height});
+    const hub = new Hub();
+    hub.device = graphTwoScopes;
+    hub.presets = [datPreset];
+    hub.artifactPathsByTask.set(task, [datName]);
+    hub.artifactPathsByTask.set(task2, [datPath]);
+    const legacy = viewport.name === 'narrow';
+    if (legacy) hub.readKinds = ['task.get', 'task.events'];
+    const errors = await setup(page, hub, {scene: false});
+    await showGraph(page);
+    const sent = posts(page);
+    await binding(page).selectOption(task2);
+    await computeGraph(page, hub);
+    await expect(source(page)).toHaveText(graphSourceB);
+    await pickGraphDomain(page);
+    expect(sent.seen.filter(call => !call.endsWith('task.get'))).toEqual(['/api/v1/actions graph.evaluate']);
+
+    const publication = page.waitForRequest(request => request.method() === 'POST' &&
+      request.postDataJSON()?.kind === 'task.artifacts');
+    await rawGraphProbe(page).click();
+    expect((await publication).postDataJSON().payload).toEqual({task_id: task2});
+    await expect(probeLog(page)).toContainText(datPath);
+    expect(hub.probes).toMatchObject([{task_id: task2, path: datPath}]);
+    expect(sent.seen.filter(call => !call.endsWith('task.get'))).toEqual([
+      '/api/v1/actions graph.evaluate',
+      legacy ? '/api/v1/actions task.artifacts' : '/api/v1/nodes/{node}/read task.artifacts',
+      '/api/v1/actions view.probe',
+    ]);
+
+    hub.artifactPathsByTask.set(task2, [datName, datPath]);
+    await rawGraphProbe(page).click();
+    await expect(page.getByRole('alert')).toContainText('多个同名 MuFerro 帧');
+    expect(hub.probes).toHaveLength(1);
+    await expect(source(page)).toHaveText(graphSourceB);
+    expect(errors).toEqual([]);
+    sent.stop();
+  });
+}
+
+test('DAT probe drops a held publication after the point changes and a held raw reply after the binding changes', async ({page}) => {
+  const hub = new Hub();
+  hub.device = graphTwoScopes;
+  hub.presets = [datPreset];
+  hub.artifactPathsByTask.set(task2, [datPath]);
+  await setup(page, hub, {scene: false});
+  await showGraph(page);
+  await binding(page).selectOption(task2);
+  await computeGraph(page, hub);
+  await pickGraphDomain(page);
+
+  const publicationKey = `task.artifacts ${task2}`;
+  const releaseArtifacts = hub.hold(publicationKey);
+  const oldRead = page.waitForRequest(request => request.method() === 'POST' && request.postDataJSON()?.kind === 'task.artifacts');
+  await rawGraphProbe(page).click();
+  await expect.poll(() => hub.reached.has(publicationKey)).toBe(true);
+  const hubRequest = await oldRead;
+  const cancelled = page.waitForEvent('requestfailed', {predicate: request => request === hubRequest});
+  await graphPane(page).getByLabel('探针X').fill('1.5');
+  await cancelled;
+  releaseArtifacts();
+  await expect(rawGraphProbe(page)).toBeEnabled();
+  expect(hub.probes).toHaveLength(0);
+
+  const releaseRaw = hub.hold('view.probe');
+  await rawGraphProbe(page).click();
+  await expect.poll(() => hub.reached.has('view.probe')).toBe(true);
+  const response = page.waitForResponse(res => res.request().method() === 'POST' && res.request().postDataJSON()?.kind === 'view.probe');
+  await binding(page).selectOption(task);
+  releaseRaw();
+  await response;
+  await expect(source(page)).toHaveText(graphSourceB);
+  await expect(probeLog(page)).not.toContainText(datPath);
+  await expect(rawGraphProbe(page)).toBeEnabled();
+  expect(hub.probes).toMatchObject([{task_id: task2, path: datPath, position: [1.5, expect.any(Number), expect.any(Number)]}]);
+});
+
 test('graph source keeps the displayed scene through a stale binding reply and a failed scene decode', async ({page}) => {
   const hub = new Hub();
   hub.device = graphTwoScopes;
@@ -3843,14 +3947,7 @@ test('graph source keeps the displayed scene through a stale binding reply and a
   await expect(source(page)).toHaveText(graphSourceB);
   const canvas = vtkCanvas(graphPane(page));
   await canvas.evaluate(el => { (el as any).__graphSource = 'same-canvas'; });
-  await canvas.scrollIntoViewIfNeeded();
-  const box = (await canvas.boundingBox())!;
-  const picked = graphPane(page).locator('.probe small');
-  for (const [x, y] of [[.5, .52], [.45, .55], [.55, .55], [.42, .48], [.5, .63]]) {
-    await page.mouse.click(box.x + box.width * x, box.y + box.height * y);
-    if ((await picked.textContent())?.includes('Domains')) break;
-  }
-  await expect(picked).toContainText('Domains');
+  await pickGraphDomain(page);
   await graphPane(page).getByRole('button', {name: '查询原始值'}).click();
   await expect(probeLog(page)).toContainText('field.dat');
   expect(hub.probes).toMatchObject([{task_id: task2, path: 'field.dat'}]);

@@ -1,10 +1,10 @@
 // 图谱 (graph) mode: evaluate a preset graph next to the data (action graph.evaluate), draw the returned
 // stk.payload/2, scrub steps with the camera kept, show plots/images/tables, and a task.events progress line.
-import React, {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {action, api, blob, readNode, type Json} from './api';
 import {cachedBlob, loadPayload, loadStkp, type LoadedPayload} from './payload';
 import {bindingNames, blobSha, coerceParameters, DISPLAYABLE, duration, editorKind, emptyProgress, EVENTS_POLL_MS, EVENTS_TAIL_BYTES, foldEvents,
-  frameDataset, framesFromArtifacts, initialValues, nextEventsDelay, outputImages, payloadOutputs, presetParameters, progressText, resolveProbeTarget,
+  frameDataset, framesFromArtifacts, initialValues, nextEventsDelay, outputImages, payloadOutputs, presetParameters, progressText, resolveProbeArtifact, resolveProbeTarget,
   selectOutputs, stepChoices, stepParameter, tableData, waitForAction, type Artifact, type GraphParameter, type GraphResult, type Preset,
   type ProbeContext, type ProgressState, type TableData} from './graph';
 import ErrorBoundary from './ErrorBoundary';
@@ -236,8 +236,8 @@ function JsonView({out}: {out: any}) {
 // `active` is false while 图谱 is not in view (the file mode, another section or the compact history over 结果): the
 // panel stays mounted with its result and camera. `scope` names the page's project and task scope; a new one starts the
 // panel afresh, even at the same node with no task (local data packages and manually bound tasks included).
-export default function GraphPanel({node, scope, task, tasks, artifacts, completedTask, canReadEvents, active = true, onError, onLog, onSource}: {node: string, scope: string, task: string,
-  tasks: Json[], artifacts: Json[], completedTask: CompletedTask | null, canReadEvents: boolean, active?: boolean,
+export default function GraphPanel({node, scope, task, tasks, artifacts, completedTask, canReadEvents, canReadArtifacts, active = true, onError, onLog, onSource}: {node: string, scope: string, task: string,
+  tasks: Json[], artifacts: Json[], completedTask: CompletedTask | null, canReadEvents: boolean, canReadArtifacts: boolean, active?: boolean,
   onError: (text: string) => void, onLog: (text: string) => void, onSource: (source: GraphSource | null) => void}) {
   const [presets, setPresets] = useState<Preset[] | null>(null);
   const [presetError, setPresetError] = useState('');
@@ -252,6 +252,13 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
   const [status, setStatus] = useState('');
   const [running, setRunning] = useState(false);
   const [probe, setProbe] = useState<{position: number[], info?: PickInfo} | null>(null);
+  const [probeStatus, setProbeStatus] = useState('');
+  const probeRequest = useRef<AbortController | null>(null);
+  const cancelProbe = useCallback(() => {
+    probeRequest.current?.abort();
+    probeRequest.current = null;
+    setProbeStatus('');
+  }, []);
   const [progress, setProgress] = useState<ProgressState | null>(null);
   // Bumped whenever a pending evaluation is superseded (new request, preset/source change, local file, unmount).
   const generation = useRef(0);
@@ -291,6 +298,7 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
   function sceneShown(payload: LoadedPayload) {
     const next = offeredView.current, previous = displayedView.current;
     if (!next || !canShow(payload) || next === previous) return;
+    cancelProbe();
     displayedView.current = next;
     setShownView(next);
     if (previous?.key !== next.key) setProbe(null);
@@ -306,6 +314,11 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
     // Unmounting abandons a pending evaluation: its polling stops at the next check.
     return () => { mounted.current = false; clearTimeout(debounce.current); generation.current++; };
   }, []);
+  useLayoutEffect(() => {
+    if (!active) cancelProbe();
+    // A node change can unmount this panel. Stop discovery before a late list can dispatch a probe.
+    return () => probeRequest.current?.abort();
+  }, [active, cancelProbe]);
   // The presets are read once, when the panel is first in view: a panel mounted hidden (its module arriving after the
   // user left 图谱) reads nothing until it is shown.
   const presetsRead = useRef(false);
@@ -324,16 +337,18 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
   // the change, so a reply of the old scope that arrives later (a queued evaluation, a probe, an error) is never shown.
   useLayoutEffect(() => {
     generation.current++;
+    cancelProbe();
     clearTimeout(debounce.current); scrubFrom.current = null;
     setValues(initialValues(params));
     setBindings(Object.fromEntries(names.map(n => [n, task])));
     offerView(null); displayedView.current = null; setShownView(null); setOutputsSource(null);
     setResult(null); setProbe(null); setStatus(''); setRunning(false); onLog('');
-  }, [preset, params, names, node, scope, task, onLog]);
+  }, [preset, params, names, node, scope, task, onLog, cancelProbe]);
 
   function changeBinding(name: string, taskId: string) {
     if (bindings[name] === taskId) return;
     generation.current++;
+    cancelProbe();
     clearTimeout(debounce.current); scrubFrom.current = null;
     offerView(displayedView.current);
     setBindings(current => ({...current, [name]: taskId}));
@@ -351,6 +366,7 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
     const missing = names.filter(n => !bindings[n]);
     if (missing.length) { onError(`请为数据源 ${missing.join('、')} 选择任务`); return; }
     const current = ++generation.current;
+    cancelProbe();
     const isCurrent = () => generation.current === current;
     offerView(displayedView.current);
     const bound = Object.fromEntries(names.map(n => [n, bindings[n]]));
@@ -393,9 +409,7 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
           ? payloadStep : graphSource.step;
         const key = JSON.stringify([preset.id, bound, output]);
         offerView({payload: loaded, source: {...graphSource, display: 'scene', output, step}, key, probe: {
-          bindings: bound, values: chosen, result: graphResult,
-          // The artifact list is for the selected task. It cannot resolve a different binding's paths.
-          artifacts: Object.values(bound).every(id => id === task) ? artifacts as Artifact[] : undefined,
+          bindings: bound, values: parameters, result: graphResult,
         }});
       }
       setStatus('');
@@ -410,6 +424,7 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
   async function openHdf5(hdf5Source: MuProSource, signal: AbortSignal, onStatus: (text: string) => void) {
     if (!completedTask || signal.aborted) return;
     const current = ++generation.current;
+    cancelProbe();
     const isCurrent = () => generation.current === current && !signal.aborted;
     clearTimeout(debounce.current);
     const from = scrubFrom.current;
@@ -517,6 +532,7 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
     if (!file) return;
     // A local payload replaces the graph result, so a pending evaluation is abandoned.
     const current = ++generation.current;
+    cancelProbe();
     clearTimeout(debounce.current); scrubFrom.current = null;
     offerView(displayedView.current);
     setRunning(false);
@@ -531,20 +547,46 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
 
   async function queryProbe() {
     const displayed = displayedView.current;
-    if (!probe || !displayed?.probe) return;
+    if (!active || !probe || !displayed?.probe || probeRequest.current) return;
     const target = resolveProbeTarget(preset?.graph, probe.info?.probe, displayed.probe);
     if ('error' in target) { onError(target.error); return; }
-    const body: Json = {task_id: target.task_id, path: target.path, position: probe.position};
-    if (target.metadata) body.metadata = target.metadata;
+    const abort = new AbortController();
+    probeRequest.current = abort;
     const current = generation.current;
-    const active = () => generation.current === current && displayedView.current === displayed;
-    setStatus('正在读取原始数据…');
+    const isCurrent = () => !abort.signal.aborted && generation.current === current && displayedView.current === displayed;
+    onError('');
+    setProbeStatus('正在读取原始数据…');
+    let review = false;
     try {
-      const item = await action(node, 'view.probe', body, () => { if (active()) setStatus('探针查询等待复核。'); }, {active});
-      if (!active()) return;
-      if (item.result) onLog(JSON.stringify({layer: probe.info?.layerName, path: target.path, ...item.result}, null, 2));
-      if (item.state !== 'review') setStatus('');
-    } catch (e) { if (active()) { setStatus(''); onError(message(e)); } }
+      let path: string;
+      if ('frame' in target) {
+        // The current queue's list belongs to its selected task. A different graph binding needs its
+        // own published list, fetched only when the user explicitly requests the raw value.
+        const request = {task_id: target.task_id};
+        const published = target.task_id === task && artifacts.length ? artifacts : canReadArtifacts
+          ? await readNode(node, 'task.artifacts', request, abort.signal)
+          : (await action(node, 'task.artifacts', request, undefined, {active: isCurrent, remember: false})).result;
+        if (!isCurrent()) return;
+        if (!Array.isArray(published)) throw new Error('无法读取所选计算的已发布文件');
+        path = resolveProbeArtifact(target, published);
+      } else {
+        path = target.path;
+      }
+      const body: Json = {task_id: target.task_id, path, position: probe.position};
+      if (target.metadata) body.metadata = target.metadata;
+      const item = await action(node, 'view.probe', body, () => {
+        if (isCurrent()) setProbeStatus('探针查询等待复核。');
+      }, {active: isCurrent});
+      if (!isCurrent()) return;
+      review = item.state === 'review';
+      if (item.result) onLog(JSON.stringify({layer: probe.info?.layerName, path, ...item.result}, null, 2));
+    } catch (e) { if (isCurrent()) onError(message(e)); }
+    finally {
+      if (isCurrent()) {
+        probeRequest.current = null;
+        if (!review) setProbeStatus('');
+      }
+    }
   }
 
   const newerFrame = progress?.frame?.step !== undefined && steps.choices.length > 0 && progress.frame.step > steps.choices[steps.choices.length - 1];
@@ -575,17 +617,21 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
       <button className="quiet" disabled={running} onClick={latest}>最新</button>
     </div>}
     {progress && <p className="progress-line"><span className="running">● 运行中</span> {progressText(progress)}{newerFrame && !shownHdf5 && <button className="quiet" onClick={latest}>查看最新帧</button>}</p>}
-    {status && <p className="muted status-line">{status}</p>}
+    {(status || probeStatus) && <p className="muted status-line">{status || probeStatus}</p>}
     {view
       ? <ErrorBoundary resetKey={view.payload}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}>
         <Viewer scene={view.payload} resetKey={view.key} canShow={canShow}
-          onShown={sceneShown} onPick={(position, info) => setProbe({position, info})}/></React.Suspense></ErrorBoundary>
+          onShown={sceneShown} onPick={(position, info) => {cancelProbe(); setProbe({position, info});}}/></React.Suspense></ErrorBoundary>
       : <div className="viewport"><div className="empty"><span className="orbit">◇</span><h2>用节点图描述要看的结果</h2><p>选择预设并绑定任务。计算在数据所在的节点完成，这里只接收渲染数据。</p></div></div>}
     {localName && <p className="muted">本地数据包 {localName} · 无法查询原始值</p>}
     {shownView?.probe && <div className="probe"><strong>物理坐标探针</strong>
       {(probe?.position ?? [0, 0, 0]).map((v, i) => <input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={Number(v.toPrecision(8))}
-        onChange={e => setProbe(p => ({...(p ?? {}), position: (p?.position ?? [0, 0, 0]).map((n, j) => (i === j ? Number(e.target.value) : n))}))}/>)}
-      <button disabled={!probe || running} onClick={() => void queryProbe()}>查询原始值</button>
+        onChange={e => {
+          const value = Number(e.target.value);
+          cancelProbe();
+          setProbe(p => ({...(p ?? {}), position: (p?.position ?? [0, 0, 0]).map((n, j) => (i === j ? value : n))}));
+        }}/>)}
+      <button disabled={!probe || running || !!probeRequest.current} onClick={() => void queryProbe()}>查询原始值</button>
       <small className="muted">{probe?.info ? `图层 ${probe.info.layerName}` : '点击表面或切片选取位置'}</small>
     </div>}
     {(outputs.length > 0 || result) && <div className="graph-outputs">{outputs.map(([name, out]) => <OutputCard key={name} name={name} out={out}/>)}</div>}

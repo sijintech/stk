@@ -199,14 +199,14 @@ export function stepChoices(result: GraphResult | null | undefined, name: string
   return {value, choices: choices.length ? choices : fallback};
 }
 
-export interface ProbeTarget {task_id: string, path: string, node: string, metadata?: Record<string, unknown>}
-export interface ProbeContext {bindings: Record<string, string>, values: Record<string, unknown>, result?: GraphResult | null, artifacts?: Artifact[]}
+interface ProbeSource {task_id: string, node: string, metadata?: Record<string, unknown>}
+interface ProbeTarget extends ProbeSource {path: string}
+interface MuFerroProbeSource extends ProbeSource {frame: string, caseDir: string}
+export interface ProbeContext {bindings: Record<string, string>, values: Record<string, unknown>, result?: GraphResult | null}
 
-/**
- * Where view.probe should read for a picked layer: walks upstream from `pick.probe.node` to the first
- * field source (`stk.source.file@1` path, or the muFerro frame file of the resolved step).
- */
-export function resolveProbeTarget(graph: GraphDocument | undefined, probe: {node?: string, dataset?: string} | undefined, ctx: ProbeContext): ProbeTarget | {error: string} {
+/** Find the source of the picked layer using its evaluated graph and binding. */
+export function resolveProbeTarget(graph: GraphDocument | undefined, probe: {node?: string, dataset?: string} | undefined,
+                                   ctx: ProbeContext): ProbeTarget | MuFerroProbeSource | {error: string} {
   if (!probe?.node) return {error: '该图层未声明探针数据源（pick.probe）'};
   if (!graph?.nodes) return {error: '预设未附带图定义，无法定位探针数据'};
   const nodes = new Map(graph.nodes.map(n => [n.id, n]));
@@ -215,44 +215,70 @@ export function resolveProbeTarget(graph: GraphDocument | undefined, probe: {nod
     const v = node.params?.[name];
     return isParamRef(v) ? (own(ctx.values, v.$param) ?? parameterDefaults.get(v.$param)) : v;
   };
+  const isFrame = (node: GraphNode) => node.type.startsWith('stk.source.muferro_frame@');
+  const isFile = (node: GraphNode) => node.type.startsWith('stk.source.file@');
   const queue = [probe.node];
   const seen = new Set<string>();
+  const sources: GraphNode[] = [];
   while (queue.length) {
     const id = queue.shift()!;
     if (seen.has(id)) continue;
     seen.add(id);
     const node = nodes.get(id);
     if (!node) continue;
-    const metadata: Record<string, unknown> = {};
-    for (const key of ['origin', 'spacing'] as const) { const v = param(node, key); if (Array.isArray(v) && v.length === 3) metadata[key] = v; }
-    const extra = Object.keys(metadata).length ? {metadata} : {};
-    if (node.type.startsWith('stk.source.file@')) {
-      const binding = param(node, 'binding'), path = param(node, 'path');
-      const task = own(ctx.bindings, binding);
-      if (!task) return {error: `数据源 ${String(binding)} 尚未绑定任务`};
-      if (typeof path !== 'string' || !path) return {error: `节点 ${id} 缺少文件路径`};
-      return {task_id: task, path, node: id, ...extra};
-    }
-    if (node.type.startsWith('stk.source.muferro_frame@')) {
-      const dataset = String(param(node, 'dataset') ?? probe.dataset ?? 'Polar');
-      const ref = node.params?.step;
-      const resolved = isParamRef(ref) ? own(ctx.result?.parameters, ref.$param)?.value ?? own(ctx.values, ref.$param) : Number.isInteger(ref) ? ref : own(ctx.result?.parameters, `${id}.step`)?.value;
-      const step = typeof resolved === 'string' && /^\d+$/.test(resolved) ? Number(resolved) : resolved;
-      if (!Number.isInteger(step) || (step as number) < 0) return {error: '请先完成一次图谱计算以确定探针所在的时间步'};
-      const run = nodes.get(linkedNode(node.inputs?.frames) ?? '');
-      const binding = run ? param(run, 'binding') : undefined;
-      const task = own(ctx.bindings, binding);
-      if (!task) return {error: `数据源 ${String(binding ?? '?')} 尚未绑定任务`};
-      // 'auto' (the default): the case directory recorded by the launcher; the published frame names it.
-      const caseDir = run ? String(param(run, 'case_dir') ?? 'auto') : 'auto';
-      const name = `${dataset}.${String(step).padStart(8, '0')}.dat`;
-      const published = ctx.artifacts?.find(a => { const m = FRAME.exec(a.path); return !!m && m[1] === dataset && Number(m[2]) === step; });
-      const path = published?.path ?? (caseDir && caseDir !== '.' && caseDir !== 'auto' ? `${caseDir.replace(/\/+$/, '')}/${name}` : name);
-      return {task_id: task, path, node: id, ...extra};
-    }
-    queue.push(...linkedNodes(node.inputs));
+    if (node.type.startsWith('stk.source.')) sources.push(node);
+    else queue.push(...linkedNodes(node.inputs));
   }
-  return {error: `从节点 ${probe.node} 向上未找到场数据源`};
+  const frame = sources.find(isFrame);
+  if (frame && sources.length > 1) return {error: '无法确定所选图层对应的唯一 MuFerro 场数据源'};
+  const node = frame ?? sources.find(isFile);
+  if (!node) return {error: `从节点 ${probe.node} 向上未找到场数据源`};
+  const id = node.id;
+  const metadata: Record<string, unknown> = {};
+  for (const key of ['origin', 'spacing'] as const) {
+    const v = param(node, key);
+    if (Array.isArray(v) && v.length === 3) metadata[key] = v;
+  }
+  const extra = Object.keys(metadata).length ? {metadata} : {};
+  if (!frame) {
+    const binding = param(node, 'binding'), path = param(node, 'path');
+    const task = own(ctx.bindings, binding);
+    if (!task) return {error: `数据源 ${String(binding)} 尚未绑定任务`};
+    if (typeof path !== 'string' || !path) return {error: `节点 ${id} 缺少文件路径`};
+    return {task_id: task, path, node: id, ...extra};
+  }
+
+  // A shared parameter report can be overwritten by a second node's resolved step.
+  // The scene's time can also belong to a different layer.
+  const ref = frame.params?.step;
+  const shared = isParamRef(ref) && graph.nodes.some(n => n !== frame && isParamRef(n.params?.step) && n.params!.step.$param === ref.$param);
+  const step = own(ctx.result?.parameters, `${id}.step`)?.value ??
+    (isParamRef(ref) && !shared ? own(ctx.result?.parameters, ref.$param)?.value : undefined);
+  if (!Number.isSafeInteger(step) || step < 0) return {error: '无法确定所选图层实际使用的 MuFerro 时间步'};
+  const run = nodes.get(linkedNode(frame.inputs?.frames) ?? '');
+  if (!run?.type.startsWith('stk.source.muferro_run@')) return {error: '无法确定 MuFerro 帧所属的计算数据源'};
+  const binding = param(run, 'binding');
+  const task = own(ctx.bindings, binding);
+  if (!task) return {error: `数据源 ${String(binding ?? '?')} 尚未绑定任务`};
+  const caseDir = param(run, 'case_dir') ?? 'auto';
+  if (typeof caseDir !== 'string') return {error: '无法确定 MuFerro 算例目录'};
+  const dataset = param(frame, 'dataset') ?? 'Polar';
+  return {task_id: task, node: id, frame: `${dataset}.${String(step).padStart(8, '0')}.dat`, caseDir, ...extra};
+}
+
+/** Match a MuFerro frame against the published artifacts of the source's own Runtime task. */
+export function resolveProbeArtifact({frame, caseDir}: MuFerroProbeSource, artifacts: Artifact[]): string {
+  const paths = artifacts.map(item => item?.path).filter(path => typeof path === 'string');
+  if (caseDir !== 'auto') {
+    const directory = caseDir.split('/').filter(part => part && part !== '.').join('/');
+    const path = directory ? `${directory}/${frame}` : frame;
+    if (paths.includes(path)) return path;
+  } else {
+    const matches = [...new Set(paths.filter(path => path.split('/').at(-1) === frame))];
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) throw new Error('此任务发布了多个同名 MuFerro 帧，无法确定图层使用的文件');
+  }
+  throw new Error('此任务未发布与所选图层匹配的 MuFerro 帧');
 }
 
 // ---------------------------------------------------------------------------------------------
