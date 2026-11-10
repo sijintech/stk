@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <gtest/gtest.h>
+#include "stk/app/project_archive.hh"
 #include "stk/app/project_attention.hh"
 #include "stk/app/project_discussion.hh"
 #include "stk/app/project_state.hh"
@@ -698,6 +699,92 @@ TEST_F(SavedConversationNavigationPython, AttentionRefusesSourceABAAndTheReopene
   f.screen.run_deferred();
   EXPECT_EQ(f.screen.maximized(), &home());
   EXPECT_TRUE(project().discussion().exchange_id().empty());
+}
+
+TEST_F(SavedConversationNavigationPython, RecentQuestionsOpenFromTasksAndResultsAtBothWidths)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_table());
+  ASSERT_NO_FATAL_FAILURE(save_question(kFirst, "First saved question"));
+  ASSERT_NO_FATAL_FAILURE(save_question(kSecond, "Second saved question", true));
+  auto &discussion = project().discussion();
+  const auto compose_context = discussion.context();
+  const auto question = "ai_question/" + handle();
+  const auto click = [&](const std::string &key) {
+    ASSERT_NE(widget(key), nullptr) << key;
+    const auto [x, y] = f.widget_center(key);
+    ASSERT_TRUE(f.drv->click(x, y)) << key;
+    f.screen.run_deferred();
+    f.drv->frame();
+  };
+  const auto wait_for_question = [&](const char *id) {
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.drv->frame();
+      return !discussion.exchange_busy() && !discussion.busy() &&
+             io::get_string(discussion.exchange_request(), "id") == id && widget(question);
+    }, 30)) << discussion.exchange_error();
+    ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
+  };
+
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  ASSERT_NO_FATAL_FAILURE(wait_for_question(kSecond));
+  widget(question)->string.assign("Draft stays in the workbench");
+  auto *conversation = f.screen.maximized();
+  ASSERT_NO_FATAL_FAILURE(click("workbench_tasks"));
+  ASSERT_EQ(dynamic_cast<EditorArea &>(*f.screen.maximized()).editor().type().id, kEditorJobs);
+  const auto first = std::string("workbench_question/") + kFirst;
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget(first) && widget(first)->enabled; }, 30));
+  ASSERT_NO_FATAL_FAILURE(click(first));
+  ASSERT_NO_FATAL_FAILURE(wait_for_question(kFirst));
+  EXPECT_EQ(f.screen.maximized(), conversation);
+  EXPECT_EQ(io::get_string(discussion.exchange_question(), "text"), "First saved question");
+  EXPECT_EQ(widget(question)->string.value(), "Draft stays in the workbench");
+
+  ASSERT_NO_FATAL_FAILURE(click("workbench_results"));
+  auto *results = f.screen.maximized();
+  const auto camera = f.shell->store().viewer().camera_serial();
+  f.drv->ctx.rect.xmax = 680;
+  f.drv->frame();
+  EXPECT_EQ(f.screen.maximized(), results);
+  EXPECT_EQ(widget(first), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+  const ui::Widget *second = nullptr;
+  for (const auto &block : f.screen.ui()->blocks()) {
+    for (const auto &candidate : block->widgets()) {
+      if (candidate.type == ui::WidgetType::MenuItem && candidate.text.ends_with("Second saved question")) {
+        second = &candidate;
+      }
+    }
+  }
+  ASSERT_NE(second, nullptr);
+  EXPECT_EQ(second->menu_index, 0);  // Newest comes first even after visiting the older question.
+  const auto key = second->key;
+  ASSERT_NO_FATAL_FAILURE(click(key));
+  ASSERT_NO_FATAL_FAILURE(wait_for_question(kSecond));
+  EXPECT_EQ(f.screen.maximized(), conversation);
+  EXPECT_EQ(io::get_string(discussion.exchange_reply(), "text"), "Saved answer");
+  EXPECT_EQ(widget(question)->string.value(), "Draft stays in the workbench");
+  EXPECT_EQ(discussion.context(), compose_context);
+  EXPECT_EQ(project().project()->revision, 1);
+  ASSERT_NO_FATAL_FAILURE(click("workbench_results"));
+  EXPECT_EQ(f.screen.maximized(), results);
+  EXPECT_EQ(f.shell->store().viewer().camera_serial(), camera);
+
+  // A changed list must close an open menu before the old row can name another question.
+  ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+  const auto menu_id = widget("workbench_history")->id;
+  auto &archive = f.shell->store().archive();
+  ASSERT_TRUE(archive.set("request", {kSecond}, true));
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    const auto *items = discussion.recent_requests();
+    return items && items->size() == 1 && io::get_string(items->front(), "request_id") == kFirst;
+  }, 30)) << discussion.recent_requests_error();
+  ASSERT_NE(widget("workbench_history"), nullptr);
+  EXPECT_NE(widget("workbench_history")->id, menu_id);
+  EXPECT_EQ(widget(key), nullptr);
+  EXPECT_EQ(f.screen.maximized(), results);
+  EXPECT_EQ(discussion.exchange_id(), kSecond);
 }
 
 TEST_F(WorkspaceNavigationPython, CapturedConversationOpensWhileOnlyTheProjectCatalogIsRefreshing)

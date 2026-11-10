@@ -416,6 +416,155 @@ class ProjectPython : public ::testing::Test {
   }
 };
 
+class RecentRequestsPython : public ProjectPython {
+ protected:
+  void configure_bridge(bridge::ClientOptions &options, const std::string &python) override
+  {
+    const auto script = dir.path() / "recent_bridge.py";
+    std::ofstream(script) << R"PY(
+from pathlib import Path
+from time import monotonic, sleep
+from suan.desktop_bridge import server
+from suan.desktop_bridge.__main__ import main
+from suan.desktop_bridge.protocol import BridgeError
+
+root = Path(__file__).parent
+original = server.Bridge.__init__
+def init(self, *args, **kwargs):
+    original(self, *args, **kwargs)
+    read = self.methods["project.requests.recent"]
+    def recent(params, call):
+        if (root / "fail_recent").exists():
+            (root / "fail_recent").unlink()
+            raise BridgeError("unavailable", "Fixture recent read refused")
+        result = read(params, call)
+        if (root / "hold_recent").exists():
+            (root / "hold_recent").unlink()
+            (root / "recent_is_held").touch()
+            deadline = monotonic() + 15
+            while not (root / "release_recent").exists() and monotonic() < deadline:
+                sleep(0.01)
+            call.after(lambda: (root / "recent_released").touch())
+        return result
+    self.methods["project.requests.recent"] = recent
+
+server.Bridge.__init__ = init
+main()
+)PY";
+    options.command = {python, "-u", core::path_to_utf8(script), "--stdio", "--state-dir",
+                       options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
+    options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
+    options.env["PYTHONDONTWRITEBYTECODE"] = "1";
+  }
+
+  void marker(const char *name) { std::ofstream(dir.path() / name) << "fixture"; }
+  void settle_archive()
+  {
+    auto &archive = f.shell->store().archive();
+    ASSERT_TRUE(loop.pump_until([&] { archive.sync(); return !archive.busy(); }, 30));
+  }
+};
+
+TEST_F(RecentRequestsPython, SharesOneReadAndTracksSavedStatusAndArchiveChanges)
+{
+  ASSERT_NO_FATAL_FAILURE(populated());
+  ASSERT_NO_FATAL_FAILURE(settle_archive());
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.recent_requests_supported());
+  EXPECT_EQ(discussion.recent_requests(), nullptr);
+  const auto calls = client->stats().calls_sent;
+  discussion.sync_recent_requests();
+  discussion.sync_recent_requests();
+  discussion.refresh_recent_requests();
+  EXPECT_FALSE(discussion.busy());
+  EXPECT_FALSE(discussion.exchange_busy());
+  ASSERT_TRUE(loop.pump_until([&] { return discussion.recent_requests() != nullptr; }, 30));
+  EXPECT_TRUE(discussion.recent_requests()->empty());
+  EXPECT_EQ(client->stats().calls_sent, calls + 1);
+
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Saved scope"));
+  ASSERT_NO_FATAL_FAILURE(settled());
+  ASSERT_TRUE(discussion.load_provider());
+  ASSERT_NO_FATAL_FAILURE(settled());
+  const std::string question = "观察样品的磁畴";
+  ASSERT_TRUE(discussion.prepare_question(io::get_string(discussion.context(), "id"), question,
+                                         "fixture-v1", "stk.text/1", "test-controlled"));
+  ASSERT_NO_FATAL_FAILURE(settled());
+  const auto id = discussion.exchange_id();
+  ASSERT_FALSE(id.empty());
+  discussion.sync_recent_requests();
+  ASSERT_TRUE(loop.pump_until([&] {
+    const auto *recent = discussion.recent_requests();
+    return recent && recent->size() == 1;
+  }, 30)) << discussion.recent_requests_error();
+  const auto entry = discussion.recent_requests()->at(0);
+  EXPECT_EQ(entry.at("request_id"), id);
+  EXPECT_EQ(entry.at("label"), question);
+  EXPECT_EQ(entry.at("status"), "pending");
+
+  ASSERT_TRUE(discussion.cancel_request(id));
+  ASSERT_NO_FATAL_FAILURE(settled());
+  discussion.sync_recent_requests();
+  ASSERT_TRUE(loop.pump_until([&] {
+    const auto *recent = discussion.recent_requests();
+    return recent && recent->at(0).at("status") == "cancelled";
+  }, 30)) << discussion.recent_requests_error();
+
+  auto &archive = f.shell->store().archive();
+  const auto version = archive.version();
+  ASSERT_TRUE(archive.set("request", {id}, true));
+  ASSERT_NO_FATAL_FAILURE(settle_archive());
+  ASSERT_GT(archive.version(), version);
+  EXPECT_EQ(discussion.recent_requests(), nullptr);
+  discussion.sync_recent_requests();
+  ASSERT_TRUE(loop.pump_until([&] { return discussion.recent_requests() != nullptr; }, 30));
+  EXPECT_TRUE(discussion.recent_requests()->empty());
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(RecentRequestsPython, WaitsForExplicitRetryAndDropsThePreviousProjectsLateReply)
+{
+  ASSERT_NO_FATAL_FAILURE(populated());
+  ASSERT_NO_FATAL_FAILURE(settle_archive());
+  auto &discussion = state().discussion();
+  marker("fail_recent");
+  discussion.sync_recent_requests();
+  ASSERT_TRUE(loop.pump_until([&] { return !discussion.recent_requests_error().empty(); }, 30));
+  EXPECT_EQ(discussion.recent_requests(), nullptr);
+  const auto failed = client->stats().calls_sent;
+  discussion.sync_recent_requests();
+  discussion.sync_recent_requests();
+  EXPECT_EQ(client->stats().calls_sent, failed);
+  discussion.refresh_recent_requests();
+  ASSERT_TRUE(loop.pump_until([&] { return discussion.recent_requests() != nullptr; }, 30));
+  EXPECT_TRUE(discussion.recent_requests_error().empty());
+
+  ASSERT_NO_FATAL_FAILURE(saved_request("11111111-2222-4333-8444-555555555555"));
+  marker("hold_recent");
+  discussion.refresh_recent_requests();
+  ASSERT_TRUE(loop.pump_until([&] { return std::filesystem::exists(dir.path() / "recent_is_held"); }, 30));
+  ASSERT_TRUE(state().create(dir.str() + "/other", "Other project"));
+  EXPECT_EQ(discussion.recent_requests(), nullptr);
+  ASSERT_NO_FATAL_FAILURE(settled());
+  ASSERT_NO_FATAL_FAILURE(settle_archive());
+  discussion.sync_recent_requests();
+  ASSERT_TRUE(loop.pump_until([&] { return discussion.recent_requests() != nullptr; }, 30));
+  ASSERT_TRUE(discussion.recent_requests()->empty());
+  marker("release_recent");
+  ASSERT_TRUE(loop.pump_until([&] { return std::filesystem::exists(dir.path() / "recent_released"); }, 30));
+  bool barrier = false;
+  client->call("project.requests.recent", {{"handle", state().project()->handle}}).then([&](auto result) {
+    EXPECT_TRUE(result.ok());
+    barrier = true;
+  });
+  ASSERT_TRUE(loop.pump_until([&] { return barrier; }, 30));
+  ASSERT_NE(discussion.recent_requests(), nullptr);
+  EXPECT_TRUE(discussion.recent_requests()->empty());
+  EXPECT_TRUE(discussion.recent_requests_error().empty());
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
 class ProjectStream : public ProjectPython {
  protected:
   virtual bool legacy() const { return false; }

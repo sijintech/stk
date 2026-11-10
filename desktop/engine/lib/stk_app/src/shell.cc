@@ -17,6 +17,7 @@
 #include "stk/app/workspace_transfer.hh"
 #include "stk/core/paths.hh"
 #include "stk/gfx/fonts.hh"
+#include "stk/ui/text.hh"
 #include "stk/ui/ui.hh"
 #include "stk/wm/csd.hh"
 #include "stk/wm/window.hh"
@@ -851,16 +852,77 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
     if (rail_) { nav.separator(); }
     nav.button("workbench_split", shell_.store_.tr("workbench.nav.split"),
                shell_.workbench_navigation_action(s, nullptr));
+    auto &project = shell_.store_.project();
     if (rail_) {
       nav.separator();
-      const auto &project = shell_.store_.project().project();
-      const std::string_view name = project ? std::string_view(project->name) :
-                                              shell_.store_.tr("script.no_project");
+      const std::string_view name = project.project() ? std::string_view(project.project()->name) :
+                                                        shell_.store_.tr("script.no_project");
       nav.label(name).tip(name);
     }
+    build_recent_questions(nav, project, static_cast<EditorArea &>(*area()));
   }
 
  private:
+  void build_recent_questions(ui::Layout &nav, ProjectState &project, EditorArea &origin)
+  {
+    auto &discussion = project.discussion();
+    if (!discussion.recent_requests_supported() || !discussion.generation_supported()) { return; }
+    discussion.sync_recent_requests();
+    const auto *questions = discussion.recent_requests();
+    const auto &error = discussion.recent_requests_error();
+    const auto &info = *project.project();
+    const auto scope = shell_.store_.project_scope_epoch();
+    const auto refresh = [shell = &shell_, weak = shell_.lifetime(), scope] {
+      if (!weak.expired() && shell->store_.project_scope_epoch() == scope) {
+        shell->store_.project().discussion().refresh_recent_requests();
+      }
+    };
+    const bool can_open = !project.busy() && !discussion.busy() && !discussion.exchange_busy();
+    const std::string title(shell_.store_.tr("workbench.history.recent"));
+    const std::string refresh_label(shell_.store_.tr("ai.refresh_history"));
+    std::string identity = "recent_questions/" + info.handle;
+    auto *rail = rail_ ? &nav.scope(identity) : nullptr;
+    const auto &style = nav.ctx().style();
+    const float menu_text_width = std::max(1.0f, float(origin.screen()->rect().width()) -
+                                                   2 * style.text_margin - style.unit);
+    std::vector<ui::MenuEntry> menu;
+    if (rail) {
+      rail->separator();
+      rail->label(title);
+    }
+    if (questions) {
+      for (const auto &question : *questions) {
+        const auto id = io::get_string(question, "request_id");
+        const auto label = io::get_string(question, "label");
+        const auto text = mark(id == discussion.exchange_id(), label);
+        auto open = shell_.saved_conversation_action(origin, id);
+        const bool enabled = can_open && bool(open);
+        if (rail) {
+          rail->button("workbench_question/" + id, text, std::move(open)).disable(!enabled).tip(label);
+        }
+        else {
+          identity += "/" + id;
+          menu.push_back({ui::clip_text(text, menu_text_width, nav.ctx().measurer(), style.font),
+                          std::move(open), enabled});
+        }
+      }
+    }
+    if (!error.empty() || !questions || questions->empty()) {
+      const auto status = shell_.store_.tr(!error.empty() ? "workbench.history.unavailable" :
+                                         questions ? "workbench.history.empty" : "workbench.history.loading");
+      if (rail) { rail->label(status).tip(error); }
+      else { menu.push_back({std::string(status), {}, false}); }
+    }
+    if (rail) { rail->button("workbench_refresh_history", refresh_label, refresh); }
+    else {
+      // A popup dispatches by row index. Close it when a refresh or project switch replaces the rows.
+      if (!error.empty()) { identity += "/error"; }
+      menu.push_back({refresh_label, refresh});
+      nav.scope(identity).menu_button("workbench_history", shell_.store_.tr("workbench.nav.history"), std::move(menu))
+          .tip(error.empty() ? info.name : error);
+    }
+  }
+
   AppShell &shell_;
   bool rail_;
 };

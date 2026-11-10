@@ -28,6 +28,16 @@ class ProjectDiscussion {
   void reset();
   bool supported() const;
   bool requests_supported() const;
+  /** Optional, local-only rail summaries for a loaded project. */
+  bool recent_requests_supported() const;
+  /** Read once when due. Visible callers share the cache and can call this each frame. */
+  void sync_recent_requests();
+  /** Request an explicit refresh, or reuse the read already in flight. */
+  void refresh_recent_requests();
+  /** Array of summaries, or nullptr until this project scope has a current successful read. */
+  const io::Json *recent_requests() const;
+  /** Last read error in this scope. A refresh can retain earlier successful summaries. */
+  const std::string &recent_requests_error() const;
   bool generation_supported() const;
   bool progress_supported() const;
   bool edit_proposals_supported() const;
@@ -112,6 +122,9 @@ class ProjectDiscussion {
             bool preserve_error = false, std::function<void(const std::string &)> failed = {});
   io::Json request(const std::string &kind, io::Json params, const std::string &id_key);
   bool mutate_request(const std::string &method, const std::string &id);
+  bool recent_requests_current() const;
+  void reset_recent_requests();
+  void observe_recent_request_status(const io::Json &record);
   void exchange_changed();
   void exchange_failed(const std::string &error);
   bool begin_exchange_read();
@@ -148,5 +161,13 @@ class ProjectDiscussion {
   bool exchange_preparing_ = false, exchange_reading_ = false, exchange_pending_ = false;
   bool exchange_following_ = false, exchange_clock_seen_ = false;
   double exchange_now_ = 0, exchange_due_ = 0, exchange_deadline_ = -1;
+  struct RecentRequests {
+    io::Json items;
+    std::string handle, error;
+    uint64_t scope = 0, bridge = 0, archive = 0;
+    bool dirty = true;
+    std::optional<bridge::Future<io::Json>> read;
+  } recent_;
+  uint64_t recent_epoch_ = 0;
 };
 }  // namespace stk::app

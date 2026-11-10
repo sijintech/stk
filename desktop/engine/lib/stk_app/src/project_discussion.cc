@@ -45,6 +45,7 @@ void ProjectDiscussion::reset()
   origin_draft_.clear();
   contexts_ = messages_ = proposals_ = request_page_ = {};
   show_archived_.clear(); listed_archive_.clear();
+  reset_recent_requests();
   context_ = message_ = origin_ = requests_ = generation_request_ = Json::object();
   provider_ = Json::object(); provider_loaded_ = false;
   usage_ = Json::object(); usage_loaded_ = usage_reading_ = false; usage_completed_.clear();
@@ -82,6 +83,108 @@ bool ProjectDiscussion::requests_supported() const
     if (!hello || !hello->has_method(method)) { return false; }
   }
   return true;
+}
+
+bool ProjectDiscussion::recent_requests_supported() const
+{
+  if (!project_.ready() || !project_.loaded() || project_.project()->format_version < 8) { return false; }
+  const auto hello = store_.bridge()->hello_info();
+  return hello && hello->has_method("project.requests.recent");
+}
+
+bool ProjectDiscussion::recent_requests_current() const
+{
+  const auto &project = project_.project();
+  return project && !recent_.handle.empty() && recent_.handle == project->handle &&
+         recent_.scope == store_.project_scope_epoch() && recent_.bridge == store_.bridge_epoch();
+}
+
+void ProjectDiscussion::reset_recent_requests()
+{
+  auto read = std::move(recent_.read);
+  recent_ = {};
+  ++recent_epoch_;
+  if (read) { read->cancel(); }
+}
+
+const Json *ProjectDiscussion::recent_requests() const
+{
+  return recent_.items.is_array() && recent_requests_current() && recent_.archive == store_.archive().version() ?
+             &recent_.items : nullptr;
+}
+
+const std::string &ProjectDiscussion::recent_requests_error() const
+{
+  static const std::string empty;
+  return recent_requests_current() && recent_.archive == store_.archive().version() ? recent_.error : empty;
+}
+
+void ProjectDiscussion::sync_recent_requests()
+{
+  if (!recent_requests_current() && !recent_.handle.empty()) { reset_recent_requests(); }
+  if (!recent_requests_supported() || project_.busy()) { return; }
+  auto &archive = store_.archive();
+  archive.sync();
+  if (recent_.handle.empty()) {
+    recent_.handle = project_.project()->handle;
+    recent_.scope = store_.project_scope_epoch();
+    recent_.bridge = store_.bridge_epoch();
+  }
+  if (recent_.archive != archive.version()) {
+    recent_.archive = archive.version();
+    recent_.items = nullptr;
+    recent_.error.clear();
+    recent_.dirty = true;
+  }
+  if (!recent_.dirty || recent_.read) { return; }
+  recent_.dirty = false;
+  recent_.error.clear();
+  const auto epoch = recent_epoch_, archived = recent_.archive;
+  const std::weak_ptr<bool> weak = alive_;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  recent_.read = store_.bridge()->call("project.requests.recent", {{"handle", recent_.handle}}, options);
+  auto read = *recent_.read;
+  read.then([this, weak, epoch, archived](bridge::Result<Json> result) {
+    if (!weak.lock() || epoch != recent_epoch_) { return; }
+    recent_.read.reset();
+    if (!recent_requests_current()) { return; }
+    // A mutation or newer archive observation can overtake this read.
+    if (!recent_.dirty && archived == store_.archive().version()) {
+      if (!result) { recent_.error = result.error().describe(); }
+      else {
+        const auto items = result.value().find("requests");
+        if (items != result.value().end() && items->is_array()) { recent_.items = *items; }
+        else { recent_.error = "Invalid recent questions response"; }
+      }
+    }
+    store_.changed();
+  });
+  store_.changed();
+}
+
+void ProjectDiscussion::refresh_recent_requests()
+{
+  if (!recent_.read) { recent_.dirty = true; }
+  sync_recent_requests();
+}
+
+void ProjectDiscussion::observe_recent_request_status(const Json &record)
+{
+  const auto id = io::get_string(record, "id"), status = io::get_string(record, "status");
+  const bool same_exchange = io::get_string(exchange_request_, "id") == id;
+  // Repeated polling of an unchanged status must not retry a failed rail read.
+  if (same_exchange && io::get_string(exchange_request_, "status") == status) { return; }
+  const auto *items = recent_requests();
+  if (!items) {
+    if (same_exchange && recent_.read) { recent_.dirty = true; }
+    return;
+  }
+  if (std::any_of(items->begin(), items->end(), [&](const auto &item) {
+        return io::get_string(item, "request_id") == id && io::get_string(item, "status") != status;
+      })) {
+    recent_.dirty = true;
+  }
 }
 
 bool ProjectDiscussion::call(const std::string &method, Json params,
@@ -229,6 +332,7 @@ bool ProjectDiscussion::create_request(const std::string &model)
       {{"adapter", provider_.at("adapter")}, {"model", model}, {"max_output_tokens", 4096}}}}, "request_id");
   return call("project.requests.create", std::move(params), [this](const Json &result) {
     generation_request_ = result.at("request"); request_page_.loaded = false;
+    recent_.dirty = true;
   });
 }
 
@@ -354,6 +458,7 @@ bool ProjectDiscussion::mutate_request(const std::string &method, const std::str
 {
   const bool accepted = call(method, {{"request_id", id}}, [this, id](const Json &result) {
     generation_request_ = result.at("request"); request_page_.loaded = false;
+    recent_.dirty = true;
     if (exchange_id_ == id) {
       // Keep the last coherent bundle until the new request and any saved reply
       // have been read together. Earlier polling snapshots are already fenced.
@@ -424,6 +529,7 @@ bool ProjectDiscussion::prepare_question(const std::string &context_id, const st
         throw std::runtime_error("Saved request does not match its prepared input");
       }
       generation_request_ = record; request_page_.loaded = false;
+      recent_.dirty = true;
       exchange_preparing_ = false;
       // Repeating Prepare may retrieve an already completed request. Fetch its
       // actual saved answer; never replace it with a new empty exchange.
@@ -666,6 +772,7 @@ void ProjectDiscussion::publish_exchange(const Json &bundle)
     }
   }
   if (!edit_proposal.empty()) { validate_edit_proposal(edit_proposal, record); }
+  observe_recent_request_status(record);
   exchange_request_ = record; exchange_context_ = context;
   exchange_question_ = question; exchange_reply_ = reply;
   exchange_progress_ = progress.is_null() ? Json::object() : progress;
