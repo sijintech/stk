@@ -133,7 +133,8 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
   EXPECT_FALSE(tasks->find_region("workbench_strip")->rect().empty());
   EXPECT_EQ(f.screen.ui()->find("editor_type"), nullptr);
   EXPECT_EQ(f.screen.ui()->find("area_menu"), nullptr);
-  EXPECT_NE(f.screen.ui()->find("submit"), nullptr);
+  EXPECT_EQ(f.screen.ui()->find(tasks->id() + "/header/submit"), nullptr);
+  EXPECT_NE(f.screen.ui()->find("focused_jobs/submit"), nullptr);
   EXPECT_NE(f.screen.ui()->find("refresh"), nullptr);
   click("workbench_results");
   ASSERT_EQ(f.screen.maximized(), &f.area("a2"));

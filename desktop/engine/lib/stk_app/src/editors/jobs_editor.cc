@@ -13,6 +13,7 @@
 
 #include "workspace_fields.hh"
 #include "stk/app/jobs_state.hh"
+#include "stk/app/shell.hh"
 #include "stk/platform/file_dialog.hh"
 
 #include "../app_theme.hh"
@@ -120,11 +121,13 @@ class JobsEditor final : public Editor {
   {
     JobsState &jobs = ctx.store.jobs();
     jobs.sync();
-    const std::string_view label = ctx.tr("jobs.submit");
-    row.button("submit", label, [&jobs]() { jobs.submit(); })
-        .width(fit_units(ctx, label))
-        .disable(!jobs.ready() || jobs.workspace().empty())
-        .tip(ctx.tr("jobs.submit.tip"));
+    if (!focused_tasks(ctx)) {
+      const std::string_view label = ctx.tr("jobs.submit");
+      row.button("submit", label, [&jobs]() { jobs.submit(); })
+          .width(fit_units(ctx, label))
+          .disable(!jobs.ready() || jobs.workspace().empty())
+          .tip(ctx.tr("jobs.submit.tip"));
+    }
     const std::string_view refresh = ctx.tr("jobs.refresh");
     row.button("refresh", refresh, [&jobs]() {
          jobs.refresh_connections();
@@ -151,13 +154,19 @@ class JobsEditor final : public Editor {
         jobs.set_preferred(pref_connection_, pref_node_, pref_workspace_);
       }
     }
-    status_line(l, ctx, jobs);
-    connection_panel(l, ctx, jobs);
-    workspace_panel(l, ctx, jobs);
-    submit_panel(l, ctx, jobs);
-    tasks_panel(l, ctx, jobs);
-    detail_panel(l, ctx, jobs);
-    review_panel(l, ctx, jobs);
+    const bool focused = focused_tasks(ctx);
+    auto &body = focused ? l.scope("focused_jobs") : l;
+    status_line(body, ctx, jobs);
+    if (focused) { tasks_panel(body, ctx, jobs); }
+    auto *environment = focused ? body.panel("environment", environment_title(ctx, jobs), false) : &body;
+    if (environment) {
+      connection_panel(*environment, ctx, jobs);
+      workspace_panel(*environment, ctx, jobs);
+    }
+    submit_panel(body, ctx, jobs, !focused);
+    if (!focused) { tasks_panel(body, ctx, jobs); }
+    detail_panel(body, ctx, jobs);
+    review_panel(body, ctx, jobs);
     dialogs(ctx, jobs);
   }
 
@@ -237,6 +246,12 @@ class JobsEditor final : public Editor {
   }
 
  private:
+  static bool focused_tasks(const EditorContext &ctx)
+  {
+    const auto *screen = ctx.area.screen();
+    return screen && screen->maximized() == &ctx.area && ctx.area.shell().workbench_is_focused(*screen);
+  }
+
   static Json encode_form(const SubmitForm &f)
   {
     return {{"version", 1}, {"use_template", f.use_template}, {"template_name", f.template_name},
@@ -301,6 +316,25 @@ class JobsEditor final : public Editor {
       return std::string(ctx.tr(c.info.state == "not_initialized" ? "conn.local.unset" : "conn.local"));
     }
     return c.info.name + " (" + std::string(ctx.tr(c.info.kind == "hub" ? "conn.kind.hub" : "conn.kind.runtime")) + ")";
+  }
+
+  static std::string environment_title(EditorContext &ctx, const JobsState &jobs)
+  {
+    std::string title(ctx.tr("jobs.panel.environment"));
+    if (const auto *connection = jobs.active()) { title += " · " + connection_name(ctx, *connection); }
+    for (const auto &node : jobs.nodes()) {
+      if (node.id == jobs.node()) {
+        title += " · " + (node.name.empty() ? node.id : node.name);
+        break;
+      }
+    }
+    for (const auto &workspace : jobs.workspaces()) {
+      if (workspace.id == jobs.workspace()) {
+        title += " · " + (workspace.name.empty() ? workspace.id.substr(0, 12) : workspace.name);
+        break;
+      }
+    }
+    return title;
   }
 
   static const char *health_key(const Health h)
@@ -549,9 +583,9 @@ class JobsEditor final : public Editor {
 
   /* ---- Submit form ---- */
 
-  void submit_panel(ui::Layout &l, EditorContext &ctx, JobsState &jobs)
+  void submit_panel(ui::Layout &l, EditorContext &ctx, JobsState &jobs, bool default_open)
   {
-    ui::Layout *p = l.panel("submit", ctx.tr("jobs.panel.submit"));
+    ui::Layout *p = l.panel("submit", ctx.tr("jobs.panel.submit"), default_open);
     if (!p) {
       return;
     }

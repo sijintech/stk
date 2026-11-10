@@ -199,6 +199,62 @@ TEST(JobsLayout, OpenCancelDialogDisablesDispatchAfterItsTaskOrScopeChanges)
   }
 }
 
+TEST(JobsLayout, FocusedTasksShowTheQueueAndRequireOpeningTheDraftToSubmit)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  UiOnFake u;
+  app::JobsState &jobs = u.jobs();
+  ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+  jobs.select_connection("runtime:lab");
+  ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty(); }));
+  const auto workspace = jobs.workspace();
+  u.f.shell->open_workbench(u.f.screen);
+  u.f.screen.run_deferred();
+  const auto navigate = [&](const char *key) {
+    ASSERT_NE(u.find(key), nullptr);
+    u.click(key);
+    u.f.screen.run_deferred();
+    u.f.drv->frame();
+  };
+  ASSERT_NO_FATAL_FAILURE(navigate("workbench_tasks"));
+  ASSERT_EQ(u.f.screen.maximized(), &u.f.area("a1"));
+  const std::string base = "a1/main/focused_jobs/";
+  const auto *queue = u.find(base + "tasks/tasks");
+  ASSERT_NE(queue, nullptr);
+  const auto queue_top = queue->rect.y;
+  const auto *environment = u.find(base + "environment");
+  ASSERT_NE(environment, nullptr);
+  EXPECT_LT(queue_top, environment->rect.y);
+  ASSERT_NE(jobs.active(), nullptr);
+  EXPECT_NE(environment->text.find(jobs.active()->info.name), std::string::npos);
+  EXPECT_EQ(u.find(base + "environment/conn/connection"), nullptr);
+  EXPECT_EQ(u.find(base + "submit/submit_form"), nullptr);
+  EXPECT_EQ(u.find("a1/header/submit"), nullptr);
+
+  u.click(base + "environment");
+  ASSERT_NE(u.find(base + "environment/conn/connection"), nullptr);
+  EXPECT_EQ(jobs.workspace(), workspace);
+  u.click(base + "environment");
+  u.click(base + "submit");
+  ASSERT_NE(u.find(base + "submit/submit_form"), nullptr);
+  u.type(base + "submit/name", "Focused draft");
+  EXPECT_EQ(jobs.form().name, "Focused draft");
+  ASSERT_NO_FATAL_FAILURE(navigate("workbench_results"));
+  u.f.drv->ctx.rect.xmax = 680;
+  u.f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(navigate("workbench_tasks"));
+  const auto *name = u.find(base + "submit/name");
+  ASSERT_NE(name, nullptr);
+  EXPECT_EQ(name->string.value(), "Focused draft");
+  EXPECT_EQ(jobs.workspace(), workspace);
+  EXPECT_FALSE(jobs.submission());
+  EXPECT_EQ(wmtest::read_text(u.dir.str() + "/model/methods.log").find("task.submit\n"), std::string::npos);
+  u.click(base + "submit/submit_form");
+  ASSERT_TRUE(u.pump([&] { return jobs.submission() && jobs.submission()->state == app::SubmitState::Done; }));
+}
+
 TEST(JobsLayout, AddRuntimeDialogAndThePathFieldFallback)
 {
   if (std::string(STK_BRIDGE_FAKE).empty()) {

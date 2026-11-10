@@ -711,6 +711,7 @@
   "jobs.op.workspaces": "Listing workspaces",
   "jobs.panel.advanced": "Outputs and environment",
   "jobs.panel.connection": "Connection",
+  "jobs.panel.environment": "Run environment",
   "jobs.panel.detail": "Task: {name}",
   "jobs.panel.resources": "Resources",
   "jobs.panel.retry": "Retry policy",

@@ -711,6 +711,7 @@
   "jobs.op.workspaces": "列出工作区",
   "jobs.panel.advanced": "输出与环境变量",
   "jobs.panel.connection": "运行位置",
+  "jobs.panel.environment": "运行环境",
   "jobs.panel.detail": "任务：{name}",
   "jobs.panel.resources": "资源配置",
   "jobs.panel.retry": "重试策略",
