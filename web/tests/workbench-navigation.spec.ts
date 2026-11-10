@@ -39,7 +39,7 @@ type Said = {id: string; role: string; content: string; created: number};
 let clock = 1794900000;
 const say = (id: string, role: string, content: string): Said => ({id, role, content, created: ++clock});
 class Hub {
-  rows: {id: string; name: string; created: number}[] = [];
+  rows: {id: string; name: string; created: number; label?: string}[] = [];
   readonly saved = new Map<string, Said[]>();
   readonly calls: string[] = [];
   readonly messages: {session: string; id: string; content: string}[] = [];
@@ -510,6 +510,26 @@ const sendButton = (page: Page) => page.locator('aside.chat form').getByRole('bu
 const resendButton = (page: Page) => page.locator('aside.chat .send-failure').getByRole('button', {name: '重新发送', exact: true});
 const label = (page: Page) => page.locator('aside.chat .conversation-name');
 const entries = (page: Page) => historyPanel(page).locator('.history-list li');
+test('history distinguishes generic saved conversations with their first question', async ({page}) => {
+  await page.setViewportSize({width: 1440, height: 900});
+  const hub = new Hub();
+  hub.rows = [
+    {id: A, name: '新会话', created: clock, label: '比较 300 K 的极化结果'},
+    {id: B, name: '材料复核', created: clock + 1, label: 'A preview must not override an explicit name'},
+  ];
+  hub.saved.set(A, [say('title-question', 'user', '比较 300 K 的极化结果')]);
+  hub.saved.set(B, []);
+  await hub.install(page);
+  const requested = page.waitForRequest(request => new URL(request.url()).pathname === '/api/v1/sessions');
+  await page.goto(ORIGIN + '/');
+  expect(new URL((await requested).url()).searchParams.get('include_labels')).toBe('true');
+  await expect(item(page, /材料复核/)).toBeVisible();
+  await expect(item(page, /A preview must not/)).toHaveCount(0);
+  await item(page, /比较 300 K 的极化结果/).click();
+  await expect(label(page)).toContainText('比较 300 K 的极化结果');
+  await shows(page, ['比较 300 K 的极化结果']);
+  expect(hub.calls.filter(call => call.startsWith('POST sessions/'))).toEqual([]);
+});
 const box = async (page: Page, selector: string) => (await page.locator(selector).boundingBox())!;
 // Up to 1050 px (the app's compact width) the history is opened from the navigation on demand.
 const isNarrow = (page: Page) => page.viewportSize()!.width <= 1050;

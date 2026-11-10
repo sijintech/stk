@@ -17,6 +17,7 @@ import uuid
 from .blobs import BlobStore
 
 RESULT_INLINE_LIMIT = 64 * 1024
+_SESSION_LABEL_CHARS = 80
 PROFILES = ("", "desktop")
 ACTION_COLUMNS = ("id", "request", "node_id", "state", "result", "error", "created", "updated", "review_reason",
                   "result_ref")
@@ -41,6 +42,14 @@ def decode_result(text):
 
 def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _session_label(text):
+    printable = "".join(char if char.isprintable() else " " for char in (text or ""))
+    label = " ".join(printable.split())
+    if len(label) > _SESSION_LABEL_CHARS:
+        return label[:_SESSION_LABEL_CHARS - 1].rstrip() + "…"
+    return label
 
 
 class ControlStore:
@@ -353,6 +362,28 @@ class ControlStore:
         with self.db() as db:
             rows = db.execute("SELECT * FROM events WHERE id>? ORDER BY id LIMIT 100", (after,)).fetchall()
         return [{**dict(r), "payload": json.loads(r["payload"])} for r in rows]
+
+    def sessions(self, *, include_labels=False):
+        with self.db() as db:
+            if not include_labels:
+                return [dict(row) for row in db.execute("SELECT * FROM sessions ORDER BY created DESC")]
+            rows = db.execute("""
+                SELECT s.*, m.content AS first_user_content
+                FROM sessions AS s
+                LEFT JOIN (
+                    SELECT session_id, MIN(rowid) AS first_user_row
+                    FROM messages WHERE role = 'user'
+                    GROUP BY session_id
+                ) AS first ON first.session_id = s.id
+                LEFT JOIN messages AS m ON m.rowid = first.first_user_row
+                ORDER BY s.created DESC
+            """).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["label"] = _session_label(item.pop("first_user_content"))
+            result.append(item)
+        return result
 
     def session(self, identity, name="新会话"):
         with self.db() as db:

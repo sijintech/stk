@@ -3,6 +3,7 @@ import sys
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 
 import pytest
 pytest.importorskip("fastapi")
@@ -213,6 +214,73 @@ def test_session_history_is_read_only_and_keeps_legacy_creation(tmp_path):
         assert saved.json() == sent.json()
         assert c.get("/api/v1/sessions", headers=AUTH).json() == before
         assert c.app.state.store.events() == events
+
+
+def test_session_list_labels_are_optional_and_read_only(tmp_path, monkeypatch):
+    class ForbiddenModel:
+        async def reply(self, messages, context):
+            pytest.fail("Listing sessions must not call the model")
+
+    app = create_app(tmp_path, OWNER, model=ForbiddenModel())
+    store = app.state.store
+    short, long, hidden, empty = (digit * 32 for digit in "abcd")
+    for session in (short, long, hidden, empty):
+        store.session(session, name=f"Session {session[0]}")
+    store.message("1" * 32, short, "assistant", "Assistant text is not a title")
+    store.message("2" * 32, short, "user", "  First\tquestion\u200e\u202e\u2067\n details  ")
+    text = " \t问题\r\n观察\u2028样品\u202e\0" + "磁畴🙂" * 30
+    store.message("3" * 32, long, "user", text)
+    store.message("4" * 32, long, "assistant", "The answer should not rename the session")
+    store.message("5" * 32, long, "user", "Neither should a later question")
+    store.message("6" * 32, hidden, "user", "\t\0\u202e")
+    # A wall clock correction must not make the later question the first saved one.
+    with store.db() as db:
+        db.execute("UPDATE messages SET created = 0 WHERE id = ?", ("5" * 32,))
+
+    path = "/api/v1/sessions"
+    labeled_path = path + "?include_labels=true"
+    with TestClient(app) as c:
+        client, _ = paired(c, role="client")
+        node, _ = paired(c)
+        client_headers = {"Authorization": "Bearer " + client["token"]}
+        assert c.get(labeled_path).status_code == 401
+        assert c.get(labeled_path, headers={"Authorization": "Bearer " + node["token"]}).status_code == 403
+
+        legacy = c.get(path, headers=client_headers).json()
+        assert [row["id"] for row in legacy] == [empty, hidden, long, short]
+        assert all(set(row) == {"id", "name", "created"} for row in legacy)
+        assert c.get(path + "?include_labels=false", headers=client_headers).json() == legacy
+        before = {row["id"]: store.session_history(row["id"]) for row in legacy}
+        events = store.events()
+
+        statements = []
+        original_db = store.db
+
+        @contextmanager
+        def trace_db():
+            with original_db() as db:
+                db.set_trace_callback(statements.append)
+                yield db
+
+        # The owner credential adds no database authentication query.
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "db", trace_db)
+            response = c.get(labeled_path, headers=AUTH)
+        assert response.status_code == 200
+        assert len(statements) == 1 and statements[0].lstrip().startswith("SELECT")
+
+        expected_long = ("问题 观察 样品 " + "磁畴🙂" * 30)[:79] + "…"
+        labels = {short: "First question details", long: expected_long, hidden: "", empty: ""}
+        expected = [{**row, "label": labels[row["id"]]} for row in legacy]
+        assert response.json() == c.get(labeled_path, headers=client_headers).json() == expected
+        assert len(expected_long) == 80 and len(expected_long.encode("utf-8")) > 80
+        assert c.get(path, headers=client_headers).json() == legacy
+        assert {row["id"]: store.session_history(row["id"]) for row in legacy} == before
+        assert store.events() == events
+
+        store.message("7" * 32, long, "assistant", "Later answer")
+        store.message("8" * 32, long, "user", "Still later question")
+        assert c.get(labeled_path, headers=client_headers).json() == expected
 
 
 def test_remote_agent_requires_tls():

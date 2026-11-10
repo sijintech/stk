@@ -2,7 +2,7 @@ import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {flushSync} from 'react-dom';
 import {createRoot} from 'react-dom/client';
 import {action,api,ApiError,events,hasToken,Json,readNode,setToken} from './api';
-import {type Entry,useConversations} from './conversations';
+import {conversationTitle,type Entry,useConversations} from './conversations';
 import ErrorBoundary from './ErrorBoundary';
 import TaskObservation from './TaskObservation';
 import {isTerminalTaskState,type TaskFact,type TaskScope} from './taskFacts';
@@ -110,7 +110,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const refresh=useCallback(async()=>{
     if(refreshing.current)return;refreshing.current=true;
     try{
-      const [d,a,s,p]=await Promise.all([api('devices'),api('actions'),api('sessions'),api('policy').catch(error=>{
+      const [d,a,s,p]=await Promise.all([api('devices'),api('actions'),api('sessions?include_labels=true'),api('policy').catch(error=>{
         if(lostAccess(error))throw error;
         return error instanceof ApiError&&(error.status===404||error.status===501)?{}:null;
       })]);
@@ -207,7 +207,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // The unsent text of a conversation the Hub no longer has goes to a new local conversation, ready to send there.
   function moveDraft(){flushSync(()=>conv.moveDraft());composer.current?.focus({preventScroll:true});}
   const sessionRow=conv.saved[conv.session];
-  const sessionLabel=conv.missing.has(conv.session)?`已不存在 · ${conv.session.slice(0,6)}`:sessionRow?`${sessionRow.name} · ${conv.session.slice(0,6)}`:
+  const sessionLabel=conv.missing.has(conv.session)?`已不存在 · ${conv.session.slice(0,6)}`:sessionRow?`${conversationTitle(sessionRow)} · ${conv.session.slice(0,6)}`:
     conv.own.has(conv.session)?'新对话 · 未保存':`正在确认 · ${conv.session.slice(0,6)}`;
   const thread=conv.thread,pending=conv.pending&&!thread.messages.some(m=>m.id===conv.pending!.id)?conv.pending:null;
   async function probeValue(){

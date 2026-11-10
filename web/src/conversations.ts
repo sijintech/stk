@@ -10,7 +10,8 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {api,ApiError,type Json,uid} from './api';
 
-export type SessionRow={id:string;name:string;created:number};
+export type SessionRow={id:string;name:string;created:number;label?:string};
+export const conversationTitle=(row:SessionRow)=>row.name==='新会话'&&row.label?row.label:row.name;
 export type Thread={status:'loading'|'ready'|'missing'|'error';messages:Json[];error?:string};
 // The one unsent message of a conversation. Its ID is kept while it is sending or after it failed, so sending the
 // same text in the same conversation again reuses it: the Hub, which may already have recorded that message (or
@@ -143,9 +144,10 @@ export function useConversations(onAccessLost:()=>void,onSent:()=>void){
       let next=previous;
       for(const row of rows){
         if(!row||typeof row.id!=='string'||!SESSION_ID.test(row.id))continue;
-        const value={id:row.id,name:typeof row.name==='string'&&row.name?row.name:'新会话',created:Number(row.created)||0};
         const known=next[row.id];
-        if(known&&known.name===value.name&&known.created===value.created)continue;
+        const value={id:row.id,name:typeof row.name==='string'&&row.name?row.name:'新会话',
+          created:Number(row.created)||0,label:typeof row.label==='string'&&row.label?row.label:known?.label};
+        if(known&&known.name===value.name&&known.created===value.created&&known.label===value.label)continue;
         if(next===previous)next={...previous};
         next[row.id]=value;
       }
@@ -190,7 +192,7 @@ export function useConversations(onAccessLost:()=>void,onSent:()=>void){
   const others=[...new Set([...own,session,...Object.keys(drafts),...Object.keys(outgoing)])].filter(id=>!saved[id]&&kept(id)&&(own.has(id)||SESSION_ID.test(id)))
     .map(id=>entry(id,own.has(id)?'local':missing.has(id)?'missing':'unconfirmed',own.has(id)?'新对话':missing.has(id)?'已不存在的对话':'未确认的对话',0));
   const listed=Object.values(saved).filter(row=>!missing.has(row.id)||kept(row.id)).sort((a,b)=>b.created-a.created)
-    .map(row=>entry(row.id,missing.has(row.id)?'missing':'saved',row.name,row.created));
+    .map(row=>entry(row.id,missing.has(row.id)?'missing':'saved',conversationTitle(row),row.created));
   const thread=threads[session]??{status:'loading',messages:[]},mine=outgoing[session],draft=drafts[session]??'';
   const draftTooLong=tooLong(draft),canPost=sendable(session)&&mine?.state!=='sending';
   return {session,entries:[...others.filter(e=>e.kind==='local'),...others.filter(e=>e.kind!=='local'),...listed],

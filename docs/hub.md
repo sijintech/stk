@@ -192,12 +192,15 @@ M1 新增的路由（均需 `Authorization: Bearer …`）：
 | `GET /api/v1/graphs/catalog` | 客户端 | 节点目录 `stk.catalog/1` |
 | `GET /api/v1/graphs/presets` | 客户端 | 预设列表 `[{id, name, description, graph, bindings: [{name, description}], parameters}]` |
 
-工作台会话接口沿用客户端权限。打开历史可使用 `GET /api/v1/sessions` 取得目录，再用
-`GET /api/v1/sessions/{id}/history` 读取 `{id, messages}`。后者只读取已保存会话，缺失返回
-404，ID 格式非法返回 400。新草稿可以留在客户端，明确发送时通过
+工作台会话接口沿用客户端权限。`GET /api/v1/sessions` 按创建时间倒序返回 `{id, name, created}` 列表。
+加上 `?include_labels=true` 时，每条记录还包含 `label` 字符串。标题取第一条保存的用户消息，
+将不可打印字符替换为空格并折叠空白，最多保留 80 个 Unicode 码点，含截断时的省略号。无可显示内容时返回空字符串。
+列表读取不会创建会话或调用模型。用 `GET /api/v1/sessions/{id}/history` 读取已保存会话的 `{id, messages}`。
+会话缺失返回 404，ID 格式非法返回 400。新草稿可以留在客户端，明确发送时通过
 `POST /api/v1/sessions/{id}/messages` 保存。旧 `GET /api/v1/sessions/{id}` 保留创建空会话的兼容行为。
 
 Web 工作台的宽屏左侧显示会话历史，窄屏通过**历史**展开。从任务或结果页选中会话会直接打开对应对话。
+默认命名的历史项显示首条已保存问题的标题。已有会话名称优先显示，旧版列表沿用名称。
 同一浏览器页面按会话保留未发送草稿。点**新对话**会先创建本地草稿，首次明确发送时保存到 Hub。
 遇到结果不明确的发送失败，同一页面先用原消息 ID **重新发送**，之后可发送保留的新草稿。
 已保存会话明确缺失时，可以把草稿移到新对话。只读历史暂时不可用时，页面提供**重新读取**。

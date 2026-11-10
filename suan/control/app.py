@@ -593,9 +593,8 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
             "Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
     @app.get("/api/v1/sessions", dependencies=[Depends(client)])
-    def sessions():
-        with store.db() as db:
-            return [dict(r) for r in db.execute("SELECT * FROM sessions ORDER BY created DESC")]
+    def sessions(include_labels: bool = False):
+        return store.sessions(include_labels=include_labels)
 
     def validate_session_id(session_id: str):
         if not re.fullmatch(r"[a-f0-9]{32}", session_id):
