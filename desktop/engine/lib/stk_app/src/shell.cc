@@ -126,7 +126,8 @@ bridge::Result<io::Json> AppShell::activate_editor(wm::Screen *screen, const std
 
 bridge::Result<io::Json> AppShell::activate_editor_if(wm::Screen *screen, const std::string &editor_id,
                                                     const bool maximize,
-                                                    const std::function<bool(const Editor &)> &can_activate)
+                                                    const std::function<bool(const Editor &)> &can_activate,
+                                                    std::optional<std::pair<EditorArea *, int>> preferred)
 {
   using bridge::Error;
   using bridge::ErrorCode;
@@ -147,21 +148,24 @@ bridge::Result<io::Json> AppShell::activate_editor_if(wm::Screen *screen, const 
     bool committed = false;
     ~MaximizeRollback() { if (!committed) { screen.set_maximized(original); } }
   } rollback{*screen, screen->maximized()};
-  EditorArea *destination = dynamic_cast<EditorArea *>(rollback.original);
-  int tab_index = -1;
-  if (destination && destination->editor().type().id == editor_id) {
-    tab_index = destination->active_tab();
-  }
-  else {
-    destination = nullptr;
-    // Active matching tabs take precedence over hidden tabs. Distinct AI editors
-    // keep distinct unsent drafts, so repeated focus must preserve the visible one.
-    for (auto *area : screen->areas()) {
-      auto *editor = dynamic_cast<EditorArea *>(area);
-      if (editor && editor->editor().type().id == editor_id) {
-        destination = editor;
-        tab_index = editor->active_tab();
-        break;
+  EditorArea *destination = preferred ? preferred->first : nullptr;
+  int tab_index = preferred ? preferred->second : -1;
+  if (!destination) {
+    destination = dynamic_cast<EditorArea *>(rollback.original);
+    if (destination && destination->editor().type().id == editor_id) {
+      tab_index = destination->active_tab();
+    }
+    else {
+      destination = nullptr;
+      // Active matching tabs take precedence over hidden tabs. Distinct AI editors
+      // keep distinct unsent drafts, so repeated focus must preserve the visible one.
+      for (auto *area : screen->areas()) {
+        auto *editor = dynamic_cast<EditorArea *>(area);
+        if (editor && editor->editor().type().id == editor_id) {
+          destination = editor;
+          tab_index = editor->active_tab();
+          break;
+        }
       }
     }
   }
@@ -267,6 +271,7 @@ bridge::Result<io::Json> AppShell::activate_editor_if(wm::Screen *screen, const 
   destination->set_active_tab(tab_index);
   screen->set_maximized(maximize ? destination : nullptr);
   rollback.committed = true;
+  overview_returns_.erase(screen);
   store_.changed();
   return io::Json{{"area_id", destination->id()}, {"editor_id", editor_id},
                   {"tab_index", tab_index}, {"maximized", maximize}};
@@ -283,6 +288,7 @@ bridge::Result<io::Json> AppShell::restore_split_layout(wm::Screen *screen)
     return Error::make(ErrorCode::Busy, std::string(store_.tr("app.focus.busy")));
   }
   const bool restored = screen->maximized() != nullptr;
+  overview_returns_.erase(screen);
   if (restored) { screen->set_maximized(nullptr); store_.changed(); }
   return io::Json{{"restored", restored}};
 }
@@ -377,13 +383,26 @@ std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, st
   };
 }
 
+namespace {
+std::vector<std::pair<std::string, uint64_t>> split_activity(const wm::Screen &screen)
+{
+  std::vector<std::pair<std::string, uint64_t>> activity;
+  for (const auto *base : screen.areas()) {
+    const auto *area = dynamic_cast<const EditorArea *>(base);
+    activity.emplace_back(base->id(), area ? area->activity_epoch() : 0);
+  }
+  return activity;
+}
+}  // namespace
+
 void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std::string handle,
-                                      std::function<bool()> valid, std::string table_id, std::string record_id)
+                                      std::function<bool()> valid, std::string table_id, std::string record_id,
+                                      const EditorArea *overview_origin)
 {
   if (!screen || (valid && !valid()) || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) { return; }
   const std::weak_ptr<bool> weak = alive_;
   screen->defer([this, weak, screen, page = std::move(page), handle = std::move(handle), valid = std::move(valid),
-                 table_id = std::move(table_id), record_id = std::move(record_id)] {
+                 table_id = std::move(table_id), record_id = std::move(record_id), overview_origin] {
     if (!weak.lock() || (valid && !valid()) || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) { return; }
     auto &project = store_.project();
     project.sync();
@@ -436,6 +455,9 @@ void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std
         }
       }
     }
+    const bool returning = overview_origin && page == "workspace" && screen->maximized() == overview_origin &&
+                           workbench_is_focused(*screen) && overview_origin->editor().type().id == kEditorAI;
+    const auto conversation = returning ? overview_origin->editor().lifetime() : std::weak_ptr<void>{};
     const auto result = activate_editor(screen, editor, false);
     if (!result) {
       if (store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
@@ -452,6 +474,10 @@ void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std
     if (!file_table.empty()) { project.select_table(file_table); }
     if (!record.empty()) { project.select_record(record); }
     if (page == "analyses" || page == "analysis_runs" || page == "workflows") { area->set_sidebar_open(true); }
+    if (returning && !screen->maximized() && !conversation.expired()) {
+      overview_returns_.insert_or_assign(screen, OverviewReturn{overview_origin->id(), conversation, handle,
+                                                               screen->visibility_epoch(), split_activity(*screen)});
+    }
     store_.changed();
   });
 }
@@ -817,6 +843,23 @@ bool AppShell::workbench_is_focused(const wm::Screen &screen) const
   return focused_workbench_section(screen) >= 0;
 }
 
+std::function<void()> AppShell::focused_project_overview_action(EditorArea &origin)
+{
+  auto *screen = origin.screen();
+  if (!screen) { return {}; }
+  const auto &project = store_.project().project();
+  const auto handle = project ? project->handle : std::string();
+  auto current = [this, screen, area = &origin, weak = lifetime(), editor = origin.editor().lifetime(),
+                  epoch = screen->visibility_epoch(), activity = origin.activity_epoch()] {
+    return !weak.expired() && !editor.expired() && has_screen(screen) && screen->maximized() == area &&
+           screen->visibility_epoch() == epoch && area->activity_epoch() == activity &&
+           workbench_is_focused(*screen) && area->editor().type().id == kEditorAI;
+  };
+  return [this, screen, area = &origin, handle, current] {
+    if (current()) { open_project_page_later(screen, "workspace", handle, current, {}, {}, area); }
+  };
+}
+
 std::function<void()> AppShell::focused_task_result_action(wm::Screen &screen)
 {
   const auto *origin = dynamic_cast<const EditorArea *>(screen.maximized());
@@ -858,7 +901,22 @@ std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, 
           return_to_task = std::move(selected->still_current);
         }
       }
-      const auto result = editor_id ? activate_editor(s, editor_id, true) : restore_split_layout(s);
+      std::optional<std::pair<EditorArea *, int>> conversation;
+      if (editor_id && std::string_view(editor_id) == kEditorAI && !s->maximized()) {
+        const auto mark = overview_returns_.find(s);
+        if (mark != overview_returns_.end()) {
+          const auto &back = mark->second;
+          const auto &project = store_.project().project();
+          if (s->visibility_epoch() == back.visibility && back.project == (project ? project->handle : std::string()) &&
+              back.split_activity == split_activity(*s)) {
+            auto *area = dynamic_cast<EditorArea *>(s->find_area(back.area));
+            const int tab = area ? area_tab(*area, back.editor) : -1;
+            if (tab >= 0) { conversation.emplace(area, tab); }
+          }
+        }
+      }
+      const auto result = editor_id ? activate_editor_if(s, editor_id, true, {}, conversation) :
+                                      restore_split_layout(s);
       if (result && editor_id) {
         focused_workbenches_[s] = s->visibility_epoch();
         if (request) {
@@ -1278,6 +1336,7 @@ void AppShell::forget(wm::Screen &screen, wm::Window *window)
   std::erase(screens_, &screen);
   work_modes_.erase(&screen);
   focused_workbenches_.erase(&screen);
+  overview_returns_.erase(&screen);
   if (window && window == window_) {
     window_ = nullptr;
   }
@@ -1376,6 +1435,7 @@ void AppShell::build_default_layout(wm::Screen &screen)
   }
   work_modes_.erase(&screen);
   focused_workbenches_.erase(&screen);
+  overview_returns_.erase(&screen);
 }
 
 void AppShell::reset_layout(wm::Screen &screen)
@@ -1434,6 +1494,7 @@ bool AppShell::apply_layout(wm::Screen &screen, const wm::LayoutFile &file, std:
   }
   screen.adopt_tree_from(prepared);
   focused_workbenches_.erase(&screen);
+  overview_returns_.erase(&screen);
   if (workbench_focused) { focused_workbenches_[&screen] = screen.visibility_epoch(); }
   work_modes_[&screen] = std::move(modes);
   const std::vector<std::string> langs = store_.catalog().languages();

@@ -370,18 +370,30 @@ TEST_F(WorkspaceNavigationPython, FocusedOverviewAndWorkbenchNameDifferentDestin
   auto *viewer_editor = &f.area("a2").tab(0);
   auto *overview_editor = &home().editor();
   const auto areas = f.screen.areas();
+  auto &other = f.area("a3");
+  auto *other_conversation = &other.editor();
+  ASSERT_EQ(other_conversation->type().id, kEditorAI);
+  f.screen.set_maximized(&other);
   f.shell->open_workbench(f.screen);
   f.screen.run_deferred();
   f.drv->frame();
-  auto *conversation = f.screen.maximized();
-  ASSERT_NE(conversation, nullptr);
+  const auto question = "ai_question/" + handle();
+  ASSERT_NE(widget(question), nullptr);
+  widget(question)->string.assign("A different AI editor's unsent question");
+  ASSERT_TRUE(home().add_tab(kEditorAI));
+  f.screen.set_maximized(&home());
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  f.drv->frame();
+  ASSERT_EQ(f.screen.maximized(), &home());
+  auto *conversation = &home().editor();
+  ASSERT_NE(conversation, other_conversation);
   ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
   const auto *overview = widget("project_workspace");
   ASSERT_NE(overview, nullptr);
   EXPECT_EQ(overview->text, "Overview");
   const auto &ui = *f.screen.ui();
   EXPECT_GE(overview->rect.w, ui.measurer().width("Overview", ui.style().font) + 2 * ui.style().text_margin);
-  const auto question = "ai_question/" + handle();
   ASSERT_NE(widget(question), nullptr);
   widget(question)->string.assign("Keep my question while checking the overview");
   const auto click = [&](const char *key) {
@@ -394,11 +406,13 @@ TEST_F(WorkspaceNavigationPython, FocusedOverviewAndWorkbenchNameDifferentDestin
   EXPECT_EQ(f.screen.maximized(), nullptr);
   EXPECT_EQ(f.screen.areas(), areas);
   EXPECT_EQ(&home().editor(), overview_editor);
+  EXPECT_EQ(&other.editor(), other_conversation);
   EXPECT_NE(widget("workspace_project"), nullptr);
   ASSERT_NE(widget("project_workspace"), nullptr);
   EXPECT_EQ(widget("project_workspace")->text, "Home");
   ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
-  EXPECT_EQ(f.screen.maximized(), conversation);
+  EXPECT_EQ(f.screen.maximized(), &home());
+  EXPECT_EQ(&home().editor(), conversation);
   ASSERT_NE(widget(question), nullptr);
   EXPECT_EQ(widget(question)->string.value(), "Keep my question while checking the overview");
   ASSERT_NO_FATAL_FAILURE(click("workbench_results"));
@@ -407,6 +421,35 @@ TEST_F(WorkspaceNavigationPython, FocusedOverviewAndWorkbenchNameDifferentDestin
   EXPECT_EQ(viewer.camera_serial(), camera);
   EXPECT_EQ(project().project()->revision, 0);
   viewer.close();
+}
+
+TEST_F(WorkspaceNavigationPython, FocusedOverviewDoesNotOverrideLaterSplitNavigation)
+{
+  ASSERT_TRUE(home().add_tab(kEditorAI));
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  f.drv->frame();
+  ASSERT_EQ(f.screen.maximized(), &home());
+  auto &other = f.area("a3");
+  ASSERT_EQ(other.editor().type().id, kEditorAI);
+  const auto click = [&](const char *key) {
+    ASSERT_NE(widget(key), nullptr) << key;
+    const auto [x, y] = f.widget_center(key);
+    EXPECT_TRUE(f.drv->click(x, y)) << key;
+  };
+  ASSERT_NO_FATAL_FAILURE(click("project_workspace"));
+  ASSERT_EQ(f.screen.maximized(), nullptr);
+  ASSERT_EQ(home().editor().type().id, kEditorWorkspace);
+
+  // A manual tab change in the split has superseded the overview, even if the
+  // user then returns to the same overview and both AI editors are still alive.
+  home().set_active_tab(2);
+  home().set_active_tab(0);
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
+  EXPECT_EQ(f.screen.maximized(), &other);
+  EXPECT_TRUE(f.shell->workbench_is_focused(f.screen));
+  EXPECT_EQ(project().project()->revision, 0);
 }
 
 TEST_F(WorkspaceNavigationPython, VisibleButtonsReuseEditorsAndRevealFilesAndBothRunHistories)

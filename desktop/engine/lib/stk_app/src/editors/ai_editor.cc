@@ -210,8 +210,7 @@ class AIEditor final : public Editor {
   {
     const auto *screen = ctx.area.screen();
     const bool focused = screen && screen->maximized() == &ctx.area && ctx.area.shell().workbench_is_focused(*screen);
-    if (focused) { workspace_link(row, ctx, "workbench.project_overview"); }
-    else { workspace_link(row, ctx); }
+    workspace_link(row, ctx, focused);
     row.button("ai_tables", ctx.tr("editor.project.title"), [ctx] { show_tables(ctx); }).width(7);
     auto &state = ctx.store.project();
     state.sync();

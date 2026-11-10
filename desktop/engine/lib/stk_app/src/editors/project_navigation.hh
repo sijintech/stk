@@ -55,11 +55,13 @@ inline const char *health_key(const Health health)
   return "workspace.health.unknown";
 }
 
-inline void workspace_link(ui::Layout &row, EditorContext &ctx, std::string_view title_key = "editor.workspace.title")
+inline void workspace_link(ui::Layout &row, EditorContext &ctx, bool focused_overview = false)
 {
   // Widget callbacks can be retained by a menu or an integration after this frame.
-  row.button("project_workspace", ctx.tr(title_key),
-             project_navigation_action(ctx, "workspace")).width(ctx.draw && ctx.ui ?
+  auto action = focused_overview ? ctx.area.shell().focused_project_overview_action(ctx.area) :
+                                   project_navigation_action(ctx, "workspace");
+  row.button("project_workspace", ctx.tr(focused_overview ? "workbench.project_overview" : "editor.workspace.title"),
+             std::move(action)).width(ctx.draw && ctx.ui ?
                  std::min(6.0f, float(ctx.draw->rect.width()) / ctx.ui->style().unit * .4f) : 6.0f);
 }
 

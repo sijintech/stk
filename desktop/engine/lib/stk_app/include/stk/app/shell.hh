@@ -127,6 +127,8 @@ class AppShell {
   /** Enter the focused workbench in the conversation or the Viewer, without rebuilding editors. */
   void open_workbench(wm::Screen &screen, bool show_result = false);
   bool workbench_is_focused(const wm::Screen &screen) const;
+  /** Open the split project overview and allow a direct return to this conversation. */
+  std::function<void()> focused_project_overview_action(EditorArea &origin);
   /** Open the selected task in focused Results from this window's focused Tasks page. */
   std::function<void()> focused_task_result_action(wm::Screen &screen);
 
@@ -158,7 +160,8 @@ class AppShell {
   /** Project-scoped navigation; never executes work or replaces existing editors. Empty handle
    * is allowed only for workspace/project management. Checks all windows for active input. */
   void open_project_page_later(wm::Screen *screen, std::string page, std::string handle,
-                               std::function<bool()> valid = {}, std::string table_id = {}, std::string record_id = {});
+                               std::function<bool()> valid = {}, std::string table_id = {}, std::string record_id = {},
+                               const EditorArea *overview_origin = nullptr);
   enum class SavedConversationKind { Question, AgentSession };
   /** Open an exact saved question or agent session in the current project for reading. */
   std::function<void()> saved_conversation_action(EditorArea &origin, std::string id,
@@ -220,7 +223,8 @@ class AppShell {
 
  private:
   bridge::Result<io::Json> activate_editor_if(wm::Screen *screen, const std::string &editor_id, bool maximize,
-                                             const std::function<bool(const Editor &)> &can_activate);
+                                             const std::function<bool(const Editor &)> &can_activate,
+                                             std::optional<std::pair<EditorArea *, int>> preferred = std::nullopt);
   class TopBar;
   class StatusBar;
   class WorkbenchNavigation;
@@ -279,6 +283,14 @@ class AppShell {
   };
   std::map<const wm::Screen *, WorkModes> work_modes_;
   std::map<const wm::Screen *, uint64_t> focused_workbenches_;
+  struct OverviewReturn {
+    std::string area;
+    std::weak_ptr<void> editor;
+    std::string project;
+    uint64_t visibility;
+    std::vector<std::pair<std::string, uint64_t>> split_activity;
+  };
+  std::map<const wm::Screen *, OverviewReturn> overview_returns_;
   uint64_t saved_conversation_epoch_ = 0;
   WorkModeLayout capture_work_mode(const wm::Screen &screen) const;
   WorkModeLayout adapt_work_mode(const wm::Screen &screen, const WorkModeLayout &saved) const;
