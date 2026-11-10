@@ -2011,3 +2011,11 @@ process/epoch, project scope and local draft/selection lifetimes. Workspace stat
 contains bounded form drafts and selections, not credentials or live authority.
 Viewer state and hidden drafts remain protected. Row disjointness and synthetic
 software checks do not establish sample/site independence or material accuracy.
+
+## MuPRO execution-environment diagnostic requests
+
+The additive `mupro.preflight.describe/list/reserve/retry/refresh` methods use a
+private, durable diagnostic journal and existing direct/SSH Runtime tasks. Reservation
+is local and must be acknowledged before an explicit execution/recovery call. Reopen
+and refresh never submit a replacement. The closed method schemas, recovery phases and
+limits are specified in [Desktop MuPRO diagnostic requests v1](mupro-preflight-desktop-1.md).

@@ -660,7 +660,616 @@
         "outputs"
       ]
     },
+    "muproPreflightOptions": {
+      "type": "object",
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": [
+            "local",
+            "pbs",
+            "slurm"
+          ]
+        },
+        "walltime_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "memory_mb": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "queue": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.@/-]+$"
+        },
+        "account": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.@/-]+$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
+      "additionalProperties": false
+    },
+    "muproPreflightRequest": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/connectionId"
+        },
+        "expected_connection_identity": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{16}$"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/hex32"
+            }
+          ]
+        },
+        "options": {
+          "$ref": "#/$defs/muproPreflightOptions"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/hex32"
+        }
+      },
+      "required": [
+        "connection",
+        "expected_connection_identity",
+        "workspace_id",
+        "options",
+        "idempotency_key"
+      ],
+      "additionalProperties": false
+    },
+    "muproPreflightObservation": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "stk.mupro-preflight/1"
+        },
+        "scope": {
+          "const": "local_process"
+        },
+        "producer": {
+          "type": "object",
+          "properties": {
+            "component": {
+              "const": "suan.mupro"
+            },
+            "distribution_version": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "maxLength": 65536
+                }
+              ]
+            }
+          },
+          "required": [
+            "component",
+            "distribution_version"
+          ],
+          "additionalProperties": false
+        },
+        "process_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "started_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "observed_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "summary": {
+          "type": "string",
+          "enum": [
+            "checks_failed",
+            "checks_incomplete",
+            "checks_passed"
+          ]
+        },
+        "checks": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "env_scripts",
+                  "sdk_prefix",
+                  "program",
+                  "shared_libraries",
+                  "mpi_launcher",
+                  "license_dir",
+                  "example_case"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "warn",
+                  "skip",
+                  "not_configured"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "unverified": {
+          "type": "object",
+          "properties": {
+            "program_version": {
+              "const": "unobserved"
+            },
+            "license_checkout": {
+              "const": "not_checked"
+            },
+            "solver_execution": {
+              "const": "not_run"
+            }
+          },
+          "required": [
+            "program_version",
+            "license_checkout",
+            "solver_execution"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schema",
+        "scope",
+        "producer",
+        "process_id",
+        "started_at",
+        "observed_at",
+        "summary",
+        "checks",
+        "unverified"
+      ],
+      "additionalProperties": false
+    },
+    "muproPreflightResult": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "stk.mupro-preflight-result/1"
+        },
+        "scope": {
+          "const": "runtime_task"
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "profile": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "connection_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "profile",
+            "connection_sha256"
+          ],
+          "additionalProperties": false
+        },
+        "task": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/hex32"
+            },
+            "workspace_id": {
+              "$ref": "#/$defs/hex32"
+            },
+            "backend": {
+              "type": "string",
+              "enum": [
+                "local",
+                "pbs",
+                "slurm"
+              ]
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "succeeded",
+                "failed"
+              ]
+            },
+            "exit_code": {
+              "type": "integer",
+              "enum": [
+                0,
+                1
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "workspace_id",
+            "backend",
+            "state",
+            "exit_code"
+          ],
+          "additionalProperties": false
+        },
+        "artifact": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "const": "stk-mupro-preflight.json"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "path",
+            "size",
+            "sha256"
+          ],
+          "additionalProperties": false
+        },
+        "observation": {
+          "$ref": "#/$defs/muproPreflightObservation"
+        }
+      },
+      "required": [
+        "schema",
+        "scope",
+        "target",
+        "task",
+        "artifact",
+        "observation"
+      ],
+      "additionalProperties": false
+    },
+    "muproPreflightRecord": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/hex32"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "request": {
+          "$ref": "#/$defs/muproPreflightRequest"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/hex32"
+            }
+          ]
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/hex32"
+            }
+          ]
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "prepared",
+        "creating_workspace",
+            "submitting",
+            "unknown",
+            "accepted",
+            "running",
+            "finished",
+            "error"
+          ]
+        },
+        "task_state": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "queued",
+                "submitting",
+                "running",
+                "cancelling",
+                "succeeded",
+                "failed",
+                "cancelled",
+                "unknown"
+              ]
+            }
+          ]
+        },
+        "task_exit_code": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/muproPreflightResult"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/error"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "updated_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "request",
+        "workspace_id",
+        "task_id",
+        "phase",
+        "task_state",
+        "task_exit_code",
+        "result",
+        "error",
+        "created_at",
+        "updated_at"
+      ],
+      "additionalProperties": false
+    },
     "methods": {
+      "mupro.preflight.describe": {
+        "description": "Passive direct/SSH Runtime identity metadata; never starts a prerequisite check.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            }
+          },
+          "required": [
+            "connection"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "connection_identity": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{16}$"
+            }
+          },
+          "required": [
+            "connection",
+            "connection_identity"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "mupro.preflight.list": {
+        "description": "Read this project's last twenty local diagnostic records; no Runtime I/O or execution.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "project_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "records": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "$ref": "#/$defs/muproPreflightRecord"
+              }
+            }
+          },
+          "required": [
+            "records"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "mupro.preflight.reserve": {
+        "description": "Reserve a durable diagnostic intent locally, without network or execution. Only an explicit retry of its acknowledged id may create the workspace or submit the task.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "expected_connection_identity": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{16}$"
+            },
+            "workspace_id": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/hex32"
+                }
+              ]
+            },
+            "options": {
+              "$ref": "#/$defs/muproPreflightOptions"
+            },
+            "idempotency_key": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "project_id",
+            "connection",
+            "expected_connection_identity",
+            "workspace_id",
+            "options",
+            "idempotency_key"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "record": {
+              "$ref": "#/$defs/muproPreflightRecord"
+            }
+          },
+          "required": [
+            "record"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "mupro.preflight.retry": {
+        "description": "Explicitly recover the original frozen uncertain request/key. Known tasks are never resubmitted.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "id": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "project_id",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "record": {
+              "$ref": "#/$defs/muproPreflightRecord"
+            }
+          },
+          "required": [
+            "record"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "mupro.preflight.refresh": {
+        "description": "Read the original task and verify its observation; never submits, recollects, approves or cancels.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "id": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "project_id",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "record": {
+              "$ref": "#/$defs/muproPreflightRecord"
+            }
+          },
+          "required": [
+            "record"
+          ],
+          "additionalProperties": false
+        }
+      },
       "blob.ensure": {
         "description": "Make blobs available in the local cache (fetched from a hub connection when given).",
         "params": {

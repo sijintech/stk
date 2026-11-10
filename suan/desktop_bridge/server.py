@@ -30,6 +30,7 @@ from .projects import ProjectSessions
 from .analysis_runs import AnalysisRunExecutor
 from .workflow_runs import WorkflowRunExecutor
 from .project_runs import ProjectRuns
+from .mupro_preflight_journal import MuproPreflightService
 from .scripts import ScriptSessions
 from .script_files import read_file as read_script_file, write_file as write_script_file
 from .ui_requests import UIRequests, UI_OPERATIONS
@@ -189,6 +190,8 @@ class Bridge:
         self.projects.local.emit = self.emit
         self._local_started = False
         self.project_runs = ProjectRuns(self.projects, self._bound_backend)
+        self._mupro_preflight = None
+        self._mupro_preflight_lock = threading.RLock()
         self.projects.agents.services.update({"workflow_executor": self.workflow_executor,
                                              "freeze_run_target": self._freeze_agent_run_target})
         self._agent_run_reviews = {}
@@ -247,6 +250,11 @@ class Bridge:
             "task.cancel": lambda p, c: self._backend(p).cancel(p["task_id"], p.get("idempotency_key")),
             "task.artifacts": lambda p, c: self._backend(p).artifacts(p["task_id"]),
             "task.logs": self.task_logs,
+            "mupro.preflight.describe": lambda p, c: self._preflight().describe(p),
+            "mupro.preflight.list": lambda p, c: self._preflight().list(p),
+            "mupro.preflight.reserve": lambda p, c: self._preflight().reserve(p),
+            "mupro.preflight.retry": lambda p, c: self._preflight().retry(p),
+            "mupro.preflight.refresh": lambda p, c: self._preflight().refresh(p),
             "watch": lambda p, c: self._subscribe("watch", p, c),
             "logs.subscribe": lambda p, c: self._subscribe("logs", p, c),
             "events.subscribe": lambda p, c: self._subscribe("events", p, c),
@@ -814,6 +822,9 @@ class Bridge:
                 self._materials.shutdown()
         self.modules.shutdown()
         self.workflow_executor.shutdown(wait=False)
+        with self._mupro_preflight_lock:
+            if self._mupro_preflight is not None:
+                self._mupro_preflight.close()
         self.analysis_executor.shutdown(wait=False)
         self.ui.close()
         self.scripts.shutdown()
@@ -833,6 +844,13 @@ class Bridge:
         self.transfers.release_after_stop(self.state_lock.release)
 
     # -- helpers ------------------------------------------------------------------------------
+
+    def _preflight(self):
+        # A damaged diagnostic journal disables diagnostics, while other desktop modules remain usable.
+        with self._mupro_preflight_lock:
+            if self._mupro_preflight is None:
+                self._mupro_preflight = MuproPreflightService(self._backend, self.state_dir)
+            return self._mupro_preflight
 
     def _backend(self, params):
         backend = self._bound_backend(params["connection"], params.get("node"))
