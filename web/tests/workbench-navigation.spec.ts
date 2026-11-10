@@ -18,7 +18,7 @@ const device = {id: node, role: 'node', name: '节点甲', online: true, revoked
   snapshot: {tasks: [row], workspaces: [{id: ws, name: '项目一'}], features: ['read', 'task.get', 'task.artifacts', 'task.events']}};
 const scene = {manifest: {version: 1, field: 'phi', units: 'V', value_range: [0, 1], render_origin: [0, 0, 0], display_reduced: false},
   mesh: {positions: [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0.5]], values: [0, 0.3, 0.6, 1], indices: [0, 1, 2, 1, 3, 2]}};
-const LOG = 'step 1 converged\nstep 2 converged\n';
+const LOG = Array.from({length: 40}, (_, i) => `step ${i + 1} converged`).join('\n') + '\n'; // taller than the pane
 const types: Record<string, string> = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json'};
 
@@ -150,6 +150,21 @@ async function freeze(page: Page) {
   await page.waitForTimeout(300);
 }
 
+// Viewer pixels at a fixed scroll offset of 结果, so a different scroll position cannot pass for a camera change.
+async function viewerShot(page: Page, name: string) {
+  await page.locator('section.analysis').evaluate(el => { el.scrollTop = 0; });
+  const shot = await page.locator('section.analysis .viewport').screenshot({path: test.info().outputPath(`viewer-${name}.png`)});
+  return shot;
+}
+
+// Scroll offset of 结果 and the log pane's box: equal before and after a late log means nothing moved.
+async function logLayout(page: Page) {
+  return page.locator('section.analysis').evaluate(el => {
+    const r = el.querySelector('details.logs')!.getBoundingClientRect();
+    return {scrollTop: el.scrollTop, pane: [r.top, r.height].map(Math.round)};
+  });
+}
+
 async function state(page: Page) {
   return {
     draft: await page.getByLabel('对话内容').inputValue(),
@@ -177,7 +192,7 @@ for (const viewport of viewports) {
       const fileList = page.getByLabel('结果文件');
       await go(page, '结果');
       await freeze(page);
-      const viewer = await page.locator('section.analysis .viewport').screenshot();
+      const viewer = await viewerShot(page, 'before');
       // 结果 is left scrolled to the bottom; on the narrow page that puts the file list out of view.
       await page.locator('section.analysis').evaluate(el => { el.scrollTop = el.scrollHeight; });
       if (viewport.name === 'narrow') await expect(fileList).not.toBeInViewport();
@@ -204,8 +219,8 @@ for (const viewport of viewports) {
       sent.stop();
       expect(sent.seen).toEqual(['/api/v1/nodes/{node}/read task.artifacts']);
       expect(await state(page)).toEqual(before);
-      expect((await page.locator('section.analysis .viewport').screenshot()).equals(viewer)).toBe(true);
       await page.screenshot({path: test.info().outputPath(`${viewport.name}-files-shortcut.png`)});
+      expect((await viewerShot(page, 'after')).equals(viewer)).toBe(true);
       expect(errors).toEqual([]);
     });
 
@@ -215,7 +230,7 @@ for (const viewport of viewports) {
       const pane = page.locator('section.analysis details.logs');
       await go(page, '结果');
       await freeze(page);
-      const viewer = await page.locator('section.analysis .viewport').screenshot();
+      const viewer = await viewerShot(page, 'before');
       // The log pane is collapsed and 结果 scrolled to the top; on the narrow page the pane is then out of view.
       await page.locator('section.analysis summary', {hasText: '日志 / 探针结果'}).click();
       expect(await pane.evaluate(el => (el as HTMLDetailsElement).open)).toBe(false);
@@ -228,21 +243,26 @@ for (const viewport of viewports) {
       await shortcut(page, '读取日志').click();
       await expectActive(page, '结果');
       expect(await pane.evaluate(el => (el as HTMLDetailsElement).open)).toBe(true);
-      await expect(pane).toBeInViewport();
+      // The pane gets its full bounded height at the click, so it is wholly in view before any text arrives
+      // (0.99: fractional layout at 390 px leaves ~0.1 px).
+      await expect(pane).toBeInViewport({ratio: 0.99});
       await expect(pane.locator('summary')).toBeFocused();
       await expect(footer(page)).toContainText('正在处理请求');
       await expect.poll(() => hub.reached.has('task.logs')).toBe(true);
+      const held = await logLayout(page);
       release();
       await expect(pane.locator('pre')).toHaveText(LOG);
-      await expect(pane.locator('pre')).toBeInViewport();
+      // The 40-line log scrolls inside the pane: 结果 neither scrolled nor reflowed.
+      expect(await logLayout(page)).toEqual(held);
+      await expect(pane).toBeInViewport({ratio: 0.99});
       await expect(footer(page)).toContainText('就绪');
       await expectActive(page, '结果');
       await page.waitForTimeout(300);
       sent.stop();
       expect(sent.seen).toEqual(['/api/v1/actions task.logs']);
       expect(await state(page)).toEqual(before);
-      expect((await page.locator('section.analysis .viewport').screenshot()).equals(viewer)).toBe(true);
       await page.screenshot({path: test.info().outputPath(`${viewport.name}-logs-shortcut.png`)});
+      expect((await viewerShot(page, 'after')).equals(viewer)).toBe(true);
       expect(errors).toEqual([]);
     });
 
@@ -293,6 +313,58 @@ for (const viewport of viewports) {
       await expect(page.locator('section.analysis .legend')).toBeVisible();
       expect(errors).toEqual([]);
     });
+
+    test('a held shortcut read completes without moving the user', async ({page}) => {
+      const hub = new Hub();
+      const errors = await setup(page, hub, {scene: false});
+      const fileList = page.getByLabel('结果文件'), log = page.locator('section.analysis details.logs pre');
+      for (const [label, kind, away] of [['结果', 'task.artifacts', '任务'], ['读取日志', 'task.logs', '工作台']] as const) {
+        await go(page, '任务');
+        hub.later = true;
+        const release = hub.hold(kind);
+        hub.reached.clear();
+        await shortcut(page, label).click();
+        await expectActive(page, '结果');
+        await expect.poll(() => hub.reached.has(kind)).toBe(true);
+        await go(page, away);
+        release();
+        await expect(footer(page)).toContainText('就绪');
+        // The late read fills 结果 for the same task while the user stays in the section they chose.
+        if (kind === 'task.artifacts') await expect(fileList.locator('option', {hasText: 'scalar-1.vti'})).toHaveCount(1);
+        else await expect.poll(() => log.textContent()).toBe(LOG);
+        await page.waitForTimeout(300);
+        await expectActive(page, away);
+      }
+      expect(errors).toEqual([]);
+    });
+
+    for (const scrolled of [false, true]) {
+      test(`a held 读取日志 after leaving and returning to 结果${scrolled ? ' scrolled to the top' : ''} moves nothing`, async ({page}) => {
+        const hub = new Hub();
+        const errors = await setup(page, hub);
+        const pane = page.locator('section.analysis details.logs');
+        const release = hub.hold('task.logs');
+        await shortcut(page, '读取日志').click();
+        await expectActive(page, '结果');
+        await expect.poll(() => hub.reached.has('task.logs')).toBe(true);
+        await go(page, '任务');
+        await go(page, '结果');
+        await expectActive(page, '结果');
+        if (scrolled) await page.locator('section.analysis').evaluate(el => { el.scrollTop = 0; });
+        if (!scrolled) await expect(pane).toBeInViewport({ratio: 0.99});
+        const held = await logLayout(page);
+        release();
+        await expect(pane.locator('pre')).toHaveText(LOG);
+        await expect(footer(page)).toContainText('就绪');
+        await page.waitForTimeout(300);
+        // The late text neither grows the pane nor scrolls 结果, whether the user left it at the pane or moved away.
+        expect(await logLayout(page)).toEqual(held);
+        if (!scrolled) await expect(pane).toBeInViewport({ratio: 0.99});
+        await expectActive(page, '结果');
+        await page.screenshot({path: test.info().outputPath(`${viewport.name}-aba${scrolled ? '-top' : ''}.png`)});
+        expect(errors).toEqual([]);
+      });
+    }
 
     test('Tasks 结果 keeps the chosen 图谱 mode and its panel', async ({page}) => {
       const hub = new Hub();

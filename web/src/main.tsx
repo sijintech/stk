@@ -46,6 +46,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
   const generation=useRef(0),scopeVersion=useRef(0),activeScope=useRef<TaskScope|null>(null),refreshing=useRef(false),alive=useRef(true);
   const artifactReads=useRef({started:0,applied:0});
+  const [logRoom,setLogRoom]=useState(false);
   const fileChoice=useRef<HTMLSelectElement>(null),modeChoice=useRef<HTMLDivElement>(null),logPane=useRef<HTMLDetailsElement>(null);
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const selected=devices.find(d=>d.id===node&&!d.revoked);
@@ -69,7 +70,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const taskOnline=online&&selected?.online===true;
   const clearTask=useCallback(()=>{
     generation.current++;scopeVersion.current++;activeScope.current=null;
-    setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);setScene(null);setLogs('');
+    setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);setScene(null);setLogs('');setLogRoom(false);
   },[]);
   const clearNode=useCallback(()=>{clearTask();setNode('');setWorkspace('');},[clearTask]);
   const nodeGone=useCallback((scope:TaskScope)=>{if(activeScope.current===scope)clearNode();},[clearNode]);
@@ -143,8 +144,10 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   async function readLogs(){const version=scopeVersion.current;const item=await invoke('task.logs',{task_id:task});if(item.result&&scopeVersion.current===version){const bytes=Uint8Array.from(atob(item.result.data),c=>c.charCodeAt(0));setLogs(new TextDecoder().decode(bytes));}}
   // An explicit 结果 / 读取日志 click in Tasks opens 结果 at once and brings the target into view; the read itself
   // keeps its own scope checks and never navigates on completion. The analysis mode and Viewer are left as they are.
+  // 读取日志 also gives the open log pane its full bounded height (logRoom, until the task scope changes), so the
+  // text that arrives later scrolls inside the pane and moves nothing in 结果, whichever page the user is on then.
   function openResults(target:'files'|'logs'){
-    flushSync(()=>setTab('results'));
+    flushSync(()=>{setTab('results');if(target==='logs')setLogRoom(true);});
     const pane=logPane.current;
     if(target==='logs'&&pane)pane.open=true;
     const element=target==='logs'?pane?.querySelector('summary'):analysis==='file'?fileChoice.current:modeChoice.current?.querySelector<HTMLElement>('[aria-selected="true"]');
@@ -192,7 +195,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       <ErrorBoundary resetKey={shownScene}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}><Viewer scene={shownScene} onPick={setProbe}/></React.Suspense></ErrorBoundary>
       {shownScene&&<div className="legend"><span>{shownScene.manifest.value_range[0].toPrecision(5)}</span><i/><span>{shownScene.manifest.value_range[1].toPrecision(5)} {shownScene.manifest.units}</span><small>{shownScene.manifest.display_reduced?'显示网格已简化':'完整显示网格'} · 数值查询使用原始数据</small></div>}
       <div className="probe"><strong>物理坐标探针</strong>{probe.map((v,i)=><input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={v} onChange={e=>setProbe(probe.map((n,j)=>i===j?Number(e.target.value):n))}/>)}<button disabled={busy||!shownScene} onClick={()=>void run(probeValue)}>查询原始值</button></div></>}
-      <details className="logs" ref={logPane} open><summary>日志 / 探针结果</summary><pre>{(selected&&logs)||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
+      <details className={logRoom?'logs log-room':'logs'} ref={logPane} open><summary>日志 / 探针结果</summary><pre>{(selected&&logs)||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
     </section>
     <aside className={`chat panel surface${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'}><div className="section-title"><h2>AI 对话</h2><button className="quiet" onClick={()=>{setSession(uid());setMessages([]);}}>新会话</button></div><select aria-label="恢复会话" value={session} onChange={e=>setSession(e.target.value)}><option value={session}>当前会话</option>{sessions.filter(s=>s.id!==session).map(s=><option key={s.id} value={s.id}>{s.name} · {s.id.slice(0,6)}</option>)}</select>
       <div className="messages">{!messages.length&&<div className="chat-intro"><h3>从一个科学问题开始</h3><p>描述你要执行的任务。命令、资源与执行状态会在任务面板中明确展示。</p></div>}{messages.map(m=><article key={m.id} className={m.role}><small>{m.role==='user'?'你':'STK'}</small><p>{m.content}</p></article>)}</div>
