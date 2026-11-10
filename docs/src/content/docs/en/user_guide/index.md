@@ -8,7 +8,7 @@ In both STK clients, **Workbench** opens conversations, **Tasks** shows runs, an
 ## Desktop client
 
 1. From **Workbench**, choose **Overview** to open a local project or select **Create example project**. The example contains parameters, synthetic field data and a completed analysis.
-2. Open recent questions or agent sessions from the sidebar. In a narrow window, open **History**. Use **Overview** for project tables, files and analyses, or **Split view** to use multiple tools side by side.
+2. Open recent questions or agent sessions from the sidebar. Choose **Saved questions** to browse the full list. In a narrow window, open **History** first. Use **Overview** for project tables, files and analyses, or **Split view** to use multiple tools side by side.
 3. In **Tasks**, choose a connection and a task. Click **Open in Viewer** on the selected task to open its published output. Expand **Source** to check the task and time step.
 
 [Linux quickstart](/en/quickstart/) · [Build on macOS and Windows](https://github.com/sijintech/stk/blob/main/desktop/QUICKSTART.md)
