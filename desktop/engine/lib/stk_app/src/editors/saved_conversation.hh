@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include "stk/io/json.hh"
@@ -17,6 +18,8 @@ bool saved_conversation_dispatch_safe(const Editor &editor, ProjectState &projec
 bool reveal_saved_conversation(Editor &editor, ProjectState &project, const std::string &request_id);
 /** Show the existing paged question list in this AI editor. */
 bool reveal_saved_question_history(Editor &editor, const ProjectState &project);
+/** Bring the current project's unsent question into focus without changing its selected exchange. */
+bool reveal_question_composer(Editor &editor, const ProjectState &project, uint64_t visibility);
 /** Select a saved agent session for display without starting a turn. */
 bool reveal_saved_agent_session(Editor &editor, ProjectState &project, const std::string &session_id);
 /** One readable line from the saved session summary. */

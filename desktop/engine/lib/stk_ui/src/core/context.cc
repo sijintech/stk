@@ -19,9 +19,10 @@ float Block::scroll() const
   return ctx_->scroll_of(scroll_id());
 }
 
-void Block::set_scroll_scope(std::string_view scope)
+void Block::set_scroll_scope(std::string_view scope, const bool reset_position)
 {
   scroll_scope_ = scope.empty() ? 0 : utf8::hash_combine(id_, utf8::fnv1a(scope));
+  if (reset_position) { ctx_->scroll_.erase(scroll_id()); }
 }
 
 Context::Context(ContextConfig config) : config_(std::move(config))

@@ -311,7 +311,8 @@ std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, st
   auto *screen = origin.screen();
   auto &project = store_.project();
   const bool browse = kind == SavedConversationKind::QuestionHistory;
-  if (!screen || !project.project() || (!browse && id.empty())) { return {}; }
+  const bool compose = kind == SavedConversationKind::QuestionComposer;
+  if (!screen || !project.project() || (!browse && !compose && id.empty())) { return {}; }
   const bool agent_session = kind == SavedConversationKind::AgentSession;
   if (agent_session && (project.busy() || !project.agent().supported() ||
                         !project.agent().history_selection_available())) {
@@ -338,9 +339,9 @@ std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, st
     return state.project() && state.project()->handle == handle && state.project()->id == project_id &&
            state.discussion().exchange_generation() == exchange && state.agent().selection_epoch() == selection;
   };
-  return [this, screen, current, id = std::move(id), agent_session, browse] {
+  return [this, screen, current, id = std::move(id), agent_session, browse, compose] {
     if (!current()) { return; }
-    screen->defer([this, screen, current, id, agent_session, browse] {
+    screen->defer([this, screen, current, id, agent_session, browse, compose] {
       if (!current()) { return; }
       auto &state = store_.project();
       state.sync();
@@ -353,8 +354,9 @@ std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, st
       }
       else if (state.discussion().busy() || state.discussion().exchange_busy()) { return; }
       const bool focused = workbench_is_focused(*screen);
-      if (browse && (!focused || !state.discussion().recent_requests_supported())) { return; }
-      const auto &request = agent_session || browse ? state.discussion().exchange_id() : id;
+      if ((browse || compose) && !focused) { return; }
+      if (browse && !state.discussion().recent_requests_supported()) { return; }
+      const auto &request = agent_session || browse || compose ? state.discussion().exchange_id() : id;
       if (!agent_session || !focused) {
         // Leaving an ordinary maximized area reveals the other active editors on this screen.
         for (const auto *other : screens_) {
@@ -376,7 +378,8 @@ std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, st
       auto *area = dynamic_cast<EditorArea *>(screen->find_area(io::get_string(result.value(), "area_id")));
       if (!area) { return; }
       bool opened;
-      if (browse) { opened = reveal_saved_question_history(area->editor(), state); }
+      if (compose) { opened = reveal_question_composer(area->editor(), state, screen->visibility_epoch()); }
+      else if (browse) { opened = reveal_saved_question_history(area->editor(), state); }
       else if (agent_session) { opened = reveal_saved_agent_session(area->editor(), state, id); }
       else { opened = reveal_saved_conversation(area->editor(), state, id); }
       if (!opened) { return; }
@@ -999,7 +1002,6 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
     auto &agent = project.agent();
     const bool questions_supported = discussion.recent_requests_supported();
     const bool agents_supported = agent.supported();
-    if (!questions_supported && !agents_supported) { return; }
     if (questions_supported) { discussion.sync_recent_requests(); }
     if (agents_supported) { agent.sync_session_list(); }
     const bool show_agents = agents_supported &&
@@ -1046,6 +1048,11 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
                         std::move(open), enabled});
       }
     };
+    auto compose = shell_.saved_conversation_action(origin, {}, SavedConversationKind::QuestionComposer);
+    const auto compose_label = shell_.store_.tr("ai.write_question");
+    const bool can_compose = !project.busy() && !discussion.busy() && !discussion.exchange_busy() && bool(compose);
+    if (rail) { rail->button("workbench_write_question", compose_label, std::move(compose)).disable(!can_compose); }
+    else { menu.push_back({std::string(compose_label), std::move(compose), can_compose}); }
     if (questions_supported) {
       auto browse = shell_.saved_conversation_action(origin, {}, SavedConversationKind::QuestionHistory);
       const auto label = shell_.store_.tr("ai.history");
@@ -1083,10 +1090,12 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
                agent.error().empty() ? "workbench.history.agent_loading" : "workbench.history.unavailable", agent.error());
       }
     }
-    if (rail) { rail->button("workbench_refresh_history", refresh_label, refresh); }
-    else {
+    if (questions_supported || agents_supported) {
+      if (rail) { rail->button("workbench_refresh_history", refresh_label, refresh); }
+      else { menu.push_back({refresh_label, refresh}); }
+    }
+    if (!rail) {
       // A popup dispatches by row index. Close it when a refresh or project switch replaces the rows.
-      menu.push_back({refresh_label, refresh});
       nav.scope(identity).menu_button("workbench_history", shell_.store_.tr("workbench.nav.history"), std::move(menu))
           .tip(info.name);
     }

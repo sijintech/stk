@@ -162,8 +162,8 @@ class AppShell {
   void open_project_page_later(wm::Screen *screen, std::string page, std::string handle,
                                std::function<bool()> valid = {}, std::string table_id = {}, std::string record_id = {},
                                const EditorArea *overview_origin = nullptr);
-  enum class SavedConversationKind { Question, AgentSession, QuestionHistory };
-  /** Browse saved questions or open an exact saved question or agent session in the current project. */
+  enum class SavedConversationKind { Question, AgentSession, QuestionHistory, QuestionComposer };
+  /** Open the question composer, saved questions or an exact saved conversation in the current project. */
   std::function<void()> saved_conversation_action(EditorArea &origin, std::string id,
       SavedConversationKind kind = SavedConversationKind::Question);
   /** Deferred: show `target` (Editor::navigate) in an `editor_id` tab of the same area while

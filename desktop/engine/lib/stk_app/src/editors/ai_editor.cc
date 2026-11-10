@@ -296,6 +296,14 @@ class AIEditor final : public Editor {
     }
     model_has_text_ = !draft.model.empty();
     poll(ctx, discussion);
+    const bool compose_first = focused && compose_handle_ == opening;
+    if (compose_first) {
+      const auto visibility = std::exchange(compose_focus_visibility_, std::nullopt);
+      const bool focus = visibility && *visibility == screen->visibility_epoch();
+      layout.block().set_scroll_scope("ai_question_composer", focus);
+      const auto &input = question_composer(layout, ctx, state, draft, key);
+      if (focus && ctx.ui) { ctx.ui->restore_focus_next_frame(input.key); }
+    }
     layout.paragraph(ctx.tr("ai.intro"));
     if (!state.error().empty()) { layout.paragraph(state.error()); }
     if (!discussion.error().empty()) { layout.paragraph(discussion.error()); }
@@ -323,7 +331,7 @@ class AIEditor final : public Editor {
         if (!picker_.active()) { configuration(*panel, ctx, state, draft); }
       }
       else if (focused && discussion.context().empty()) { layout.paragraph(ctx.tr("ai.no_context")); }
-      conversation(layout, ctx, state, draft, key, false, settings_open, focused);
+      conversation(layout, ctx, state, draft, key, false, settings_open, focused, compose_first);
     }
   }
 
@@ -1002,7 +1010,10 @@ class AIEditor final : public Editor {
         if (browsing) {
           if (auto open = area->shell().saved_conversation_action(*area, id)) { open(); }
         }
-        else if (discussion.load_exchange(id)) { opened_history_ = true; }
+        else if (discussion.load_exchange(id)) {
+          opened_history_ = true;
+          compose_handle_.clear();
+        }
       }
     }).disable(!enabled || discussion.exchange_busy() || ids.empty());
     history.button("ai_history_refresh", ctx.tr("ai.refresh_history"), [&discussion, &state, handle, offset = page.offset] {
@@ -1025,19 +1036,20 @@ class AIEditor final : public Editor {
 
   void conversation(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft,
                     const std::string &key, const bool wide, const bool settings_open = false,
-                    const bool focused = false)
+                    const bool focused = false, const bool compose_first = false)
   {
     auto &discussion = state.discussion();
     const bool enabled = !state.busy() && !discussion.busy();
     const std::string handle = state.project()->handle;
     advance_auto(ctx, state);
-    discussion.sync_archive();  // archived questions leave the history unless switched to them
     const auto &page = discussion.page("requests");
-    if (!page.loaded && enabled) { discussion.load_page("requests", page.offset, true); }
-    const auto &items = page.items;
     if (!discussion.exchange_id().empty()) { opened_history_ = true; }
-    if (!opened_history_ && page.loaded && !items.empty() && enabled && !discussion.exchange_busy()) {
-      opened_history_ = discussion.load_exchange(io::get_string(items.back(), "id"));
+    if (!compose_first) {
+      discussion.sync_archive();  // Archived questions leave the list unless switched to them.
+      if (!page.loaded && enabled) { discussion.load_page("requests", page.offset, true); }
+      if (!opened_history_ && page.loaded && !page.items.empty() && enabled && !discussion.exchange_busy()) {
+        opened_history_ = discussion.load_exchange(io::get_string(page.items.back(), "id"));
+      }
     }
     const bool history_on_rail = focused && discussion.recent_requests_supported();
     if (!history_on_rail) {
@@ -1051,7 +1063,7 @@ class AIEditor final : public Editor {
     const auto context = discussion.exchange_context();
     const std::string id = io::get_string(request, "id"), status = io::get_string(request, "status");
     // A list read marks its page loaded at dispatch. Wait for it to settle before using the empty layout.
-    const bool compact_empty = focused && page.loaded && items.empty() && request.empty() &&
+    const bool compact_empty = focused && (compose_first || (page.loaded && page.items.empty())) && request.empty() &&
                                discussion.exchange_id().empty() && !discussion.busy() && !discussion.exchange_busy() &&
                                discussion.error().empty();
     const bool parameter_request = request.contains("prompt_version") && structured_proposal(request.at("prompt_version"));
@@ -1093,7 +1105,7 @@ class AIEditor final : public Editor {
       }
       archived_notice(layout, ctx, "request", id);
     }
-    else { layout.paragraph(ctx.tr(discussion.exchange_busy() ? "ai.loading" : "ai.empty")); }
+    else if (!compose_first) { layout.paragraph(ctx.tr(discussion.exchange_busy() ? "ai.loading" : "ai.empty")); }
     if (!compact_empty) {
       const float height = ctx.draw ? float(ctx.draw->rect.height()) : 800.0f;
       const float candidate_space = parameter_request && status == "completed" ? 4.0f : 0.0f;
@@ -1142,7 +1154,31 @@ class AIEditor final : public Editor {
       archive_button(actions, ctx, "request", id, "ai_archive", false, enabled && status != "running" && status != "uncertain");
     }
     if (parameter_request && status == "completed") { proposal_actions(layout, ctx, state, handle, id, enabled); }
-    layout.separator();
+    if (!compose_first) {
+      layout.separator();
+      question_composer(layout, ctx, state, draft, key);
+    }
+    if (auto *details = layout.panel("ai_scope_detail", ctx.tr("ai.scope_detail"), false)) {
+      hint(*details, ctx, "ai.single_turn");
+      if (!id.empty()) { details->paragraph(id); details->paragraph(io::get_string(request, "context_id")); }
+      if (parameter_request && !reply.empty()) {
+        details->label(ctx.tr("ai.raw_reply"));
+        details->log_view("ai_raw_reply", raw_reply_, 6);
+      }
+    }
+    if (history_on_rail && !compose_first) {
+      if (auto *history = layout.panel("ai_all_saved_questions", ctx.tr("ai.history"), false)) {
+        draw_saved_questions(*history, ctx, state);
+      }
+    }
+  }
+
+  ui::Widget &question_composer(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft,
+                                const std::string &key)
+  {
+    auto &discussion = state.discussion();
+    const bool enabled = !state.busy() && !discussion.busy();
+    const std::string handle = state.project()->handle;
     layout.label(ctx.tr("ai.compose"));
     intent_dropdown(layout, ctx, state, draft);
     if (draft.intent >= 1 && !discussion.edit_proposals_supported()) { layout.paragraph(ctx.tr("ai.edits_unavailable")); }
@@ -1180,6 +1216,7 @@ class AIEditor final : public Editor {
           ask.request_id = discussion.exchange_id();
           auto_ = std::move(ask);
           opened_history_ = true;
+          compose_handle_.clear();
           proposal_navigation_error_.clear();
         }
         return;
@@ -1187,25 +1224,14 @@ class AIEditor final : public Editor {
       if (discussion.prepare_question(context_id, current.text, current.model, prompt, adapter)) {
         auto_.reset();
         opened_history_ = true;
+        compose_handle_.clear();
         proposal_navigation_error_.clear();
       }
     }).disable(!enabled || picker_.active() || discussion.exchange_busy() || context_id.empty() || !has_question ||
                !(choose_automatically ? ranked.is_object() && ranked.value("choice", Json()).is_object() : manual_model_ready) ||
                discussion.provider().empty() ||
                (draft.intent >= 1 && !discussion.edit_proposals_supported()));
-    if (auto *details = layout.panel("ai_scope_detail", ctx.tr("ai.scope_detail"), false)) {
-      hint(*details, ctx, "ai.single_turn");
-      if (!id.empty()) { details->paragraph(id); details->paragraph(io::get_string(request, "context_id")); }
-      if (parameter_request && !reply.empty()) {
-        details->label(ctx.tr("ai.raw_reply"));
-        details->log_view("ai_raw_reply", raw_reply_, 6);
-      }
-    }
-    if (history_on_rail) {
-      if (auto *history = layout.panel("ai_all_saved_questions", ctx.tr("ai.history"), false)) {
-        draw_saved_questions(*history, ctx, state);
-      }
-    }
+    return input;
   }
 
   void proposal_actions(ui::Layout &layout, EditorContext &ctx, ProjectState &state,
@@ -1309,6 +1335,7 @@ class AIEditor final : public Editor {
   {
     if (!state.discussion().load_exchange(request_id)) { return false; }
     saved_questions_handle_.clear();
+    compose_handle_.clear();
     const auto &project = *state.project();
     auto &draft = project_draft(project, project.directory + "\n" + project.id);
     if (draft.intent == kAgentIntent) { draft.intent = 0; }
@@ -1320,6 +1347,19 @@ class AIEditor final : public Editor {
   {
     if (!state.project()) { return false; }
     saved_questions_handle_ = state.project()->handle;
+    compose_handle_.clear();
+    return true;
+  }
+
+  bool reveal_question_composer(const ProjectState &state, const uint64_t visibility)
+  {
+    if (!state.project()) { return false; }
+    const auto &project = *state.project();
+    auto &draft = project_draft(project, project.directory + "\n" + project.id);
+    if (draft.intent == kAgentIntent) { draft.intent = 0; }
+    saved_questions_handle_.clear();
+    compose_handle_ = project.handle;
+    compose_focus_visibility_ = visibility;
     return true;
   }
 
@@ -1328,6 +1368,7 @@ class AIEditor final : public Editor {
     auto &agent = state.agent();
     if (!agent.select_history_session(session_id)) { return false; }
     saved_questions_handle_.clear();
+    compose_handle_.clear();
     const auto &project = *state.project();
     project_draft(project, project.directory + "\n" + project.id).intent = kAgentIntent;
     return true;
@@ -1339,6 +1380,7 @@ class AIEditor final : public Editor {
     const auto session = io::get_string(target, "session_id");
     if (session.empty()) { return false; }
     saved_questions_handle_.clear();
+    compose_handle_.clear();
     pending_session_ = session;  // taken by the next draw (navigation redraws the area)
     pending_project_ = io::get_string(target, "project_id");
     return true;
@@ -1700,7 +1742,8 @@ class AIEditor final : public Editor {
   std::unordered_map<std::string, Draft> drafts_, workspace_drafts_;
   std::string active_draft_, opening_, shown_context_, shown_exchange_;
   bool opened_history_ = false;
-  std::string saved_questions_handle_;
+  std::string saved_questions_handle_, compose_handle_;
+  std::optional<uint64_t> compose_focus_visibility_;
   bool model_has_text_ = false;
   struct NewEndpoint { std::string id, name, base_url, models; bool internal = false; int tier = 0; } new_endpoint_;
   int import_entry_ = -1;
@@ -1744,6 +1787,12 @@ bool reveal_saved_question_history(Editor &editor, const ProjectState &project)
 {
   auto *ai = dynamic_cast<AIEditor *>(&editor);
   return ai && ai->reveal_saved_question_history(project);
+}
+
+bool reveal_question_composer(Editor &editor, const ProjectState &project, const uint64_t visibility)
+{
+  auto *ai = dynamic_cast<AIEditor *>(&editor);
+  return ai && ai->reveal_question_composer(project, visibility);
 }
 
 bool reveal_saved_agent_session(Editor &editor, ProjectState &project, const std::string &session_id)

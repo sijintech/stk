@@ -454,7 +454,7 @@ class Block {
   const std::deque<Widget> &widgets() const { return widgets_; }
   float content_height() const { return content_h_; }
   /** Keep separate outer scroll positions without changing the widget keys in this region. */
-  void set_scroll_scope(std::string_view scope);
+  void set_scroll_scope(std::string_view scope, bool reset_position = false);
   float scroll() const;
   /** Frame of overlay blocks (modal dialog, popup, tooltip); == rect for regions. */
   const Rect &frame() const { return frame_; }
