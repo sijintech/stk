@@ -271,6 +271,39 @@ TEST_F(WorkspaceNavigationPython, TheNextStepFollowsTheProjectAndItsParameters)
   EXPECT_FALSE(shows(f, "2. Parameters  ·  next"));
 }
 
+TEST_F(WorkspaceNavigationPython, FocusedConversationKeepsDataAndModelControlsOnDemand)
+{
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  f.drv->frame();
+  ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
+  const std::string question = "ai_question/" + handle();
+  ASSERT_NE(widget(question), nullptr);
+  widget(question)->string.assign("An unsent question about these cases.");
+  ASSERT_NE(widget("ai_workbench_context_settings"), nullptr);
+  EXPECT_EQ(widget("ai_capture"), nullptr);
+  const auto click = [&](const char *key) {
+    const auto [x, y] = f.widget_center(key);
+    f.drv->click(x, y);
+    f.screen.run_deferred();
+    f.drv->frame();
+  };
+  click("ai_workbench_context_settings");
+  EXPECT_NE(widget("ai_capture"), nullptr);
+  click("ai_workbench_context_settings");
+  EXPECT_EQ(widget("ai_capture"), nullptr);
+  click("workbench_results");
+  f.drv->ctx.rect.xmax = 680;
+  f.drv->frame();
+  click("workbench_home");
+  ASSERT_NE(widget(question), nullptr);
+  EXPECT_EQ(widget(question)->string.value(), "An unsent question about these cases.");
+  EXPECT_EQ(widget("ai_capture"), nullptr);
+  EXPECT_TRUE(project().discussion().context().empty());
+  EXPECT_TRUE(project().discussion().exchange_id().empty());
+  EXPECT_EQ(project().project()->revision, 0);
+}
+
 TEST_F(WorkspaceNavigationPython, VisibleButtonsReuseEditorsAndRevealFilesAndBothRunHistories)
 {
   auto &viewer = f.shell->store().viewer();

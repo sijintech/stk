@@ -215,12 +215,15 @@ class AIEditor final : public Editor {
 
   void draw_main(ui::Layout &layout, EditorContext &ctx) override
   {
+    const auto *screen = ctx.area.screen();
+    const bool focused = screen && screen->maximized() == &ctx.area && ctx.area.shell().workbench_is_focused(*screen);
     auto &state = ctx.store.project();
     state.sync();
     if (!state.ready()) { layout.paragraph(ctx.tr("project.bridge_required")); return; }
     if (!state.project()) {
       layout.paragraph(ctx.tr("ai.open_project"));
-      layout.button("ai_open_project", ctx.tr("project.location"), [ctx] { show_tables(ctx); });
+      auto &actions = layout.row().alignment(ui::LayoutAlign::Left);
+      actions.button("ai_open_project", ctx.tr("project.location"), [ctx] { show_tables(ctx); });
       return;
     }
     if (!state.loaded()) { layout.label(ctx.tr("project.busy")); return; }
@@ -280,7 +283,7 @@ class AIEditor final : public Editor {
     }
     const float width = ctx.draw ? float(ctx.draw->rect.width()) : 1280.0f;
     const float scale = ctx.ui ? ctx.ui->style().unit / 20.0f : 1.0f;
-    if (width >= 920.0f * scale) {
+    if (!focused && width >= 920.0f * scale) {
       auto &columns = layout.split(0.32f);
       auto &left = columns.column();
       auto &right = columns.column();
@@ -290,11 +293,13 @@ class AIEditor final : public Editor {
     }
     else {
       bool settings_open = false;
-      if (auto *panel = layout.panel("ai_context_settings", ctx.tr("ai.context_settings"), discussion.context().empty())) {
+      const auto panel_key = focused ? "ai_workbench_context_settings" : "ai_context_settings";
+      if (auto *panel = layout.panel(panel_key, ctx.tr("ai.context_settings"), !focused && discussion.context().empty())) {
         settings_open = true;
         source(*panel, ctx, state, true);
         if (!picker_.active()) { configuration(*panel, ctx, state, draft); }
       }
+      else if (focused && discussion.context().empty()) { layout.paragraph(ctx.tr("ai.no_context")); }
       conversation(layout, ctx, state, draft, key, false, settings_open);
     }
   }
@@ -516,7 +521,6 @@ class AIEditor final : public Editor {
       box.prop(ctx.tr("discussion.requests.model")).dropdown("ai_endpoint_model", offered, {
         [&draft, offered] { const auto it = std::find(offered.begin(), offered.end(), draft.model); return it == offered.end() ? -1 : int(it - offered.begin()); },
         [&draft, offered](const int index) { if (index >= 0 && size_t(index) < offered.size()) { draft.model = offered[size_t(index)]; } }});
-      model_has_text_ = std::find(offered.begin(), offered.end(), draft.model) != offered.end();
     }
     if (!choose_automatically && endpoint && !io::get_bool(*endpoint, "allowed", true)) { box.paragraph(ctx.tr("models.blocked")); }
     if (endpoint && !builtin) {
@@ -1081,6 +1085,11 @@ class AIEditor final : public Editor {
     const auto context_id = io::get_string(discussion.context(), "id");
     const auto *target = chosen_endpoint(ctx, draft);
     const auto adapter = target ? io::get_string(*target, "adapter") : std::string();
+    bool manual_model_ready = model_has_text_;
+    if (target && !io::get_bool(*target, "builtin", false)) {
+      const auto offered = target->value("models", Json::array());
+      manual_model_ready = std::find(offered.begin(), offered.end(), draft.model) != offered.end();
+    }
     const bool choose_automatically = automatic(ctx, draft);
     const auto ranked = choose_automatically ? route(ctx, state, draft) : Json();
     layout.button("ai_prepare", ctx.tr("ai.prepare"), [this, &discussion, &state, handle, key, context_id, adapter, choose_automatically, ranked] {
@@ -1110,7 +1119,7 @@ class AIEditor final : public Editor {
         proposal_navigation_error_.clear();
       }
     }).disable(!enabled || picker_.active() || discussion.exchange_busy() || context_id.empty() || !has_question ||
-               !(choose_automatically ? ranked.is_object() && ranked.value("choice", Json()).is_object() : model_has_text_) ||
+               !(choose_automatically ? ranked.is_object() && ranked.value("choice", Json()).is_object() : manual_model_ready) ||
                discussion.provider().empty() ||
                (draft.intent >= 1 && !discussion.edit_proposals_supported()));
     if (auto *details = layout.panel("ai_scope_detail", ctx.tr("ai.scope_detail"), false)) {
