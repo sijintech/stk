@@ -372,7 +372,13 @@ bool ProjectDiscussion::load_page(const std::string &kind, const int64_t offset,
   const auto filter = archive_filter(kind);
   if (filter) { params["archived"] = *filter; }
   const auto archive = archive_key(kind);
-  const bool accepted = call(method, std::move(params), [this, kind, offset](const Json &result) {
+  const bool accepted = call(method, std::move(params), [this, kind, offset, archive](const Json &result) {
+    if (kind == "contexts" || kind == "requests") {
+      // The archive filter or its index may have changed while this page was in flight.
+      sync_archive();
+      const auto listed = listed_archive_.find(kind);
+      if (listed == listed_archive_.end() || listed->second != archive) { return; }
+    }
     auto &page = kind == "contexts" ? contexts_ : kind == "messages" ? messages_ : kind == "requests" ? request_page_ : proposals_;
     page.items = result.at(kind);
     page.offset = offset;

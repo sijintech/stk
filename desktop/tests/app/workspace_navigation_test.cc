@@ -304,13 +304,33 @@ TEST_F(WorkspaceNavigationPython, TheNextStepFollowsTheProjectAndItsParameters)
 
 TEST_F(WorkspaceNavigationPython, FocusedConversationKeepsDataAndModelControlsOnDemand)
 {
+  f.drv->ctx.rect.xmax = 1600;
+  f.drv->ctx.rect.ymax = 720;
   f.shell->open_workbench(f.screen);
   f.screen.run_deferred();
-  f.drv->frame();
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    const auto &discussion = project().discussion();
+    return discussion.page("requests").loaded && !discussion.busy();
+  }, 30));
   ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
+  ASSERT_TRUE(project().discussion().recent_requests_supported());
   const std::string question = "ai_question/" + handle();
   ASSERT_NE(widget(question), nullptr);
   widget(question)->string.assign("An unsent question about these cases.");
+  const auto expect_composer_in_view = [&] {
+    for (const std::string &key : {question, std::string("ai_prepare")}) {
+      const auto *control = widget(key);
+      ASSERT_NE(control, nullptr);
+      EXPECT_GE(control->rect.y, control->clip.y);
+      EXPECT_LE(control->rect.y1(), control->clip.y1());
+    }
+    EXPECT_EQ(widget("ai_transcript"), nullptr);
+    EXPECT_EQ(widget("ai_send_saved"), nullptr);
+    EXPECT_EQ(widget("ai_history"), nullptr);
+    EXPECT_NE(widget("ai_all_saved_questions"), nullptr);
+  };
+  ASSERT_NO_FATAL_FAILURE(expect_composer_in_view());
   ASSERT_NE(widget("ai_workbench_context_settings"), nullptr);
   EXPECT_EQ(widget("ai_capture"), nullptr);
   const auto click = [&](const char *key) {
@@ -325,8 +345,10 @@ TEST_F(WorkspaceNavigationPython, FocusedConversationKeepsDataAndModelControlsOn
   EXPECT_EQ(widget("ai_capture"), nullptr);
   click("workbench_results");
   f.drv->ctx.rect.xmax = 680;
+  f.drv->ctx.rect.ymax = 620;
   f.drv->frame();
   click("workbench_home");
+  ASSERT_NO_FATAL_FAILURE(expect_composer_in_view());
   ASSERT_NE(widget(question), nullptr);
   EXPECT_EQ(widget(question)->string.value(), "An unsent question about these cases.");
   EXPECT_EQ(widget("ai_capture"), nullptr);
@@ -808,6 +830,13 @@ TEST_F(SavedConversationNavigationPython, RecentQuestionsOpenFromTasksAndResults
   f.shell->open_workbench(f.screen);
   f.screen.run_deferred();
   ASSERT_NO_FATAL_FAILURE(wait_for_question(kSecond));
+  EXPECT_NE(widget("ai_transcript"), nullptr);
+  EXPECT_EQ(widget("ai_history"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("ai_all_saved_questions"));
+  EXPECT_NE(widget("ai_history"), nullptr);
+  EXPECT_NE(widget("ai_history_refresh"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("ai_all_saved_questions"));
+  EXPECT_EQ(widget("ai_history"), nullptr);
   widget(question)->string.assign("Draft stays in the workbench");
   auto *conversation = f.screen.maximized();
   ASSERT_NO_FATAL_FAILURE(click("workbench_tasks"));
@@ -865,6 +894,17 @@ TEST_F(SavedConversationNavigationPython, RecentQuestionsOpenFromTasksAndResults
   EXPECT_EQ(widget(key), nullptr);
   EXPECT_EQ(f.screen.maximized(), results);
   EXPECT_EQ(discussion.exchange_id(), kSecond);
+  ASSERT_NO_FATAL_FAILURE(click("workbench_home"));
+  ASSERT_NO_FATAL_FAILURE(click("ai_all_saved_questions"));
+  ASSERT_TRUE(discussion.busy());  // The unarchived list began reading when Workbench reopened.
+  ASSERT_NO_FATAL_FAILURE(click("ai_history_show_archived"));
+  EXPECT_TRUE(discussion.show_archived("requests"));
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    const auto &page = discussion.page("requests");
+    return page.loaded && page.items.size() == 1 && io::get_string(page.items.front(), "id") == kSecond;
+  }, 30)) << discussion.error();
+  EXPECT_EQ(widget(question)->string.value(), "Draft stays in the workbench");
 }
 
 TEST_F(SavedConversationNavigationPython, OpenCompactHistoryIsolatesViewerInputUntilDismissed)

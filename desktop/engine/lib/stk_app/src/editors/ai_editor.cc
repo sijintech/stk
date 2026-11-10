@@ -299,7 +299,7 @@ class AIEditor final : public Editor {
         if (!picker_.active()) { configuration(*panel, ctx, state, draft); }
       }
       else if (focused && discussion.context().empty()) { layout.paragraph(ctx.tr("ai.no_context")); }
-      conversation(layout, ctx, state, draft, key, false, settings_open);
+      conversation(layout, ctx, state, draft, key, false, settings_open, focused);
     }
   }
 
@@ -938,7 +938,8 @@ class AIEditor final : public Editor {
   }
 
   void conversation(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft,
-                    const std::string &key, const bool wide, const bool settings_open = false)
+                    const std::string &key, const bool wide, const bool settings_open = false,
+                    const bool focused = false)
   {
     auto &discussion = state.discussion();
     const bool enabled = !state.busy() && !discussion.busy();
@@ -952,40 +953,46 @@ class AIEditor final : public Editor {
     if (!opened_history_ && page.loaded && !items.empty() && enabled && !discussion.exchange_busy()) {
       opened_history_ = discussion.load_exchange(io::get_string(items.back(), "id"));
     }
-    std::vector<std::string> ids, titles;
-    for (const auto &item : items) {
-      ids.push_back(io::get_string(item, "id"));
-      titles.push_back(io::get_string(item.at("configuration"), "model") + " · " +
-          std::string(ctx.tr("discussion.requests." + io::get_string(item, "status"))) + " · " + ids.back().substr(0, 8));
-    }
-    layout.label(ctx.tr("ai.history"));
-    auto &history = layout.row();
-    history.dropdown("ai_history", std::move(titles), {
-      [ids, &discussion] {
-        const auto id = io::get_string(discussion.exchange_request(), "id");
-        const auto it = std::find(ids.begin(), ids.end(), id);
-        return it == ids.end() ? -1 : int(it - ids.begin());
-      },
-      [this, ids, &discussion, &state, handle](int index) {
-        if (!state.project() || state.project()->handle != handle || index < 0 || size_t(index) >= ids.size()) { return; }
-        if (discussion.load_exchange(ids[size_t(index)])) { opened_history_ = true; }
+    const bool history_on_rail = focused && discussion.recent_requests_supported();
+    const auto draw_saved_questions = [&](ui::Layout &body) {
+      std::vector<std::string> ids, titles;
+      for (const auto &item : items) {
+        ids.push_back(io::get_string(item, "id"));
+        titles.push_back(io::get_string(item.at("configuration"), "model") + " · " +
+            std::string(ctx.tr("discussion.requests." + io::get_string(item, "status"))) + " · " + ids.back().substr(0, 8));
       }
-    }).disable(!enabled || discussion.exchange_busy() || ids.empty());
-    history.button("ai_history_refresh", ctx.tr("ai.refresh_history"), [&discussion, &state, handle, offset = page.offset] {
-      if (state.project() && state.project()->handle == handle) { discussion.load_page("requests", offset); }
-    }).width(6).disable(!enabled);
-    archive_switch(layout, ctx, "request", {[&discussion] { return discussion.show_archived("requests"); },
-        [&discussion](const bool show) { discussion.set_show_archived("requests", show); }}, "ai_history_show_archived");
-    if (page.offset > 0 || page.next >= 0) {
-      auto &pages = layout.row();
-      pages.button("ai_previous", ctx.tr("project.drafts.previous"), [&discussion, &state, handle, offset = page.offset] {
-        if (state.project() && state.project()->handle == handle) {
-          discussion.load_page("requests", std::max<int64_t>(0, offset - 100));
+      auto &history = body.row();
+      history.dropdown("ai_history", std::move(titles), {
+        [ids, &discussion] {
+          const auto id = io::get_string(discussion.exchange_request(), "id");
+          const auto it = std::find(ids.begin(), ids.end(), id);
+          return it == ids.end() ? -1 : int(it - ids.begin());
+        },
+        [this, ids, &discussion, &state, handle](int index) {
+          if (!state.project() || state.project()->handle != handle || index < 0 || size_t(index) >= ids.size()) { return; }
+          if (discussion.load_exchange(ids[size_t(index)])) { opened_history_ = true; }
         }
-      }).disable(!enabled || page.offset == 0);
-      pages.button("ai_next", ctx.tr("project.drafts.next"), [&discussion, &state, handle, next = page.next] {
-        if (state.project() && state.project()->handle == handle) { discussion.load_page("requests", next); }
-      }).disable(!enabled || page.next < 0);
+      }).disable(!enabled || discussion.exchange_busy() || ids.empty());
+      history.button("ai_history_refresh", ctx.tr("ai.refresh_history"), [&discussion, &state, handle, offset = page.offset] {
+        if (state.project() && state.project()->handle == handle) { discussion.load_page("requests", offset); }
+      }).width(6).disable(!enabled);
+      archive_switch(body, ctx, "request", {[&discussion] { return discussion.show_archived("requests"); },
+          [&discussion](const bool show) { discussion.set_show_archived("requests", show); }}, "ai_history_show_archived");
+      if (page.offset > 0 || page.next >= 0) {
+        auto &pages = body.row();
+        pages.button("ai_previous", ctx.tr("project.drafts.previous"), [&discussion, &state, handle, offset = page.offset] {
+          if (state.project() && state.project()->handle == handle) {
+            discussion.load_page("requests", std::max<int64_t>(0, offset - 100));
+          }
+        }).disable(!enabled || page.offset == 0);
+        pages.button("ai_next", ctx.tr("project.drafts.next"), [&discussion, &state, handle, next = page.next] {
+          if (state.project() && state.project()->handle == handle) { discussion.load_page("requests", next); }
+        }).disable(!enabled || page.next < 0);
+      }
+    };
+    if (!history_on_rail) {
+      layout.label(ctx.tr("ai.history"));
+      draw_saved_questions(layout);
     }
     const auto request = discussion.exchange_request();
     const auto question = discussion.exchange_question();
@@ -993,6 +1000,10 @@ class AIEditor final : public Editor {
     const auto progress = discussion.exchange_progress();
     const auto context = discussion.exchange_context();
     const std::string id = io::get_string(request, "id"), status = io::get_string(request, "status");
+    // A list read marks its page loaded at dispatch. Wait for it to settle before using the empty layout.
+    const bool compact_empty = focused && page.loaded && items.empty() && request.empty() &&
+                               discussion.exchange_id().empty() && !discussion.busy() && !discussion.exchange_busy() &&
+                               discussion.error().empty();
     const bool parameter_request = request.contains("prompt_version") && structured_proposal(request.at("prompt_version"));
     const bool sweep_request = io::get_string(request, "prompt_version") == "stk.parameter-sweep/1";
     const float unit = ctx.ui ? ctx.ui->style().unit : 20.0f;
@@ -1033,51 +1044,53 @@ class AIEditor final : public Editor {
       archived_notice(layout, ctx, "request", id);
     }
     else { layout.paragraph(ctx.tr(discussion.exchange_busy() ? "ai.loading" : "ai.empty")); }
-    const float height = ctx.draw ? float(ctx.draw->rect.height()) : 800.0f;
-    const float candidate_space = parameter_request && status == "completed" ? 4.0f : 0.0f;
-    const float transcript_units = wide ? std::clamp(height / unit - 23.0f - candidate_space, 5.0f, 22.0f) :
-        settings_open ? 6.0f : std::clamp(height / unit - 25.0f - candidate_space, 6.0f, 22.0f);
-    layout.log_view("ai_transcript", transcript_, transcript_units);
-    const bool archived = ctx.store.archive().archived("request", id);
-    // An automatic question whose local model is not running yet is sent once STK has started it.
-    const bool auto_request = auto_ && auto_->key == key && auto_->request_id == id && !id.empty();
-    const auto blocked = request.empty() || (auto_request && io::get_bool(auto_->current, "start", false)) ? std::string() :
-        send_blocked(ctx, discussion, io::get_string(request.value("configuration", Json::object()), "adapter"), &context);
-    if (status == "pending" && !blocked.empty() && blocked != "ai.missing_key") { layout.paragraph(ctx.tr(blocked)); }
-    auto &actions = layout.row();
-    // The saved question goes to the model frozen in it, named on the button.
-    const auto send_model = io::get_string(request.value("configuration", Json::object()), "model");
-    const auto send_text = send_model.empty() ? std::string(ctx.tr("ai.send_saved")) :
-        ctx.store.catalog().format("ai.send_saved_model", {{"model", send_model}});
-    actions.button("ai_send_saved", send_text, [this, &discussion, &state, handle, id, auto_request] {
-      if (!state.project() || state.project()->handle != handle || io::get_string(discussion.exchange_request(), "id") != id) { return; }
-      if (auto_request && auto_ && auto_->request_id == id) {  // started (and sent) next frame; again after a refusal
-        auto_->send = true;
-        auto_->sent = false;
-        return;
-      }
-      discussion.start_request(id);
-    }).disable(!enabled || status != "pending" || archived || !blocked.empty() ||
-               (auto_request && auto_ && auto_->send && !auto_->sent));
-    actions.button("ai_refresh_reply", ctx.tr("ai.refresh"), [&discussion, &state, handle, id] {
-      if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
-        discussion.refresh_exchange();
-      }
-    })
-        .disable(!enabled || id.empty() || discussion.exchange_busy());
-    actions.button("ai_cancel", ctx.tr("discussion.requests.cancel"), [&discussion, &state, handle, id] {
-      if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
-        discussion.cancel_request(id);
-      }
-    }).disable(!enabled || (status != "pending" && status != "running" && status != "uncertain"));
-    if (status == "running" || status == "uncertain") {
-      layout.button("ai_recover", ctx.tr("discussion.requests.recover"), [&discussion, &state, handle, id] {
-        if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
-          discussion.recover_request(id);
+    if (!compact_empty) {
+      const float height = ctx.draw ? float(ctx.draw->rect.height()) : 800.0f;
+      const float candidate_space = parameter_request && status == "completed" ? 4.0f : 0.0f;
+      const float transcript_units = wide ? std::clamp(height / unit - 23.0f - candidate_space, 5.0f, 22.0f) :
+          settings_open ? 6.0f : std::clamp(height / unit - 25.0f - candidate_space, 6.0f, 22.0f);
+      layout.log_view("ai_transcript", transcript_, transcript_units);
+      const bool archived = ctx.store.archive().archived("request", id);
+      // An automatic question whose local model is not running yet is sent once STK has started it.
+      const bool auto_request = auto_ && auto_->key == key && auto_->request_id == id && !id.empty();
+      const auto blocked = request.empty() || (auto_request && io::get_bool(auto_->current, "start", false)) ? std::string() :
+          send_blocked(ctx, discussion, io::get_string(request.value("configuration", Json::object()), "adapter"), &context);
+      if (status == "pending" && !blocked.empty() && blocked != "ai.missing_key") { layout.paragraph(ctx.tr(blocked)); }
+      auto &actions = layout.row();
+      // The saved question goes to the model frozen in it, named on the button.
+      const auto send_model = io::get_string(request.value("configuration", Json::object()), "model");
+      const auto send_text = send_model.empty() ? std::string(ctx.tr("ai.send_saved")) :
+          ctx.store.catalog().format("ai.send_saved_model", {{"model", send_model}});
+      actions.button("ai_send_saved", send_text, [this, &discussion, &state, handle, id, auto_request] {
+        if (!state.project() || state.project()->handle != handle || io::get_string(discussion.exchange_request(), "id") != id) { return; }
+        if (auto_request && auto_ && auto_->request_id == id) {  // started (and sent) next frame; again after a refusal
+          auto_->send = true;
+          auto_->sent = false;
+          return;
         }
-      }).disable(!enabled);
+        discussion.start_request(id);
+      }).disable(!enabled || status != "pending" || archived || !blocked.empty() ||
+                 (auto_request && auto_ && auto_->send && !auto_->sent));
+      actions.button("ai_refresh_reply", ctx.tr("ai.refresh"), [&discussion, &state, handle, id] {
+        if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
+          discussion.refresh_exchange();
+        }
+      })
+          .disable(!enabled || id.empty() || discussion.exchange_busy());
+      actions.button("ai_cancel", ctx.tr("discussion.requests.cancel"), [&discussion, &state, handle, id] {
+        if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
+          discussion.cancel_request(id);
+        }
+      }).disable(!enabled || (status != "pending" && status != "running" && status != "uncertain"));
+      if (status == "running" || status == "uncertain") {
+        layout.button("ai_recover", ctx.tr("discussion.requests.recover"), [&discussion, &state, handle, id] {
+          if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
+            discussion.recover_request(id);
+          }
+        }).disable(!enabled);
+      }
+      archive_button(actions, ctx, "request", id, "ai_archive", false, enabled && status != "running" && status != "uncertain");
     }
-    archive_button(actions, ctx, "request", id, "ai_archive", false, enabled && status != "running" && status != "uncertain");
     if (parameter_request && status == "completed") { proposal_actions(layout, ctx, state, handle, id, enabled); }
     layout.separator();
     layout.label(ctx.tr("ai.compose"));
@@ -1136,6 +1149,11 @@ class AIEditor final : public Editor {
       if (parameter_request && !reply.empty()) {
         details->label(ctx.tr("ai.raw_reply"));
         details->log_view("ai_raw_reply", raw_reply_, 6);
+      }
+    }
+    if (history_on_rail) {
+      if (auto *history = layout.panel("ai_all_saved_questions", ctx.tr("ai.history"), false)) {
+        draw_saved_questions(*history);
       }
     }
   }
