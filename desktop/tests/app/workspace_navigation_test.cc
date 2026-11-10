@@ -106,24 +106,30 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
   auto *conversation = &home->editor();
   ASSERT_EQ(conversation->type().id, kEditorAI);
   EXPECT_EQ(f.screen.ui()->find("tool_files"), nullptr);
+  const auto *rail = home->find_region("workbench_rail");
+  ASSERT_NE(rail, nullptr);
+  EXPECT_FALSE(rail->rect().empty());
+  EXPECT_EQ(home->find_region("main")->rect().xmin, rail->rect().xmax);
+  const auto *home_button = f.screen.ui()->find("workbench_home");
+  ASSERT_NE(home_button, nullptr);
+  EXPECT_FALSE(home_button->enabled);
 
-  const auto select = [&](int index) {
-    const auto *tabs = f.screen.ui()->find("workbench_sections");
-    ASSERT_NE(tabs, nullptr);
-    tabs->index.assign(index);
-    f.screen.run_deferred();
-    f.drv->frame();
-  };
-  ASSERT_NO_FATAL_FAILURE(select(1));
+  click("workbench_tasks");
   auto *tasks = dynamic_cast<EditorArea *>(f.screen.maximized());
   ASSERT_NE(tasks, nullptr);
   EXPECT_EQ(tasks->editor().type().id, kEditorJobs);
-  ASSERT_NO_FATAL_FAILURE(select(2));
+  // Window/scale changes relocate the same controls without switching the active editor.
+  f.drv->ctx.rect.xmax = 650;
+  f.drv->frame();
+  EXPECT_EQ(f.screen.maximized(), tasks);
+  EXPECT_TRUE(tasks->find_region("workbench_rail")->rect().empty());
+  EXPECT_FALSE(tasks->find_region("workbench_strip")->rect().empty());
+  click("workbench_results");
   ASSERT_EQ(f.screen.maximized(), &f.area("a2"));
   EXPECT_EQ(&f.area("a2").editor(), viewer);
   EXPECT_EQ(state.payload(), shown);
   EXPECT_EQ(state.camera_serial(), camera);
-  ASSERT_NO_FATAL_FAILURE(select(0));
+  click("workbench_home");
   ASSERT_EQ(f.screen.maximized(), home);
   EXPECT_EQ(&home->editor(), conversation);
   ASSERT_NE(f.screen.ui()->find("workbench_split"), nullptr);

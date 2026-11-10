@@ -683,6 +683,110 @@ void AppShell::open_viewer_payload(wm::Screen *screen, std::string handle,
   });
 }
 
+namespace {
+constexpr float kWorkbenchRailBreakpoint = 700.0f;
+struct WorkbenchSection {
+  const char *editor;
+  const char *key;
+  const char *label;
+};
+constexpr WorkbenchSection workbench_sections[] = {
+    {kEditorAI, "workbench_home", "workbench.nav.home"},
+    {kEditorJobs, "workbench_tasks", "workbench.nav.tasks"},
+    {kEditorViewer, "workbench_results", "workbench.nav.results"},
+};
+}  // namespace
+
+int AppShell::focused_workbench_section(const wm::Screen &screen) const
+{
+  const auto *focused = dynamic_cast<const EditorArea *>(screen.maximized());
+  const auto mark = focused_workbenches_.find(&screen);
+  if (focused && mark != focused_workbenches_.end() && mark->second == screen.visibility_epoch()) {
+    for (int i = 0; i < int(std::size(workbench_sections)); ++i) {
+      if (focused->editor().type().id == workbench_sections[i].editor) { return i; }
+    }
+  }
+  return -1;
+}
+
+std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, const char *editor_id)
+{
+  const auto epoch = screen.visibility_epoch();
+  const auto *origin = dynamic_cast<const EditorArea *>(screen.maximized());
+  const auto activity = origin ? origin->activity_epoch() : 0;
+  const auto editor = origin ? origin->editor().lifetime() : std::weak_ptr<void>{};
+  const auto weak = lifetime();
+  auto current = [this, weak, s = &screen, epoch, origin, activity, editor] {
+    return !weak.expired() && has_screen(s) && s->visibility_epoch() == epoch &&
+           (!origin || (!editor.expired() && s->maximized() == origin && origin->activity_epoch() == activity));
+  };
+  return [this, s = &screen, editor_id, current] {
+    if (!current()) { return; }
+    s->defer([this, s, editor_id, current] {
+      if (!current()) { return; }
+      const auto result = editor_id ? activate_editor(s, editor_id, true) : restore_split_layout(s);
+      if (result && editor_id) { focused_workbenches_[s] = s->visibility_epoch(); }
+      if (!result && store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
+    });
+  };
+}
+
+class AppShell::WorkbenchNavigation final : public wm::Region {
+ public:
+  WorkbenchNavigation(AppShell &shell, bool rail)
+      : Region(rail ? "workbench_rail" : "workbench_strip",
+               rail ? wm::RegionAlign::Left : wm::RegionAlign::Top, 144.0f),
+        shell_(shell), rail_(rail)
+  {
+    persistent = false;
+  }
+
+  int size_px(float scale) const override
+  {
+    const auto *s = screen();
+    if (!s || s->maximized() != area() || shell_.focused_workbench_section(*s) < 0) { return 0; }
+    const bool wide = s->rect().width() > kWorkbenchRailBreakpoint * scale;
+    if (wide != rail_) { return 0; }
+    return rail_ ? Region::size_px(scale) : wm::ui_bar_height_px(scale);
+  }
+
+  void build_ui(ui::Context &ui, const wm::DrawContext &) override
+  {
+    auto &s = *screen();
+    const int current = shell_.focused_workbench_section(s);
+    if (current < 0) { return; }
+    // Only one navigation region is laid out on a screen at a time.
+    auto &block = ui.block("workbench_navigation", ui_rect());
+    block.set_background(theme::kBarBack);
+    auto &nav = rail_ ? block.layout().column() : block.layout().row();
+    for (int i = 0; i < int(std::size(workbench_sections)); ++i) {
+      const auto &section = workbench_sections[i];
+      nav.button(section.key, mark(i == current, shell_.store_.tr(section.label)),
+                 shell_.workbench_navigation_action(s, section.editor)).disable(i == current);
+    }
+    if (rail_) { nav.separator(); }
+    nav.button("workbench_split", shell_.store_.tr("workbench.nav.split"),
+               shell_.workbench_navigation_action(s, nullptr));
+    if (rail_) {
+      nav.separator();
+      const auto &project = shell_.store_.project().project();
+      const std::string_view name = project ? std::string_view(project->name) :
+                                              shell_.store_.tr("script.no_project");
+      nav.label(name).tip(name);
+    }
+  }
+
+ private:
+  AppShell &shell_;
+  bool rail_;
+};
+
+void AppShell::attach_workbench_navigation(EditorArea &area)
+{
+  area.emplace_region<WorkbenchNavigation>(*this, true);
+  area.emplace_region<WorkbenchNavigation>(*this, false);
+}
+
 class AppShell::TopBar final : public wm::Region {
  public:
   TopBar(AppShell &shell, wm::Screen &screen) : Region("topbar"), shell_(shell), screen_(screen)
@@ -730,47 +834,9 @@ class AppShell::TopBar final : public wm::Region {
     const auto show = [shell, screen, weak](const char *id) {
       if (!weak.expired()) { shell->activate_editor_later(screen, id, false); }
     };
-    const auto epoch = screen_.visibility_epoch();
-    const auto focus = [shell, screen, weak, epoch](const char *id) {
-      if (weak.expired() || !shell->has_screen(screen)) { return; }
-      screen->defer([shell, screen, weak, epoch, id] {
-        if (weak.expired() || !shell->has_screen(screen) || screen->visibility_epoch() != epoch) { return; }
-        const auto result = shell->activate_editor(screen, id, true);
-        if (result) { shell->focused_workbenches_[screen] = screen->visibility_epoch(); }
-        else if (shell->store_.toast) { shell->store_.toast(result.error().message, ui::ToastKind::Warning); }
-      });
-    };
-    static constexpr const char *sections[] = {kEditorAI, kEditorJobs, kEditorViewer};
-    const auto *focused = dynamic_cast<EditorArea *>(screen_.maximized());
-    const auto workbench_focus = shell_.focused_workbenches_.find(&screen_);
-    int section = -1;
-    if (focused && workbench_focus != shell_.focused_workbenches_.end() && workbench_focus->second == epoch) {
-      for (int i = 0; i < 3; ++i) {
-        if (focused->editor().type().id == sections[i]) { section = i; break; }
-      }
-    }
-    const auto workbench = shell_.store_.tr("workbench.nav.home");
-    if (section >= 0) {
-      const auto tasks = shell_.store_.tr("workbench.nav.tasks");
-      const auto results = shell_.store_.tr("workbench.nav.results");
-      const auto width = 3 * std::max({fit_units(ui, workbench, 2.0f), fit_units(ui, tasks, 2.0f),
-                                       fit_units(ui, results, 2.0f)});
-      row.tabs("workbench_sections", {std::string(workbench), std::string(tasks), std::string(results)}, {
-        [section] { return section; },
-        [focus, section](int i) { if (i >= 0 && i < 3 && i != section) { focus(sections[i]); } }
-      }).width(width);
-      const auto split = shell_.store_.tr("workbench.nav.split");
-      row.button("workbench_split", split, [shell, screen, weak, epoch] {
-        if (weak.expired() || !shell->has_screen(screen)) { return; }
-        screen->defer([shell, screen, weak, epoch] {
-          if (weak.expired() || !shell->has_screen(screen) || screen->visibility_epoch() != epoch) { return; }
-          const auto result = shell->restore_split_layout(screen);
-          if (!result && shell->store_.toast) { shell->store_.toast(result.error().message, ui::ToastKind::Warning); }
-        });
-      }).width(fit_units(ui, split, 2.0f));
-    }
-    else {
-      row.button("tool_workbench", workbench, [focus] { focus(kEditorAI); })
+    if (shell_.focused_workbench_section(screen_) < 0) {
+      const auto workbench = shell_.store_.tr("workbench.nav.home");
+      row.button("tool_workbench", workbench, shell_.workbench_navigation_action(screen_, kEditorAI))
           .width(fit_units(ui, workbench, 2.0f));
       for (const auto &item : std::vector<std::pair<const char *, const char *>>{
                {kEditorFiles, "app.tool.files"}, {kEditorAnalysisGraph, "app.tool.nodes"},

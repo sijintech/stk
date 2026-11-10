@@ -48,8 +48,9 @@ class EditorRegion final : public wm::Region {
 
   int size_px(const float ui_scale) const override
   {
-    return kind_ == Kind::Header ? wm::ui_bar_height_px(ui_scale) *
-        (owner_.rect().width() < 700 * ui_scale ? 2 : 1) : Region::size_px(ui_scale);
+    if (kind_ != Kind::Header) { return Region::size_px(ui_scale); }
+    const int content_width = owner_.rect().width() - owner_.find_region("workbench_rail")->size_px(ui_scale);
+    return wm::ui_bar_height_px(ui_scale) * (content_width < 700 * ui_scale ? 2 : 1);
   }
 
   void build_ui(ui::Context &ui, const wm::DrawContext &ctx) override
@@ -147,6 +148,7 @@ EditorArea::EditorArea(AppShell &shell, const std::string &type) : wm::Area(type
 {
   min_width_1x = 100.0f;
   min_height_1x = 24.0f;
+  shell_.attach_workbench_navigation(*this);
   emplace_region<EditorRegion>(*this, EditorRegion::Kind::Header);
   emplace_region<EditorRegion>(*this, EditorRegion::Kind::Toolbar);
   emplace_region<EditorRegion>(*this, EditorRegion::Kind::Sidebar);

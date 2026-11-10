@@ -130,6 +130,7 @@ bridge::Result<io::Json> AppShell::switch_work_mode(wm::Screen *screen, WorkMode
   }
   modes.layouts[previous] = std::move(leaving);
   modes.active = mode;
+  focused_workbenches_.erase(screen);
   screen->tag_redraw();
   return io::Json{{"mode", mode_name(mode)}, {"changed", true}};
 }
