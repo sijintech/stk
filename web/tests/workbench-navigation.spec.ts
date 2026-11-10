@@ -68,6 +68,8 @@ class Hub {
     }
   }
   later = false;
+  // When set, task.artifacts lists exactly these paths instead of scalar-0.vti (and scalar-1.vti once `later`).
+  artifactPaths?: string[];
   field = 'phi';
   // 任务: `device` is the node the hub lists; `down` makes every hub call fail as an unreachable control service;
   // `review` sends a task.submit to execution review, which GET actions then lists until it is approved or refused.
@@ -170,6 +172,7 @@ class Hub {
       if (kind === 'task.artifacts') {
         const later = this.later;
         await this.gate(kind);
+        if (this.artifactPaths) return json({result: this.artifactPaths.map(path => ({path, size: 10}))});
         return json({result: [{path: 'scalar-0.vti', size: 10}, ...(later ? [{path: 'scalar-1.vti', size: 10}] : [])]});
       }
     }
@@ -785,6 +788,41 @@ const probeLog = (page: Page) => page.locator('section.analysis details.logs pre
 const taskRow = (page: Page, name: string) => queue(page).getByRole('button', {name: new RegExp(name)});
 const shown = (file: string, name = '解析场验证') => `节点甲 · 项目一 · ${name}，${file}`;
 const pending = (file: string) => `已选 ${file}，加载视图后显示`;
+// 来源 beside the source line opens the full source of 结果 over the page: label and value of each row, and the
+// selectable values (IDs and paths) alone.
+const sourceToggle = (page: Page) => page.locator('section.analysis .view-title').getByRole('button', {name: '来源', exact: true});
+const sourcePanel = (page: Page) => page.getByRole('region', {name: '来源详情'});
+const detailRows = (page: Page) => sourcePanel(page).locator('dl').evaluate(dl =>
+  [...dl.querySelectorAll('dt')].map(dt => [dt.textContent, dt.nextElementSibling!.textContent]));
+const detailValues = (page: Page) => sourcePanel(page).locator('.source-value').allTextContents();
+const selectedText = (page: Page) => page.evaluate(() => getSelection()!.toString());
+// Where 结果 and its Viewer are: equal before, while and after the details are open means nothing moved.
+const resultLayout = (page: Page) => page.locator('section.analysis').evaluate(el => {
+  const box = (selector: string) => { const r = el.querySelector(selector)!.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; };
+  return {scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, viewport: box('.viewport'), title: box('.view-title'), controls: box('.view-controls')};
+});
+// Every request of the page (GETs, POSTs and files alike), for a check that an action sends nothing at all.
+function everything(page: Page) {
+  const seen: string[] = [];
+  const listener = (request: Request) => seen.push(`${request.method()} ${new URL(request.url()).pathname}`);
+  page.on('request', listener);
+  return {seen, stop: () => page.off('request', listener)};
+}
+// Counts every use of the clipboard API, execCommand and copy/cut/paste events in the page.
+async function spyClipboard(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as any, clipboard = navigator.clipboard as any;
+    w.__clipboard = [];
+    if (clipboard) for (const name of ['writeText', 'write', 'readText', 'read']) {
+      const original = clipboard[name]?.bind(clipboard);
+      clipboard[name] = (...args: unknown[]) => { w.__clipboard.push(name); return original?.(...args); };
+    }
+    const exec = document.execCommand.bind(document);
+    document.execCommand = (command: string, ...rest: any[]) => { w.__clipboard.push(`exec ${command}`); return exec(command, ...rest); };
+    for (const type of ['copy', 'cut', 'paste']) document.addEventListener(type, () => w.__clipboard.push(`event ${type}`), true);
+  });
+}
+const clipboardUses = (page: Page) => page.evaluate(() => (window as any).__clipboard);
 
 for (const viewport of viewports) {
   test.describe(`${viewport.name} 结果 source`, () => {
@@ -1064,6 +1102,236 @@ for (const viewport of viewports) {
       const box = (await source(page).boundingBox())!;
       expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
       await page.screenshot({path: test.info().outputPath(`${viewport.name}-source-long.png`)});
+      expect(errors).toEqual([]);
+    });
+
+    test('来源 opens the full source over 结果 in one click and closes back to its toggle; nothing is sent and nothing moves', async ({page}) => {
+      const hub = new Hub();
+      hub.later = true;
+      conversations(hub);
+      await spyClipboard(page);
+      const errors = await setup(page, hub);
+      const fileList = page.getByLabel('结果文件');
+      // The task's log is read and shown in 结果 first, so the log pane's text and place are compared too.
+      await shortcut(page, '读取日志').click();
+      await expect(probeLog(page)).toContainText('step 40 converged');
+      await go(page, '任务');
+      const r = route(page, `${viewport.name}-source-details`);
+      // The existing one-click shortcut is unchanged: 结果 with its file list focused and the summary line in view.
+      await r.click(shortcut(page, '结果'), 'Tasks 结果');
+      await expectActive(page, '结果');
+      await expect(fileList).toBeFocused();
+      await expect(fileList.locator('option', {hasText: 'scalar-1.vti'})).toHaveCount(1);
+      await r.select(fileList, 'scalar-1.vti', '结果文件 scalar-1.vti');
+      await expect(source(page)).toHaveText(`${shown('显示 scalar-0.vti')}${pending('scalar-1.vti')}`);
+      await expect(footer(page)).toContainText('就绪');
+      await freeze(page);
+      const before = await state(page);
+      const viewer = await viewerShot(page, 'details-before');
+      const placed = await resultLayout(page);
+      const logText = await probeLog(page).textContent(), logPlace = await logLayout(page);
+      expect(logText).toBe(LOG);
+      // Closed by default: one 来源 button in the source row, in view, and no details.
+      await expect(sourceToggle(page)).toHaveAttribute('aria-expanded', 'false');
+      await expect(sourceToggle(page)).toBeInViewport();
+      await expect(sourcePanel(page)).toHaveCount(0);
+      const sourceBox = (await source(page).boundingBox())!, toggleBox = (await sourceToggle(page).boundingBox())!;
+      expect(toggleBox.y).toBeGreaterThanOrEqual(sourceBox.y);
+      expect(toggleBox.y + toggleBox.height).toBeLessThanOrEqual(sourceBox.y + sourceBox.height);
+      expect(toggleBox.height).toBeGreaterThanOrEqual(24);
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-details-closed.png`)});
+      const sent = everything(page);
+      // One click: the full node, project and task, the shown file and, apart from it, the chosen one.
+      await r.click(sourceToggle(page), '来源');
+      await expect(sourcePanel(page)).toBeVisible();
+      await expect(sourcePanel(page)).toBeInViewport();
+      await expect(sourceToggle(page)).toHaveAttribute('aria-expanded', 'true');
+      await expect(sourceToggle(page)).toHaveAttribute('aria-controls', 'result-source-details');
+      await expect(sourcePanel(page)).toHaveAttribute('id', 'result-source-details');
+      await expect(sourceToggle(page)).toBeFocused();
+      expect(await detailRows(page)).toEqual([['节点', `节点甲${node}`], ['项目', `项目一${ws}`], ['任务', `解析场验证${task}`],
+        ['显示的文件', 'scalar-0.vti'], ['已选文件', 'scalar-1.vti尚未加载，点「加载视图」后显示']]);
+      expect(await detailValues(page)).toEqual([node, ws, task, 'scalar-0.vti', 'scalar-1.vti']);
+      expect(await sourcePanel(page).evaluate(el => [el.scrollWidth <= el.clientWidth, el.getBoundingClientRect().right <= innerWidth])).toEqual([true, true]);
+      expect(await resultLayout(page)).toEqual(placed);
+      expect(await canvasMarker(page)).toBe('same-canvas');
+      await expect(page.locator('section.analysis h2, section.analysis h3')).toHaveCount(0);
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-details-open.png`)});
+      await r.click(sourcePanel(page).getByRole('button', {name: '收起', exact: true}), '收起');
+      await expect(sourcePanel(page)).toHaveCount(0);
+      await expect(sourceToggle(page)).toBeFocused();
+      await expect(sourceToggle(page)).toHaveAttribute('aria-expanded', 'false');
+      expect(await resultLayout(page)).toEqual(placed);
+      expect((await viewerShot(page, 'details-closed')).equals(viewer)).toBe(true);
+      expect(await state(page)).toEqual(before);
+      // Keyboard: Enter opens with the focus kept on 来源, Tab reaches each ID and path, which then selects itself;
+      // Escape closes from the toggle or from inside and gives the focus back to 来源; Space opens again.
+      await page.keyboard.press('Enter');
+      await expect(sourcePanel(page)).toBeVisible();
+      await expect(sourceToggle(page)).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(sourcePanel(page).locator('.source-value').first()).toBeFocused();
+      expect(await selectedText(page)).toBe(node);
+      for (let i = 0; i < 3; i++) await page.keyboard.press('Tab');
+      await expect(sourcePanel(page).locator('.source-value', {hasText: 'scalar-0.vti'})).toBeFocused();
+      expect(await selectedText(page)).toBe('scalar-0.vti');
+      await page.keyboard.press('Tab');
+      expect(await selectedText(page)).toBe('scalar-1.vti');
+      await page.keyboard.press('Escape');
+      await expect(sourcePanel(page)).toHaveCount(0);
+      await expect(sourceToggle(page)).toBeFocused();
+      await page.keyboard.press('Space');
+      await expect(sourcePanel(page)).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(sourcePanel(page)).toHaveCount(0);
+      await expect(sourceToggle(page)).toBeFocused();
+      expect(await resultLayout(page)).toEqual(placed);
+      // Tab past 收起 closes the details: the next control (the analysis mode) takes the focus, nothing under them.
+      await page.keyboard.press('Enter');
+      await expect(sourcePanel(page)).toBeVisible();
+      for (let i = 0; i < 6; i++) await page.keyboard.press('Tab');
+      await expect(sourcePanel(page).getByRole('button', {name: '收起', exact: true})).toBeFocused();
+      expect(await selectedText(page)).toBe('');
+      await page.keyboard.press('Tab');
+      await expect(sourcePanel(page)).toHaveCount(0);
+      await expect(page.getByRole('tab', {name: '结果文件'})).toBeFocused();
+      await expect(sourceToggle(page)).toHaveAttribute('aria-expanded', 'false');
+      // Shift+Tab back to 来源 and before it (the source line has no focusable part): the details close the same way.
+      await page.keyboard.press('Shift+Tab');
+      await expect(sourceToggle(page)).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(sourcePanel(page)).toBeVisible();
+      await page.keyboard.press('Shift+Tab');
+      await expect(sourcePanel(page)).toHaveCount(0);
+      expect(await resultLayout(page)).toEqual(placed);
+      // The same at a scrolled 结果 (来源 still in view): opening, moving through, closing by Escape and by 收起
+      // keep the scroll offset.
+      const scrolled = await page.locator('section.analysis').evaluate(el => { el.scrollTop = 40; return el.scrollTop; });
+      expect(scrolled).toBe(40);
+      await expect(sourceToggle(page)).toBeInViewport({ratio: 1});
+      const at = await resultLayout(page);
+      const offset = () => page.locator('section.analysis').evaluate(el => el.scrollTop);
+      await sourceToggle(page).focus();
+      await page.keyboard.press('Enter');
+      await expect(sourcePanel(page)).toBeVisible();
+      await page.keyboard.press('Tab');
+      expect(await offset()).toBe(40);
+      await page.keyboard.press('Escape');
+      await expect(sourceToggle(page)).toBeFocused();
+      expect(await resultLayout(page)).toEqual(at);
+      await page.keyboard.press('Enter');
+      await sourcePanel(page).getByRole('button', {name: '收起', exact: true}).click();
+      await expect(sourceToggle(page)).toBeFocused();
+      expect(await resultLayout(page)).toEqual(at);
+      await page.locator('section.analysis').evaluate((el, top) => { el.scrollTop = top; }, placed.scrollTop);
+      expect(await resultLayout(page)).toEqual(placed);
+      expect(await probeLog(page).textContent()).toBe(logText);
+      expect(await logLayout(page)).toEqual(logPlace);
+      if (isNarrow(page)) {
+        await page.keyboard.press('Enter');
+        await expect(sourcePanel(page)).toBeVisible();
+        await historyToggle(page).focus();
+        await page.keyboard.press('Enter');
+        await expect(historyToggle(page)).toHaveAttribute('aria-expanded', 'true');
+        await page.keyboard.press('Escape');
+        await expect(historyToggle(page)).toBeFocused();
+        await expect(sourcePanel(page)).toHaveCount(0);
+      }
+      await page.waitForTimeout(300);
+      sent.stop();
+      expect(sent.seen).toEqual([]);
+      expect(await clipboardUses(page)).toEqual([]);
+      expect(await state(page)).toEqual(before);
+      // Open, then a press outside: the details close and the press reaches its target (工作台), then 结果 again.
+      await r.click(sourceToggle(page), '来源');
+      await r.click(nav(page).getByRole('button', {name: '工作台', exact: true}), '工作台');
+      await expectActive(page, '工作台');
+      await r.click(nav(page).getByRole('button', {name: '结果', exact: true}), '结果');
+      await expect(sourcePanel(page)).toHaveCount(0);
+      expect(await state(page)).toEqual(before);
+      // Open, then a conversation from the history and back: the conversation opens, 结果 is as it was, details closed.
+      await r.click(sourceToggle(page), '来源');
+      if (isNarrow(page)) await r.click(historyToggle(page), '历史');
+      await r.click(item(page, /相场参数讨论/), '相场参数讨论');
+      await shows(page, ['A 的问题', 'A 的回答']);
+      await r.click(nav(page).getByRole('button', {name: '结果', exact: true}), '结果');
+      await expect(sourcePanel(page)).toHaveCount(0);
+      const {draft: _, ...kept} = before;
+      expect(await work(page)).toEqual(kept);
+      expect(await probeLog(page).textContent()).toBe(logText);
+      expect((await viewerShot(page, 'details-returned')).equals(viewer)).toBe(true);
+      // 图谱 keeps its source at task level: its data sources are bound in the graph panel.
+      await r.click(page.getByRole('tab', {name: '图谱'}), '图谱');
+      await r.click(sourceToggle(page), '来源');
+      expect(await detailRows(page)).toEqual([['节点', `节点甲${node}`], ['项目', `项目一${ws}`], ['任务', `解析场验证${task}`],
+        ['数据源', '在下方图谱面板中绑定']]);
+      await expect(sourcePanel(page)).not.toContainText('scalar');
+      await page.keyboard.press('Escape');
+      await expect(sourcePanel(page)).toHaveCount(0);
+      expect(hub.calls).toEqual([`history ${A}`]);
+      expect(hub.builds).toHaveLength(1);
+      expect(hub.probes).toHaveLength(0);
+      expect(hub.replies).toBe(0);
+      expect(await clipboardUses(page)).toEqual([]);
+      r.save();
+      writeFileSync(test.info().outputPath('details-requests.json'), JSON.stringify({openClose: sent.seen, conversationCalls: hub.calls, builds: hub.builds}, null, 2));
+      expect(errors).toEqual([]);
+    });
+
+    test('来源 shows long and pathological names and paths exactly, as plain text, inside the page', async ({page}) => {
+      const hub = new Hub();
+      const shownPath = 'runs/' + 'step-0000/'.repeat(80) + 'scalar-0.vti';
+      const chosenPath = 'x'.repeat(360) + '\\..\\ · ，<em>原始结果</em>&amp;.vti';
+      const nodeName = '节点'.repeat(80), wsName = '项目 · 一，二 · 三'.repeat(20);
+      const taskBase = '解析 · 场，'.repeat(24) + '<em>原始结果</em>';
+      const taskName = taskBase + '\u202E原始\u200B';
+      hub.artifactPaths = [shownPath, chosenPath];
+      hub.device = {...device, name: nodeName, snapshot: {...device.snapshot, tasks: [{...row, name: taskName}], workspaces: [{id: ws, name: wsName}]}};
+      const errors = await start(page, hub);
+      await go(page, '任务');
+      await page.getByLabel('执行节点').selectOption(node);
+      await project(page).selectOption(ws);
+      await taskRow(page, '解析').click();
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await go(page, '结果');
+      const fileList = page.getByLabel('结果文件');
+      await fileList.selectOption(shownPath);
+      await page.getByRole('button', {name: '加载视图'}).click();
+      await expect(source(page)).toContainText(`显示 ${shownPath}`);
+      await fileList.selectOption(chosenPath);
+      await expect(source(page)).toContainText(pending(chosenPath));
+      await expect(source(page)).toHaveAttribute('title', `节点 ${node}\n项目 ${ws}\n任务 ${task}\n文件 ${shownPath}`);
+      await expect(footer(page)).toContainText('就绪');
+      const placed = await resultLayout(page);
+      await sourceToggle(page).click();
+      await expect(sourcePanel(page)).toBeVisible();
+      // Exact text, nothing interpreted as markup, each value in its own row whatever separators it contains.
+      const capturedValues = await detailValues(page);
+      expect(capturedValues).toEqual([node, ws, task, shownPath, chosenPath]);
+      expect(await sourcePanel(page).locator('.source-name').allTextContents()).toEqual([nodeName, wsName, taskName]);
+      expect(await sourcePanel(page).locator('.source-escaped').allTextContents()).toEqual(
+        [`含不可见字符：${taskBase}\\u{202E}原始\\u{200B}`]);
+      expect(await page.locator('section.analysis .source-details em').count()).toBe(0);
+      // Wrapped within the page and scrolled inside the details: no sideways overflow, and 结果 has not moved.
+      const fit = await sourcePanel(page).evaluate(el => ({wide: el.scrollWidth <= el.clientWidth, right: el.getBoundingClientRect().right <= innerWidth,
+        bottom: el.getBoundingClientRect().bottom <= innerHeight, scrolls: el.scrollHeight > el.clientHeight}));
+      expect(fit).toMatchObject({wide: true, right: true, bottom: true});
+      expect(await page.locator('section.analysis').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      expect(await resultLayout(page)).toEqual(placed);
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-details-long.png`)});
+      // A click or tap selects a whole path; the keyboard focus on the last one selects it and brings it into view.
+      const values = sourcePanel(page).locator('.source-value');
+      await values.nth(3).click();
+      expect(await selectedText(page)).toBe(shownPath);
+      await values.nth(4).focus();
+      expect(await selectedText(page)).toBe(chosenPath);
+      await expect(values.nth(4)).toBeInViewport();
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-details-long-end.png`)});
+      await page.keyboard.press('Escape');
+      await expect(sourcePanel(page)).toHaveCount(0);
+      await expect(sourceToggle(page)).toBeFocused();
+      expect(await resultLayout(page)).toEqual(placed);
+      writeFileSync(test.info().outputPath('details-long.json'), JSON.stringify({fit, values: capturedValues}, null, 2));
       expect(errors).toEqual([]);
     });
   });

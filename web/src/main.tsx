@@ -1,4 +1,4 @@
-import React,{useCallback,useEffect,useRef,useState} from 'react';
+import React,{useCallback,useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {flushSync} from 'react-dom';
 import {createRoot} from 'react-dom/client';
 import {action,api,ApiError,events,hasToken,Json,readNode,setToken} from './api';
@@ -26,6 +26,19 @@ function entryNote(entry:Entry){
   const kind=entry.kind==='local'?'未保存':entry.kind==='missing'?`已不存在 · ${entry.id.slice(0,6)}`:entry.kind==='unconfirmed'?`正在确认 · ${entry.id.slice(0,6)}`:
     [created(entry.created),entry.id.slice(0,6)].filter(Boolean).join(' · ');
   return kind+(entry.draft?' · 有草稿':'')+(entry.outgoing==='sending'?' · 发送中':entry.outgoing==='failed'?' · 发送失败':'');
+}
+// Characters that render as nothing or reorder the text around them: a source value containing any of them also
+// shows an escaped form, so the exact value can be read as well as copied.
+const INVISIBLE=/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+// One value of 来源 details as plain text. IDs and paths (selectable) take the focus and then select themselves, so
+// Ctrl+C or a touch copies exactly the value; nothing is written to the clipboard by the page.
+function SourceValue({value,selectable=false}:{value:string;selectable?:boolean}){
+  const escaped=value.replace(INVISIBLE,c=>`\\u{${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4,'0')}}`);
+  return <>{selectable?<code className="source-value" tabIndex={0} onFocus={e=>getSelection()?.selectAllChildren(e.currentTarget)}
+    onBlur={e=>{const selection=getSelection();if(selection?.anchorNode&&selection.focusNode&&
+      e.currentTarget.contains(selection.anchorNode)&&e.currentTarget.contains(selection.focusNode))selection.removeAllRanges();}}>{value}</code>:
+    value?<span className="source-name">{value}</span>:<span className="muted">（无名称）</span>}
+    {escaped!==value&&<small className="source-escaped">含不可见字符：{escaped}</small>}</>;
 }
 const created=(seconds:number)=>seconds?new Date(seconds*1000).toLocaleString(undefined,{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
 
@@ -71,6 +84,10 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const displayedNow=useRef<Displayed|null>(null);
   const show=useCallback((next:Displayed|null)=>{displayedNow.current=next;setDisplayed(next);setProbeText('');setViewError('');},[]);
   const [logRoom,setLogRoom]=useState(false);
+  // 来源 details: opened and closed only in the page, over 结果 rather than in its flow, so nothing below moves.
+  const [sourceOpen,setSourceOpen]=useState(false);
+  const sourceToggle=useRef<HTMLButtonElement>(null),sourcePanel=useRef<HTMLDivElement>(null);
+  const closeSource=useCallback(()=>{setSourceOpen(false);sourceToggle.current?.focus({preventScroll:true});},[]);
   const fileChoice=useRef<HTMLSelectElement>(null),modeChoice=useRef<HTMLDivElement>(null),logPane=useRef<HTMLDetailsElement>(null);
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const selected=devices.find(d=>d.id===node&&!d.revoked);
@@ -156,6 +173,32 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     const key=(e:KeyboardEvent)=>{if(e.key==='Escape'){e.preventDefault();closeHistory();}};
     window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);
   },[overlay]);
+  // 来源 details close when 结果 is left, and on a press outside them; the press itself goes on to its target.
+  useEffect(()=>{if(tab!=='results'||overlay)setSourceOpen(false);},[tab,overlay]);
+  useEffect(()=>{
+    if(!sourceOpen||overlay)return;
+    const press=(e:PointerEvent)=>{
+      const target=e.target as Node;
+      if(!sourcePanel.current?.contains(target)&&!sourceToggle.current?.contains(target))setSourceOpen(false);
+    };
+    const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&!e.defaultPrevented){e.preventDefault();closeSource();}};
+    document.addEventListener('pointerdown',press,true);window.addEventListener('keydown',key);
+    return()=>{document.removeEventListener('pointerdown',press,true);window.removeEventListener('keydown',key);};
+  },[sourceOpen,overlay,closeSource]);
+  // The open details end above the bottom of 结果 (and scroll inside), so on a short or narrow page they stay in view.
+  useLayoutEffect(()=>{
+    if(!sourceOpen)return;
+    const fit=()=>{
+      const panel=sourcePanel.current,area=panel?.closest('section'),title=panel?.parentElement;
+      if(!panel||!area||!title)return;
+      const viewport=area.getBoundingClientRect(),header=title.getBoundingClientRect();
+      const below=viewport.bottom-header.bottom-12;
+      const constrained=below<120;
+      panel.style.top=constrained?`${viewport.top-header.top+2}px`:'';
+      panel.style.maxHeight=`${Math.max(0,Math.min(460,Math.floor(constrained?viewport.height-12:below)))}px`;
+    };
+    fit();window.addEventListener('resize',fit);return()=>window.removeEventListener('resize',fit);
+  },[sourceOpen]);
   useEffect(()=>{void refresh();const abort=new AbortController();void events(()=>void refresh(),abort.signal);const timer=setInterval(()=>void refresh(),5000);return()=>{abort.abort();clearInterval(timer);};},[refresh]);
   useEffect(()=>{if(node&&!selected)clearNode();},[node,selected,clearNode]);
   useEffect(()=>{
@@ -240,7 +283,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   function closeHistory(){setHistoryOpen(false);historyToggle.current?.focus({preventScroll:true});}
   function toggleHistory(){
     if(historyOpen){setHistoryOpen(false);return;}
-    flushSync(()=>setHistoryOpen(true));
+    flushSync(()=>{setSourceOpen(false);setHistoryOpen(true);});
     focusHistory();
   }
   // The unsent text of a conversation the Hub no longer has goes to a new local conversation, ready to send there.
@@ -267,6 +310,25 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const sourceFile=analysis==='graph'?'图谱数据源在下方绑定':!task?'在「任务」中选择任务':shown?`显示 ${shown.path}`:'尚未加载结果文件';
   const sourceNext=analysis==='file'&&taskBound&&path&&path!==shown?.path?`已选 ${path}，加载视图后显示`:'';
   const sourceIds=task&&selection?`节点 ${selection.node}\n项目 ${selection.workspace}\n任务 ${selection.task}${analysis==='file'&&shown?`\n文件 ${shown.path}`:''}`:undefined;
+  function leaveSource(e:React.FocusEvent){
+    const next=e.relatedTarget;
+    if(sourceOpen&&next&&!sourcePanel.current?.contains(next)&&!sourceToggle.current?.contains(next))setSourceOpen(false);
+  }
+  // 来源 details name the same accepted state in full, one labelled value per row: the selected task's node, project
+  // and task (name and ID), then in file mode the file the Viewer shows and, separately, a chosen file not yet loaded.
+  const sourceNames=task&&selection?{node:selected?.name??'',workspace:workspaces.find(w=>w.id===selection.workspace)?.name??'',
+    task:taskBound?observed?.name||(heartbeat||null)?.name||'':''}:null;
+  const sourceDetails=<div id="result-source-details" ref={sourcePanel} className="source-details" role="region" aria-label="来源详情" tabIndex={-1}>
+    {sourceNames&&selection?<dl>
+      <div><dt>节点</dt><dd><SourceValue value={sourceNames.node}/><SourceValue value={selection.node} selectable/></dd></div>
+      <div><dt>项目</dt><dd><SourceValue value={sourceNames.workspace}/><SourceValue value={selection.workspace} selectable/></dd></div>
+      <div><dt>任务</dt><dd>{taskBound?<SourceValue value={sourceNames.task}/>:<span className="muted">正在确认任务</span>}<SourceValue value={selection.task} selectable/></dd></div>
+      {analysis==='graph'?<div><dt>数据源</dt><dd><span className="muted">在下方图谱面板中绑定</span></dd></div>:<>
+        <div><dt>显示的文件</dt><dd>{shown?<SourceValue value={shown.path} selectable/>:<span className="muted">尚未加载结果文件</span>}</dd></div>
+        {sourceNext&&<div><dt>已选文件</dt><dd><SourceValue value={path} selectable/><span className="muted">尚未加载，点「加载视图」后显示</span></dd></div>}</>}
+    </dl>:<p className="muted">未选择任务。在「任务」中选择任务后，这里显示它的节点、项目与文件。</p>}
+    <div className="source-details-foot"><button type="button" className="quiet" onClick={closeSource}>收起</button></div>
+  </div>;
   const resultNotice=tab==='results'&&analysis==='file'?viewError:'';
   const notice=error||resultNotice;
   const resultText=analysis==='graph'?graphProbeText:shown?probeText:'';
@@ -311,9 +373,11 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       </details>
       <details><summary>最近操作与重试</summary>{actions.filter(a=>a.request.kind!=='task.events').slice(0,20).map(a=><p key={a.id}><small>{a.request.kind} · {a.state}<br/>{a.error}</small></p>)}<button onClick={()=>void run(async()=>{const saved=sessionStorage.getItem('stk-last-action');if(saved)await api('actions','POST',JSON.parse(saved));})}>以相同 ID 重试上次操作</button></details>
     </aside>
-    <section className={`analysis surface${tab==='results'?'':' surface-hidden'}`} inert={tab!=='results'||overlay}><div className="view-title"><div><h1>{analysis==='graph'?'图谱视图':shownScene?.manifest.field||'科学结果'}</h1>
-      <p className="result-source" aria-label="结果来源" title={sourceIds}><span>{sourceTask}</span><span className="sr-only">，</span>
-        <span className="source-file"><span>{sourceFile}</span>{sourceNext&&<span className="source-next" title={sourceNext}>{sourceNext}</span>}</span></p></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span></div>
+    <section className={`analysis surface${tab==='results'?'':' surface-hidden'}`} inert={tab!=='results'||overlay}><div className="view-title" onBlur={leaveSource}><div><h1>{analysis==='graph'?'图谱视图':shownScene?.manifest.field||'科学结果'}</h1>
+      <div className="source-row"><p className="result-source" aria-label="结果来源" title={sourceIds}><span>{sourceTask}</span><span className="sr-only">，</span>
+        <span className="source-file"><span>{sourceFile}</span>{sourceNext&&<span className="source-next" title={sourceNext}>{sourceNext}</span>}</span></p>
+        <button type="button" ref={sourceToggle} className="source-toggle" aria-expanded={sourceOpen} aria-controls={sourceOpen?'result-source-details':undefined} onClick={()=>setSourceOpen(open=>!open)}>来源</button></div></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span>
+      {sourceOpen&&sourceDetails}</div>
       <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>{if(analysis!==key){setAnalysis(key);setGraphProbeText('');}}}>{label}</button>)}</div>
       {analysis==='graph'?<React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={selected?.id||''} node={selected?node:''} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} canReadEvents={canReadEvents&&taskOnline} onError={setError} onLog={setGraphProbeText}/></React.Suspense>:<>
       <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{setPath(e.target.value);generation.current++;setViewError('');}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(a=>/\.(vti|vtk|npy|dat)$/.test(a.path)).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
