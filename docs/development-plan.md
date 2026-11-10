@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-10 03:29 UTC · 诊断请求持久化、严格 Bridge 与前一 CI 终态
+
+`5e377de0` 集成实际 Claude78 `81185683` 的共享预检客户端/未注册适配器，以及独立 `669b523b`、`f046d791` 的诊断 journal，并发布五个 Bridge 方法 describe/list/reserve/retry/refresh。记录在项目外持久化，固定原运行环境、工作区选择、资源和请求键。reserve 纯本机保存 prepared；原生调用方必须先得到持久确认，再在原视图仍有效时发送明确执行请求。丢 reserve 回执不会留下排队执行。重开、列出和刷新均不重提，未知回执只允许沿原 ID/原键明确恢复；已知任务 retry 零 POST。新工作区创建也使用稳定派生键。坏 journal 仅让预检不可用，不删除数据，不阻止其他 Bridge 模块启动。未增 Agent 工具、项目格式或放置权限。 [桌面诊断契约](specs/mupro-preflight-desktop-1.md)
+
+前远端 `37e48356` Desktop `42732315824` 于 2026-11-10 01:58:24 UTC 终态 failure，六个作业全部结束、四成功。Linux 主测 2170/2170、两个打包作业成功；Windows CPU 1488/1488、零跳过，工作区 18/18 和 guarded 7/7 全部具名通过，上一轮四项路径失败已恢复。macOS CPU 1548/1548、Metal 254/254，主原生仍 4/6；独立 Windows 原生实际 5/6，不能沿用前头全过。同头 Runtime `42732316049` 终态 13/13，Secret scan/文档部署成功。整轮结束满足本批已验证后端提交的推送前提；本节随本批交付，新的精确头 CI 结果待验。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42732315824) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42732316049)
+
+原生面板仍为未提交候选：root 增加独立 workspace 选择与事件/目标代次，直接调用 Bridge，不复用 Jobs 的选择或 Script 执行。独立真实回归已证明旧候选在折叠及折叠再展开、未绘制下一帧时会误发一次 retry；root 已补事件即时 panel epoch、原 ID 绑定及新建工作区自有选择，等待最终新 ABI 定向与真实窗口验收，不称界面已交付。当前无本地 CI 观察器，后续按同 run 的官方状态复读。实际 Claude80 已从 `b7aa88fa` 在独立 worktree 写一份用户指南，root 保留 UI/契约/集成/推送职责。PR #53/#54 头仍 c9f13994/2dd3e4ee，原冲突未合入。真实软件/研究参数、HDF5-only 完成、H2 和分析提案持久形式等待决保持。
+
 ## 2026-11-10 01:32 UTC · 显式执行环境预检与原任务回执
 
 本地 `8d3752ff` 与 `1c8c2dcf` 完成显式 Runtime 执行环境预检。客户端提交固定单 CPU、空输入及空环境覆盖的诊断任务，在 worker/调度环境使用该端自己的配置；不启动 MuPRO/MPI 或签出许可。`preflight-result` 只读原任务，按固定规格、连接、终态/退出码、唯一产物大小/SHA-256和严格内层格式核验。失败检查仍有 failed/1 的有效观察，取消、执行故障、错接规格与未知状态不冒充成功；丢提交答复只允许明确同键同请求重试，零自动重提。本机 `check` 原含义、运行/收集链及 Agent 权限保持。 [任务回执契约](specs/mupro-preflight-task-1.md)
