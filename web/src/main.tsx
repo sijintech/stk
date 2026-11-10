@@ -1,4 +1,5 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
+import {flushSync} from 'react-dom';
 import {createRoot} from 'react-dom/client';
 import {action,api,ApiError,events,hasToken,Json,readNode,setToken,uid} from './api';
 import ErrorBoundary from './ErrorBoundary';
@@ -11,6 +12,9 @@ const GraphPanel=React.lazy(()=>import('./GraphPanel'));
 const ExampleView=import.meta.env.DEV&&new URLSearchParams(location.search).has('example')?React.lazy(()=>import('./ExampleView')):null;
 const lostAccess=(error:unknown)=>error instanceof ApiError&&(error.status===401||error.status===403);
 type ObservedTask = {scope:TaskScope;name:string;state:string;verifiedIdentity:boolean;exactTerminal:boolean};
+// Persistent sections: 工作台 is the conversation home. All three stay mounted; only the active one is shown.
+type Section='workbench'|'tasks'|'results';
+const SECTIONS:readonly (readonly [Section,string])[]=[['workbench','工作台'],['tasks','任务'],['results','结果']];
 
 function App(){
   const [connected,setConnected]=useState(hasToken());
@@ -39,9 +43,10 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const [readKinds,setReadKinds]=useState<string[]|null>(null),[taskRefresh,setTaskRefresh]=useState(0);
   const [analysis,setAnalysis]=useState<'file'|'graph'>('file'),[mode,setMode]=useState('slice'),[axis,setAxis]=useState(2),[index,setIndex]=useState(0),[level,setLevel]=useState(0),[probe,setProbe]=useState<number[]>([0,0,0]);
   const [session,setSession]=useState(()=>sessionStorage.getItem('stk-session')||uid()),[sessions,setSessions]=useState<Json[]>([]),[messages,setMessages]=useState<Json[]>([]),[chat,setChat]=useState('');
-  const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState('tasks'),[online,setOnline]=useState(navigator.onLine);
+  const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
   const generation=useRef(0),scopeVersion=useRef(0),activeScope=useRef<TaskScope|null>(null),refreshing=useRef(false),alive=useRef(true);
   const artifactReads=useRef({started:0,applied:0});
+  const fileChoice=useRef<HTMLSelectElement>(null),modeChoice=useRef<HTMLDivElement>(null),logPane=useRef<HTMLDetailsElement>(null);
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const selected=devices.find(d=>d.id===node&&!d.revoked);
   const tasks:Json[]=selected?.snapshot?.tasks||[];
@@ -134,18 +139,27 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     activeScope.current=scope;setSelection(scope);
   }
   async function loadView(){const current=++generation.current;const options:Json={mode,axis};if(mode==='slice')options.index=index;if(mode==='iso')options.level=level;if(mode==='vectors')options.component='magnitude';
-    const item=await invoke('view.build',{task_id:task,path,options});if(item.result&&generation.current===current){setScene(item.result);setLevel((item.result.manifest.value_range[0]+item.result.manifest.value_range[1])/2);setTab('view');}}
+    const item=await invoke('view.build',{task_id:task,path,options});if(item.result&&generation.current===current){setScene(item.result);setLevel((item.result.manifest.value_range[0]+item.result.manifest.value_range[1])/2);}}
   async function readLogs(){const version=scopeVersion.current;const item=await invoke('task.logs',{task_id:task});if(item.result&&scopeVersion.current===version){const bytes=Uint8Array.from(atob(item.result.data),c=>c.charCodeAt(0));setLogs(new TextDecoder().decode(bytes));}}
+  // An explicit 结果 / 读取日志 click in Tasks opens 结果 at once and brings the target into view; the read itself
+  // keeps its own scope checks and never navigates on completion. The analysis mode and Viewer are left as they are.
+  function openResults(target:'files'|'logs'){
+    flushSync(()=>setTab('results'));
+    const pane=logPane.current;
+    if(target==='logs'&&pane)pane.open=true;
+    const element=target==='logs'?pane?.querySelector('summary'):analysis==='file'?fileChoice.current:modeChoice.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    (target==='logs'?pane:element)?.scrollIntoView({block:'nearest'});element?.focus({preventScroll:true});
+  }
   async function probeValue(){
     const version=generation.current;
     const result=await invoke('view.probe',{task_id:task,path,position:probe});
     if(generation.current===version)setLogs(JSON.stringify(result.result,null,2));
   }
   return <div className="app"><header><div className="wordmark">STK <span>科学工作台</span></div><span className={online?'connection':'connection offline'}>{online?'控制服务已连接':'连接中断 · 显示最近状态'}</span><button className="quiet" onClick={disconnect}>断开</button></header>
-    <nav className="mobile-nav">{[['tasks','任务'],['chat','对话'],['view','三维']].map(([key,label])=><button className={tab===key?'active':''} key={key} onClick={()=>setTab(key)}>{label}</button>)}</nav>
     {error&&<div className="notice" role="alert">{error}<button onClick={()=>setError('')}>关闭</button></div>}
     <div className="workspace">
-    <aside className={`tasks panel mobile-${tab==='tasks'?'show':'hide'}`}><div className="section-title"><h2>项目与任务</h2><button className="quiet" onClick={()=>{setTaskRefresh(value=>value+1);void refresh();}}>刷新</button></div>
+    <nav className="section-nav" aria-label="工作区">{SECTIONS.map(([key,label])=><button type="button" className={tab===key?'active':''} aria-current={tab===key?'page':undefined} key={key} onClick={()=>setTab(key)}>{label}</button>)}</nav>
+    <aside className={`tasks panel surface${tab==='tasks'?'':' surface-hidden'}`} inert={tab!=='tasks'}><div className="section-title"><h2>项目与任务</h2><button className="quiet" onClick={()=>{setTaskRefresh(value=>value+1);void refresh();}}>刷新</button></div>
       <label>执行节点<select value={node} onChange={e=>{clearTask();setNode(e.target.value);setWorkspace('');}}><option value="">选择节点</option>{devices.filter(d=>d.role==='node'&&!d.revoked).map(d=><option key={d.id} value={d.id}>{d.online?'●':'○'} {d.name}</option>)}</select></label>
       {selected&&<p className="muted">{selected.online?'在线':'离线'} · 最近更新 {selected.last_seen?new Date(selected.last_seen*1000).toLocaleString():'尚未连接'}{selected.snapshot.cpu_percent!==undefined&&<><br/>CPU {selected.snapshot.cpu_percent}% · 内存 {selected.snapshot.memory_percent}%</>}</p>}
       <label>项目<select value={workspace} onChange={e=>selectWorkspace(e.target.value)}><option value="">选择项目</option>{(selected?.snapshot?.workspaces||[]).map((w:Json)=><option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
@@ -163,14 +177,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       {task&&selection&&<TaskObservation key={`${node}/${selection.workspace}/${task}`} scope={selection}
         heartbeat={heartbeat} online={taskOnline} supported={canReadTask} refresh={taskRefresh}
         onObservation={observeTask} onAccessLost={disconnect} onNodeGone={nodeGone}/>}
-      {taskBound&&<div className="inline"><button disabled={busy} onClick={()=>void run(readLogs)}>读取日志</button><button disabled={busy} onClick={()=>void run(files)}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
+      {taskBound&&<div className="inline"><button disabled={busy} onClick={()=>{openResults('logs');void run(readLogs);}}>读取日志</button><button disabled={busy} onClick={()=>{openResults('files');void run(files);}}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
       {actions.filter(a=>a.state==='review').map(a=><article className="review" key={a.id}><strong>等待执行复核</strong><p>{a.review_reason}</p><pre>{JSON.stringify(a.request.payload,null,2)}</pre>{[true,false].map(approved=><button key={String(approved)} disabled={busy} onClick={()=>void run(async()=>{await api(`actions/${a.id}/review`,'POST',{approved});})}>{approved?'批准执行':'拒绝'}</button>)}</article>)}
       <details><summary>最近操作与重试</summary>{actions.filter(a=>a.request.kind!=='task.events').slice(0,20).map(a=><p key={a.id}><small>{a.request.kind} · {a.state}<br/>{a.error}</small></p>)}<button onClick={()=>void run(async()=>{const saved=sessionStorage.getItem('stk-last-action');if(saved)await api('actions','POST',JSON.parse(saved));})}>以相同 ID 重试上次操作</button></details>
     </aside>
-    <section className={`analysis mobile-${tab==='view'?'show':'hide'}`}><div className="view-title"><div><span className="eyebrow">RESULT EXPLORER</span><h1>{analysis==='graph'?'图谱视图':shownScene?.manifest.field||'科学结果'}</h1></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span></div>
-      <div className="mode-switch" role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>setAnalysis(key)}>{label}</button>)}</div>
+    <section className={`analysis surface${tab==='results'?'':' surface-hidden'}`} inert={tab!=='results'}><div className="view-title"><div><span className="eyebrow">RESULT EXPLORER</span><h1>{analysis==='graph'?'图谱视图':shownScene?.manifest.field||'科学结果'}</h1></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span></div>
+      <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>setAnalysis(key)}>{label}</button>)}</div>
       {analysis==='graph'?<React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={selected?.id||''} node={selected?node:''} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} canReadEvents={canReadEvents&&taskOnline} onError={setError} onLog={setLogs}/></React.Suspense>:<>
-      <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" value={taskBound?path:''} onChange={e=>{setPath(e.target.value);generation.current++;}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(a=>/\.(vti|vtk|npy|dat)$/.test(a.path)).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
+      <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{setPath(e.target.value);generation.current++;}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(a=>/\.(vti|vtk|npy|dat)$/.test(a.path)).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
       <label>视图<select value={mode} onChange={e=>setMode(e.target.value)}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>
       {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>setAxis(Number(e.target.value))}>{['X','Y','Z'].map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={index} onChange={e=>setIndex(Number(e.target.value))}/></label></>}
       {mode==='iso'&&<label>等值<input type="number" value={level} onChange={e=>setLevel(Number(e.target.value))}/></label>}
@@ -178,9 +192,9 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       <ErrorBoundary resetKey={shownScene}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}><Viewer scene={shownScene} onPick={setProbe}/></React.Suspense></ErrorBoundary>
       {shownScene&&<div className="legend"><span>{shownScene.manifest.value_range[0].toPrecision(5)}</span><i/><span>{shownScene.manifest.value_range[1].toPrecision(5)} {shownScene.manifest.units}</span><small>{shownScene.manifest.display_reduced?'显示网格已简化':'完整显示网格'} · 数值查询使用原始数据</small></div>}
       <div className="probe"><strong>物理坐标探针</strong>{probe.map((v,i)=><input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={v} onChange={e=>setProbe(probe.map((n,j)=>i===j?Number(e.target.value):n))}/>)}<button disabled={busy||!shownScene} onClick={()=>void run(probeValue)}>查询原始值</button></div></>}
-      <details className="logs" open><summary>日志 / 探针结果</summary><pre>{(selected&&logs)||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
+      <details className="logs" ref={logPane} open><summary>日志 / 探针结果</summary><pre>{(selected&&logs)||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
     </section>
-    <aside className={`chat panel mobile-${tab==='chat'?'show':'hide'}`}><div className="section-title"><h2>AI 对话</h2><button className="quiet" onClick={()=>{setSession(uid());setMessages([]);}}>新会话</button></div><select aria-label="恢复会话" value={session} onChange={e=>setSession(e.target.value)}><option value={session}>当前会话</option>{sessions.filter(s=>s.id!==session).map(s=><option key={s.id} value={s.id}>{s.name} · {s.id.slice(0,6)}</option>)}</select>
+    <aside className={`chat panel surface${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'}><div className="section-title"><h2>AI 对话</h2><button className="quiet" onClick={()=>{setSession(uid());setMessages([]);}}>新会话</button></div><select aria-label="恢复会话" value={session} onChange={e=>setSession(e.target.value)}><option value={session}>当前会话</option>{sessions.filter(s=>s.id!==session).map(s=><option key={s.id} value={s.id}>{s.name} · {s.id.slice(0,6)}</option>)}</select>
       <div className="messages">{!messages.length&&<div className="chat-intro"><h3>从一个科学问题开始</h3><p>描述你要执行的任务。命令、资源与执行状态会在任务面板中明确展示。</p></div>}{messages.map(m=><article key={m.id} className={m.role}><small>{m.role==='user'?'你':'STK'}</small><p>{m.content}</p></article>)}</div>
       <form onSubmit={e=>{e.preventDefault();const content=chat;setChat('');void run(async()=>{const result=await api(`sessions/${session}/messages`,'POST',{id:uid(),content});setMessages(result.messages);});}}><label className="sr-only" htmlFor="chat-input">对话内容</label><textarea id="chat-input" value={chat} onChange={e=>setChat(e.target.value)} placeholder="描述计算任务…"/><button className="primary wide" disabled={busy||!chat.trim()}>发送</button></form><small className="muted">常规模板自动执行；新脚本及高资源任务需复核。</small></aside>
     </div><footer>{busy?'正在处理请求…':'就绪'}<span>STK · 计算持续运行，视图随处可达</span></footer>
