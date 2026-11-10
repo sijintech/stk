@@ -268,6 +268,10 @@ const footer = (page: Page) => page.locator('footer');
 // 任务 keeps the run environment and the new task form in disclosures under the queue.
 const project = (page: Page) => page.locator('aside.tasks label', {hasText: /^项目/}).locator('select');
 const disclosure = (page: Page, name: '运行环境' | '新建任务') => page.locator('aside.tasks details.setting > summary', {hasText: name});
+async function selectEnvironment(page: Page, control: Locator, value: string) {
+  if (!await control.isVisible()) await disclosure(page, '运行环境').click();
+  await control.selectOption(value);
+}
 
 // covered: the compact history is open over the active section, which then stays shown but takes no input.
 async function expectActive(page: Page, label: keyof typeof surfaces, {covered = false} = {}) {
@@ -303,8 +307,8 @@ async function setup(page: Page, hub: Hub, {scene: withScene = true} = {}) {
   await expectActive(page, '工作台');
   await page.getByLabel('对话内容').fill('未发送的草稿：分析 phi 场');
   await go(page, '任务');
-  await page.getByLabel('执行节点').selectOption(node);
-  await project(page).selectOption(ws);
+  await selectEnvironment(page, page.getByLabel('执行节点'), node);
+  await selectEnvironment(page, project(page), ws);
   await page.getByRole('button', {name: /解析场验证/}).click();
   await expectActive(page, '任务');
   await expect(page.getByRole('region', {name: '所选任务状态'})).toContainText('已读取 Runtime 状态');
@@ -635,6 +639,7 @@ for (const viewport of viewports) {
       await expect(project(page)).toBeInViewport({ratio: 1});
       await r.select(project(page), ws, '项目');
       await expect(queue(page).locator('.queue-head')).toHaveText('任务队列节点甲 · 在线 · 项目一');
+      await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
       await expect(disclosure(page, '运行环境')).toHaveText('运行环境 · 节点甲 · 项目一');
       await expect(disclosure(page, '新建任务')).toHaveText('新建任务 · 项目一');
       const row = queue(page).getByRole('button', {name: /解析场验证/});
@@ -644,24 +649,23 @@ for (const viewport of viewports) {
       await expect(page.locator('aside.tasks .task-scope')).toHaveText('所选任务 · 节点甲 · 项目一');
       await expect(shortcut(page, '结果')).toBeInViewport({ratio: 1});
       await page.screenshot({path: test.info().outputPath(`${viewport.name}-connected-selected.png`)});
-      // One click folds the environment to its readable summary; the queue and the selected task do not move.
+      // Initial setup has already folded. The next action opens its own disclosure.
       const at = [await top(queue(page)), await top(status(page))];
-      await r.click(disclosure(page, '运行环境'), '收起运行环境');
       await expect(page.getByLabel('执行节点')).toBeHidden();
+      await r.click(disclosure(page, '新建任务'), '展开新建任务');
+      await expect(page.getByRole('button', {name: '运行解析场示例'})).toBeEnabled();
+      await expect(page.getByLabel('TaskSpec')).toBeVisible();
       expect([await top(queue(page)), await top(status(page))]).toEqual(at);
       await page.screenshot({path: test.info().outputPath(`${viewport.name}-connected-folded.png`)});
       await r.click(disclosure(page, '运行环境'), '展开运行环境');
       await expect(page.getByLabel('执行节点')).toHaveValue(node);
       await expect(project(page)).toHaveValue(ws);
-      await r.click(disclosure(page, '新建任务'), '展开新建任务');
-      await expect(page.getByRole('button', {name: '运行解析场示例'})).toBeEnabled();
-      await expect(page.getByLabel('TaskSpec')).toBeVisible();
       await expect(page.locator('aside.tasks .task.selected')).toHaveText(/解析场验证/);
       sent.stop();
       expect(writes(sent.seen)).toEqual([]);
       expect([...new Set(sent.seen)].sort()).toEqual(['/api/v1/nodes/{node}/read task.artifacts', '/api/v1/nodes/{node}/read task.get']);
       expect(hub.calls).toEqual([]);
-      expect(r.record).toMatchObject({clicks: 5, selects: 2});
+      expect(r.record).toMatchObject({clicks: 4, selects: 2});
       r.save();
       expect(errors).toEqual([]);
     });
@@ -682,7 +686,7 @@ for (const viewport of viewports) {
       await expect(status(page)).toBeInViewport({ratio: 1});
       await expect(shortcut(page, '读取日志')).toBeInViewport({ratio: 1});
       expect(await top(status(page))).toBeLessThan(await top(disclosure(page, '运行环境')));
-      await r.click(disclosure(page, '运行环境'), '收起运行环境');
+      await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
       await r.click(disclosure(page, '新建任务'), '收起新建任务');
       await expect(page.getByLabel('TaskSpec')).toBeHidden();
       await expect(disclosure(page, '运行环境')).toHaveText('运行环境 · 节点甲 · 项目一');
@@ -705,7 +709,7 @@ for (const viewport of viewports) {
       expect(await state(page)).toEqual(before);
       sent.stop();
       expect(writes(sent.seen)).toEqual([]);
-      expect(r.record).toMatchObject({clicks: 7, selects: 0});
+      expect(r.record).toMatchObject({clicks: 6, selects: 0});
       r.save();
       await go(page, '结果');
       expect((await viewerShot(page, 'after')).equals(viewer)).toBe(true);
@@ -748,13 +752,13 @@ for (const viewport of viewports) {
       hub.device = {...device, online: false, snapshot: {...device.snapshot, workspaces: [...device.snapshot.workspaces, {id: other, name: '项目二'}]}};
       const errors = await start(page, hub);
       await go(page, '任务');
-      await page.getByLabel('执行节点').selectOption(node);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node);
       await expect(queue(page).locator('.queue-head')).toHaveText('任务队列节点甲 · 离线 · 全部项目');
       // The whole node is listed while no project is chosen; the selected task shows its own project.
       await queue(page).getByRole('button', {name: /解析场验证/}).click();
       await expect(page.locator('aside.tasks .task-scope')).toHaveText('所选任务 · 节点甲 · 项目一');
       await expect(status(page)).toContainText('暂时无法读取 Runtime 状态');
-      await project(page).selectOption(other);
+      await selectEnvironment(page, project(page), other);
       await expect(queue(page)).toContainText('项目二 中暂无任务，可在下方「新建任务」中提交。');
       await expect(page.locator('aside.tasks .task')).toHaveCount(0);
       await expect(disclosure(page, '运行环境')).toHaveText('运行环境 · 节点甲 · 项目二');
@@ -770,8 +774,8 @@ for (const viewport of viewports) {
       hub.device = {...device, snapshot: {...device.snapshot, tasks: [row, ...more]}};
       const errors = await start(page, hub);
       await go(page, '任务');
-      await page.getByLabel('执行节点').selectOption(node);
-      await project(page).selectOption(ws);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node);
+      await selectEnvironment(page, project(page), ws);
       const list = queue(page).locator('.task-list');
       const rows = list.getByRole('button');
       await expect(rows).toHaveCount(200);
@@ -808,7 +812,8 @@ for (const viewport of viewports) {
       expect(writes(sent.seen)).toEqual(['/api/v1/actions task.submit']);
       expect(hub.actionRows[0].request.payload).toMatchObject({template: 'demo-field', spec: {workspace_id: ws, name: '解析场验证'}});
       // The review sits with the selected task, above the folded settings, and needs no disclosure to approve.
-      for (const name of ['运行环境', '新建任务'] as const) await disclosure(page, name).click();
+      await disclosure(page, '新建任务').click();
+      await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
       expect(await card.evaluate(el => el.closest('details'))).toBeNull();
       expect(await top(card)).toBeLessThan(await top(disclosure(page, '运行环境')));
       await expect(card).toContainText('新命令需要执行复核');
@@ -1102,7 +1107,7 @@ for (const viewport of viewports) {
       hub.device = {...device, snapshot: {...device.snapshot, tasks: [row, row3], workspaces: [{id: ws, name: '项目一'}, {id: ws2, name: '项目二'}]}};
       const errors = await start(page, hub);
       await go(page, '任务');
-      await page.getByLabel('执行节点').selectOption(node);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node);
       await expect(queue(page).locator('.queue-head')).toHaveText('任务队列节点甲 · 在线 · 全部项目');
       await taskRow(page, '项目二任务').click();
       await expect(status(page)).toContainText('已读取 Runtime 状态');
@@ -1120,7 +1125,7 @@ for (const viewport of viewports) {
       await page.getByRole('button', {name: '查询原始值'}).click();
       await expect.poll(() => hub.reached.has('view.probe')).toBe(true);
       await go(page, '任务');
-      await project(page).selectOption(ws);
+      await selectEnvironment(page, project(page), ws);
       release();
       await expect(footer(page)).toContainText('就绪');
       await page.waitForTimeout(300);
@@ -1144,8 +1149,8 @@ for (const viewport of viewports) {
       await hub.install(page);
       await page.goto(ORIGIN + '/');
       await go(page, '任务');
-      await page.getByLabel('执行节点').selectOption(node);
-      await project(page).selectOption(ws);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node);
+      await selectEnvironment(page, project(page), ws);
       await taskRow(page, '任务名').click();
       await go(page, '结果');
       await page.getByLabel('结果文件').selectOption('scalar-0.vti');
@@ -1344,8 +1349,8 @@ for (const viewport of viewports) {
       hub.device = {...device, name: nodeName, snapshot: {...device.snapshot, tasks: [{...row, name: taskName}], workspaces: [{id: ws, name: wsName}]}};
       const errors = await start(page, hub);
       await go(page, '任务');
-      await page.getByLabel('执行节点').selectOption(node);
-      await project(page).selectOption(ws);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node);
+      await selectEnvironment(page, project(page), ws);
       await taskRow(page, '解析').click();
       await expect(status(page)).toContainText('已读取 Runtime 状态');
       await go(page, '结果');
@@ -2722,12 +2727,12 @@ for (const viewport of viewports) {
       await expect.poll(() => hub.reached.has('graph.evaluate')).toBe(true);
       await modeTab(page, '结果文件').click();
       await go(page, '任务');
-      await page.getByLabel('执行节点').selectOption(node2);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node2);
       await expect(graphPane(page)).toHaveCount(0);
       release();
       await page.waitForTimeout(500);
-      await page.getByLabel('执行节点').selectOption(node);
-      await project(page).selectOption(ws);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node);
+      await selectEnvironment(page, project(page), ws);
       await choose(/解析场验证/);
       await go(page, '结果');
       await expect(graphPane(page)).toHaveCount(0);
@@ -2821,8 +2826,8 @@ for (const viewport of viewports) {
       await modeTab(page, '结果文件').click();
       await both();
       await go(page, '任务');
-      await project(page).selectOption('');
-      await project(page).selectOption(ws);
+      await selectEnvironment(page, project(page), '');
+      await selectEnvironment(page, project(page), ws);
       await firstTask().click();
       await go(page, '结果');
       await empty();
@@ -2833,10 +2838,10 @@ for (const viewport of viewports) {
       await modeTab(page, '结果文件').click();
       await both();
       await go(page, '任务');
-      await page.getByLabel('执行节点').selectOption(node2);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node2);
       await expect(graphPane(page)).toHaveCount(0);
-      await page.getByLabel('执行节点').selectOption(node);
-      await project(page).selectOption(ws);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node);
+      await selectEnvironment(page, project(page), ws);
       await firstTask().click();
       await expect(status(page)).toContainText('已读取 Runtime 状态');
       await go(page, '结果');
@@ -2916,7 +2921,7 @@ async function pixelDiff(page: Page, a: Buffer, b: Buffer) {
 }
 async function chooseProject(page: Page, id: string) {
   await go(page, '任务');
-  await project(page).selectOption(id);
+  await selectEnvironment(page, project(page), id);
 }
 
 for (const viewport of viewports) {
@@ -2931,8 +2936,8 @@ for (const viewport of viewports) {
       const sent = traffic(page);
       const errors = await start(page, hub);
       await go(page, '任务');
-      await page.getByLabel('执行节点').selectOption(node);
-      await project(page).selectOption(ws);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node);
+      await selectEnvironment(page, project(page), ws);
       // In 项目一, no task selected: a task bound by hand in 图谱 and computed; the node queues it.
       await showGraph(page);
       await expect(source(page)).toHaveText('尚未显示图谱结果，选择数据源并计算图谱');
@@ -2976,8 +2981,8 @@ for (const viewport of viewports) {
       const sent = traffic(page);
       const errors = await start(page, hub);
       await go(page, '任务');
-      await page.getByLabel('执行节点').selectOption(node);
-      await project(page).selectOption(ws2);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node);
+      await selectEnvironment(page, project(page), ws2);
       await showGraph(page);
       await openPackage(page);
       await vtkCanvas(graphPane(page)).evaluate(el => { (el as any).__marker = 'local-package'; });
@@ -3019,8 +3024,8 @@ for (const viewport of viewports) {
       hub.viewErrors.set('graph.evaluate', '节点拒绝：图谱数据不可读');
       const errors = await start(page, hub);
       await go(page, '任务');
-      await page.getByLabel('执行节点').selectOption(node);
-      await project(page).selectOption(ws);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node);
+      await selectEnvironment(page, project(page), ws);
       await showGraph(page);
       await binding(page).selectOption(task);
       let release = hub.hold('graph.evaluate');
@@ -3080,7 +3085,7 @@ for (const viewport of viewports) {
       hub.device = {...twoProjects, snapshot: {...twoProjects.snapshot, tasks: [row, {...row, workspace_id: ws2, name: '复用编号任务'}]}};
       const errors = await start(page, hub);
       await go(page, '任务');
-      await page.getByLabel('执行节点').selectOption(node);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node);
       await taskRow(page, '解析场验证').click();
       await expect(status(page)).toContainText('已读取 Runtime 状态');
       await showGraph(page);
@@ -3221,11 +3226,11 @@ for (const viewport of viewports) {
       expect(presetReads(sent.seen)).toBe(1);
       // 图谱 stays the chosen mode; the node changes in 任务, twice, and the first task is chosen again.
       await go(page, '任务');
-      await page.getByLabel('执行节点').selectOption(node2);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node2);
       await expect(graphPane(page)).toHaveCount(0);
       await page.waitForTimeout(500);
-      await page.getByLabel('执行节点').selectOption(node);
-      await project(page).selectOption(ws);
+      await selectEnvironment(page, page.getByLabel('执行节点'), node);
+      await selectEnvironment(page, project(page), ws);
       await taskRow(page, '解析场验证').click();
       await expect(status(page)).toContainText('已读取 Runtime 状态');
       await page.waitForTimeout(500);
@@ -3747,5 +3752,120 @@ test('graph source distinguishes a local package and output cards without invent
   expect(await detailValues(page)).toContain(task2);
   expect(await detailValues(page)).not.toContain('main');
   expect(hub.evaluations).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+for (const viewport of viewports) {
+  for (const taskCount of [1, 200]) {
+    test(`${viewport.name} first scope leaves 新建任务 reachable for a ${taskCount}-row queue`, async ({page}) => {
+      await page.setViewportSize({width: viewport.width, height: viewport.height});
+      const hub = new Hub();
+      const extra = Array.from({length: taskCount - 1}, (_, i) => ({
+        ...row, id: (i + 1).toString(16).padStart(32, '0'), name: `额外任务 ${i + 1}`,
+      }));
+      hub.device = {...device, snapshot: {...device.snapshot, tasks: [row, ...extra]}};
+      const errors = await start(page, hub);
+      await go(page, '任务');
+      await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
+      await page.getByLabel('执行节点').selectOption(node);
+      await project(page).selectOption(ws);
+      await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+      await taskRow(page, '解析场验证').click();
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await expect(shortcut(page, '结果')).toBeInViewport({ratio: 1});
+      const surface = page.locator('aside.tasks');
+      await surface.evaluate(el => { el.scrollTop = 0; });
+      await pause(page);
+      const summary = disclosure(page, '新建任务');
+      const box = (await summary.boundingBox())!, pane = (await surface.boundingBox())!;
+      await page.screenshot({path: test.info().outputPath('tasks-first-scope.png')});
+      const sent = traffic(page), r = route(page, `new-task-${viewport.name}-${taskCount}`);
+      const scrollRequired = Math.max(0, Math.ceil(box.y + box.height - pane.y - pane.height));
+      const wheel = scrollRequired > 0 ? scrollRequired + 8 : 0;
+      expect(wheel > 0).toBe(viewport.name === 'narrow' && taskCount === 200);
+      if (wheel) {
+        await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height - 10);
+        await page.mouse.wheel(0, wheel);
+        await expect.poll(() => surface.evaluate(el => el.scrollTop)).toBeGreaterThanOrEqual(scrollRequired);
+      }
+      await expect(summary).toBeInViewport({ratio: 1});
+      await r.click(summary, '新建任务');
+      await expect(page.getByLabel('TaskSpec')).toBeVisible();
+      await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+      await expect(queue(page).locator('.task.selected')).toHaveText('解析场验证succeeded');
+      sent.stop();
+      expect(sent.seen).toEqual([]);
+      expect(hub.evaluations).toHaveLength(0);
+      expect([hub.calls, hub.messages, hub.replies, errors]).toEqual([[], [], 0, []]);
+      expect(r.record).toMatchObject({clicks: 1, selects: 0});
+      r.save();
+      writeFileSync(test.info().outputPath('new-task-geometry.json'), JSON.stringify({
+        viewport, taskCount, fixedStart: 'node and workspace chosen, one selected task, offset 0, first setup folded',
+        summary: box, panel: pane, wheelDelta: wheel, measuredRequests: sent.seen, measuredClicks: r.record.clicks,
+      }, null, 2));
+    });
+  }
+}
+
+test('a keyboard workspace choice returns focus to the folded summary, and explicit reopening survives scope changes', async ({page}) => {
+  const hub = new Hub();
+  hub.device = twoProjects;
+  hub.others = [{...device, id: node2, name: '节点乙', snapshot: {...device.snapshot,
+    tasks: [], workspaces: [{id: ws2, name: '项目二'}]}}];
+  const errors = await start(page, hub);
+  await go(page, '任务');
+  await page.getByLabel('执行节点').selectOption(node);
+  const summary = disclosure(page, '运行环境'), area = page.locator('aside.tasks');
+  await project(page).focus();
+  const scroll = await area.evaluate(el => el.scrollTop);
+  const sent = traffic(page);
+  await page.keyboard.press('ArrowDown');
+  await expect(project(page)).toHaveValue(ws);
+  await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+  await expect(summary).toBeFocused();
+  expect(await area.evaluate(el => el.scrollTop)).toBe(scroll);
+  await page.keyboard.press('Enter');
+  await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
+  await project(page).selectOption(ws2);
+  await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
+  await page.getByLabel('执行节点').selectOption(node2);
+  await expect(project(page)).toHaveValue('');
+  await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
+  await project(page).selectOption(ws2);
+  await expect(summary).toHaveText('运行环境 · 节点乙 · 项目二');
+  await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
+  await summary.click();
+  await go(page, '结果');
+  await go(page, '任务');
+  await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+  sent.stop();
+  expect(sent.seen).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('automatic folding leaves outside focus alone and reopens when the selected node is lost', async ({page}) => {
+  const hub = new Hub();
+  const errors = await start(page, hub);
+  await go(page, '任务');
+  await page.getByLabel('执行节点').selectOption(node);
+  const refreshButton = page.locator('aside.tasks').getByRole('button', {name: '刷新', exact: true});
+  await refreshButton.focus();
+  await project(page).evaluate((el, id) => {
+    (el as HTMLSelectElement).value = id;
+    el.dispatchEvent(new Event('change', {bubbles: true}));
+  }, ws);
+  await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+  await expect(refreshButton).toBeFocused();
+  hub.device = {...device, revoked: true};
+  hub.publish();
+  await expect(page.getByLabel('执行节点')).toHaveValue('');
+  await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
+  await expect(refreshButton).toBeFocused();
+  hub.device = device;
+  hub.publish();
+  await expect(page.getByLabel('执行节点').locator('option')).toHaveCount(2);
+  await page.getByLabel('执行节点').selectOption(node);
+  await project(page).selectOption(ws);
+  await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
   expect(errors).toEqual([]);
 });

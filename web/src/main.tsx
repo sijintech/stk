@@ -19,6 +19,7 @@ type ObservedTask = {scope:TaskScope;name:string;state:string;verifiedIdentity:b
 type Displayed = {scope:TaskScope;path:string;scene:Json};
 // Persistent sections: 工作台 is the conversation home. All three stay mounted; only the active one is shown.
 type Section='workbench'|'tasks'|'results';
+type EnvironmentDisclosure='setup'|'auto-closed'|'open'|'closed';
 const SECTIONS:readonly (readonly [Section,string])[]=[['workbench','工作台'],['tasks','任务'],['results','结果']];
 // Up to this width the conversation history is opened on demand over the active section instead of a fixed column.
 const COMPACT='(max-width: 1050px)';
@@ -84,6 +85,8 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     if(messageList.current)messageList.current.scrollTop=transcriptOffsets.current.get(conv.session)??0;
   },[conv.session]);
   const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
+  const [environmentDisclosure,setEnvironmentDisclosure]=useState<EnvironmentDisclosure>('setup');
+  const environment=useRef<HTMLDetailsElement>(null);
   const [probeText,setProbeText]=useState(''),[graphProbeText,setGraphProbeText]=useState(''),[viewError,setViewError]=useState(''),[graphError,setGraphError]=useState('');
   const [graphSource,setGraphSource]=useState<GraphSource|null>(null);
   // The Tasks shortcut that opened 结果 and the task scope it was pressed in. The next navigation forgets it; only
@@ -138,6 +141,17 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // Readable scope of 任务: the queue lists the chosen node, filtered by the chosen project; the selected task keeps its
   // own scope, which can be another project of the node while no project is chosen.
   const nodes=devices.filter(d=>d.role==='node'&&!d.revoked),workspaces:Json[]=selected?.snapshot?.workspaces||[];
+  const environmentReady=!!workspace&&workspaces.some(w=>w.id===workspace);
+  const environmentOpen=environmentDisclosure==='setup'||environmentDisclosure==='open';
+  // Initial setup retires once, when the workspace belongs to the selected node. A lost scope can reopen the
+  // automatically folded panel for recovery; subsequent explicit disclosure choices remain as the user left them.
+  useLayoutEffect(()=>{
+    if(environmentDisclosure==='setup'&&environmentReady){
+      const summary=environment.current?.querySelector('summary'),active=document.activeElement;
+      if(summary&&active!==summary&&environment.current?.contains(active))summary.focus({preventScroll:true});
+      setEnvironmentDisclosure('auto-closed');
+    }else if(environmentDisclosure==='auto-closed'&&!environmentReady)setEnvironmentDisclosure('open');
+  },[environmentDisclosure,environmentReady]);
   const workspaceName=(id:string)=>workspaces.find(w=>w.id===id)?.name||id.slice(0,8);
   const nodeName=selected?selected.name||node.slice(0,8):'';
   const queue=tasks.filter(t=>!workspace||t.workspace_id===workspace);
@@ -425,7 +439,9 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         onObservation={observeTask} onAccessLost={disconnect} onNodeGone={nodeGone}/>}
       {taskBound&&<div className="inline"><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{openResults('logs',e.currentTarget);void run(readLogs);}}>读取日志</button><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{openResults('files',e.currentTarget);void run(files);}}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
       {actions.filter(a=>a.state==='review').map(a=><article className="review" key={a.id}><strong>等待执行复核</strong><p>{a.review_reason}</p><pre>{JSON.stringify(a.request.payload,null,2)}</pre>{[true,false].map(approved=><button key={String(approved)} disabled={busy} onClick={()=>void run(async()=>{await api(`actions/${a.id}/review`,'POST',{approved});})}>{approved?'批准执行':'拒绝'}</button>)}</article>)}
-      <details className="setting" open><summary>运行环境 · {nodeName||'未选择节点'}{selected&&` · ${workspace?workspaceName(workspace):'未选择项目'}`}</summary>
+      <details className="setting" ref={environment} open={environmentOpen}><summary onClick={event=>{
+        event.preventDefault();setEnvironmentDisclosure(environmentOpen?'closed':'open');
+      }}>运行环境 · {nodeName||'未选择节点'}{selected&&` · ${workspace?workspaceName(workspace):'未选择项目'}`}</summary>
       <label>执行节点<select value={node} onChange={e=>{clearTask();setNode(e.target.value);setWorkspace('');}}><option value="">选择节点</option>{nodes.map(d=><option key={d.id} value={d.id}>{d.online?'●':'○'} {d.name}</option>)}</select></label>
       {selected&&<p className="muted">{selected.online?'在线':'离线'} · 最近更新 {selected.last_seen?new Date(selected.last_seen*1000).toLocaleString():'尚未连接'}{selected.snapshot.cpu_percent!==undefined&&<><br/>CPU {selected.snapshot.cpu_percent}% · 内存 {selected.snapshot.memory_percent}%</>}</p>}
       <label>项目<select value={workspace} onChange={e=>selectWorkspace(e.target.value)}><option value="">选择项目</option>{workspaces.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
