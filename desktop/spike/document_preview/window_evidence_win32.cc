@@ -239,9 +239,8 @@ capture_geometry::Rect geometry_rect(RECT rect)
 // crash filter. Keep this block free of Windows types (it is compiled alone on Linux).
 // Step milliseconds: -1 means no clean measurement (not reached, or the failure site).
 // capture.scope-exit is the release of the start's local COM references after StartCapture
-// returned. After a throw, the failing call's own time cannot be separated from the throw
-// and the unwinding of those locals, so failed_step names the site and the whole mixed span
-// goes to capture.failed-step-and-unwind, never to an API step.
+// returned. The legacy failure bucket spans the failing step and try-scope unwind.
+// A returned CreateForWindow HRESULT also carries separate ABI, check and unwind times.
 enum StartStep : unsigned {
   kStartOptions, kStartApartment, kStartWindowChecks, kStartIsSupported, kStartWindowOwner,
   kStartDwmGeometry, kStartItemFactory, kStartCreateForWindow, kStartItemSize, kStartWindowGeometry,
@@ -258,6 +257,11 @@ constexpr const char *start_step_labels[kStartStepCount] = {
 constexpr int64_t slow_start_ms = 1000;  // Successful starts on the hosted runner took 57-67 ms.
 constexpr unsigned start_line_limit = 16;
 unsigned start_sequence = 0, start_lines = 0;  // Captures start only on the acceptance UI thread.
+
+struct CreateForWindowFailureTiming {
+  int32_t hresult = 0;
+  int64_t call_ms = -1, check_ms = -1, unwind_ms = -1;
+};
 
 class StartTiming {
  public:
@@ -280,12 +284,20 @@ class StartTiming {
     current_ = kStartStepCount;
     return label;
   }
+  void mark_create_for_window_failure(Clock::time_point called, Clock::time_point returned, int32_t hresult) noexcept
+  {
+    create_unwind_began_ = Clock::now();
+    create_failure_ = {hresult, milliseconds(called, returned), milliseconds(returned, create_unwind_began_), -1};
+  }
   // For a catch handler: returns the failure site's label, or nullptr, but books the open
   // span (failing call + throw + unwind of try-scope locals) to the mixed bucket only.
   const char *fail() noexcept
   {
     if (current_ >= kStartStepCount) { return nullptr; }
     const auto *label = start_step_labels[current_];
+    if (current_ == kStartCreateForWindow && create_failure_.call_ms >= 0) {
+      create_failure_.unwind_ms = since(create_unwind_began_);
+    }
     current_ = kStartFailedAndUnwind;
     return leave() ? label : nullptr;
   }
@@ -297,12 +309,15 @@ class StartTiming {
   }
   int64_t ms(StartStep step) const noexcept { return ms_[step]; }
   int64_t total_ms() const noexcept { return since(began_); }
+  const CreateForWindowFailureTiming &create_failure() const noexcept { return create_failure_; }
  private:
-  static int64_t since(Clock::time_point from) noexcept
+  static int64_t milliseconds(Clock::time_point from, Clock::time_point to) noexcept
   {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - from).count();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(to - from).count();
   }
-  Clock::time_point began_ = Clock::now(), step_began_{};
+  static int64_t since(Clock::time_point from) noexcept { return milliseconds(from, Clock::now()); }
+  Clock::time_point began_ = Clock::now(), step_began_{}, create_unwind_began_{};
+  CreateForWindowFailureTiming create_failure_;
   StartStep current_ = kStartStepCount;
   int64_t ms_[kStartStepCount];
 };
@@ -328,6 +343,15 @@ bool report_start_timing(const StartTiming &timing, int64_t total, unsigned sequ
   for (unsigned i = 0; i < kStartStepCount && used > 0 && size_t(used) < sizeof(line); ++i) {
     const int added = std::snprintf(line + used, sizeof(line) - size_t(used), "%s%s:%lld", i ? "," : "",
                                     start_step_labels[i], static_cast<long long>(timing.ms(StartStep(i))));
+    used = added < 0 ? -1 : used + added;
+  }
+  const auto &split = timing.create_failure();
+  if (split.unwind_ms >= 0 && used > 0 && size_t(used) < sizeof(line)) {
+    const int added = std::snprintf(line + used, sizeof(line) - size_t(used),
+        " create_for_window_hresult=0x%08lx create_for_window_call_ms=%lld create_for_window_check_ms=%lld "
+        "create_for_window_unwind_ms=%lld",
+        static_cast<unsigned long>(static_cast<uint32_t>(split.hresult)), static_cast<long long>(split.call_ms),
+        static_cast<long long>(split.check_ms), static_cast<long long>(split.unwind_ms));
     used = added < 0 ? -1 : used + added;
   }
   if (used <= 0 || size_t(used) >= sizeof(line)) {  // Fixed labels fit; never print a partial line.
@@ -387,8 +411,19 @@ class Capture final : public WindowEvidenceCapture {
       timing.enter(kStartItemFactory);
       auto interop = winrt::get_activation_factory<GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
       timing.enter(kStartCreateForWindow);
-      winrt::check_hresult(interop->CreateForWindow(window_, winrt::guid_of<GraphicsCaptureItem>(),
-                                                   winrt::put_abi(item_)));
+      const auto item_iid = winrt::guid_of<GraphicsCaptureItem>();
+      const auto item_abi = winrt::put_abi(item_);
+      const auto called = StartTiming::Clock::now();
+      const auto create_result = interop->CreateForWindow(window_, item_iid, item_abi);
+      const auto returned = StartTiming::Clock::now();
+      try {
+        winrt::check_hresult(create_result);
+      }
+      catch (...) {
+        // Mark the rethrow while interop is still alive. The outer catch runs after try-scope cleanup.
+        timing.mark_create_for_window_failure(called, returned, int32_t(create_result));
+        throw;
+      }
       timing.enter(kStartItemSize);
       const auto size = item_.Size();
       pool_width_ = size.Width; pool_height_ = size.Height;
