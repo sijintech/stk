@@ -1,5 +1,15 @@
 # 开发交接记录
 
+## 2026-11-10 22:25 UTC · Web 图谱按所选图层读取原始值
+
+`b105894f` 集成独立候选 `13d9586e`。MuFerro DAT 探针从已显示图层的读取节点取实际解析步号，绑定该图层的原计算任务。用户点「查询原始值」才读取该任务的发布清单。明确算例目录只接受完整匹配路径，自动目录要求同名帧在该任务中唯一。无法确认来源时提示原因，保留当前画面。切换图层、坐标、工作区或页面会丢弃旧请求的迟到回执。已发出的取值动作可在 Hub 完成。普通文件图谱和显式 MuPRO HDF5 路径沿用各自读取器。
+
+固定起点为实际 Web 产物已显示另一工作区的任务第 2 步，队列仍选任务 A。真实本机 Hub、NodeAgent、Runtime、Chromium 软件渲染，中文 1440×900 和 390×844。两种尺寸都实际点选图层 1 次，输入坐标 3 次，再点「查询原始值」1 次。旧版对两个同名发布文件取根目录值 `[0.125, 0.125, 0.125]`。新版只发一条绑定任务的清单读取并提示歧义，零取值请求。唯一发布文件时发同一绑定的清单读取与取值动作各一条，读取 `case/Polar.00000002.dat` 并返回 `[0.34765625, 0.40625, 0.34765625]`。点选阶段零新增清单与取值请求，两端均保留一个画布。Runtime 只有夹具的三项任务。收据和截图在外部 `root-delivery-20261110-146/graph-probe-browser/{baseline-exact,integrated}`。
+
+独立最终产物及 Root 生产构建通过，完整 Web 均 186/186，零跳过。独立 Runtime 及 NodeAgent 对照另覆盖内联步号 3 实际解析成 2、自动目录歧义与已明确目录。模拟 Hub 验证旧读取路径、延迟回执隔离及相同宽窄屏操作。Root 核对补丁逐字节一致，暂存扫描零发现。原生桥的同名串读和字面步号问题已用真实本机图谱 worker 复现，修复在独立 worktree。原生侧栏直接打开完整保存问答也在另一独立 worktree 验证。
+
+远端 `a64941b4` Linux Desktop 2205/2205，Linux 安装包和冒烟通过，Runtime 13/13。macOS 和 Windows Desktop 作业仍在运行，本地提交待其终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42908396134) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42908396193)
+
 ## 2026-11-10 22:13 UTC · Windows PDF 捕获生命周期与图谱探针取证
 
 `2a8afa4a` 集成独立候选 `78bb2f8a`。Windows 报告 PDF 原生验收为同一窗口保留一个 WGC 捕获目标。窗口销毁、目标关闭或宿主身份变化会使旧目标失效，窗口重开后重新绑定。每次取样仍创建新的图形设备、帧池和会话。新增目标创建与复用计数，原 20 轮、160 张图片和每阶段连续有效取样门槛照旧。此前远端 `9ce87c63` 在第 5 轮 PDF 重开的 `CreateForWindow` 同步调用耗时 120038 ms，返回 `0x8007041d`，零采样。新实现首次绑定仍使用该系统调用，实际 Windows SDK 构建、计数和像素结论待目标 CI。 [Microsoft 捕获会话](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture) [原失败工件](https://github.com/sijintech/stk/actions/runs/42895759127/artifacts/13806041518)
