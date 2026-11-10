@@ -262,6 +262,11 @@ struct TextFieldOptions {
   std::function<void()> on_submit;
 };
 
+struct LogViewPosition {
+  float offset = 0.0f;
+  bool follow = true;
+};
+
 class Block;
 class Context;
 class Layout;
@@ -317,6 +322,7 @@ struct Widget {
   std::shared_ptr<ListSpec> list;
   std::shared_ptr<TableSpec> table;
   const LogBuffer *log = nullptr;
+  LogViewPosition *log_position = nullptr;
   ImageSpec image;
   std::vector<Vec2> curve; /**< Normalized curve preview points; display only. */
   Binding<float> factor;
@@ -384,7 +390,9 @@ class Layout {
   /** fraction in [0, 1]; text empty = percentage. */
   Widget &progress(float fraction, std::string_view text = {});
   Widget &virtual_list(std::string_view key, ListSpec spec);
-  Widget &log_view(std::string_view key, const LogBuffer &log, float height_units = 8.0f);
+  /** An optional caller-owned position must remain valid while this frame receives input. */
+  Widget &log_view(std::string_view key, const LogBuffer &log, float height_units = 8.0f,
+                   LogViewPosition *position = nullptr);
   Widget &table(std::string_view key, TableSpec spec);
   Widget &image(std::string_view key, ImageSpec spec);
   /** Stable geometry for a native child view; no GPU drawing, input capture or Tab stop. */
@@ -717,6 +725,8 @@ class Context {
   Rect table_scroll_track(const Widget &w) const;
   Rect table_scroll_thumb(const Widget &w);
   void set_scroll(WidgetId id, float v, float max);
+  LogViewPosition log_view_position(const Widget &w) const;
+  void remember_log_view_position(const Widget &w, bool follow);
   TableState &table_state(const Widget &w);
   const std::vector<int> &table_perm(const Widget &w);
   float table_col_px(const Widget &w, int c);

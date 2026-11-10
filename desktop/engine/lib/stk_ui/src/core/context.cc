@@ -175,6 +175,19 @@ void Context::set_scroll(WidgetId id, float v, float max)
   scroll_[id] = next;
 }
 
+LogViewPosition Context::log_view_position(const Widget &w) const
+{
+  if (w.log_position) { return *w.log_position; }
+  const auto follow = follow_.find(w.id);
+  return {scroll_of(w.id), follow == follow_.end() || follow->second};
+}
+
+void Context::remember_log_view_position(const Widget &w, const bool follow)
+{
+  if (w.log_position) { *w.log_position = {scroll_of(w.id), follow}; }
+  else { follow_[w.id] = follow; }
+}
+
 /* -------------------------------------------------------------------- */
 /* Frame */
 
@@ -1104,7 +1117,7 @@ bool Context::activate_focused(const Event &e)
         default: return false;
       }
       set_scroll(w->id, s, max_scroll(*w));
-      follow_[w->id] = scroll_of(w->id) >= max_scroll(*w) - 0.5f;
+      remember_log_view_position(*w, scroll_of(w->id) >= max_scroll(*w) - 0.5f);
       redraw_ = true;
       return true;
     }
@@ -1488,7 +1501,7 @@ EventResult Context::mouse_move(const Event &e)
         if (track > 0) {
           set_scroll(w->id, drag_.start_scroll + d.y * ms / track, ms);
           if (w->log) {
-            follow_[w->id] = scroll_of(w->id) >= ms - 0.5f;
+            remember_log_view_position(*w, scroll_of(w->id) >= ms - 0.5f);
           }
         }
         break;
@@ -1732,6 +1745,7 @@ EventResult Context::mouse_down(const Event &e)
           const float page = body.h * 0.9f;
           set_scroll(w->id, scroll + (e.pos.y < thumb.y ? -page : page), ms);
           drag_.start_scroll = scroll_of(w->id);
+          if (w->log_position) { remember_log_view_position(*w, drag_.start_scroll >= ms - 0.5f); }
         }
         break;
       }
@@ -1759,11 +1773,11 @@ EventResult Context::mouse_down(const Event &e)
         const float ph = std::round(0.9f * style_.unit);
         const float pw = std::round(LayoutEngine::text_w(*this, tr("ui.log.follow")) + style_.unit);
         const Rect pill{w->rect.x1() - pw - style_.scrollbar - 3 * px, w->rect.y1() - ph - 3 * px, pw, ph};
-        if (!follow_.count(w->id) || follow_[w->id] || !pill.contains(e.pos)) {
+        if (log_view_position(*w).follow || !pill.contains(e.pos)) {
           break;
         }
-        follow_[w->id] = true;
         set_scroll(w->id, ms, ms);
+        remember_log_view_position(*w, true);
         break;
       }
       if (!body.contains(e.pos)) { break; }
@@ -1964,7 +1978,7 @@ EventResult Context::wheel(const Event &e)
     if (ms > 0.0f) {
       set_scroll(w->id, scroll_of(w->id) - e.wheel_y * 3 * list_row_height(*w), ms);
       if (w->log) {
-        follow_[w->id] = scroll_of(w->id) >= ms - 0.5f;
+        remember_log_view_position(*w, scroll_of(w->id) >= ms - 0.5f);
       }
       return {true, true};
     }

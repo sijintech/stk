@@ -845,6 +845,40 @@ TEST(LogView, FollowsTailUntilScrolledUp)
   EXPECT_NEAR(h.ctx->scroll_of(id), max_scroll(), 0.5f);
 }
 
+TEST(LogView, OwnedPositionFollowsNewLinesUntilScrolled)
+{
+  Harness h;
+  LogBuffer log;
+  LogViewPosition position;
+  for (int i = 0; i < 50; ++i) { log.append("line " + std::to_string(i) + "\n"); }
+  h.ui = [&](Context &ctx) {
+    ctx.block("r", {0, 0, 400, 600}).layout().log_view("log", log, 5.0f, &position);
+  };
+  h.frame();
+  EXPECT_TRUE(position.follow);
+  const float initial = position.offset;
+  ASSERT_GT(initial, 0.0f);
+  log.append("stream update\n");
+  h.frame();
+  const float tail = position.offset;
+  EXPECT_GT(tail, initial);
+  const auto rect = h.w("log").rect;
+  const auto &style = h.ctx->style();
+  h.click({rect.x1() - 2 * style.pixel - style.scrollbar / 2, rect.y + style.unit});
+  EXPECT_FALSE(position.follow);
+  EXPECT_LT(position.offset, tail);
+  h.key(Key::End);
+  EXPECT_TRUE(position.follow);
+  EXPECT_FLOAT_EQ(position.offset, tail);
+  h.send(Event::wheel(h.center("log"), 1.0f));
+  ASSERT_FALSE(position.follow);
+  const float reading = position.offset;
+  log.append("another stream update\n");
+  h.frame();
+  EXPECT_FLOAT_EQ(position.offset, reading);
+  EXPECT_FLOAT_EQ(h.ctx->scroll_of(h.w("log").id), reading);
+}
+
 TEST(Modal, TrapsFocusAndInput)
 {
   Harness h;

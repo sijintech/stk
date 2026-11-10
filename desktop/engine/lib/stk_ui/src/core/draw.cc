@@ -629,12 +629,10 @@ void Context::draw_widget(const Widget &w)
       const float horizontal = table ? table_scroll_x(w) : 0.0f;
       const Rect body = list_body(w);
       const float ms = max_scroll(w);
-      if (log && (!follow_.count(w.id) || follow_[w.id])) {
-        follow_[w.id] = true;
-        scroll_[w.id] = ms;
-      }
-      float scroll = std::clamp(scroll_of(w.id), 0.0f, ms);
+      const auto position = log ? log_view_position(w) : LogViewPosition{scroll_of(w.id), false};
+      const float scroll = std::clamp(position.follow ? ms : position.offset, 0.0f, ms);
       scroll_[w.id] = scroll;
+      if (w.log_position) { w.log_position->offset = scroll; }
       const float sbw = ms > 0.0f ? st.scrollbar + 2 * px : 0.0f;
       const int count = w.list ? w.list->count : (w.table ? w.table->rows : int(w.log->line_count()));
       const float lpad = log ? std::round(0.2f * st.unit) : 0.0f;
@@ -817,7 +815,7 @@ void Context::draw_widget(const Widget &w)
         const Color color = hover && track.contains(mouse_) ? colors.item.mul_hsl(1.0f, 1.0f, 1.35f) : colors.item;
         draw_.round_box(thumb, clamp_radius(colors.roundness * thumb.h * 2.0f, thumb), CORNER_ALL, color, none);
       }
-      if (log && !follow_[w.id]) {
+      if (log && !position.follow) {
         const std::string_view label = tr("ui.log.follow");
         const float ph = std::round(0.9f * st.unit);
         const float pw = std::round(LayoutEngine::text_w(*this, label) + st.unit);

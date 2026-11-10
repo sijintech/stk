@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <list>
 #include <map>
 #include <optional>
 #include <set>
@@ -243,6 +244,7 @@ class AIEditor final : public Editor {
       opening_ = opening;
       opened_history_ = false;
       shown_exchange_.clear(); transcript_.clear();
+      transcript_positions_.clear();
       shown_context_.clear(); captured_.reset();
       proposal_navigation_error_.clear();
       picker_.close();
@@ -939,6 +941,22 @@ class AIEditor final : public Editor {
     return digits;
   }
 
+  ui::LogViewPosition *transcript_position(const std::string &request_id)
+  {
+    // A loading or failed read has no request record. Its blank view must not clamp a saved position.
+    if (request_id.empty()) { return nullptr; }
+    const auto found = std::find_if(transcript_positions_.begin(), transcript_positions_.end(),
+                                    [&](const auto &entry) { return entry.first == request_id; });
+    if (found != transcript_positions_.end()) {
+      transcript_positions_.splice(transcript_positions_.end(), transcript_positions_, found);
+    }
+    else {
+      if (transcript_positions_.size() >= 32) { transcript_positions_.pop_front(); }
+      transcript_positions_.emplace_back(request_id, ui::LogViewPosition{});
+    }
+    return &transcript_positions_.back().second;
+  }
+
   void conversation(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft,
                     const std::string &key, const bool wide, const bool settings_open = false,
                     const bool focused = false)
@@ -1051,7 +1069,7 @@ class AIEditor final : public Editor {
       const float candidate_space = parameter_request && status == "completed" ? 4.0f : 0.0f;
       const float transcript_units = wide ? std::clamp(height / unit - 23.0f - candidate_space, 5.0f, 22.0f) :
           settings_open ? 6.0f : std::clamp(height / unit - 25.0f - candidate_space, 6.0f, 22.0f);
-      layout.log_view("ai_transcript", transcript_, transcript_units);
+      layout.log_view("ai_transcript", transcript_, transcript_units, transcript_position(id));
       const bool archived = ctx.store.archive().archived("request", id);
       // An automatic question whose local model is not running yet is sent once STK has started it.
       const bool auto_request = auto_ && auto_->key == key && auto_->request_id == id && !id.empty();
@@ -1653,6 +1671,7 @@ class AIEditor final : public Editor {
   std::shared_ptr<const CapturedProjectTable> captured_;
   ProjectContextPicker picker_;
   ui::LogBuffer transcript_, raw_reply_;
+  std::list<std::pair<std::string, ui::LogViewPosition>> transcript_positions_;
   std::string pending_session_, pending_project_, agent_opening_, shown_agent_, agent_navigation_error_;
   ui::LogBuffer agent_timeline_;
   std::string run_plan_origin_;

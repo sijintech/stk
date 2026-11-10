@@ -707,7 +707,10 @@ def init(self, *args, **kwargs):
             request = result["request"]["id"]
             owner = str(uuid4())
             requests._claim(request, executor_id=owner)
-            result["request"] = requests._complete(request, executor_id=owner, text="Saved answer")
+            answer = Path(__file__).with_name("saved_answer")
+            text = answer.read_text() if answer.exists() else "Saved answer"
+            answer.unlink(missing_ok=True)
+            result["request"] = requests._complete(request, executor_id=owner, text=text)
         return result
     def unexpected(params, call):
         Path(__file__).with_name("unexpected_write").touch()
@@ -1000,6 +1003,92 @@ TEST_F(SavedConversationNavigationPython, RecentQuestionsOpenFromTasksAndResults
     return page.loaded && page.items.size() == 1 && io::get_string(page.items.front(), "id") == kSecond;
   }, 30)) << discussion.error();
   EXPECT_EQ(widget(question)->string.value(), "Draft stays in the workbench");
+}
+
+TEST_F(SavedConversationNavigationPython, RecentQuestionsRestoreTheScrolledTranscript)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_table());
+  {
+    std::ofstream answer(dir.path() / "saved_answer");
+    for (int line = 0; line < 90; ++line) { answer << "Alpha reply row " << line << '\n'; }
+  }
+  ASSERT_NO_FATAL_FAILURE(save_question(kFirst, "Alpha", true));
+  ASSERT_NO_FATAL_FAILURE(save_question(kSecond, "Bravo", true));
+  f.drv->ctx.rect.xmax = 1600;
+  f.drv->ctx.rect.ymax = 1100;
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+
+  auto &discussion = project().discussion();
+  const auto wait_for = [&](const char *id) {
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.drv->frame();
+      return !discussion.exchange_busy() && io::get_string(discussion.exchange_request(), "id") == id &&
+             widget("ai_transcript");
+    }, 30)) << discussion.exchange_error();
+  };
+  const auto choose = [&](const char *id) {
+    const auto key = std::string("workbench_question/") + id;
+    ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget(key) && widget(key)->enabled; }, 30));
+    const auto [x, y] = f.widget_center(key);
+    ASSERT_TRUE(f.drv->click(x, y));
+    f.screen.run_deferred();
+    f.drv->frame();
+    ASSERT_EQ(discussion.exchange_id(), id);
+    ASSERT_TRUE(discussion.exchange_request().empty());  // The loading frame is drawn before accepting the reply.
+    ASSERT_NO_FATAL_FAILURE(wait_for(id));
+  };
+  const auto position = [&] {
+    const auto *view = widget("ai_transcript");
+    EXPECT_NE(view, nullptr);
+    return view ? f.screen.ui()->scroll_of(view->id) : -1.0f;
+  };
+
+  ASSERT_NO_FATAL_FAILURE(wait_for(kSecond));
+  ASSERT_NO_FATAL_FAILURE(choose(kFirst));
+  const float tail = position();
+  ASSERT_GT(tail, 0.0f);  // A first visit follows the tail.
+  const auto [x, y] = f.widget_center("ai_transcript");
+  wm::Event wheel;
+  wheel.type = wm::EventType::Wheel;
+  wheel.x = x; wheel.y = y; wheel.wheel_y = 10;
+  ASSERT_TRUE(f.drv->send(wheel));
+  f.drv->frame();
+  const float reading = position();
+  ASSERT_GT(reading, 0.0f);
+  ASSERT_LT(reading, tail);
+  const auto draft_key = "ai_question/" + handle();
+  ASSERT_NE(widget(draft_key), nullptr);
+  widget(draft_key)->string.assign("Unsent navigation draft");
+
+  ASSERT_NO_FATAL_FAILURE(choose(kSecond));
+  EXPECT_EQ(position(), 0.0f);
+  EXPECT_EQ(io::get_string(discussion.exchange_reply(), "text"), "Saved answer");
+  ASSERT_NO_FATAL_FAILURE(choose(kFirst));
+  EXPECT_EQ(position(), reading);
+  ASSERT_NE(widget(draft_key), nullptr);
+  EXPECT_EQ(widget(draft_key)->string.value(), "Unsent navigation draft");
+
+  // A second AI instance in the same area uses the same layout key and its own reading position.
+  auto &area = dynamic_cast<EditorArea &>(*f.screen.maximized());
+  const int original = area.active_tab();
+  ASSERT_TRUE(area.add_tab(kEditorAI));
+  f.drv->frame();
+  EXPECT_EQ(position(), tail);
+  area.set_active_tab(original);
+  f.drv->frame();
+  EXPECT_EQ(position(), reading);
+  EXPECT_EQ(project().project()->revision, 1);
+
+  const auto opening = handle();
+  ASSERT_TRUE(project().close());
+  ASSERT_NO_FATAL_FAILURE(idle());
+  ASSERT_TRUE(project().open(dir.str() + "/project"));
+  ASSERT_NO_FATAL_FAILURE(idle());
+  ASSERT_NE(handle(), opening);
+  ASSERT_NO_FATAL_FAILURE(wait_for(kSecond));
+  ASSERT_NO_FATAL_FAILURE(choose(kFirst));
+  EXPECT_EQ(position(), tail);
 }
 
 TEST_F(SavedConversationNavigationPython, OpenCompactHistoryIsolatesViewerInputUntilDismissed)
