@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "evidence_pixels.hh"
 #include "window_capture_geometry.hh"
+#include "window_capture_lifetime.hh"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cmath>
@@ -8,6 +9,49 @@
 #include <string_view>
 namespace stk::document_preview {
 namespace {
+TEST(DocumentEvidence, CaptureItemLifetimeAcceptsRepeatedSamplesOnlyForItsExactOwner)
+{
+  using namespace capture_lifetime;
+  const Owner original{1, 2, 3};
+  Lifetime lifetime(original);
+  EXPECT_TRUE(lifetime.accepts(original, 3));
+  EXPECT_TRUE(lifetime.accepts(original, 3));
+  EXPECT_FALSE(lifetime.accepts({4, 2, 3}, 3));
+  EXPECT_FALSE(lifetime.accepts(original, 3));
+}
+TEST(DocumentEvidence, CaptureItemLifetimeRejectsChangedProcessThreadAndWrongCaller)
+{
+  using namespace capture_lifetime;
+  const Owner original{1, 2, 3};
+  for (const Owner changed : {Owner{1, 4, 3}, Owner{1, 2, 4}}) {
+    Lifetime lifetime(original);
+    EXPECT_FALSE(lifetime.accepts(changed, 3));
+    EXPECT_FALSE(lifetime.accepts(original, 3));
+  }
+  Lifetime lifetime(original);
+  EXPECT_FALSE(lifetime.accepts(original, 4));
+  EXPECT_FALSE(lifetime.accepts(original, 3));
+}
+TEST(DocumentEvidence, CaptureItemClosedOrDestroyedWindowCannotReuseTheSameNumericHandle)
+{
+  using namespace capture_lifetime;
+  const Owner original{1, 2, 3};
+  Lifetime old(original);
+  ASSERT_TRUE(old.accepts(original, 3));
+  old.invalidate(); // Both the item's Closed event and WM_NCDESTROY retire this owner.
+  EXPECT_FALSE(old.accepts(original, 3));
+  Lifetime next(original); // A newly constructed source gets its own lifetime even after HWND reuse.
+  EXPECT_TRUE(next.accepts(original, 3));
+  EXPECT_FALSE(old.accepts(original, 3));
+}
+TEST(DocumentEvidence, CaptureItemLifetimeRefusesMissingWindowOrOwner)
+{
+  using namespace capture_lifetime;
+  for (const Owner invalid : {Owner{}, Owner{0, 2, 3}, Owner{1, 0, 3}, Owner{1, 2, 0}}) {
+    Lifetime lifetime(invalid);
+    EXPECT_FALSE(lifetime.accepts(invalid, invalid.thread));
+  }
+}
 io::Image fixture(int page, int scale = 1)
 {
   io::Image image(320 * scale, 100 * scale);

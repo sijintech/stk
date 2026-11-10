@@ -23,4 +23,16 @@ class WindowEvidenceCapture {
 // error dialog. Returns a diagnostic only; success is never native presentation evidence.
 std::string native_evidence_environment_error();
 std::unique_ptr<WindowEvidenceCapture> capture_window_evidence(wm::NativeWindowHandle parent);
+// Optional run-scoped source. On Windows it leases only the capture target item for the
+// exact original window lifetime. Every capture still creates its own pool/session/frames.
+// Use and destroy the source and all its captures on the owning UI thread, before the
+// window is destroyed. Existing one-shot callers retain their independent startup path.
+class WindowEvidenceCaptureSource {
+ public:
+  virtual ~WindowEvidenceCaptureSource() = default;
+  virtual std::unique_ptr<WindowEvidenceCapture> capture(wm::NativeWindowHandle parent) = 0;
+};
+#ifdef _WIN32
+std::unique_ptr<WindowEvidenceCaptureSource> window_evidence_capture_source(wm::NativeWindowHandle parent);
+#endif
 }  // namespace stk::document_preview

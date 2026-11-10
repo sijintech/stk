@@ -455,6 +455,13 @@ class Exercise {
     });
 #endif
   }
+#ifdef _WIN32
+  void lease_capture_item()
+  {
+    capture_source_ = document_preview::window_evidence_capture_source(window_.native_window_handle());
+  }
+#endif
+  void release_capture_source() { capture_source_.reset(); }
   bool drain_native_seek() noexcept
   {
 #if defined(__APPLE__) && defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES)
@@ -687,7 +694,8 @@ class Exercise {
       const auto began = Clock::now();
       if (!pending) {
         ++capture_requests; ++os_capture_requests_;
-        pending = document_preview::capture_window_evidence(window_.native_window_handle());
+        const auto parent = window_.native_window_handle();
+        pending = capture_source_ ? capture_source_->capture(parent) : document_preview::capture_window_evidence(parent);
         last_activity = Clock::now();
         longest_start_ms = std::max(longest_start_ms, elapsed_ms(began, last_activity));
         restart.started(last_activity);
@@ -2298,6 +2306,7 @@ class Exercise {
   Json &result_; fs::path directory_;
   // Every own-window OS capture request; the delay control proves it unchanged.
   size_t os_capture_requests_ = 0;
+  std::unique_ptr<document_preview::WindowEvidenceCaptureSource> capture_source_;
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
   std::shared_ptr<MediaProbeObservation> last_media_probe_;
   size_t dom_probe_requests_ = 0; // Every media() DOM probe request.
@@ -2341,6 +2350,10 @@ void run(const Options &options, Json &result, const fs::path &directory)
   } redraw_timer{*manager, manager->add_timer(50, 50, [window] { window->request_redraw(); })};
   require(redraw_timer.id != 0, "Cannot install bounded-wait redraw timer");
   Exercise ui(*manager, *window, result, directory);
+#ifdef _WIN32
+  // Isolate the lease to the Windows PDF gate, which has exhibited repeated target startup stalls.
+  if (options.source == "pdf") { ui.lease_capture_item(); }
+#endif
 #if defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES) && defined(__APPLE__)
   // Confirm activation before the first layout mouseDown, not only after a
   // video is prepared: an intervening FocusOut cancels Screen pointer capture.
@@ -2403,7 +2416,9 @@ raise SystemExit(main())
       if (!drained) std::fputs("FAIL: native AX owned-child cleanup was not confirmed\n", stderr);
       timer.reset();
       shell.store().project().attach(nullptr); shell.store().set_bridge(nullptr); client.close();
-      shell.store().viewer().close(); manager.close_window(window);
+      shell.store().viewer().close();
+      ui.release_capture_source(); // Release the item and its apartment on this UI thread before HWND destruction.
+      manager.close_window(window);
     }
   } cleanup{shell, *client, *manager, window, redraw_timer, ui, result};
   shell.store().set_bridge(client.get()); app::BridgeStatus bridge_status(shell.store(), *client, manager.get());

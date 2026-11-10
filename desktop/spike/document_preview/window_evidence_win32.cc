@@ -2,6 +2,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <commctrl.h>
 #include <dwmapi.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
@@ -14,11 +15,13 @@
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 #include "window_evidence.hh"
 #include "window_capture_geometry.hh"
+#include "window_capture_lifetime.hh"
 #include "stk/io/json.hh"
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cwchar>
+#include <exception>
 #include <iterator>
 #include <stdexcept>
 #include <string_view>
@@ -242,16 +245,18 @@ capture_geometry::Rect geometry_rect(RECT rect)
 // returned. The legacy failure bucket spans the failing step and try-scope unwind.
 // A returned CreateForWindow HRESULT also carries separate ABI, check and unwind times.
 enum StartStep : unsigned {
-  kStartOptions, kStartApartment, kStartWindowChecks, kStartIsSupported, kStartWindowOwner,
-  kStartDwmGeometry, kStartItemFactory, kStartCreateForWindow, kStartItemSize, kStartWindowGeometry,
+  kStartOptions, kStartApartment, kStartItemLookup, kStartWindowChecks, kStartIsSupported,
+  kStartWindowOwner, kStartDwmGeometry, kStartItemFactory, kStartCreateForWindow, kStartItemBind,
+  kStartItemSize, kStartWindowGeometry,
   kStartD3dDevice, kStartDxgiAdapter, kStartWinrtDevice, kStartFramePool,
   kStartCreateSession, kStartCursorOption, kStartStartCapture, kStartScopeExit,
   kStartFailedAndUnwind, kStartErrorText, kStartStepCount
 };
 constexpr const char *start_step_labels[kStartStepCount] = {
-    "capture.options", "capture.apartment", "capture.window-checks", "capture.is-supported",
-    "capture.window-owner", "capture.dwm-geometry", "capture.item-factory", "capture.create-for-window",
-    "capture.item-size", "capture.window-geometry", "capture.d3d-device", "capture.dxgi-adapter",
+    "capture.options", "capture.apartment", "capture.item-lookup", "capture.window-checks",
+    "capture.is-supported", "capture.window-owner", "capture.dwm-geometry", "capture.item-factory",
+    "capture.create-for-window", "capture.item-bind", "capture.item-size", "capture.window-geometry",
+    "capture.d3d-device", "capture.dxgi-adapter",
     "capture.winrt-device", "capture.frame-pool", "capture.create-session", "capture.cursor-option",
     "capture.start-capture", "capture.scope-exit", "capture.failed-step-and-unwind", "capture.error-text"};
 constexpr int64_t slow_start_ms = 1000;  // Successful starts on the hosted runner took 57-67 ms.
@@ -364,9 +369,110 @@ bool report_start_timing(const StartTiming &timing, int64_t total, unsigned sequ
 }
 // stk-start-timing-end
 
+capture_lifetime::Owner window_owner(wm::NativeWindowHandle parent)
+{
+  if (parent.kind != wm::NativeWindowKind::Win32) { return {}; }
+  const auto window = static_cast<HWND>(parent.value);
+  DWORD process = 0;
+  const auto thread = GetWindowThreadProcessId(window, &process);
+  if (!IsWindow(window) || process != GetCurrentProcessId()) { return {}; }
+  return {reinterpret_cast<uintptr_t>(window), process, thread};
+}
+void require_capture_owner(capture_lifetime::Lifetime &lifetime, wm::NativeWindowHandle parent)
+{
+  if (!lifetime.accepts(window_owner(parent), GetCurrentThreadId())) {
+    throw std::runtime_error("Capture item lease outlived its exact STK window or owner thread");
+  }
+}
+
+// Microsoft supports one item with multiple capture sessions. Only this run-owned target
+// is shared. No device, frame pool, session, texture or previously accepted frame is cached.
+// https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture
+class CaptureItemLease {
+ public:
+  explicit CaptureItemLease(wm::NativeWindowHandle parent)
+      : parent_(parent), lifetime_(std::make_shared<capture_lifetime::Lifetime>(window_owner(parent)))
+  {
+    require_capture_owner(*lifetime_, parent);
+    winrt::init_apartment(winrt::apartment_type::single_threaded);
+    try {
+      if (!SetWindowSubclass(static_cast<HWND>(parent_.value), window_message,
+          reinterpret_cast<UINT_PTR>(this), reinterpret_cast<DWORD_PTR>(this))) {
+        throw std::runtime_error("Cannot bind capture item lease to the STK window lifetime");
+      }
+    }
+    catch (...) { winrt::uninit_apartment(); throw; }
+    subclassed_ = true;
+  }
+  ~CaptureItemLease()
+  {
+    // The UI-thread API deliberately refuses an unsafe late COM release on another thread.
+    if (GetCurrentThreadId() != lifetime_->thread()) {
+      std::fputs("FAIL: Capture item lease destroyed outside its owner thread\n", stderr);
+      std::terminate();
+    }
+    lifetime_->invalidate();
+    if (subclassed_ && !RemoveWindowSubclass(static_cast<HWND>(parent_.value), window_message,
+        reinterpret_cast<UINT_PTR>(this))) {
+      // Continuing would leave a window callback pointing at freed lease state.
+      std::fputs("FAIL: Cannot remove the capture item window lifetime hook\n", stderr);
+      std::terminate();
+    }
+    release_item();
+    std::fprintf(stderr, "STK_NATIVE_CAPTURE_ITEM_LEASE creates=%u reuses=%u retired=true\n", creates_, reuses_);
+    winrt::uninit_apartment();
+  }
+  GraphicsCaptureItem acquire(wm::NativeWindowHandle parent)
+  {
+    require_capture_owner(*lifetime_, parent);
+    if (item_) { ++reuses_; }
+    return item_;
+  }
+  void remember(wm::NativeWindowHandle parent, const GraphicsCaptureItem &item)
+  {
+    require_capture_owner(*lifetime_, parent);
+    const auto lifetime = lifetime_;
+    auto closed = item.Closed(winrt::auto_revoke, [lifetime](const auto &, const auto &) {
+      lifetime->invalidate();
+    });
+    // Registration and CreateForWindow can pump messages. A retired item is never promoted.
+    require_capture_owner(*lifetime_, parent);
+    item_ = item;
+    closed_ = std::move(closed);
+    ++creates_;
+  }
+  std::shared_ptr<capture_lifetime::Lifetime> lifetime() const { return lifetime_; }
+
+ private:
+  void release_item() noexcept
+  {
+    closed_.revoke();
+    item_ = nullptr;
+  }
+  static LRESULT CALLBACK window_message(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
+                                         UINT_PTR id, DWORD_PTR data)
+  {
+    if (message == WM_NCDESTROY) {
+      auto &lease = *reinterpret_cast<CaptureItemLease *>(data);
+      lease.lifetime_->invalidate();
+      lease.subclassed_ = false;
+      RemoveWindowSubclass(window, window_message, id);
+      lease.release_item();
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
+  }
+  wm::NativeWindowHandle parent_;
+  std::shared_ptr<capture_lifetime::Lifetime> lifetime_;
+  bool subclassed_ = false;
+  unsigned creates_ = 0, reuses_ = 0;
+  GraphicsCaptureItem item_{nullptr};
+  GraphicsCaptureItem::Closed_revoker closed_;
+};
+
 class Capture final : public WindowEvidenceCapture {
  public:
-  explicit Capture(wm::NativeWindowHandle parent)
+  explicit Capture(wm::NativeWindowHandle parent, CaptureItemLease *lease = nullptr)
+      : lifetime_(lease ? lease->lifetime() : nullptr)
   {
     StartTiming timing;
     const unsigned sequence = ++start_sequence;
@@ -387,6 +493,10 @@ class Capture final : public WindowEvidenceCapture {
       timing.enter(kStartApartment);
       winrt::init_apartment(winrt::apartment_type::single_threaded);
       apartment_ = true;
+      if (lease) {
+        timing.enter(kStartItemLookup);
+        item_ = lease->acquire(parent);
+      }
       timing.enter(kStartWindowChecks);
       window_ = static_cast<HWND>(parent.value);
       // Same short-circuit order and refusal as one condition; the step open at the throw names
@@ -408,22 +518,31 @@ class Capture final : public WindowEvidenceCapture {
       client_ = client_bounds();
       winrt::check_hresult(DwmGetWindowAttribute(window_, DWMWA_EXTENDED_FRAME_BOUNDS,
                                                  &outer_, sizeof(outer_)));
-      timing.enter(kStartItemFactory);
-      auto interop = winrt::get_activation_factory<GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
-      timing.enter(kStartCreateForWindow);
-      const auto item_iid = winrt::guid_of<GraphicsCaptureItem>();
-      const auto item_abi = winrt::put_abi(item_);
-      const auto called = StartTiming::Clock::now();
-      const auto create_result = interop->CreateForWindow(window_, item_iid, item_abi);
-      const auto returned = StartTiming::Clock::now();
-      try {
-        winrt::check_hresult(create_result);
+      const bool reused = bool(item_);
+      winrt::com_ptr<IGraphicsCaptureItemInterop> interop;
+      if (!item_) {
+        timing.enter(kStartItemFactory);
+        interop = winrt::get_activation_factory<GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
+        timing.enter(kStartCreateForWindow);
+        const auto item_iid = winrt::guid_of<GraphicsCaptureItem>();
+        const auto item_abi = winrt::put_abi(item_);
+        const auto called = StartTiming::Clock::now();
+        const auto create_result = interop->CreateForWindow(window_, item_iid, item_abi);
+        const auto returned = StartTiming::Clock::now();
+        try {
+          winrt::check_hresult(create_result);
+        }
+        catch (...) {
+          // Attribute the ABI call separately from HRESULT checking and local COM unwind.
+          timing.mark_create_for_window_failure(called, returned, int32_t(create_result));
+          throw;
+        }
+        if (lease) {
+          timing.enter(kStartItemBind);
+          lease->remember(parent, item_);
+        }
       }
-      catch (...) {
-        // Mark the rethrow while interop is still alive. The outer catch runs after try-scope cleanup.
-        timing.mark_create_for_window_failure(called, returned, int32_t(create_result));
-        throw;
-      }
+      if (lease) { backend_ += reused ? ";capture_item=run-reused" : ";capture_item=run-created"; }
       timing.enter(kStartItemSize);
       const auto size = item_.Size();
       pool_width_ = size.Width; pool_height_ = size.Height;
@@ -544,6 +663,7 @@ class Capture final : public WindowEvidenceCapture {
     bool mapped = false;
     winrt::com_ptr<ID3D11Texture2D> staging;
     try {
+      if (lifetime_) { require_capture_owner(*lifetime_, {wm::NativeWindowKind::Win32, window_}); }
       RECT current_outer{};
       winrt::check_hresult(DwmGetWindowAttribute(window_, DWMWA_EXTENDED_FRAME_BOUNDS,
                                                  &current_outer, sizeof(current_outer)));
@@ -630,8 +750,14 @@ class Capture final : public WindowEvidenceCapture {
     catch (const winrt::hresult_error &e) { out.error = winrt::to_string(e.message()); }
     catch (const std::exception &e) { out.error = e.what(); }
     if (mapped) { context_->Unmap(staging.get(), 0); }
-    try { if (frame) { frame.Close(); } }
+    try {
+      if (frame) { frame.Close(); }
+      if (lifetime_ && out.error.empty()) {
+        require_capture_owner(*lifetime_, {wm::NativeWindowKind::Win32, window_});
+      }
+    }
     catch (const winrt::hresult_error &e) { out.error = winrt::to_string(e.message()); }
+    catch (const std::exception &e) { out.error = e.what(); }
     return out;
   }
  private:
@@ -645,6 +771,7 @@ class Capture final : public WindowEvidenceCapture {
         bottom.x <= top.x || bottom.y <= top.y) { throw std::runtime_error("Cannot locate STK client area"); }
     return {top.x, top.y, bottom.x, bottom.y};
   }
+  std::shared_ptr<capture_lifetime::Lifetime> lifetime_;
   bool apartment_ = false;
   HWND window_ = nullptr;
   RECT client_{}, outer_{}, window_rect_{};
@@ -660,6 +787,16 @@ class Capture final : public WindowEvidenceCapture {
   GraphicsCaptureItem item_{nullptr};
   Direct3D11CaptureFramePool pool_{nullptr};
   GraphicsCaptureSession session_{nullptr};
+};
+class CaptureSource final : public WindowEvidenceCaptureSource {
+ public:
+  explicit CaptureSource(wm::NativeWindowHandle parent) : lease_(parent) {}
+  std::unique_ptr<WindowEvidenceCapture> capture(wm::NativeWindowHandle parent) override
+  {
+    return std::make_unique<Capture>(parent, &lease_);
+  }
+ private:
+  CaptureItemLease lease_;
 };
 }
 std::string native_evidence_environment_error()
@@ -886,5 +1023,9 @@ std::string native_evidence_environment_error()
 std::unique_ptr<WindowEvidenceCapture> capture_window_evidence(wm::NativeWindowHandle parent)
 {
   return std::make_unique<Capture>(parent);
+}
+std::unique_ptr<WindowEvidenceCaptureSource> window_evidence_capture_source(wm::NativeWindowHandle parent)
+{
+  return std::make_unique<CaptureSource>(parent);
 }
 }  // namespace stk::document_preview

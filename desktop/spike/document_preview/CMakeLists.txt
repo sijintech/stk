@@ -51,7 +51,7 @@ if(APPLE)
     "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
   set_target_properties(stk-document-preview-spike PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
 elseif(WIN32)
-  target_link_libraries(stk-document-preview-spike PRIVATE d3d11 dxgi dwmapi windowsapp runtimeobject opengl32)
+  target_link_libraries(stk-document-preview-spike PRIVATE d3d11 dxgi dwmapi windowsapp runtimeobject opengl32 comctl32)
 endif()
 get_filename_component(_preview_payload "${CMAKE_SOURCE_DIR}/../docs/specs/examples/payload-v2" ABSOLUTE)
 target_compile_definitions(stk-document-preview-spike PRIVATE
