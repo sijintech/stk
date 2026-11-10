@@ -18,6 +18,7 @@ def bridge_with_transfers(tmp_path):
     bridge._literature_lock = threading.Lock()
     bridge._materials_lock = threading.Lock()
     bridge._literature = bridge._materials = None
+    bridge._mupro_preflight, bridge._mupro_preflight_lock = None, threading.RLock()
     bridge.inflight_lock, bridge.inflight = threading.Lock(), set()
     noop = lambda *args, **kwargs: None
     bridge.peers = bridge.modules = bridge.projects = SimpleNamespace(shutdown=noop)
