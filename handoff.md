@@ -1,5 +1,15 @@
 # STK 当前交接
 
+## 2026-11-10 01:32 UTC · 显式执行环境预检与原任务回执
+
+本地 `8d3752ff` 与 `1c8c2dcf` 完成显式 Runtime 执行环境预检。客户端提交固定单 CPU、空输入及空环境覆盖的诊断任务，在 worker/调度环境使用该端自己的配置；不启动 MuPRO/MPI 或签出许可。`preflight-result` 只读原任务，按固定规格、连接、终态/退出码、唯一产物大小/SHA-256和严格内层格式核验。失败检查仍有 failed/1 的有效观察，取消、执行故障、错接规格与未知状态不冒充成功；丢提交答复只允许明确同键同请求重试，零自动重提。本机 `check` 原含义、运行/收集链及 Agent 权限保持。 [任务回执契约](docs/specs/mupro-preflight-task-1.md)
+
+root 最终联测 211 过、2 跳过；两跳过仍为真实 muFerro 样例条件及 Windows 目录联接。Python 3.11/3.14 的计算/本机观察各 111/111、CLI 各 31/31，零跳过。真实回环核对 worker PID、相反客户端配置、环境脚本单次执行、失败产物、冷客户端重读、同键恢复、取消和畸形回执。独立基础依赖 wheel 无 NumPy/h5py，实际安装控制台→HTTP Runtime→worker 的三配置均通过；重开客户端和同键重试保持同一任务/字节，三个任务仅采集三次。四个安装模块与当前主线源码摘要一致。该证据只覆盖本地 Linux 回环和合成前置条件，不是跨机 SSH、PBS/Slurm、真实软件或许可证明。
+
+已推送远端 `37e48356`。截至 2026-11-10T01:31:10+00:00，同头 Runtime `42732316049` 已终态 13/13；Desktop `42732315824` 仍运行，Linux 主测 2170/2170，工作区 18 项及 guarded 7 项均具名通过，两个打包作业成功；macOS 和 Windows CPU 尚未终态。Secret scan、文档部署已成功。上述两个新的远端预检实现提交仅本地，等待 `37e48356` 整个 Desktop 终态后再推送。当前远端 CI 只含上一批本机预检和 UI/路径修正，不把它当新增远端诊断代码的验证。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42732315824) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42732316049)
+
+实际 Claude78 已从冻结 `1c8c2dcf` 在独立 `claude/mupro-preflight-bridge-78` 接下一模块：共享纯客户端读取/提交逻辑及未注册的桌面 Bridge 适配器。root 负责方法注册/契约、原生仿真面板、目标切换/未知回执状态、最终回归和推送。该适配器与原生按钮尚未交付，不称桌面已可检查。新流程未做产品窗口点击验收；既有文献双布局 8→6 点击回执保持。真实 MuPRO 资产/科学参数、HDF5-only 完成证明、H2和分析提案持久形式仍按原待决；PR #53/#54 原冲突差异未合入，Cocoa 视频问题继续以原强制门禁验收。
+
 ## 2026-11-10 00:57 UTC · MuPRO 本机预检与前一 Desktop 终态
 
 `000bb6ff` 新增显式本机 `suan mupro check --json`，发布 `stk.mupro-preflight/1`：复用既有采集一次，输出固定检查项、保守总结、进程/组件版本与采集时间，排除路径和原始诊断。所有总结均保留软件版本未观察、许可未签出、求解器未运行。原 `python -m suan.mupro check` 诊断和退出码保持。命令会 source 已配置的受信任脚本，不能作为被动 health/graph.meta 读取或所选远端机器的就绪证明。
