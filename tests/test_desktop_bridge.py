@@ -590,6 +590,49 @@ def test_probe_target_of_a_muferro_frame():
     assert target["path"] == "runs/a/Polar.00000007.dat"
 
 
+def test_evaluated_probe_requires_the_layer_frame_step():
+    from suan.graph.probe import resolve_probe_target
+
+    graph = domains_graph()
+    polar = next(node for node in graph["nodes"] if node["id"] == "polar")
+    other = {**polar, "id": "other"}
+    graph["nodes"].append(other)
+    bindings = {"run": "a" * 32}
+    shared = {"parameters": {"step": {"value": 4}}}
+    pick = {"node": "polar"}
+    assert "实际使用" in resolve_probe_target(graph, pick, bindings=bindings, result=shared, evaluated=True)["error"]
+    exact = {"parameters": {"step": {"value": 4}, "polar.step": {"value": 2}}}
+    assert resolve_probe_target(graph, pick, bindings=bindings, result=exact, evaluated=True)["frame"] == "Polar.00000002.dat"
+    polar["params"] = {**polar["params"], "step": 3}
+    assert resolve_probe_target(graph, pick, bindings=bindings, result=exact, evaluated=True)["frame"] == "Polar.00000002.dat"
+    assert resolve_probe_target(graph, pick, bindings=bindings)["path"] == "Polar.00000003.dat"
+    graph["nodes"].append({"id": "mixed", "type": "stk.view.scene@1",
+                           "inputs": {"layers": [{"from": "polar.out"}, {"from": "other.out"}]}})
+    assert "唯一" in resolve_probe_target(graph, {"node": "mixed"}, bindings=bindings, result=exact, evaluated=True)["error"]
+
+
+def test_evaluated_probe_requires_a_frame_basename():
+    from suan.graph.probe import resolve_probe_target
+
+    graph = domains_graph()
+    polar = next(node for node in graph["nodes"] if node["id"] == "polar")
+    polar["params"]["dataset"] = "/Polar"
+    result = {"parameters": {"step": {"value": 2}}}
+    target = resolve_probe_target(graph, {"node": "polar"}, bindings={"run": "a" * 32},
+                                  result=result, evaluated=True)
+    assert "场文件名" in target["error"]
+
+
+def test_legacy_probe_accepts_empty_result(inproc, tmp_path):
+    graph = domains_graph()
+    next(node for node in graph["nodes"] if node["id"] == "run")["params"]["case_dir"] = "case"
+    next(node for node in graph["nodes"] if node["id"] == "polar")["params"]["step"] = 2
+    harness = inproc()
+    result = harness.call("probe", {"graph": graph, "pick": {"node": "polar"},
+                                   "context": {"result": {}}, "local_bindings": {"run": str(tmp_path)}})
+    assert result == {"target": {"binding": "run", "node": "polar", "path": "case/Polar.00000002.dat"}}
+
+
 def test_probe_target_of_a_file_source_and_errors():
     from suan.graph.probe import resolve_probe_target
     source = {"binding": "data", "path": "f.vti", "origin": {"$param": "o"}, "spacing": [0.5, 0.5, 0.5]}
@@ -692,6 +735,88 @@ def test_local_graph_evaluate_on_a_fake_domain_run(inproc, tmp_path):
     assert error["code"] == "invalid_params"
     harness.close()
     assert worker.poll() is not None
+
+
+@pytest.mark.parametrize("guarded", [False, True], ids=["ordinary", "collected"])
+def test_evaluated_local_dat_probe_uses_the_rendered_case_and_snapshot(inproc, tmp_path, guarded):
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("vtk")
+    pytest.importorskip("matplotlib")
+    from mupro_fake import write_domain_run
+    from suan.data.dat import write_dat
+
+    project = tmp_path / "project"
+    root = project / "runs" / "collected"
+    name = "Polar.00000002.dat"
+    shape = (8, 6, 4)
+    frames = write_domain_run(root / "case", grid=shape, steps=2, interval=2, film=False)
+    launcher = root / "stk-mupro.json"
+    launcher.write_text('{"schema_version":1,"case_dir":"case","state":"succeeded"}', encoding="utf-8")
+    write_dat(root / name, np.full((*shape, 3), .125), component_shape=(3,))
+    binding = {"local_bindings": {"run": str(root)}}
+    if guarded:
+        binding["local_proofs"] = {"run": {"project_root": str(project), "case_path": "runs/collected", "files": [
+            {"path": item.relative_to(project).as_posix(), "sha256": hashlib.sha256(item.read_bytes()).hexdigest()}
+            for item in sorted(root.rglob("*")) if item.is_file()]}}
+    harness = inproc()
+    graph = domains_graph()
+
+    def evaluate(identity):
+        result = harness.call("graph.evaluate", {**binding, "eval_id": identity,
+                              "request": {"graph": graph, "outputs": ["view"]}}, timeout=90)["result"]
+        manifest = result["outputs"]["view"]["manifest"]
+        assert manifest["source"]["time"]["step"] == 2
+        layer = next(item for item in manifest["layers"] if item["id"] == "surface_layer")
+        return result, {"graph": graph, "pick": layer["pick"]["probe"], "context": {"result": result}, **binding}
+
+    initial, args = evaluate("nested-auto")
+    sample = harness.call("probe", {**args, "position": [0, 0, 0]})
+    assert sample["target"] == {"binding": "run", "path": f"case/{name}", "node": "polar"}
+    np.testing.assert_allclose(sample["sample"]["values"], frames[2][0, 0, 0])
+
+    frame = next(node for node in graph["nodes"] if node["id"] == "polar")
+    frame["params"]["step"] = 3
+    result, args = evaluate("literal-alias")
+    assert result["parameters"]["polar.step"]["value"] == 2
+    assert "polar" not in result["evaluated"] and result["keys"]["polar"] == initial["keys"]["polar"]
+    assert harness.call("probe", args) == {"target": sample["target"]}
+
+    original = launcher.read_bytes()
+    launcher.write_text('{"schema_version":1,"case_dir":".","state":"succeeded"}', encoding="utf-8")
+    error = harness.error("probe", {**args, "position": [0, 0, 0]})
+    if guarded:
+        assert error["data"]["graph_code"] == "invalid_data"
+    else:
+        assert error["data"]["probe_error"] and "重新计算" in error["message"]
+    launcher.write_bytes(original)
+
+    field = root / "case" / name
+    before = field.stat()
+    original = field.read_bytes()
+    different = (root / name).read_bytes()
+    assert len(different) == len(original) and different != original
+    field.write_bytes(different)
+    os.utime(field, ns=(before.st_atime_ns, before.st_mtime_ns))
+    error = harness.error("probe", {**args, "position": [0, 0, 0]})
+    if guarded:
+        assert error["data"]["graph_code"] == "invalid_data"
+    else:
+        assert error["data"]["probe_error"] and "重新计算" in error["message"]
+    field.write_bytes(original)
+    assert harness.call("probe", {**args, "position": [0, 0, 0]}) == sample
+
+    if guarded:
+        # An unregistered launcher is absent to the guarded graph and to the probe.
+        proof = binding["local_proofs"]["run"]
+        proof["files"] = [item for item in proof["files"] if not item["path"].endswith("/stk-mupro.json")]
+        root_result = harness.call("graph.evaluate", {**binding, "eval_id": "unregistered-launcher",
+            "request": {"graph": graph, "outputs": ["fractions"]}}, timeout=90)["result"]
+        assert root_result["keys"]["polar"]["data"] != result["keys"]["polar"]["data"]
+        root_sample = harness.call("probe", {**binding, "graph": graph, "pick": {"node": "polar"},
+            "context": {"result": root_result}, "position": [0, 0, 0]})
+        assert root_sample["target"]["path"] == name
+        assert root_sample["sample"]["values"] == [.125] * 3
+    harness.close()
 
 
 def test_local_start_can_initialize_the_local_runtime(inproc, bridge_env, monkeypatch):

@@ -1,23 +1,10 @@
-"""Where a probe (a pick on a rendered layer) reads its original data values (standard library only).
+"""Resolve original field sources for rendered picks without opening a field.
 
-A payload layer that supports probing declares ``pick.probe = {"node", "dataset"?}``: the graph node
-whose *input data* holds the values under the picked point. :func:`resolve_probe_target` walks the
-graph upstream from that node, breadth first, to the first field source:
-
-* ``stk.source.file@1``: its ``binding`` and ``path`` parameters;
-* ``stk.source.muferro_frame@1``: the frame file of the resolved step, named
-  ``<Dataset>.<step:08d>.dat`` (muFerro's published frame names), found in the bound task's
-  ``artifacts`` when given, else under the run's ``case_dir`` (``auto``: the binding root).
-
-The step of a muFerro frame is the graph parameter it references (the evaluated value from
-``result["parameters"]`` wins over ``values``), an integer literal, or the node's reported
-``<node>.step`` choice. ``origin``/``spacing`` parameters of the source become ``metadata``.
-
-This is the Python port of ``web/src/graph.ts::resolveProbeTarget`` (the web keeps its TypeScript
-copy; both follow the same rules and messages). The only addition is the ``binding`` key of a
-target, so a caller whose bindings are local directories (the desktop bridge) can resolve the path
-itself. Errors are returned, not raised: ``{"error": "<message>"}``.
+The desktop bridge binds evaluated MuFerro picks to a resolved source step and verifies the
+file against the local run or the bound Runtime task. The target-only resolver retains the
+legacy path lookup for callers without an evaluated scene.
 """
+from collections import deque
 from collections.abc import Mapping
 import re
 
@@ -75,12 +62,14 @@ def frames_from_artifacts(artifacts, dataset=None):
     return sorted(steps)
 
 
-def resolve_probe_target(graph, probe, *, bindings, values=None, result=None, artifacts=None):
+def resolve_probe_target(graph, probe, *, bindings, values=None, result=None, artifacts=None, evaluated=False):
     """``{"binding", "task_id", "path", "node", "metadata"?}`` or ``{"error": message}``.
 
     ``bindings`` maps binding names to task ids (any non-empty string marks a bound name);
     ``values`` are the parameter values the caller sent; ``result`` a ``stk.graph-result/1``
     (its ``parameters`` give the evaluated step); ``artifacts`` the bound task's ``[{"path"}]``.
+    For an evaluated pick, the bridge receives the MuFerro frame name, case and node definition
+    to resolve against the actual binding.
     """
     if not isinstance(probe, Mapping) or not probe.get("node"):
         return {"error": "该图层未声明探针数据源（pick.probe）"}
@@ -102,9 +91,10 @@ def resolve_probe_target(graph, probe, *, bindings, values=None, result=None, ar
         task = _own(bindings, binding)
         return task if isinstance(task, str) and task else None
 
-    queue, seen = [probe["node"]], set()
+    sources = []
+    queue, seen = deque([probe["node"]]), set()
     while queue:
-        node_id = queue.pop(0)
+        node_id = queue.popleft()
         if node_id in seen:
             continue
         seen.add(node_id)
@@ -112,55 +102,94 @@ def resolve_probe_target(graph, probe, *, bindings, values=None, result=None, ar
         if node is None:
             continue
         node_type = str(node.get("type", ""))
-        metadata = {}
-        for key in ("origin", "spacing"):
-            value = param(node, key)
-            if isinstance(value, list) and len(value) == 3:
-                metadata[key] = value
-        extra = {"metadata": metadata} if metadata else {}
-        if node_type.startswith("stk.source.file@"):
-            binding, path = param(node, "binding"), param(node, "path")
-            task = bound(binding)
-            if not task:
-                return {"error": f"数据源 {_text(binding)} 尚未绑定任务"}
-            if not isinstance(path, str) or not path:
-                return {"error": f"节点 {node_id} 缺少文件路径"}
-            return {"binding": binding, "task_id": task, "path": path, "node": node_id, **extra}
-        if node_type.startswith("stk.source.muferro_frame@"):
-            dataset = param(node, "dataset")
-            if dataset is None:
-                dataset = probe.get("dataset") if probe.get("dataset") is not None else "Polar"
-            dataset = _text(dataset)
-            ref = (node.get("params") or {}).get("step")
-            if _is_param_ref(ref):
-                evaluated = _own(_own(result_parameters, ref["$param"]), "value")
-                resolved = evaluated if evaluated is not None else _own(values, ref["$param"])
-            elif _is_int(ref):
-                resolved = ref
-            else:
-                resolved = _own(_own(result_parameters, f"{node_id}.step"), "value")
-            step = int(resolved) if isinstance(resolved, str) and _DIGITS.match(resolved) else resolved
-            if not _is_int(step) or step < 0:
-                return {"error": "请先完成一次图谱计算以确定探针所在的时间步"}
-            run = nodes.get(_linked_node((node.get("inputs") or {}).get("frames")) or "")
-            binding = param(run, "binding") if run is not None else None
-            task = bound(binding)
-            if not task:
-                return {"error": f"数据源 {_text(binding if binding is not None else '?')} 尚未绑定任务"}
-            # 'auto' (the default): the case directory recorded by the launcher; the published frame names it.
-            case_dir = str(param(run, "case_dir") if param(run, "case_dir") is not None else "auto")
-            name = f"{dataset}.{step:08d}.dat"
-            published = None
-            for artifact in artifacts or ():
-                match = FRAME.search(str(_own(artifact, "path") or ""))
-                if match and match[1] == dataset and int(match[2]) == step:
-                    published = artifact["path"]
-                    break
-            if published is None:
-                published = f"{case_dir.rstrip('/')}/{name}" if case_dir and case_dir not in (".", "auto") else name
-            return {"binding": binding, "task_id": task, "path": published, "node": node_id, **extra}
-        queue.extend(_linked_nodes(node.get("inputs")))
-    return {"error": f"从节点 {probe['node']} 向上未找到场数据源"}
+        if node_type.startswith(("stk.source.file@", "stk.source.muferro_frame@")):
+            sources.append(node)
+            if not evaluated:
+                break
+        else:
+            if evaluated and node_type.startswith("stk.source."):
+                sources.append(node)
+            queue.extend(_linked_nodes(node.get("inputs")))
+    frames = [node for node in sources if str(node.get("type", "")).startswith("stk.source.muferro_frame@")]
+    if evaluated and frames and len(sources) > 1:
+        return {"error": "无法确定所选图层对应的唯一 MuFerro 场数据源"}
+    node = frames[0] if frames else next((n for n in sources if str(n.get("type", "")).startswith("stk.source.file@")), None)
+    if node is None:
+        return {"error": f"从节点 {probe['node']} 向上未找到场数据源"}
+    node_id = node["id"]
+    metadata = {}
+    for key in ("origin", "spacing"):
+        value = param(node, key)
+        if isinstance(value, list) and len(value) == 3:
+            metadata[key] = value
+    extra = {"metadata": metadata} if metadata else {}
+    if not frames:
+        binding, path = param(node, "binding"), param(node, "path")
+        task = bound(binding)
+        if not task:
+            return {"error": f"数据源 {_text(binding)} 尚未绑定任务"}
+        if not isinstance(path, str) or not path:
+            return {"error": f"节点 {node_id} 缺少文件路径"}
+        return {"binding": binding, "task_id": task, "path": path, "node": node_id, **extra}
+
+    ref = (node.get("params") or {}).get("step")
+    step = _own(_own(result_parameters, f"{node_id}.step"), "value")
+    if step is None and _is_param_ref(ref):
+        name = ref["$param"]
+        shared = evaluated and any(other is not node and (other.get("params") or {}).get("step") == ref
+                                   for other in nodes.values())
+        if not shared:
+            step = _own(_own(result_parameters, name), "value")
+        if step is None and not evaluated:
+            step = _own(values, name)
+    elif step is None and not evaluated and _is_int(ref):
+        step = ref
+    if not evaluated and isinstance(step, str) and _DIGITS.match(step):
+        step = int(step)
+    if not _is_int(step) or step < 0:
+        return {"error": "无法确定所选图层实际使用的 MuFerro 时间步"}
+    run = nodes.get(_linked_node((node.get("inputs") or {}).get("frames")) or "")
+    if evaluated and (not run or not str(run.get("type", "")).startswith("stk.source.muferro_run@")):
+        return {"error": "无法确定 MuFerro 帧所属的计算数据源"}
+    binding = param(run, "binding") if run is not None else None
+    task = bound(binding)
+    if not task:
+        return {"error": f"数据源 {_text(binding if binding is not None else '?')} 尚未绑定任务"}
+    dataset = param(node, "dataset")
+    if dataset is None:
+        dataset = "Polar" if evaluated else probe.get("dataset") or "Polar"
+    case_dir = param(run, "case_dir") if run is not None else None
+    case_dir = case_dir if case_dir is not None else "auto"
+    name = f"{dataset}.{step:08d}.dat"
+    target = {"binding": binding, "task_id": task, "node": node_id, **extra}
+    if evaluated:
+        if not isinstance(dataset, str) or not isinstance(case_dir, str) or "/" in name or FRAME.fullmatch(name) is None:
+            return {"error": "无法确定 MuFerro 算例目录或场文件名"}
+        return {**target, "frame": name, "case_dir": case_dir, "frame_node": node}
+    for artifact in artifacts or ():
+        match = FRAME.search(str(_own(artifact, "path") or ""))
+        if match and match[1] == dataset and int(match[2]) == step:
+            return {**target, "path": artifact["path"]}
+    case_dir = str(case_dir)
+    return {**target, "path": f"{case_dir.rstrip('/')}/{name}" if case_dir and case_dir not in (".", "auto") else name}
+
+
+def published_muferro_frame(name, case_dir, artifacts):
+    """Exact explicit case path, or the only published path matching the resolved auto-case frame."""
+    from suan.connectors.mupro import case_prefix
+
+    paths = {path for item in artifacts if isinstance((path := _own(item, "path")), str)}
+    if case_dir != "auto":
+        path = case_prefix(case_dir) + name
+        if path in paths:
+            return path
+    else:
+        matches = {path for path in paths if path.rsplit("/", 1)[-1] == name}
+        if len(matches) == 1:
+            return matches.pop()
+        if len(matches) > 1:
+            raise ValueError("此任务发布了多个同名 MuFerro 帧，无法确定图层使用的文件")
+    raise ValueError("此任务未发布与所选图层匹配的 MuFerro 帧")
 
 
 def _text(value):

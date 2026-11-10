@@ -293,7 +293,7 @@ class GraphService:
     # -- probe --------------------------------------------------------------------------------
 
     def probe(self, params):
-        from suan.graph.probe import FRAME, resolve_probe_target
+        from suan.graph.probe import FRAME, published_muferro_frame, resolve_probe_target
         graph = params.get("graph")
         if graph is None and params.get("preset"):
             from suan.graph.catalog import load_preset
@@ -313,13 +313,52 @@ class GraphService:
             raise _graph_error(exc) from None
         bindings = {**(context.get("bindings") or {}), **{name: "local" for name in local}}
         artifacts = context.get("artifacts")
+        result = context.get("result")
+        position = params.get("position")
+        # Older callers can supply a partial context without a graph result.
+        evaluated = (isinstance(result, dict) and result.get("schema") == "stk.graph-result/1"
+                     and bool(local or params.get("connection") or position is not None))
         target = resolve_probe_target(graph, params.get("pick"), bindings=bindings, values=context.get("values"),
-                                      result=context.get("result"), artifacts=artifacts)
+                                      result=result, artifacts=artifacts, evaluated=evaluated)
         if "error" in target:
-            raise BridgeError("not_found", target["error"], data={"probe_error": True})
-        local_root = local.get(target["binding"])
-        guarded = target["binding"] in (params.get("local_proofs") or {})
-        if local_root is not None:
+            raise _probe_error(target["error"])
+        binding = target["binding"]
+        local_root = local.get(binding)
+        guarded = binding in proofs
+        backend = None
+        artifact = None
+        frame = target.pop("frame", None)
+        if frame is not None:
+            case_dir = target.pop("case_dir")
+            frame_node = target.pop("frame_node")
+            if local_root is not None:
+                from suan.graph.resolve import LocalDirSource
+                try:
+                    source = resolver.resolve(binding) if guarded else LocalDirSource(local_root, binding=binding)
+                except GraphError as exc:
+                    raise _graph_error(exc) from None
+                except (ValueError, OSError) as exc:
+                    raise _probe_error(f"无法读取 MuFerro 算例目录：{exc}") from None
+                target.pop("task_id", None)
+                return self._probe_local_muferro(target, source, case_dir, frame, frame_node, graph, context, position,
+                                                 proof=proofs.get(binding))
+            if position is None and not params.get("connection"):
+                # A graph may also carry unrelated local bindings in a target-only lookup.
+                target = resolve_probe_target(graph, params.get("pick"), bindings=bindings, values=context.get("values"),
+                                              result=result, artifacts=artifacts)
+                if "error" in target:
+                    raise _probe_error(target["error"])
+                return {"target": target}
+            backend = self.connections.backend(params.get("connection"), params.get("node"))
+            publication = backend.artifacts(target["task_id"]).get("artifacts")
+            if not isinstance(publication, list):
+                raise _probe_error("无法读取所选计算的已发布文件")
+            try:
+                target["path"] = published_muferro_frame(frame, case_dir, publication)
+            except ValueError as exc:
+                raise _probe_error(str(exc)) from None
+            artifact = next(item for item in publication if isinstance(item, dict) and item.get("path") == target["path"])
+        elif local_root is not None:
             target.pop("task_id", None)
             if artifacts is None and FRAME.search(target["path"]) and not guarded:
                 target["path"] = _local_frame(Path(local_root), target["path"])
@@ -339,7 +378,6 @@ class GraphService:
                 return out
             except GraphError as exc:
                 raise _graph_error(exc) from None
-        position = params.get("position")
         if position is None:
             return out
         metadata = dict(target.get("metadata") or {})
@@ -351,7 +389,8 @@ class GraphService:
                 raise BridgeError("not_found", f"{type(exc).__name__}: {exc}") from None
             out["sample"] = self._sample(path, target["path"], metadata, position)
             return out
-        backend = self.connections.backend(params.get("connection"), params.get("node"))
+        if backend is None:
+            backend = self.connections.backend(params.get("connection"), params.get("node"))
         if isinstance(backend, HubBackend):
             payload = {"task_id": target["task_id"], "path": target["path"], "position": position}
             if metadata:
@@ -361,7 +400,7 @@ class GraphService:
             record = backend.run_action("view.probe", payload, identity)
             out["sample"] = record["result"]
             return out
-        item = backend.describe("task", target["task_id"], target["path"])
+        item = artifact if artifact is not None else backend.describe("task", target["task_id"], target["path"])
         if item["size"] > 1024 ** 3:
             raise BridgeError("invalid_params", "Probing reads fields of at most 1 GiB")
         path = self.cache_dir / "fields" / (item["sha256"] + Path(target["path"]).suffix)
@@ -369,7 +408,45 @@ class GraphService:
         out["sample"] = self._sample(path, target["path"], metadata, position)
         return out
 
-    def _sample(self, path, name, metadata, position):
+    def _probe_local_muferro(self, target, source, case_dir, frame, node, graph, context, position, *, proof):
+        from suan.connectors.files import _stream_sha256
+        from suan.connectors.mupro import RESULT, case_prefix, recorded_case_dir
+        from suan.graph.registry import GraphError
+
+        try:
+            if case_dir == "auto":
+                # A collected worker only sees registered paths. Absence falls back to the root;
+                # a changed registered launcher raises from the proof-carrying source.
+                report = None if proof is None else f"{proof['case_path']}/{RESULT}"
+                listed = report is None or any(item["path"] == report for item in proof["files"])
+                case_dir = recorded_case_dir(source) if listed else "."
+            name = target["path"] = case_prefix(case_dir) + frame
+            # Worker-produced graph results have a data key even on a cache hit. Pin the original
+            # frame to that key before reporting a path or returning any raw values.
+            result = context["result"]
+            keys = result.get("keys")
+            entry = keys.get(node["id"]) if isinstance(keys, dict) else None
+            expected = entry.get("data") if isinstance(entry, dict) else None
+            if not isinstance(expected, str) or not SHA256_RE.fullmatch(expected):
+                raise _probe_error("图谱结果缺少 MuFerro 帧来源，请重新计算图谱")
+            out = {"target": target}
+            with tempfile.TemporaryDirectory(prefix="stk-muferro-probe-") as directory:
+                snapshot = Path(directory) / "frame.dat"
+                with snapshot.open("wb") as destination:
+                    digest = _stream_sha256(source, name, destination=destination)
+                if expected != _muferro_data_key(self.registry(), graph, context.get("values"), node,
+                                                name, digest, snapshot):
+                    raise _probe_error("MuFerro 帧或算例目录已变化，请重新计算图谱")
+                if position is not None:
+                    out["sample"] = self._sample(snapshot, name, dict(target.get("metadata") or {}), position,
+                                                 fingerprint=digest)
+            return out
+        except GraphError as exc:
+            raise _graph_error(exc) from None
+        except (ValueError, OSError) as exc:
+            raise _probe_error(f"无法读取所选图层的 MuFerro 帧：{exc}") from None
+
+    def _sample(self, path, name, metadata, position, *, fingerprint=None):
         from suan.control.agent import frame_metadata
         from suan.visualization.scene import load_grid, probe
         frame = frame_metadata(name)
@@ -378,8 +455,12 @@ class GraphService:
             metadata["timestep"] = frame["timestep"]
             if "coordinate_units" not in metadata and "spacing" not in metadata:
                 metadata["coordinate_units"] = "grid index"
-        stat = Path(path).stat()
-        key = (str(path), stat.st_size, stat.st_mtime_ns, repr(sorted(metadata.items())))
+        if fingerprint is None:
+            stat = Path(path).stat()
+            identity = (str(path), stat.st_size, stat.st_mtime_ns)
+        else:
+            identity = (fingerprint,)
+        key = (*identity, repr(sorted(metadata.items())))
         with self.lock:
             grid = self.grids.get(key)
             if grid is not None:
@@ -413,6 +494,30 @@ class GraphService:
             "reserved_colors": {str(k): list(v) for k, v in colormaps.RESERVED_COLORS.items()},
             "nan_color": list(colormaps.DEFAULT_NAN_COLOR),
         }
+
+
+def _probe_error(message):
+    return BridgeError("not_found", message, data={"probe_error": True})
+
+
+def _muferro_data_key(registry, graph, values, node, name, digest, snapshot):
+    from suan.connectors.api import ConnectorError
+    from suan.connectors.mupro import READER, stem_field
+    from suan.data.dat import dat_info
+    from suan.graph.cache import data_key
+    from suan.graph.schema import parameter_values, substitute_params
+
+    node_type = registry[node["type"]]
+    params = node_type.normalize_params(substitute_params(node.get("params") or {}, parameter_values(graph, values)))
+    data, _ = node_type.split_params(params)
+    data = {key: value for key, value in data.items() if key not in node_type.selectors}
+    try:
+        field = stem_field(params["dataset"])
+    except ConnectorError:
+        field = stem_field(params["dataset"], dat_info(snapshot)["components"])
+    # The source node excludes selectors and upstream keys. Its fingerprint pins the resolved DAT.
+    source = {"path": name, "sha256": digest, "reader": READER, "components": field["components"]}
+    return data_key(node_type.id, node_type.impl_version, data, {}, source)
 
 
 def _local_frame(root, path):

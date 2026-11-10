@@ -240,21 +240,30 @@ def test_hub_review_flow(hub, inproc, tmp_path):  # noqa: F811
     harness.close()
 
 
-def test_hub_graph_evaluate_blobs_and_probe(hub, inproc):  # noqa: F811
+def test_hub_graph_evaluate_blobs_and_probe(hub, inproc, runtime):  # noqa: F811
     np = pytest.importorskip("numpy")
     pytest.importorskip("vtk")
     pytest.importorskip("matplotlib")
     from conftest import finish
     from mupro_fake import domain_polarization
     from suan.render.payload import decode
+    from test_desktop_bridge_runtime import add_profile
     client, supervisor = hub.client, hub.supervisor
     workspace = client.create_workspace("图谱")["id"]
+    frame = "Polar.00000002.dat"
     program = (f"import sys; sys.path.insert(0, {str(TESTS)!r}); from mupro_fake import write_domain_run; "
-               "write_domain_run('.', grid=(12, 10, 8), steps=2, interval=1)")
-    task_id = client.submit({"workspace_id": workspace, "argv": ["{python}", "-c", program]})["id"]
+               "from pathlib import Path; "
+               "write_domain_run('case', grid=(12, 10, 8), steps=2, interval=1); "
+               "Path('stk-mupro.json').write_text('{\"schema_version\":1,\"case_dir\":\"case\"}')")
+    duplicate_program = program + (f"; import numpy as np; from suan.data.dat import write_dat; "
+                                   f"write_dat('{frame}', np.full((12, 10, 8, 3), .125), component_shape=(3,))")
     hub.stop.set()  # tick the supervisor here, then let the node loop run again
     hub.loop.join(timeout=10)
-    assert finish(client, supervisor, task_id, timeout=60)["state"] == "succeeded"
+    task_id = client.submit({"workspace_id": workspace, "argv": ["{python}", "-c", program]})["id"]
+    other = client.create_workspace("另一工作区")["id"]
+    duplicate = client.submit({"workspace_id": other, "argv": ["{python}", "-c", duplicate_program]})["id"]
+    for task in (task_id, duplicate):
+        assert finish(client, supervisor, task, timeout=60)["state"] == "succeeded"
     hub.stop.clear()
     hub.loop = threading.Thread(target=hub.run_node, daemon=True)
     hub.loop.start()
@@ -281,10 +290,25 @@ def test_hub_graph_evaluate_blobs_and_probe(hub, inproc):  # noqa: F811
                                             "node": hub.node_id, "request": request})
     assert again["action"]["id"] == evaluated["action"]["id"] and again["result"] == result
     layer = next(item for item in manifest["layers"] if item["id"] == "surface_layer")
-    probe = harness.call("probe", {"preset": "muferro-domains", "pick": layer["pick"]["probe"],
-                                   "context": {"bindings": {"run": task_id}, "result": result},
-                                   "connection": hub_id, "node": hub.node_id, "position": [2.0, 3.0, 4.0]})
-    assert probe["target"] == {"binding": "run", "task_id": task_id, "path": "Polar.00000002.dat", "node": "polar"}
+    args = {"preset": "muferro-domains", "pick": layer["pick"]["probe"],
+            "context": {"bindings": {"run": task_id}, "result": result, "artifacts": [{"path": frame}]},
+            "position": [2.0, 3.0, 4.0]}
+    before = len(hub.executed)
+    probe = harness.call("probe", {**args, "connection": hub_id, "node": hub.node_id})
+    assert hub.executed[before:] == ["task.artifacts", "view.probe"]
+    assert probe["target"] == {"binding": "run", "task_id": task_id, "path": f"case/{frame}", "node": "polar"}
     expected = np.asarray(domain_polarization((12, 10, 8), step=2))[2, 3, 4]
     assert np.allclose(probe["sample"]["values"], expected)
+    runtime_id = add_profile(harness, runtime)
+    assert harness.call("probe", {**args, "connection": runtime_id}) == probe
+
+    duplicate_result = harness.call("graph.evaluate", {"eval_id": "hub-duplicate", "mode": "hub", "connection": hub_id,
+        "node": hub.node_id, "request": {**request, "bindings": {"run": {"task_id": duplicate}}}})["result"]
+    duplicate_args = {**args, "context": {"bindings": {"run": duplicate}, "result": duplicate_result,
+                                          "artifacts": [{"path": f"case/{frame}"}]}}
+    before = len(hub.executed)
+    for backend in ({"connection": hub_id, "node": hub.node_id}, {"connection": runtime_id}):
+        error = harness.error("probe", {**duplicate_args, **backend})
+        assert error["code"] == "not_found" and "多个同名" in error["message"]
+    assert hub.executed[before:] == ["task.artifacts"]
     harness.close()
