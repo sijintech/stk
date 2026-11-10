@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-10 15:30 UTC · 原生执行预检、CI 夹具与统一工作台方向
+
+`9216d7cb` 在项目的材料仿真中增加默认折叠的执行环境检查。一次明确点击保存请求，再向所选 Runtime 提交单 CPU 诊断。面板可见时读取原任务，重开从本机记录恢复。晚回执按项目、连接、编辑器与父子面板代次核对。指南由实际 Claude80 的 `ae5a82e0` 经 root 审阅集成。 [桌面指南](mupro-desktop-preflight.md)
+
+所有者要求简化 STK 并统一 Web 与本地客户端。以 Synthrix `caec2b9` 的统一主页面和 Codex 的会话工作方式为参照。首片共用工作台、任务、结果的顺序，保留现有会话、任务与 Viewer 实例。Root 负责原生聚焦及分栏恢复。实际 Claude82 已在独立 `claude/unified-workbench-web-82` 接 Web 导航，候选待跨端审阅。项目与会话侧栏、默认布局和详情的统一继续实施。 [统一工作台](design/unified-workbench.md)
+
+既有试点任务及科学验收继续按依赖推进。实际点击和目标系统 CI 见[运行验收](runtime-validation.md)。
+
 ## 2026-11-10 03:29 UTC · 诊断请求持久化、严格 Bridge 与前一 CI 终态
 
 `5e377de0` 集成实际 Claude78 `81185683` 的共享预检客户端/未注册适配器，以及独立 `669b523b`、`f046d791` 的诊断 journal，并发布五个 Bridge 方法 describe/list/reserve/retry/refresh。记录在项目外持久化，固定原运行环境、工作区选择、资源和请求键。reserve 纯本机保存 prepared；原生调用方必须先得到持久确认，再在原视图仍有效时发送明确执行请求。丢 reserve 回执不会留下排队执行。重开、列出和刷新均不重提，未知回执只允许沿原 ID/原键明确恢复；已知任务 retry 零 POST。新工作区创建也使用稳定派生键。坏 journal 仅让预检不可用，不删除数据，不阻止其他 Bridge 模块启动。未增 Agent 工具、项目格式或放置权限。 [桌面诊断契约](specs/mupro-preflight-desktop-1.md)
