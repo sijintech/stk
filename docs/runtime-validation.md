@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-10 21:46 UTC · 上一 Desktop 批次终态
+
+远端 `9ce87c63` 的 Desktop `42895759127` 整批终态失败，4/6 作业通过。Linux 主作业 2201/2201、两个 Linux 打包、Windows CPU 1506/1506 均通过。macOS CPU 1566/1566、Metal 254/254，原生必测 4/6，媒体和可选对照的阶段见下一节。同头 Runtime 13/13，Pages 和 Secret scan 通过。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42895759127) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42895759007)
+
+Windows 原生 5/6，零跳过。PDF 完成 4/20 轮并有 39 张验收图片。第 5 轮 `reprepared-page1` 的 WGC `capture.create-for-window` 返回 `0x8007041d`，同步调用 120038 ms，捕获启动总计 120060 ms。失败时 1 次捕获请求，零轮询、零采样和零宿主帧。视口已就绪，第 5 轮前七张图片摘要已核对，最后为关闭预览图。重开阶段没有新像素可判定。此阶段和错误码与既有 WGC 阻塞记录一致，两次发布间 Windows 报告承载、PDF 夹具和捕获实现源码无变化。两项视频均完成 20/20 轮，各 161 张图片。两个 OS 工件均核对完整归档 SHA-256。 [Windows 作业](https://github.com/sijintech/stk/actions/runs/42895759127/job/130137120764) · [Windows 工件](https://github.com/sijintech/stk/actions/runs/42895759127/artifacts/13806041518) · [macOS 工件](https://github.com/sijintech/stk/actions/runs/42895759127/artifacts/13804850740)
+
+终态和工件已记入验收，主线推送门禁满足。待发布版本包含统一工作台返回、阅读位置、图谱来源、合成 HDF5 三跳验收及可选 Cocoa 取证。发布前工作树中的所有者未提交内容保留，上一远端至待发版本的提交范围扫描通过。
+
 ## 2026-11-10 21:35 UTC · 图谱来源、原生复验与 Cocoa 取证
 
 `f497dfae` 集成独立候选 `f50947f9`。Web 图谱以实际接受的渲染层为准，显示绑定任务、运行工作区、预设、输出和时间步。有效载荷步号优先。新场景提交后清除旧探针数值，保留同场景导航和失败时的原画面。新绑定、范围变化或本地数据包使过期画面回执失效。本地数据包显示文件名。独立与 Root Chromium 各 165/165，零跳过及重试。模拟 Hub 额外覆盖有效载荷读取后延迟的真实渲染模块、注入模块失败、迟到计算、错误摘要和仅有输出卡片。
