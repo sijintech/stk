@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /** Inert Viewer restore and independent per-window cameras, with the portable payload bridge. */
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <mutex>
@@ -291,6 +292,68 @@ TEST(ViewerWorkspace, PendingProbeFollowsTheNewlyDisplayedStep)
   EXPECT_EQ(switched["probe_requests"][1]["position"], switched["probe_requests"][0]["position"]);
   EXPECT_EQ(viewer.probe().status, ProbeState::Status::Done);
   EXPECT_EQ(viewer.probe().sample["values"], Json::array({0.25, -0.5, 0.75}));
+}
+
+TEST(ViewerWorkspace, RestoredProbeAcceptsPresetDisplayMetadataChanges)
+{
+  GuardedOpenViewer f;
+  ASSERT_TRUE(f.start());
+  auto &viewer = f.viewer();
+  ASSERT_TRUE(f.open("first"));
+  ASSERT_TRUE(f.wait([&] { return viewer.payload() && !viewer.evaluating(); })) << viewer.eval_error();
+  const auto original = viewer.graph_inspection();
+  ASSERT_TRUE(original->shown_configuration);
+  ASSERT_EQ(original->shown_graph_verified, true);
+
+  auto metadata = repo_presets();
+  auto &presets = metadata["presets"];
+  const auto preset = std::find_if(presets.begin(), presets.end(), [](const Json &item) {
+    return item.value("id", "") == "muferro-domains";
+  });
+  ASSERT_NE(preset, presets.end());
+  auto &updated = (*preset)["graph"];
+  updated["name"] = "Updated display name";
+  std::reverse(updated["nodes"].begin(), updated["nodes"].end());
+  ASSERT_NE(updated, original->shown_configuration->graph);
+  viewer.set_metadata(metadata, repo_catalog());
+  const auto saved = viewer.save_workspace_state();
+  ASSERT_TRUE(viewer.load_workspace_state(saved, viewer.base_payload()));
+  const auto restored = viewer.graph_inspection();
+  ASSERT_TRUE(restored->shown_configuration);
+  EXPECT_EQ(restored->shown_configuration->graph, original->shown_configuration->graph);
+
+  PickInfo pick;
+  pick.probe_node = "polar";
+  pick.physical = {1.0, 2.0, 3.0};
+  viewer.set_pick(pick);
+  const auto requests = f.barrier();
+  ASSERT_TRUE(requests.is_object());
+  ASSERT_EQ(requests["evaluate_requests"].size(), 1u);
+  ASSERT_EQ(requests["probe_requests"].size(), 1u);
+  const auto &probe = requests["probe_requests"].front();
+  EXPECT_EQ(probe.at("graph"), original->shown_configuration->graph);
+  EXPECT_EQ(probe.at("local_bindings").at("run"), f.source_path("first"));
+  EXPECT_EQ(probe.at("local_proofs").at("run"), viewer.source().source_proof);
+  f.loop.run_ready();
+  EXPECT_EQ(viewer.probe().status, ProbeState::Status::Done);
+
+  viewer.evaluate_now();
+  ASSERT_TRUE(f.wait([&] { return viewer.payload() && !viewer.evaluating(); })) << viewer.eval_error();
+  const auto refreshed = f.barrier();
+  ASSERT_TRUE(refreshed.is_object());
+  ASSERT_EQ(refreshed["evaluate_requests"].size(), 2u);
+  ASSERT_EQ(refreshed["probe_requests"].size(), 2u);
+  EXPECT_EQ(refreshed["probe_requests"].back().at("graph"), updated);
+  f.loop.run_ready();
+  EXPECT_EQ(viewer.probe().status, ProbeState::Status::Done);
+
+  updated["outputs"]["view"] = updated["outputs"].at("image");
+  viewer.set_metadata(metadata, repo_catalog());
+  const auto changed = viewer.save_workspace_state();
+  ASSERT_TRUE(viewer.load_workspace_state(changed, viewer.base_payload()));
+  viewer.set_pick(pick);
+  EXPECT_EQ(viewer.probe().status, ProbeState::Status::Unavailable);
+  EXPECT_EQ(f.barrier().at("probe_requests").size(), 2u);
 }
 
 Json visible_viewer_state(const ViewerState &viewer)

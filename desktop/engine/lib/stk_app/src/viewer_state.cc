@@ -83,8 +83,7 @@ bool same_graph_configuration(const ViewerGraphConfiguration &a, const ViewerGra
       dumps(a.parameters) == dumps(b.parameters);
 }
 
-std::optional<bool> verify_shown_graph(const ViewerGraphConfiguration &configuration,
-                                     const io::GraphResult &result)
+std::optional<bool> verify_shown_graph(const Json &graph, const io::GraphResult &result)
 {
   const auto hex_digest = [](const std::string &text) {
     return text.size() == 64 && std::all_of(text.begin(), text.end(), [](const char c) {
@@ -97,7 +96,7 @@ std::optional<bool> verify_shown_graph(const ViewerGraphConfiguration &configura
   }
   if (result.graph_hash.substr(7) != result.graph_sha256) { return false; }
   try {
-    return io::graph_hash(configuration.graph) == result.graph_hash;
+    return io::graph_hash(graph) == result.graph_hash;
   }
   catch (const std::exception &) {
     // Metadata is not an evaluation. Unhashable local metadata cannot verify a receipt.
@@ -689,12 +688,12 @@ struct ViewerState::Impl {
     // Old workspace files carry the shown graph and saved preset metadata, not the dispatch binding.
     if (!base || !result || !shown_configuration ||
         !shown_configuration->source.evaluates() || !same_viewer_source(shown_configuration->source, source) ||
-        !verify_shown_graph(*shown_configuration, *result).value_or(false)) {
+        !verify_shown_graph(shown_configuration->graph, *result).value_or(false)) {
       return;
     }
     const auto &configuration = *shown_configuration;
     const auto *p = preset(configuration.preset_id);
-    if (p && p->raw.contains("graph") && dumps(p->raw.at("graph")) == dumps(configuration.graph)) {
+    if (p && p->raw.contains("graph") && verify_shown_graph(p->raw.at("graph"), *result).value_or(false)) {
       shown_probe_origin = ProbeOrigin{configuration.source, configuration.preset_id,
                                        binding_name(configuration.preset_id)};
     }
@@ -962,7 +961,11 @@ struct ViewerState::Impl {
     if (!shown_configuration || !frame.configuration) {
       return !shown_configuration && !frame.configuration;
     }
-    return dumps(shown_configuration->graph) == dumps(frame.configuration->graph);
+    const auto &old_graph = shown_configuration->graph;
+    const auto &new_graph = frame.configuration->graph;
+    return dumps(old_graph) == dumps(new_graph) ||
+           (verify_shown_graph(old_graph, frame.result).value_or(false) &&
+            verify_shown_graph(new_graph, frame.result).value_or(false));
   }
 
   void show_frame(const Frame &f, EvalRecord record)
@@ -1472,7 +1475,7 @@ struct ViewerState::Impl {
       return;
     }
     if (shown_configuration) {
-      const auto verified = verify_shown_graph(*shown_configuration, *result);
+      const auto verified = verify_shown_graph(shown_configuration->graph, *result);
       if (!verified.value_or(false)) {
         probe.status = ProbeState::Status::Unavailable;
         probe.error = std::string(store.tr(verified ? "analysis_graph.graph_mismatch" : "analysis_graph.graph_unverified"));
@@ -2145,7 +2148,8 @@ std::shared_ptr<const ViewerGraphInspection> ViewerState::graph_inspection() con
   snapshot->shown_evaluation = m.last;
   snapshot->shown_resolved_parameters = m.shown_resolved_parameters;
   if (!m.frozen_workspace_result && snapshot->shown_configuration && snapshot->shown_result) {
-    snapshot->shown_graph_verified = verify_shown_graph(*snapshot->shown_configuration, *snapshot->shown_result);
+    snapshot->shown_graph_verified = verify_shown_graph(snapshot->shown_configuration->graph,
+                                                       *snapshot->shown_result);
   }
   if (snapshot->desired && snapshot->shown_configuration && snapshot->shown_graph_verified.value_or(false)) {
     snapshot->shown_matches_desired = same_graph_configuration(*snapshot->desired, *snapshot->shown_configuration);
