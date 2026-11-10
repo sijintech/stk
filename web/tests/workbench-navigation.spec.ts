@@ -76,6 +76,11 @@ class Hub {
   review = false;
   readonly actionRows: Record<string, any>[] = [];
   logsFail = false;
+  readonly viewErrors = new Map<string, string>();
+  reportedViewSource?: {task_id: string; path: string} | 'omit';
+  // Payloads of the view.build and view.probe actions, in order: which task and artifact each one asked for.
+  readonly builds: Record<string, any>[] = [];
+  readonly probes: Record<string, any>[] = [];
   readonly pending = new Map<string, Promise<void>>();
   readonly reached = new Set<string>();
   hold(kind: string) {
@@ -157,7 +162,11 @@ class Hub {
     }
     if (path === `nodes/${node}/read`) {
       const {kind} = request.postDataJSON();
-      if (kind === 'task.get') return json({result: row});
+      // The node's own row for the asked task, as the Runtime has it.
+      if (kind === 'task.get') {
+        const id = request.postDataJSON().payload?.task_id;
+        return json({result: this.device.snapshot.tasks.find(t => t.id === id) ?? row});
+      }
       if (kind === 'task.artifacts') {
         const later = this.later;
         await this.gate(kind);
@@ -166,8 +175,20 @@ class Hub {
     }
     if (path === 'actions' && request.method() === 'POST') {
       const body = request.postDataJSON();
+      if (body.kind === 'view.build') this.builds.push(body.payload);
+      if (body.kind === 'view.probe') this.probes.push(body.payload);
+      const viewError = this.viewErrors.get(body.kind);
       await this.gate(body.kind);
-      if (body.kind === 'view.build') return json({id: body.id, state: 'succeeded', result: {...scene, manifest: {...scene.manifest, field: this.field}}});
+      if (viewError) return json({detail: viewError}, 502);
+      if (body.kind === 'view.build') {
+        const field = this.field;
+        const source = this.reportedViewSource ?? {task_id: body.payload.task_id, path: body.payload.path};
+        return json({id: body.id, state: 'succeeded',
+          result: {...scene, manifest: {...scene.manifest, field, ...(source === 'omit' ? {} : {source})}}});
+      }
+      if (body.kind === 'view.probe') {
+        return json({id: body.id, state: 'succeeded', result: {position: body.payload.position, values: [0.5], units: 'V'}});
+      }
       if (body.kind === 'task.submit') {
         if (!this.review) return json({id: body.id, state: 'succeeded', result: {id: task}});
         const item = {id: body.id, state: 'review', review_reason: '新命令需要执行复核', request: {kind: body.kind, payload: body.payload}};
@@ -745,6 +766,304 @@ for (const viewport of viewports) {
       sent.stop();
       expect(writes(sent.seen).slice(2)).toEqual(['/api/v1/actions task.submit']);
       expect(hub.actionRows[0].request.payload).toEqual({spec: {workspace_id: ws, argv: ['python3', 'draft.py'], outputs: []}});
+      expect(errors).toEqual([]);
+    });
+  });
+}
+
+// 结果 names its source in one line under the title: the selected task's node, project and name, then the artifact
+// the Viewer shows. The shown scene stays bound to the task and file of the view.build that made it, so another
+// file choice is shown as chosen but not loaded, 查询原始值 asks for the shown file, and a late reply for another
+// task or an older scene is dropped. Only 加载视图 and 查询原始值 send anything.
+const task2 = 'd'.repeat(32);
+const row2 = {...row, id: task2, name: '对照任务', state: 'succeeded'};
+const twoTasks = {...device, snapshot: {...device.snapshot, tasks: [row, row2]}};
+const source = (page: Page) => page.getByLabel('结果来源');
+const title = (page: Page) => page.locator('section.analysis .view-title h1');
+const canvasMarker = (page: Page) => page.locator('section.analysis .viewport canvas').evaluate(el => (el as any).__marker ?? null);
+const probeLog = (page: Page) => page.locator('section.analysis details.logs pre');
+const taskRow = (page: Page, name: string) => queue(page).getByRole('button', {name: new RegExp(name)});
+const shown = (file: string, name = '解析场验证') => `节点甲 · 项目一 · ${name}，${file}`;
+const pending = (file: string) => `已选 ${file}，加载视图后显示`;
+
+for (const viewport of viewports) {
+  test.describe(`${viewport.name} 结果 source`, () => {
+    test.use({viewport: {width: viewport.width, height: viewport.height}});
+
+    test('结果 names the shown task and file; another choice stays chosen until 加载视图, and 查询原始值 asks for the shown file', async ({page}) => {
+      const hub = new Hub();
+      const errors = await setup(page, hub);
+      const fileList = page.getByLabel('结果文件');
+      await go(page, '结果');
+      await freeze(page);
+      const viewer = await viewerShot(page, 'source-before');
+      await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+      await expect(source(page)).toBeInViewport();
+      await expect(page.locator('section.analysis')).not.toContainText('RESULT EXPLORER');
+      await go(page, '任务');
+      hub.later = true;
+      const sent = posts(page);
+      const r = route(page, `${viewport.name}-result-source`);
+      // The existing one-click shortcut: 结果 opens with the list it reads, and the source line already in view.
+      await r.click(shortcut(page, '结果'), 'Tasks 结果');
+      await expectActive(page, '结果');
+      await expect(source(page)).toBeInViewport();
+      await expect(fileList.locator('option', {hasText: 'scalar-1.vti'})).toHaveCount(1);
+      await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+      const viewportBox = () => page.locator('section.analysis .viewport').boundingBox();
+      const placed = await viewportBox();
+      await r.select(fileList, 'scalar-1.vti', '结果文件 scalar-1.vti');
+      // Chosen, not loaded: the line keeps the shown file and names the choice; the canvas and its camera stay.
+      await expect(source(page)).toHaveText(`${shown('显示 scalar-0.vti')}${pending('scalar-1.vti')}`);
+      expect(await title(page).textContent()).toBe('phi');
+      expect(await canvasMarker(page)).toBe('same-canvas');
+      expect((await viewerShot(page, 'source-chosen')).equals(viewer)).toBe(true);
+      // The note is one line, cut short rather than wrapped: the Viewer does not move.
+      expect(await viewportBox()).toEqual(placed);
+      // Ordinary navigation away and back sends nothing and keeps the same canvas and line.
+      await r.click(nav(page).getByRole('button', {name: '工作台', exact: true}), '工作台');
+      await r.click(nav(page).getByRole('button', {name: '结果', exact: true}), '结果');
+      await expect(source(page)).toHaveText(`${shown('显示 scalar-0.vti')}${pending('scalar-1.vti')}`);
+      expect(await canvasMarker(page)).toBe('same-canvas');
+      expect(await page.getByLabel('对话内容').inputValue()).toBe('未发送的草稿：分析 phi 场');
+      await page.waitForTimeout(300);
+      expect(sent.seen).toEqual(['/api/v1/nodes/{node}/read task.artifacts']);
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-source-chosen.png`)});
+      // 查询原始值 reads the file the Viewer shows, not the newer choice.
+      await r.click(page.getByRole('button', {name: '查询原始值'}), '查询原始值 (shown scalar-0)');
+      await expect(probeLog(page)).toContainText('"values"');
+      expect(hub.probes).toHaveLength(1);
+      expect(hub.probes[0]).toMatchObject({task_id: task, path: 'scalar-0.vti'});
+      expect(hub.probes[0].position[0]).toBe(0.25);
+      // 加载视图 shows the chosen file; from then on the line and the probe follow it.
+      hub.field = 'psi';
+      await r.click(page.getByRole('button', {name: '加载视图'}), '加载视图 scalar-1');
+      await expect(source(page)).toHaveText(shown('显示 scalar-1.vti'));
+      await expect(title(page)).toHaveText('psi');
+      await expect(probeLog(page)).not.toContainText('"values"');
+      expect(hub.builds.map(b => [b.task_id, b.path])).toEqual([[task, 'scalar-0.vti'], [task, 'scalar-1.vti']]);
+      await r.click(page.getByRole('button', {name: '查询原始值'}), '查询原始值 (shown scalar-1)');
+      await expect.poll(() => hub.probes.length).toBe(2);
+      expect(hub.probes[1]).toMatchObject({task_id: task, path: 'scalar-1.vti'});
+      await expect(footer(page)).toContainText('就绪');
+      await page.waitForTimeout(300);
+      sent.stop();
+      expect(sent.seen).toEqual(['/api/v1/nodes/{node}/read task.artifacts', '/api/v1/actions view.probe',
+        '/api/v1/actions view.build', '/api/v1/actions view.probe']);
+      // 图谱 names the task only: its data sources are bound in the graph panel.
+      await page.getByRole('tab', {name: '图谱'}).click();
+      await expect(source(page)).toHaveText('节点甲 · 项目一 · 解析场验证，图谱数据源在下方绑定');
+      await expect(source(page)).not.toHaveAttribute('title', /scalar-1\.vti/);
+      await expect(probeLog(page)).not.toContainText('"values"');
+      await expect(page.locator('section.analysis .view-title h1')).toHaveText('图谱视图');
+      r.save();
+      writeFileSync(test.info().outputPath('source-requests.json'), JSON.stringify({posts: sent.seen, builds: hub.builds, probes: hub.probes}, null, 2));
+      expect(errors).toEqual([]);
+    });
+
+    test('expired result failures stay with their source and a new scene restores task logs', async ({page}) => {
+      const hub = new Hub();
+      hub.device = twoTasks;
+      hub.later = true;
+      const errors = await setup(page, hub);
+      await go(page, '任务');
+      await shortcut(page, '读取日志').click();
+      await expect(probeLog(page)).toContainText('step 1 converged');
+      await expect(footer(page)).toContainText('就绪');
+      await page.getByRole('button', {name: '查询原始值'}).click();
+      await expect(probeLog(page)).toContainText('"values"');
+      const file = page.getByLabel('结果文件');
+      const load = page.getByRole('button', {name: '加载视图'});
+      const alert = page.getByRole('alert');
+
+      hub.viewErrors.set('view.build', '文件读取失败');
+      const releaseBuild = hub.hold('view.build');
+      await load.click();
+      await expect.poll(() => hub.reached.has('view.build')).toBe(true);
+      await file.selectOption('scalar-1.vti');
+      releaseBuild();
+      await expect(footer(page)).toContainText('就绪');
+      await expect(alert).toHaveCount(0);
+      await expect(probeLog(page)).toContainText('"values"');
+
+      await load.click();
+      await expect(alert).toContainText('文件读取失败');
+      await file.selectOption('scalar-0.vti');
+      await expect(alert).toHaveCount(0);
+      hub.viewErrors.delete('view.build');
+      await file.selectOption('scalar-1.vti');
+      hub.reportedViewSource = {task_id: task, path: 'scalar-0.vti'};
+      await load.click();
+      await expect(alert).toContainText('返回的结果来源与所选文件不符');
+      await expect(source(page)).toContainText('显示 scalar-0.vti');
+      hub.reportedViewSource = 'omit';
+      await load.click();
+      await expect(source(page)).toHaveText(shown('显示 scalar-1.vti'));
+      await expect(probeLog(page)).toContainText('step 1 converged');
+      await expect(probeLog(page)).not.toContainText('"values"');
+
+      hub.viewErrors.set('view.probe', '旧探针失败');
+      const releaseProbe = hub.hold('view.probe');
+      await page.getByRole('button', {name: '查询原始值'}).click();
+      await expect.poll(() => hub.reached.has('view.probe')).toBe(true);
+      await go(page, '任务');
+      await taskRow(page, '对照任务').click();
+      releaseProbe();
+      await expect(footer(page)).toContainText('就绪');
+      await go(page, '结果');
+      await expect(source(page)).toHaveText(shown('尚未加载结果文件', '对照任务'));
+      await expect(alert).toHaveCount(0);
+      expect(unexpected(errors, 502)).toEqual([]);
+    });
+
+    test('held replies are dropped after another task is chosen, even after coming back to the first', async ({page}) => {
+      const hub = new Hub();
+      hub.device = twoTasks;
+      const errors = await setup(page, hub, {scene: false});
+      const sent = posts(page);
+      const r = route(page, `${viewport.name}-held-scope`);
+      // A held 加载视图 for 解析场验证, then 对照任务 and back to 解析场验证 before it completes.
+      await go(page, '结果');
+      await r.select(page.getByLabel('结果文件'), 'scalar-0.vti', '结果文件 scalar-0.vti');
+      await expect(source(page)).toHaveText(`${shown('尚未加载结果文件')}${pending('scalar-0.vti')}`);
+      let release = hub.hold('view.build');
+      await r.click(page.getByRole('button', {name: '加载视图'}), '加载视图 (held)');
+      await expect.poll(() => hub.reached.has('view.build')).toBe(true);
+      await r.click(nav(page).getByRole('button', {name: '任务', exact: true}), '任务');
+      await r.click(taskRow(page, '对照任务'), '对照任务');
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await r.click(taskRow(page, '解析场验证'), '解析场验证');
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      release();
+      await expect(footer(page)).toContainText('就绪');
+      await page.waitForTimeout(300);
+      await r.click(nav(page).getByRole('button', {name: '结果', exact: true}), '结果');
+      await expect(page.locator('section.analysis .viewport canvas')).toHaveCount(0);
+      await expect(title(page)).toHaveText('科学结果');
+      await expect(source(page)).toHaveText(shown('尚未加载结果文件'));
+      // A shown scene, then a held 查询原始值 and another task before it answers.
+      await r.select(page.getByLabel('结果文件'), 'scalar-0.vti', '结果文件 scalar-0.vti');
+      await r.click(page.getByRole('button', {name: '加载视图'}), '加载视图');
+      await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+      await expect(page.locator('section.analysis .viewport canvas')).toHaveCount(1);
+      hub.reached.clear();
+      release = hub.hold('view.probe');
+      await r.click(page.getByRole('button', {name: '查询原始值'}), '查询原始值 (held)');
+      await expect.poll(() => hub.reached.has('view.probe')).toBe(true);
+      await r.click(nav(page).getByRole('button', {name: '任务', exact: true}), '任务');
+      await r.click(taskRow(page, '对照任务'), '对照任务');
+      release();
+      await expect(footer(page)).toContainText('就绪');
+      await page.waitForTimeout(300);
+      await r.click(nav(page).getByRole('button', {name: '结果', exact: true}), '结果');
+      await expect(probeLog(page)).toHaveText('选择任务读取日志，或在三维视图中选取一个位置。');
+      await expect(source(page)).toHaveText(shown('尚未加载结果文件', '对照任务'));
+      await expect(page.locator('section.analysis .viewport canvas')).toHaveCount(0);
+      sent.stop();
+      expect(writes(sent.seen)).toEqual(['/api/v1/actions view.build', '/api/v1/actions view.build', '/api/v1/actions view.probe']);
+      expect(hub.builds.map(b => b.task_id)).toEqual([task, task]);
+      expect(hub.probes.map(p => [p.task_id, p.path])).toEqual([[task, 'scalar-0.vti']]);
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-held-scope.png`)});
+      r.save();
+      writeFileSync(test.info().outputPath('held-scope-requests.json'), JSON.stringify({posts: sent.seen, builds: hub.builds, probes: hub.probes}, null, 2));
+      expect(errors).toEqual([]);
+    });
+
+    test('a held 查询原始值 keeps its reply across a file choice; a held 加载视图 for an older choice is dropped', async ({page}) => {
+      const hub = new Hub();
+      hub.later = true;
+      const errors = await setup(page, hub);
+      await go(page, '结果');
+      const fileList = page.getByLabel('结果文件');
+      await expect(fileList.locator('option', {hasText: 'scalar-1.vti'})).toHaveCount(1);
+      // The probe was asked for the shown scalar-0; changing the choice does not change what it reads.
+      let release = hub.hold('view.probe');
+      await page.getByRole('button', {name: '查询原始值'}).click();
+      await expect.poll(() => hub.reached.has('view.probe')).toBe(true);
+      await fileList.selectOption('scalar-1.vti');
+      release();
+      await expect(probeLog(page)).toContainText('"values"');
+      expect(hub.probes.map(p => p.path)).toEqual(['scalar-0.vti']);
+      await expect(source(page)).toHaveText(`${shown('显示 scalar-0.vti')}${pending('scalar-1.vti')}`);
+      // A build of scalar-1 held while the choice goes back to scalar-0: its late scene is not shown.
+      hub.reached.clear();
+      hub.field = 'psi';
+      release = hub.hold('view.build');
+      await page.getByRole('button', {name: '加载视图'}).click();
+      await expect.poll(() => hub.reached.has('view.build')).toBe(true);
+      await fileList.selectOption('scalar-0.vti');
+      release();
+      await expect(footer(page)).toContainText('就绪');
+      await page.waitForTimeout(300);
+      await expect(title(page)).toHaveText('phi');
+      await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+      expect(await canvasMarker(page)).toBe('same-canvas');
+      expect(hub.builds.map(b => b.path)).toEqual(['scalar-0.vti', 'scalar-1.vti']);
+      expect(errors).toEqual([]);
+    });
+
+    test('the line names the task\'s own project while the queue shows all projects; choosing a project drops a held probe', async ({page}) => {
+      const hub = new Hub();
+      const ws2 = 'e'.repeat(32), task3 = 'f'.repeat(32);
+      const row3 = {...row, id: task3, workspace_id: ws2, name: '项目二任务'};
+      hub.device = {...device, snapshot: {...device.snapshot, tasks: [row, row3], workspaces: [{id: ws, name: '项目一'}, {id: ws2, name: '项目二'}]}};
+      const errors = await start(page, hub);
+      await go(page, '任务');
+      await page.getByLabel('执行节点').selectOption(node);
+      await expect(queue(page).locator('.queue-head')).toHaveText('任务队列节点甲 · 在线 · 全部项目');
+      await taskRow(page, '项目二任务').click();
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await go(page, '结果');
+      await expect(source(page)).toHaveText('节点甲 · 项目二 · 项目二任务，尚未加载结果文件');
+      await page.getByLabel('结果文件').selectOption('scalar-0.vti');
+      await page.getByRole('button', {name: '加载视图'}).click();
+      await expect(source(page)).toHaveText('节点甲 · 项目二 · 项目二任务，显示 scalar-0.vti');
+      await page.getByRole('button', {name: '查询原始值'}).click();
+      await expect(probeLog(page)).toContainText('"values"');
+      expect(hub.builds.map(b => [b.task_id, b.path])).toEqual([[task3, 'scalar-0.vti']]);
+      expect(hub.probes.map(p => [p.task_id, p.path])).toEqual([[task3, 'scalar-0.vti']]);
+      // A held probe, then a project chosen in 运行环境 (which clears the selected task) before it answers.
+      const release = hub.hold('view.probe');
+      await page.getByRole('button', {name: '查询原始值'}).click();
+      await expect.poll(() => hub.reached.has('view.probe')).toBe(true);
+      await go(page, '任务');
+      await project(page).selectOption(ws);
+      release();
+      await expect(footer(page)).toContainText('就绪');
+      await page.waitForTimeout(300);
+      await go(page, '结果');
+      await expect(probeLog(page)).toHaveText('选择任务读取日志，或在三维视图中选取一个位置。');
+      await expect(source(page)).toHaveText('未选择任务，在「任务」中选择任务');
+      await expect(title(page)).toHaveText('科学结果');
+      await expect(page.locator('section.analysis .viewport canvas')).toHaveCount(0);
+      expect(hub.probes.map(p => p.task_id)).toEqual([task3, task3]);
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-other-project.png`)});
+      expect(errors).toEqual([]);
+    });
+
+    test('long node, project and task names wrap in the source line', async ({page}) => {
+      const hub = new Hub();
+      const long = (word: string) => word.repeat(60 / word.length);
+      const longRow = {...row, name: long('任务名')};
+      hub.device = {...device, name: long('节点'), snapshot: {...device.snapshot, tasks: [longRow], workspaces: [{id: ws, name: long('项目')}]}};
+      const errors: string[] = [];
+      page.on('pageerror', e => errors.push(String(e)));
+      await hub.install(page);
+      await page.goto(ORIGIN + '/');
+      await go(page, '任务');
+      await page.getByLabel('执行节点').selectOption(node);
+      await project(page).selectOption(ws);
+      await taskRow(page, '任务名').click();
+      await go(page, '结果');
+      await page.getByLabel('结果文件').selectOption('scalar-0.vti');
+      await page.getByRole('button', {name: '加载视图'}).click();
+      await expect(source(page)).toHaveText(`${long('节点')} · ${long('项目')} · ${long('任务名')}，显示 scalar-0.vti`);
+      const analysis = page.locator('section.analysis');
+      const widths = await analysis.evaluate(el => [el.scrollWidth, el.clientWidth]);
+      expect(widths[0]).toBeLessThanOrEqual(widths[1]);
+      const box = (await source(page).boundingBox())!;
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-source-long.png`)});
       expect(errors).toEqual([]);
     });
   });

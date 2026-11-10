@@ -13,6 +13,9 @@ const GraphPanel=React.lazy(()=>import('./GraphPanel'));
 const ExampleView=import.meta.env.DEV&&new URLSearchParams(location.search).has('example')?React.lazy(()=>import('./ExampleView')):null;
 const lostAccess=(error:unknown)=>error instanceof ApiError&&(error.status===401||error.status===403);
 type ObservedTask = {scope:TaskScope;name:string;state:string;verifiedIdentity:boolean;exactTerminal:boolean};
+// The scene 结果 shows in file mode, bound to the task scope and artifact path of the view.build that produced it.
+// Choosing another file only edits the choice: the canvas and its source stay until a new build succeeds.
+type Displayed = {scope:TaskScope;path:string;scene:Json};
 // Persistent sections: 工作台 is the conversation home. All three stay mounted; only the active one is shown.
 type Section='workbench'|'tasks'|'results';
 const SECTIONS:readonly (readonly [Section,string])[]=[['workbench','工作台'],['tasks','任务'],['results','结果']];
@@ -48,7 +51,7 @@ function Connect({connected}:{connected:()=>void}){
 
 function Workbench({disconnect}:{disconnect:()=>void}){
   const [devices,setDevices]=useState<Json[]>([]),[devicesRead,setDevicesRead]=useState(false),[actions,setActions]=useState<Json[]>([]),[node,setNode]=useState(''),[workspace,setWorkspace]=useState('');
-  const [selection,setSelection]=useState<TaskScope|null>(null),[artifacts,setArtifacts]=useState<Json[]>([]),[path,setPath]=useState(''),[scene,setScene]=useState<Json|null>(null);
+  const [selection,setSelection]=useState<TaskScope|null>(null),[artifacts,setArtifacts]=useState<Json[]>([]),[path,setPath]=useState(''),[displayed,setDisplayed]=useState<Displayed|null>(null);
   const [observedTask,setObservedTask]=useState<ObservedTask|null>(null);
   const [readKinds,setReadKinds]=useState<string[]|null>(null),[taskRefresh,setTaskRefresh]=useState(0);
   const [analysis,setAnalysis]=useState<'file'|'graph'>('file'),[mode,setMode]=useState('slice'),[axis,setAxis]=useState(2),[index,setIndex]=useState(0),[level,setLevel]=useState(0),[probe,setProbe]=useState<number[]>([0,0,0]);
@@ -61,8 +64,12 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const historyShown=wide||historyOpen,overlay=!wide&&historyOpen;
   const historyPanel=useRef<HTMLElement>(null),historyToggle=useRef<HTMLButtonElement>(null),messageList=useRef<HTMLDivElement>(null),composer=useRef<HTMLTextAreaElement>(null);
   const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
+  const [probeText,setProbeText]=useState(''),[graphProbeText,setGraphProbeText]=useState(''),[viewError,setViewError]=useState('');
   const generation=useRef(0),scopeVersion=useRef(0),activeScope=useRef<TaskScope|null>(null),refreshing=useRef(false),alive=useRef(true);
   const artifactReads=useRef({started:0,applied:0});
+  // The displayed record as of the latest change, so a late probe reply can tell whether its scene is still shown.
+  const displayedNow=useRef<Displayed|null>(null);
+  const show=useCallback((next:Displayed|null)=>{displayedNow.current=next;setDisplayed(next);setProbeText('');setViewError('');},[]);
   const [logRoom,setLogRoom]=useState(false);
   const fileChoice=useRef<HTMLSelectElement>(null),modeChoice=useRef<HTMLDivElement>(null),logPane=useRef<HTMLDetailsElement>(null);
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
@@ -78,7 +85,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     const row={id:task,name:observed.name,state:observed.state};
     graphTasks=tasks.some(item=>item.id===task)?tasks.map(item=>item.id===task?row:item):[row,...tasks];
   }
-  const shownScene=taskBound?scene:null;
+  const shown=taskBound&&displayed?.scope===selection?displayed:null,shownScene=shown?.scene??null;
   const features:unknown=selected?.snapshot?.features;
   const canRead=Array.isArray(features)&&features.includes('read');
   const canReadArtifacts=canRead&&readKinds?.includes('task.artifacts')===true;
@@ -97,8 +104,8 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     !tasks.length?'节点快照中暂无任务。':!queue.length?`${workspaceName(workspace)} 中暂无任务，可在下方「新建任务」中提交。`:'';
   const clearTask=useCallback(()=>{
     generation.current++;scopeVersion.current++;activeScope.current=null;
-    setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);setScene(null);setLogs('');setLogRoom(false);
-  },[]);
+    setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);show(null);setLogs('');setGraphProbeText('');setLogRoom(false);
+  },[show]);
   const clearNode=useCallback(()=>{clearTask();setNode('');setWorkspace('');},[clearTask]);
   const nodeGone=useCallback((scope:TaskScope)=>{if(activeScope.current===scope)clearNode();},[clearNode]);
   const observeTask=useCallback((scope:TaskScope,fact:TaskFact,verifiedIdentity:boolean)=>{
@@ -163,8 +170,15 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     });
     return()=>abort.abort();
   },[node,task,taskBound,taskOnline,canReadArtifacts,exactTerminal,acceptArtifacts,disconnect]);
-  async function run(fn:()=>Promise<void>){setBusy(true);setError('');try{await fn();if(alive.current)await refresh();}catch(error){if(alive.current){if(lostAccess(error))disconnect();else setError(String(error));}}finally{setBusy(false);}}
-  const invoke=(kind:string,payload:Json)=>action(node,kind,payload,()=>setError('操作等待复核，请在任务面板查看完整参数。'));
+  async function run(fn:()=>Promise<void>,active?:()=>boolean){
+    const report=active?setViewError:setError;
+    setBusy(true);report('');
+    try{await fn();if(alive.current&&(!active||active()))await refresh();}
+    catch(error){if(alive.current){if(lostAccess(error))disconnect();else if(!active||active())report(String(error));}}
+    finally{setBusy(false);}
+  }
+  const invoke=(kind:string,payload:Json,target=node,active?:()=>boolean)=>action(target,kind,payload,
+    ()=> (active?setViewError:setError)('操作等待复核，请在任务面板查看完整参数。'),{active});
   async function files(){
     const version=scopeVersion.current;
     const request=++artifactReads.current.started;
@@ -181,9 +195,24 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     const scope={node,workspace:workspaceId,task:id};
     activeScope.current=scope;setSelection(scope);
   }
-  async function loadView(){const current=++generation.current;const options:Json={mode,axis};if(mode==='slice')options.index=index;if(mode==='iso')options.level=level;if(mode==='vectors')options.component='magnitude';
-    const item=await invoke('view.build',{task_id:task,path,options});if(item.result&&generation.current===current){setScene(item.result);setLevel((item.result.manifest.value_range[0]+item.result.manifest.value_range[1])/2);}}
-  async function readLogs(){const version=scopeVersion.current;const item=await invoke('task.logs',{task_id:task});if(item.result&&scopeVersion.current===version){const bytes=Uint8Array.from(atob(item.result.data),c=>c.charCodeAt(0));setLogs(new TextDecoder().decode(bytes));}}
+  // A build is accepted only for the scope and file choice it was started with: another task, project or node, or
+  // another file choice before it completes, discards it. The accepted scene keeps that scope and path.
+  function loadView(){const current=++generation.current,scope=activeScope.current,source=path;if(!scope)return;
+    const active=()=>alive.current&&generation.current===current&&activeScope.current===scope;
+    const options:Json={mode,axis};if(mode==='slice')options.index=index;if(mode==='iso')options.level=level;if(mode==='vectors')options.component='magnitude';
+    void run(async()=>{
+      const item=await invoke('view.build',{task_id:scope.task,path:source,options},scope.node,active);
+      if(!item.result||!active())return;
+      const manifest=item.result.manifest;
+      const reported=manifest?.source;
+      if(reported!==undefined&&(reported?.task_id!==scope.task||reported?.path!==source)){
+        throw new Error('返回的结果来源与所选文件不符。');
+      }
+      const level=(manifest.value_range[0]+manifest.value_range[1])/2;
+      show({scope,path:source,scene:item.result});setLevel(level);
+    },active);
+  }
+  async function readLogs(){const version=scopeVersion.current;const item=await invoke('task.logs',{task_id:task});if(item.result&&scopeVersion.current===version){const bytes=Uint8Array.from(atob(item.result.data),c=>c.charCodeAt(0));setLogs(new TextDecoder().decode(bytes));setProbeText('');setGraphProbeText('');}}
   // An explicit 结果 / 读取日志 click in Tasks opens 结果 at once and brings the target into view; the read itself
   // keeps its own scope checks and never navigates on completion. The analysis mode and Viewer are left as they are.
   // 读取日志 also gives the open log pane its full bounded height (logRoom, until the task scope changes), so the
@@ -220,13 +249,29 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const sessionLabel=conv.missing.has(conv.session)?`已不存在 · ${conv.session.slice(0,6)}`:sessionRow?`${conversationTitle(sessionRow)} · ${conv.session.slice(0,6)}`:
     conv.own.has(conv.session)?'新对话 · 未保存':`正在确认 · ${conv.session.slice(0,6)}`;
   const thread=conv.thread,pending=conv.pending&&!thread.messages.some(m=>m.id===conv.pending!.id)?conv.pending:null;
-  async function probeValue(){
-    const version=generation.current;
-    const result=await invoke('view.probe',{task_id:task,path,position:probe});
-    if(generation.current===version)setLogs(JSON.stringify(result.result,null,2));
+  // 查询原始值 reads the raw data behind the displayed scene: its own task and path, whatever the file choice is now.
+  // The reply is kept only while that scene is still the one shown (a new scene or another task discards it).
+  function probeValue(){
+    const source=displayedNow.current;if(!source||source!==shown)return;
+    const active=()=>alive.current&&displayedNow.current===source&&activeScope.current===source.scope;
+    void run(async()=>{
+      const result=await invoke('view.probe',{task_id:source.scope.task,path:source.path,position:probe},source.scope.node,active);
+      if(result.result&&active())setProbeText(JSON.stringify(result.result,null,2));
+    },active);
   }
+  // The source of 结果 under its title: the selected task's node, project and name, then in file mode the artifact the
+  // Viewer shows and any other file chosen but not yet loaded (one line, cut short rather than wrapped, so choosing a
+  // file never moves the Viewer). Graph data sources are bound in the graph panel, so 图谱 names only the task.
+  const taskName=observed?.name||(heartbeat||null)?.name||task.slice(0,8);
+  const sourceTask=task&&selection?(taskBound?`${nodeName} · ${workspaceName(selection.workspace)} · ${taskName}`:`${nodeName} · ${workspaceName(selection.workspace)} · 正在确认任务`):'未选择任务';
+  const sourceFile=analysis==='graph'?'图谱数据源在下方绑定':!task?'在「任务」中选择任务':shown?`显示 ${shown.path}`:'尚未加载结果文件';
+  const sourceNext=analysis==='file'&&taskBound&&path&&path!==shown?.path?`已选 ${path}，加载视图后显示`:'';
+  const sourceIds=task&&selection?`节点 ${selection.node}\n项目 ${selection.workspace}\n任务 ${selection.task}${analysis==='file'&&shown?`\n文件 ${shown.path}`:''}`:undefined;
+  const resultNotice=tab==='results'&&analysis==='file'?viewError:'';
+  const notice=error||resultNotice;
+  const resultText=analysis==='graph'?graphProbeText:shown?probeText:'';
   return <div className="app"><header><div className="wordmark">STK <span>科学工作台</span></div><span className={online?'connection':'connection offline'}>{online?'控制服务已连接':'连接中断 · 显示最近状态'}</span><button className="quiet" onClick={disconnect}>断开</button></header>
-    {error&&<div className="notice" role="alert">{error}<button onClick={()=>setError('')}>关闭</button></div>}
+    {notice&&<div className="notice" role="alert">{notice}<button onClick={()=>error?setError(''):setViewError('')}>关闭</button></div>}
     <div className={wide?'workspace with-history':'workspace'}>
     <nav className="section-nav" aria-label="工作区">{SECTIONS.map(([key,label])=><button type="button" className={tab===key?'active':''} aria-current={tab===key?'page':undefined} key={key} onClick={()=>{setTab(key);setHistoryOpen(false);}}>{label}</button>)}
       {!wide&&<button type="button" ref={historyToggle} className={historyOpen?'history-toggle open':'history-toggle'} aria-expanded={historyOpen} aria-controls="conversation-history" aria-label="对话历史" onClick={toggleHistory}>历史</button>}</nav>
@@ -266,18 +311,20 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       </details>
       <details><summary>最近操作与重试</summary>{actions.filter(a=>a.request.kind!=='task.events').slice(0,20).map(a=><p key={a.id}><small>{a.request.kind} · {a.state}<br/>{a.error}</small></p>)}<button onClick={()=>void run(async()=>{const saved=sessionStorage.getItem('stk-last-action');if(saved)await api('actions','POST',JSON.parse(saved));})}>以相同 ID 重试上次操作</button></details>
     </aside>
-    <section className={`analysis surface${tab==='results'?'':' surface-hidden'}`} inert={tab!=='results'||overlay}><div className="view-title"><div><span className="eyebrow">RESULT EXPLORER</span><h1>{analysis==='graph'?'图谱视图':shownScene?.manifest.field||'科学结果'}</h1></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span></div>
-      <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>setAnalysis(key)}>{label}</button>)}</div>
-      {analysis==='graph'?<React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={selected?.id||''} node={selected?node:''} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} canReadEvents={canReadEvents&&taskOnline} onError={setError} onLog={setLogs}/></React.Suspense>:<>
-      <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{setPath(e.target.value);generation.current++;}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(a=>/\.(vti|vtk|npy|dat)$/.test(a.path)).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
+    <section className={`analysis surface${tab==='results'?'':' surface-hidden'}`} inert={tab!=='results'||overlay}><div className="view-title"><div><h1>{analysis==='graph'?'图谱视图':shownScene?.manifest.field||'科学结果'}</h1>
+      <p className="result-source" aria-label="结果来源" title={sourceIds}><span>{sourceTask}</span><span className="sr-only">，</span>
+        <span className="source-file"><span>{sourceFile}</span>{sourceNext&&<span className="source-next" title={sourceNext}>{sourceNext}</span>}</span></p></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span></div>
+      <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>{if(analysis!==key){setAnalysis(key);setGraphProbeText('');}}}>{label}</button>)}</div>
+      {analysis==='graph'?<React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={selected?.id||''} node={selected?node:''} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} canReadEvents={canReadEvents&&taskOnline} onError={setError} onLog={setGraphProbeText}/></React.Suspense>:<>
+      <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{setPath(e.target.value);generation.current++;setViewError('');}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(a=>/\.(vti|vtk|npy|dat)$/.test(a.path)).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
       <label>视图<select value={mode} onChange={e=>setMode(e.target.value)}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>
       {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>setAxis(Number(e.target.value))}>{['X','Y','Z'].map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={index} onChange={e=>setIndex(Number(e.target.value))}/></label></>}
       {mode==='iso'&&<label>等值<input type="number" value={level} onChange={e=>setLevel(Number(e.target.value))}/></label>}
-      <button disabled={busy||!taskBound||!path} onClick={()=>void run(loadView)}>加载视图</button></div>
+      <button disabled={busy||!taskBound||!path} onClick={loadView}>加载视图</button></div>
       <ErrorBoundary resetKey={shownScene}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}><Viewer scene={shownScene} onPick={setProbe}/></React.Suspense></ErrorBoundary>
       {shownScene&&<div className="legend"><span>{shownScene.manifest.value_range[0].toPrecision(5)}</span><i/><span>{shownScene.manifest.value_range[1].toPrecision(5)} {shownScene.manifest.units}</span><small>{shownScene.manifest.display_reduced?'显示网格已简化':'完整显示网格'} · 数值查询使用原始数据</small></div>}
-      <div className="probe"><strong>物理坐标探针</strong>{probe.map((v,i)=><input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={v} onChange={e=>setProbe(probe.map((n,j)=>i===j?Number(e.target.value):n))}/>)}<button disabled={busy||!shownScene} onClick={()=>void run(probeValue)}>查询原始值</button></div></>}
-      <details className={logRoom?'logs log-room':'logs'} ref={logPane} open><summary>日志 / 探针结果</summary><pre>{(selected&&logs)||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
+      <div className="probe"><strong>物理坐标探针</strong>{probe.map((v,i)=><input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={v} onChange={e=>setProbe(probe.map((n,j)=>i===j?Number(e.target.value):n))}/>)}<button disabled={busy||!shown} onClick={probeValue}>查询原始值</button></div></>}
+      <details className={logRoom?'logs log-room':'logs'} ref={logPane} open><summary>日志 / 探针结果</summary><pre>{(selected&&(resultText||logs))||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
     </section>
     <aside className={`chat panel surface${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'||overlay}><div className="section-title"><h2>AI 对话</h2><span className="muted conversation-name">{sessionLabel}</span></div>
       <div className="messages" ref={messageList} tabIndex={-1} role="log" aria-label="对话记录">
