@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-10 19:15 UTC · 上一远端 Desktop CI 终态
+
+远端 `693e7ea4` 的 Desktop CI 于 19:13:06 UTC 结束，6 个作业全部到终态。Linux Desktop 2195/2195、两项 Linux 打包、Windows CPU 1505/1505 与 Windows 原生内容均通过。Windows 原生 6/6、零跳过，PDF 完成 20/20 轮与 160/160 张截图，第 20 轮重新准备第一页的像素证据已上传。PDF 最长捕获启动 112 ms，两个视频均通过。上一轮 PDF 捕获超时本次未复现。唯一失败是 macOS 依赖安装时下载 fmt 补丁返回 HTTP 429，该作业的构建、CPU、Metal 和原生验收均跳过。同一源码头的 Runtime 13/13、Secret scan 与 Pages 均通过。下一批待发布源码含 `a9cefe9e` 的 Windows 捕获诊断与 `37e22f6a` 之前已记录的双端界面交付。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42870791136) · [Windows 原生作业](https://github.com/sijintech/stk/actions/runs/42870791136/job/130049729774) · [macOS 作业](https://github.com/sijintech/stk/actions/runs/42870791136/job/130021209994) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42870793242)
+
 ## 2026-11-10 19:11 UTC · 双端结果来源详情与弹窗焦点
 
 `222b15e6` 在原生聚焦结果页提供「来源」。详情读取 Viewer 已接受的配置和具体显示步号，展示任务的连接、节点、运行工作区和任务 ID，或本地文件、目录和载荷标签。任务图只展示已知绑定；确切产物路径取决于求值回执。长值可滚动，控制字符按可见转义呈现。Esc 与关闭按钮把焦点归还给来源入口。窗口路由隔离弹窗下方的指针、键盘和文件拖放。Jobs 54/54、UI 131/131、窗口 88/88，零跳过。
