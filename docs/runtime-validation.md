@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-10 23:40 UTC · Viewer 恢复、Cocoa 诊断与 HDF5 取值
+
+`ea3f5eb1` 用已求值图谱的语义摘要验证恢复时的来源。固定起点为已显示 MuFerro 帧、同一项目与来源、已调整的 Viewer 相机。预设显示名称和节点排列更改后，旧版一次查询发送零个请求，新版一次查询仍读取已显示帧的原始值。计算定义更改时拒绝使用旧证明。刷新并接纳语义等价图谱时保留物理选点。Root 定向构建与 25/25 测试通过，零跳过，覆盖真实 Python 桥、OpenGL、Vulkan、X11 和 Wayland。先前 `6ee7ae36` 项目套件完整 971/971，零跳过及失败，859.07 秒。暂存扫描通过。证据在外部 `root-delivery-20261110-148/native-probe-preset-root` 和 `root-delivery-20261110-149/restored-probe-metadata`。
+
+`8a066663` 按逐字节相同补丁集成 `3c8d6be0`。Cocoa MP4 的可选诊断依次验证同一原生视图显式挂起、普通切页隐藏、重显后释放和人工点击恢复播放。诊断独立于必测视频门。Root Linux 编译与 Report/DocumentEvidence 31/31，零跳过，暂存扫描通过。Cocoa Objective-C++ SDK 编译和实际播放仍等该提交发布后的 macOS 作业。证据在外部 `root-delivery-20261110-149/cocoa-suspend-root`。
+
+同一发布摘要绑定下，Root 使用真实本机 Hub、NodeAgent 与 Runtime，对合成 MuPRO HDF5 用现有图谱协议读取单体素。三份 136 字节 NPY 工件经下载与摘要复核，分别精确读取 `uint64` 的 `9223372036854775942`、`float64` 的 `1.0000000000000002` 与 `inf`。源摘要不符与越界均由 Runtime 拒绝。取值与两端 UI 继续分别在独立工作树验证。证据在外部 `root-delivery-20261110-149/hdf5-live-voxel`。
+
+远端 `ee051512` Runtime 13/13 全通过。Desktop 的 Linux 主回归、打包和新环境冒烟通过，macOS、Windows 尚未完成。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42920785047) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42920785230)
+
 ## 2026-11-10 23:16 UTC · 原生探针使用已显示图谱
 
 `6ee7ae36` 集成 `695025ea`，保留 `7f2ea3fc` 的跨帧 Pending 回执防护。探针固定到已接纳画面的图谱、原参数、绑定和本地证明。预设更改等待或失败时，旧画面的探针继续读取原来源。新图谱或来源真正接替时，旧选点与迟到回执失效。同一图谱的时间步切换继续按原物理坐标查询。恢复工作区需要可验证的已显示图谱和相符的原预设定义，已保存的探针结果仍可查看。仅标签或节点排列变化也可能使恢复后的重新取值不可用。独立审阅核对本机、已收集目录、直连 Runtime、Hub 和旧预设五种协议形状，真实原生数据验证覆盖本机与已收集目录。
