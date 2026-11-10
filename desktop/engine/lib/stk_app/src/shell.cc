@@ -724,25 +724,70 @@ class AppShell::TopBar final : public wm::Region {
     menu("view", "app.menu.view", shell_.view_menu(screen_));
     menu("language", "app.menu.language", shell_.language_menu());
     menu("scale", "app.menu.scale", shell_.scale_menu());
-    // Primary editors are visible actions, rather than destinations inside nested menus.
-    for (const auto &item : std::vector<std::pair<const char *, const char *>>{
-             {kEditorFiles, "app.tool.files"}, {kEditorAnalysisGraph, "app.tool.nodes"},
-             {kEditorTable, "app.tool.table"}, {kEditorPython, "app.tool.python"},
-             {kEditorLiterature, "app.tool.literature"}}) {
-      const std::string key = std::string("tool_") + item.first;
-      const std::string id = item.first;
-      const auto label = shell_.store_.tr(item.second);
-      row.button(key, label, [shell = &shell_, screen = &screen_, weak = shell_.lifetime(), id] {
-        if (!weak.expired()) { shell->activate_editor_later(screen, id, false); }
-      }).width(fit_units(ui, label, 2.0f));
-    }
-    const auto swap_label = shell_.store_.tr("app.tool.swap");
-    row.button("tool_swap", swap_label, [shell = &shell_, screen = &screen_, weak = shell_.lifetime()] {
+    auto *shell = &shell_;
+    auto *screen = &screen_;
+    const auto weak = shell_.lifetime();
+    const auto show = [shell, screen, weak](const char *id) {
+      if (!weak.expired()) { shell->activate_editor_later(screen, id, false); }
+    };
+    const auto epoch = screen_.visibility_epoch();
+    const auto focus = [shell, screen, weak, epoch](const char *id) {
       if (weak.expired() || !shell->has_screen(screen)) { return; }
-      screen->defer([shell, screen, weak] {
-        if (!weak.expired() && shell->has_screen(screen)) { shell->swap_visual_editors(*screen); }
+      screen->defer([shell, screen, weak, epoch, id] {
+        if (weak.expired() || !shell->has_screen(screen) || screen->visibility_epoch() != epoch) { return; }
+        const auto result = shell->activate_editor(screen, id, true);
+        if (result) { shell->focused_workbenches_[screen] = screen->visibility_epoch(); }
+        else if (shell->store_.toast) { shell->store_.toast(result.error().message, ui::ToastKind::Warning); }
       });
-    }).width(fit_units(ui, swap_label, 2.0f)).disable(screen_.maximized() != nullptr);
+    };
+    static constexpr const char *sections[] = {kEditorAI, kEditorJobs, kEditorViewer};
+    const auto *focused = dynamic_cast<EditorArea *>(screen_.maximized());
+    const auto workbench_focus = shell_.focused_workbenches_.find(&screen_);
+    int section = -1;
+    if (focused && workbench_focus != shell_.focused_workbenches_.end() && workbench_focus->second == epoch) {
+      for (int i = 0; i < 3; ++i) {
+        if (focused->editor().type().id == sections[i]) { section = i; break; }
+      }
+    }
+    const auto workbench = shell_.store_.tr("workbench.nav.home");
+    if (section >= 0) {
+      const auto tasks = shell_.store_.tr("workbench.nav.tasks");
+      const auto results = shell_.store_.tr("workbench.nav.results");
+      const auto width = 3 * std::max({fit_units(ui, workbench, 2.0f), fit_units(ui, tasks, 2.0f),
+                                       fit_units(ui, results, 2.0f)});
+      row.tabs("workbench_sections", {std::string(workbench), std::string(tasks), std::string(results)}, {
+        [section] { return section; },
+        [focus, section](int i) { if (i >= 0 && i < 3 && i != section) { focus(sections[i]); } }
+      }).width(width);
+      const auto split = shell_.store_.tr("workbench.nav.split");
+      row.button("workbench_split", split, [shell, screen, weak, epoch] {
+        if (weak.expired() || !shell->has_screen(screen)) { return; }
+        screen->defer([shell, screen, weak, epoch] {
+          if (weak.expired() || !shell->has_screen(screen) || screen->visibility_epoch() != epoch) { return; }
+          const auto result = shell->restore_split_layout(screen);
+          if (!result && shell->store_.toast) { shell->store_.toast(result.error().message, ui::ToastKind::Warning); }
+        });
+      }).width(fit_units(ui, split, 2.0f));
+    }
+    else {
+      row.button("tool_workbench", workbench, [focus] { focus(kEditorAI); })
+          .width(fit_units(ui, workbench, 2.0f));
+      for (const auto &item : std::vector<std::pair<const char *, const char *>>{
+               {kEditorFiles, "app.tool.files"}, {kEditorAnalysisGraph, "app.tool.nodes"},
+               {kEditorTable, "app.tool.table"}, {kEditorPython, "app.tool.python"},
+               {kEditorLiterature, "app.tool.literature"}}) {
+        const auto label = shell_.store_.tr(item.second);
+        row.button(std::string("tool_") + item.first, label, [show, id = item.first] { show(id); })
+            .width(fit_units(ui, label, 2.0f));
+      }
+      const auto swap_label = shell_.store_.tr("app.tool.swap");
+      row.button("tool_swap", swap_label, [shell, screen, weak] {
+        if (weak.expired() || !shell->has_screen(screen)) { return; }
+        screen->defer([shell, screen, weak] {
+          if (!weak.expired() && shell->has_screen(screen)) { shell->swap_visual_editors(*screen); }
+        });
+      }).width(fit_units(ui, swap_label, 2.0f)).disable(screen_.maximized() != nullptr);
+    }
     row.label(shell_.store_.tr("app.title"), ui::Align::Center);
 
     if (has_csd && !csd.buttons.empty()) {
@@ -918,6 +963,7 @@ void AppShell::forget(wm::Screen &screen, wm::Window *window)
 {
   std::erase(screens_, &screen);
   work_modes_.erase(&screen);
+  focused_workbenches_.erase(&screen);
   if (window && window == window_) {
     window_ = nullptr;
   }
@@ -1015,6 +1061,7 @@ void AppShell::build_default_layout(wm::Screen &screen)
     if (auto *area = dynamic_cast<EditorArea *>(base)) { area->set_sidebar_open(false); }
   }
   work_modes_.erase(&screen);
+  focused_workbenches_.erase(&screen);
 }
 
 void AppShell::reset_layout(wm::Screen &screen)
@@ -1063,6 +1110,7 @@ bool AppShell::apply_layout(wm::Screen &screen, const wm::LayoutFile &file, std:
     return false;
   }
   screen.adopt_tree_from(prepared);
+  focused_workbenches_.erase(&screen);
   work_modes_[&screen] = std::move(modes);
   const std::vector<std::string> langs = store_.catalog().languages();
   if (!file.language.empty() && std::find(langs.begin(), langs.end(), file.language) != langs.end()) {

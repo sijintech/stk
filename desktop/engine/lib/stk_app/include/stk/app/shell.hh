@@ -260,6 +260,7 @@ class AppShell {
     std::map<WorkMode, WorkModeLayout> layouts;
   };
   std::map<const wm::Screen *, WorkModes> work_modes_;
+  std::map<const wm::Screen *, uint64_t> focused_workbenches_;
   WorkModeLayout capture_work_mode(const wm::Screen &screen) const;
   WorkModeLayout adapt_work_mode(const wm::Screen &screen, const WorkModeLayout &saved) const;
   nlohmann::json capture_work_modes(const wm::Screen &screen) const;

@@ -5,6 +5,7 @@
 #include "stk/app/viewer_state.hh"
 #include "stk/bridge/process.hh"
 #include "stk/core/paths.hh"
+#include "stk/io/payload.hh"
 #include "../bridge/support.hh"
 #include "../wm/support.hh"
 
@@ -78,6 +79,61 @@ TEST(WorkspaceNavigation, GuidedWorkspaceRemainsAvailableAndOpensJobsAndViewerWi
   EXPECT_EQ(f.screen.maximized(), nullptr);  // explicit navigation restores the peer panes
   EXPECT_EQ(f.area("a2").editor().type().id, kEditorViewer);
   EXPECT_EQ(home.editor().type().id, kEditorWorkspace);
+}
+
+TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
+{
+  wmtest::AppFixture f;
+  const auto areas = f.screen.areas();
+  auto *viewer = &f.area("a2").editor();
+  auto &state = f.shell->store().viewer();
+  const auto payload = std::make_shared<io::Payload>(io::read_stkp(
+      std::string(STK_REPO_ROOT) + "/desktop/tests/viewer/fixtures/muferro_domains.stkp"));
+  state.open_payload(payload, "Existing result");
+  const auto click = [&](const std::string &key) {
+    const auto [x, y] = f.widget_center(key);
+    f.drv->click(x, y);
+    f.screen.run_deferred();
+    f.drv->frame();
+  };
+  f.drv->frame();
+  const auto shown = state.payload();
+  const auto camera = state.camera_serial();
+  ASSERT_NE(f.screen.ui()->find("tool_workbench"), nullptr);
+  click("tool_workbench");
+  auto *home = dynamic_cast<EditorArea *>(f.screen.maximized());
+  ASSERT_NE(home, nullptr);
+  auto *conversation = &home->editor();
+  ASSERT_EQ(conversation->type().id, kEditorAI);
+  EXPECT_EQ(f.screen.ui()->find("tool_files"), nullptr);
+
+  const auto select = [&](int index) {
+    const auto *tabs = f.screen.ui()->find("workbench_sections");
+    ASSERT_NE(tabs, nullptr);
+    tabs->index.assign(index);
+    f.screen.run_deferred();
+    f.drv->frame();
+  };
+  ASSERT_NO_FATAL_FAILURE(select(1));
+  auto *tasks = dynamic_cast<EditorArea *>(f.screen.maximized());
+  ASSERT_NE(tasks, nullptr);
+  EXPECT_EQ(tasks->editor().type().id, kEditorJobs);
+  ASSERT_NO_FATAL_FAILURE(select(2));
+  ASSERT_EQ(f.screen.maximized(), &f.area("a2"));
+  EXPECT_EQ(&f.area("a2").editor(), viewer);
+  EXPECT_EQ(state.payload(), shown);
+  EXPECT_EQ(state.camera_serial(), camera);
+  ASSERT_NO_FATAL_FAILURE(select(0));
+  ASSERT_EQ(f.screen.maximized(), home);
+  EXPECT_EQ(&home->editor(), conversation);
+  ASSERT_NE(f.screen.ui()->find("workbench_split"), nullptr);
+  click("workbench_split");
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  EXPECT_EQ(f.screen.areas(), areas);
+  EXPECT_EQ(&f.area("a2").editor(), viewer);
+  EXPECT_EQ(state.base_payload(), payload);
+  EXPECT_EQ(state.camera_serial(), camera);
+  EXPECT_NE(f.screen.ui()->find("tool_files"), nullptr);
 }
 
 class WorkspaceNavigationPython : public ::testing::Test {
