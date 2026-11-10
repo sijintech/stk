@@ -338,9 +338,12 @@ class WorkspaceEditor final : public Editor {
     auto &label = row.label(text);
     if (const auto error = io::get_string(item, "error"); !error.empty()) { label.tip(error); }
     auto *attention = &ctx.store.attention();
-    const auto open = navigation(ctx, item.value("target", io::Json::object()));
-    row.button("workspace_attention_open/" + key, ctx.tr("workspace.attention.open"), [attention, key, open, seen] {
-      if (seen) { attention->mark_viewed({key}); }
+    const auto target = item.value("target", io::Json::object());
+    const auto request = io::get_string(target, "request_id");
+    const bool saved = io::get_string(target, "page") == "conversation" && !request.empty();
+    const auto open = saved ? ctx.area.shell().saved_conversation_action(ctx.area, request) : navigation(ctx, target);
+    row.button("workspace_attention_open/" + key, ctx.tr("workspace.attention.open"), [open, attention, key, seen, saved] {
+      if (seen && !saved) { attention->mark_viewed({key}); }
       if (open) { open(); }
     }).width(3).disable(!open);
     if (seen) {

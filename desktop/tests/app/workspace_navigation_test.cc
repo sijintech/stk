@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <gtest/gtest.h>
+#include "stk/app/project_attention.hh"
 #include "stk/app/project_discussion.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/viewer_state.hh"
@@ -10,6 +11,7 @@
 #include "../wm/support.hh"
 
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 
 namespace stk::app {
@@ -218,6 +220,7 @@ class WorkspaceNavigationPython : public ::testing::Test {
     ADD_FAILURE() << "No active destination: " << type;
     return home();
   }
+  virtual void configure_bridge(bridge::ClientOptions &, const std::string &) {}
   void SetUp() override
   {
     std::string python = STK_BRIDGE_TEST_PYTHON_DEFAULT;
@@ -233,6 +236,7 @@ class WorkspaceNavigationPython : public ::testing::Test {
     options.env["STK_TOKEN_PLAN_API_KEY"] = "";
     options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
     options.strict = options.validate = true;
+    configure_bridge(options, python);
     client = bridge::Client::create(options);
     ASSERT_TRUE(client->start()); ASSERT_TRUE(client->wait_ready(60)); loop.run_ready();
     f.shell->store().set_bridge(client.get()); project().sync();
@@ -511,6 +515,189 @@ TEST_F(WorkspaceNavigationPython, ReturningToConversationKeepsItsUnsentQuestion)
   ASSERT_NE(widget(key), nullptr);
   EXPECT_EQ(widget(key)->string.value(), "Compare these cases without starting a simulation.");
   EXPECT_EQ(project().project()->revision, 0);
+}
+
+class SavedConversationNavigationPython : public WorkspaceNavigationPython {
+ protected:
+  static constexpr const char *kFirst = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  static constexpr const char *kSecond = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  static constexpr const char *kTable = "11111111-1111-4111-8111-111111111111";
+  static constexpr const char *kRow = "22222222-2222-4222-8222-222222222222";
+  static constexpr const char *kField = "33333333-3333-4333-8333-333333333333";
+
+  void configure_bridge(bridge::ClientOptions &options, const std::string &python) override
+  {
+    const auto script = dir.path() / "observe.py";
+    std::ofstream(script) << R"PY(
+from pathlib import Path
+from suan.desktop_bridge import server
+from suan.desktop_bridge.__main__ import main
+from suan.desktop_bridge.protocol import BridgeError
+from uuid import uuid4
+
+original = server.Bridge.__init__
+def init(self, *args, **kwargs):
+    original(self, *args, **kwargs)
+    create = self.methods["project.requests.create"]
+    def save(params, call):
+        result = create(params, call)
+        if params["configuration"]["adapter"] == "test-completed":
+            requests = self.projects._get(params["handle"]).requests
+            request = result["request"]["id"]
+            owner = str(uuid4())
+            requests._claim(request, executor_id=owner)
+            result["request"] = requests._complete(request, executor_id=owner, text="Saved answer")
+        return result
+    def unexpected(params, call):
+        Path(__file__).with_name("unexpected_write").touch()
+        raise BridgeError("unavailable", "fixture forbids writes during navigation")
+    self.methods["project.requests.create"] = save
+    for method in ("project.requests.start", "project.agent.create", "project.agent.say",
+                   "project.agent.start", "models.local.start", "project.attention.viewed"):
+        self.methods[method] = unexpected
+
+server.Bridge.__init__ = init
+main()
+)PY";
+    options.command = {python, "-u", core::path_to_utf8(script), "--stdio", "--state-dir",
+                       options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
+  }
+
+  void prepare_table()
+  {
+    ASSERT_TRUE(project().apply(Json::array({
+        {{"op", "create_table"}, {"id", kTable}, {"name", "Saved results"}},
+        {{"op", "add_field"}, {"id", kField}, {"table_id", kTable}, {"name", "Value"}, {"type", "number"}},
+        {{"op", "add_record"}, {"id", kRow}, {"table_id", kTable}},
+        {{"op", "set_cell"}, {"table_id", kTable}, {"record_id", kRow}, {"field_id", kField}, {"value", 300}}
+    })));
+    ASSERT_NO_FATAL_FAILURE(idle());
+  }
+
+  void save_question(const char *id, const char *question, bool completed = false)
+  {
+    auto &discussion = project().discussion();
+    ASSERT_TRUE(discussion.capture(kTable, {kRow}, {kField}, question));
+    ASSERT_TRUE(loop.pump_until([&] { return !discussion.busy(); }, 30)) << discussion.error();
+    ASSERT_TRUE(discussion.add_message(question));
+    ASSERT_TRUE(loop.pump_until([&] { return !discussion.busy(); }, 30)) << discussion.error();
+    ASSERT_TRUE(discussion.message().contains("id")) << discussion.error();
+    std::optional<bridge::Result<Json>> result;
+    client->call("project.requests.create",
+                 {{"handle", handle()}, {"request_id", id}, {"message_id", discussion.message().at("id")},
+                  {"configuration", {{"adapter", completed ? "test-completed" : "test-controlled"},
+                                     {"model", "fixture-v1"}}}})
+        .then([&](auto reply) { result = std::move(reply); });
+    ASSERT_TRUE(loop.pump_until([&] { return result.has_value(); }, 30));
+    ASSERT_TRUE(result->ok()) << result->error().describe();
+    ASSERT_EQ(result->value().at("request").at("status"), completed ? "completed" : "pending");
+  }
+
+  std::string attention_key(const char *id, const char *status)
+  {
+    return std::string("workspace_attention_open/request:") + id + ":" + status;
+  }
+
+  void show_attention(const char *id, const char *status = "pending")
+  {
+    f.screen.set_maximized(&home());
+    auto &attention = f.shell->store().attention();
+    const auto key = attention_key(id, status);
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.drv->frame();
+      if (widget(key)) { return true; }
+      if (!attention.busy()) { attention.refresh(); }
+      return false;
+    }, 30)) << attention.error();
+    ASSERT_TRUE(widget(key)->enabled);
+  }
+
+  void TearDown() override
+  {
+    WorkspaceNavigationPython::TearDown();
+    EXPECT_FALSE(std::filesystem::exists(dir.path() / "unexpected_write"));
+  }
+};
+
+TEST_F(SavedConversationNavigationPython, AttentionReopensEachSavedQuestionAndKeepsBothDrafts)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_table());
+  auto &discussion = project().discussion();
+  ASSERT_NO_FATAL_FAILURE(save_question(kFirst, "First saved question"));
+  const auto first_context = discussion.context();
+  ASSERT_NO_FATAL_FAILURE(save_question(kSecond, "Second saved question", true));
+  const auto compose_context = discussion.context();
+  ASSERT_NE(first_context, compose_context);
+
+  go("conversation");
+  const auto question = "ai_question/" + handle();
+  const auto intent = "ai_intent/" + handle();
+  const auto agent_text = "ai_agent_text/" + handle();
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget(question) != nullptr; }, 30));
+  widget(question)->string.assign("Unsent discussion draft");
+  ASSERT_NE(widget(intent), nullptr);
+  widget(intent)->index.assign(3);
+  f.drv->frame();
+  ASSERT_NE(widget(agent_text), nullptr);
+  widget(agent_text)->string.assign("Unsent agent draft");
+
+  const auto open = [&](const char *id, const char *text, const char *status, const Json &context) {
+    ASSERT_NO_FATAL_FAILURE(show_attention(id, status));
+    widget(attention_key(id, status))->on_click();
+    f.screen.run_deferred();
+    EXPECT_EQ(f.screen.maximized(), nullptr);
+    EXPECT_EQ(discussion.exchange_id(), id);
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.drv->frame();
+      return !discussion.exchange_busy() && io::get_string(discussion.exchange_question(), "text") == text;
+    }, 30)) << discussion.exchange_error();
+    EXPECT_EQ(io::get_string(discussion.exchange_request(), "id"), id);
+    EXPECT_EQ(io::get_string(discussion.exchange_request(), "status"), status);
+    EXPECT_EQ(io::get_string(discussion.exchange_context(), "id"), io::get_string(context, "id"));
+    EXPECT_EQ(discussion.context(), compose_context);
+    ASSERT_NE(widget(question), nullptr);
+    EXPECT_EQ(widget(question)->string.value(), "Unsent discussion draft");
+  };
+  ASSERT_NO_FATAL_FAILURE(open(kFirst, "First saved question", "pending", first_context));
+  ASSERT_NO_FATAL_FAILURE(open(kSecond, "Second saved question", "completed", compose_context));
+  EXPECT_EQ(io::get_string(discussion.exchange_reply(), "text"), "Saved answer");
+  ASSERT_NE(widget(intent), nullptr);
+  widget(intent)->index.assign(3);
+  f.drv->frame();
+  ASSERT_NE(widget(agent_text), nullptr);
+  EXPECT_EQ(widget(agent_text)->string.value(), "Unsent agent draft");
+  EXPECT_EQ(project().project()->revision, 1);
+}
+
+TEST_F(SavedConversationNavigationPython, AttentionRefusesSourceABAAndTheReopenedProjectHandle)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_table());
+  ASSERT_NO_FATAL_FAILURE(save_question(kFirst, "Saved before reopening"));
+  ASSERT_NO_FATAL_FAILURE(show_attention(kFirst));
+  auto open = widget(attention_key(kFirst, "pending"))->on_click;
+  open();
+  home().set_active_tab(1);
+  home().set_active_tab(0);
+  f.screen.run_deferred();
+  EXPECT_EQ(f.screen.maximized(), &home());
+  EXPECT_TRUE(project().discussion().exchange_id().empty());
+
+  ASSERT_NO_FATAL_FAILURE(show_attention(kFirst));
+  open = widget(attention_key(kFirst, "pending"))->on_click;
+  open();
+  const auto original = handle();
+  const auto project_id = project().project()->id;
+  ASSERT_TRUE(project().close());
+  ASSERT_TRUE(loop.pump_until([&] { return !project().busy(); }, 30));
+  ASSERT_TRUE(project().open(dir.str() + "/project"));
+  ASSERT_TRUE(loop.pump_until([&] { return !project().busy(); }, 30));
+  ASSERT_TRUE(project().loaded());
+  ASSERT_EQ(project().project()->id, project_id);
+  ASSERT_NE(handle(), original);
+  open();
+  f.screen.run_deferred();
+  EXPECT_EQ(f.screen.maximized(), &home());
+  EXPECT_TRUE(project().discussion().exchange_id().empty());
 }
 
 TEST_F(WorkspaceNavigationPython, CapturedConversationOpensWhileOnlyTheProjectCatalogIsRefreshing)

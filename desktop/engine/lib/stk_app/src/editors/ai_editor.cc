@@ -17,6 +17,7 @@
 #include "project_navigation.hh"
 #include "project_labels.hh"
 #include "editor_text.hh"
+#include "saved_conversation.hh"
 #include "simulation_target.hh"
 #include "stk/app/jobs_state.hh"
 
@@ -247,10 +248,7 @@ class AIEditor final : public Editor {
     // intentionally not part of layout JSON; only explicitly prepared questions are persisted.
     const std::string key = state.project()->directory + "\n" + state.project()->id;
     active_draft_ = key;
-    if (const auto restored = workspace_drafts_.find(state.project()->id); restored != workspace_drafts_.end()) {
-      drafts_[key] = std::move(restored->second); workspace_drafts_.erase(restored);
-    }
-    auto &draft = drafts_[key];
+    auto &draft = project_draft(*state.project(), key);
     // Agent sessions (format 13): a fourth purpose with its own view (steps, wait cards, record).
     auto &agent = state.agent();
     if (!pending_session_.empty()) {
@@ -314,6 +312,15 @@ class AIEditor final : public Editor {
     SimulationTarget run_target;  // draft controls only; never restored as an active authorization
   };
   static constexpr int kAgentIntent = 3;
+
+  Draft &project_draft(const bridge::ProjectInfo &project, const std::string &key)
+  {
+    if (const auto restored = workspace_drafts_.find(project.id); restored != workspace_drafts_.end()) {
+      drafts_[key] = std::move(restored->second);
+      workspace_drafts_.erase(restored);
+    }
+    return drafts_[key];
+  }
 
   /** An automatically routed question in flight (S1d): its ranked candidates, those tried, and what it waits for.
    * Fallback to the next candidate happens only when a request definitely was not sent (``adapter_failed``) or a
@@ -940,7 +947,7 @@ class AIEditor final : public Editor {
     const auto &page = discussion.page("requests");
     if (!page.loaded && enabled) { discussion.load_page("requests", page.offset, true); }
     const auto items = page.items;
-    if (!discussion.exchange_request().empty()) { opened_history_ = true; }
+    if (!discussion.exchange_id().empty()) { opened_history_ = true; }
     if (!opened_history_ && page.loaded && !items.empty() && enabled && !discussion.exchange_busy()) {
       opened_history_ = discussion.load_exchange(io::get_string(items.back(), "id"));
     }
@@ -1209,6 +1216,36 @@ class AIEditor final : public Editor {
   }
 
  public:
+  bool can_reveal_saved(const ProjectState &state) const
+  {
+    return state.project() && (opening_ != state.project()->handle || !picker_.active()) &&
+           (pending_session_.empty() || (!pending_project_.empty() && pending_project_ != state.project()->id));
+  }
+
+  bool saved_dispatch_safe(ProjectState &state, const std::string &request_id) const
+  {
+    const auto &project = *state.project();
+    if (!auto_ || auto_->key != project.directory + "\n" + project.id) { return true; }
+    // A history link cannot resume an armed model start or an automatic fallback.
+    if (auto_->prepare || (auto_->send && !auto_->sent)) { return false; }
+    if (!auto_->send || auto_->request_id != request_id) { return true; }
+    const auto &request = state.discussion().exchange_request();
+    const auto status = io::get_string(request, "status");
+    return io::get_string(request, "id") == request_id &&
+           (status == "completed" || status == "cancelled" || status == "uncertain" ||
+            (status == "failed" && io::get_string(request, "error_code") != "adapter_failed"));
+  }
+
+  bool reveal_saved(ProjectState &state, const std::string &request_id)
+  {
+    if (!state.discussion().load_exchange(request_id)) { return false; }
+    const auto &project = *state.project();
+    auto &draft = project_draft(project, project.directory + "\n" + project.id);
+    if (draft.intent == kAgentIntent) { draft.intent = 0; }
+    opened_history_ = true;
+    return true;
+  }
+
   /** {"session_id"}: show that agent session (for example from a Home attention item). */
   bool navigate(const nlohmann::json &target, const std::weak_ptr<void> &, std::string &) override
   {
@@ -1581,6 +1618,24 @@ class AIEditor final : public Editor {
   std::map<std::string, bool> run_plan_readable_;
 };
 }  // namespace
+
+bool can_reveal_saved_conversation(const Editor &editor, const ProjectState &project)
+{
+  const auto *ai = dynamic_cast<const AIEditor *>(&editor);
+  return ai && ai->can_reveal_saved(project);
+}
+
+bool saved_conversation_dispatch_safe(const Editor &editor, ProjectState &project, const std::string &request_id)
+{
+  const auto *ai = dynamic_cast<const AIEditor *>(&editor);
+  return !ai || ai->saved_dispatch_safe(project, request_id);
+}
+
+bool reveal_saved_conversation(Editor &editor, ProjectState &project, const std::string &request_id)
+{
+  auto *ai = dynamic_cast<AIEditor *>(&editor);
+  return ai && ai->reveal_saved(project, request_id);
+}
 
 std::unique_ptr<Editor> make_ai_editor(const EditorType &type)
 {

@@ -22,6 +22,7 @@
 #include "stk/wm/window.hh"
 
 #include "app_theme.hh"
+#include "editors/saved_conversation.hh"
 
 #ifndef STK_APP_VERSION
 #  define STK_APP_VERSION "0.0.0"
@@ -117,6 +118,13 @@ void AppShell::focus_viewer(wm::Screen &screen)
 bridge::Result<io::Json> AppShell::activate_editor(wm::Screen *screen, const std::string &editor_id,
                                                 const bool maximize)
 {
+  return activate_editor_if(screen, editor_id, maximize, {});
+}
+
+bridge::Result<io::Json> AppShell::activate_editor_if(wm::Screen *screen, const std::string &editor_id,
+                                                    const bool maximize,
+                                                    const std::function<bool(const Editor &)> &can_activate)
+{
   using bridge::Error;
   using bridge::ErrorCode;
   if (!screen || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) {
@@ -136,7 +144,6 @@ bridge::Result<io::Json> AppShell::activate_editor(wm::Screen *screen, const std
     bool committed = false;
     ~MaximizeRollback() { if (!committed) { screen.set_maximized(original); } }
   } rollback{*screen, screen->maximized()};
-  if (!maximize) { screen->set_maximized(nullptr); }
   EditorArea *destination = dynamic_cast<EditorArea *>(rollback.original);
   int tab_index = -1;
   if (destination && destination->editor().type().id == editor_id) {
@@ -169,6 +176,10 @@ bridge::Result<io::Json> AppShell::activate_editor(wm::Screen *screen, const std
       if (destination) { break; }
     }
   }
+  if (destination && can_activate && !can_activate(destination->tab(tab_index))) {
+    return Error::make(ErrorCode::Busy, std::string(store_.tr("app.focus.busy")));
+  }
+  if (!maximize) { screen->set_maximized(nullptr); }
   // Old layouts may place a Python/analysis tab beside the only Viewer tab in one area.
   // Reveal that existing instance elsewhere, retaining its drafts and the live Viewer.
   if (!maximize && editor_id != kEditorViewer && destination && destination->editor().type().id == kEditorViewer) {
@@ -283,6 +294,63 @@ void AppShell::activate_editor_later(wm::Screen *screen, std::string editor_id, 
     const auto result = activate_editor(screen, editor_id, maximize);
     if (!result && store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
   });
+}
+
+std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, std::string request_id)
+{
+  auto *screen = origin.screen();
+  auto &project = store_.project();
+  if (!screen || !project.project() || request_id.empty()) { return {}; }
+  const auto handle = project.project()->handle;
+  const auto project_id = project.project()->id;
+  const auto scope = store_.project_scope_epoch();
+  const auto bridge = store_.bridge_epoch();
+  const auto visibility = screen->visibility_epoch();
+  const auto activity = origin.activity_epoch();
+  const auto exchange = project.discussion().exchange_generation();
+  const auto editor = origin.editor().lifetime();
+  const auto weak = lifetime();
+  const auto current = [this, weak, screen, area = &origin, editor, activity, visibility,
+                        handle, project_id, scope, bridge, exchange] {
+    if (weak.expired() || editor.expired() || !has_screen(screen) || !has_area(area) ||
+        area->screen() != screen || area->activity_epoch() != activity ||
+        screen->visibility_epoch() != visibility || store_.bridge_epoch() != bridge ||
+        store_.project_scope_epoch() != scope) { return false; }
+    auto &state = store_.project();
+    return state.project() && state.project()->handle == handle && state.project()->id == project_id &&
+           state.discussion().exchange_generation() == exchange;
+  };
+  return [this, screen, current, request_id = std::move(request_id)] {
+    if (!current()) { return; }
+    screen->defer([this, screen, current, request_id] {
+      if (!current()) { return; }
+      auto &state = store_.project();
+      state.sync();
+      if (!current() || !state.ready() || !state.loaded() || state.busy() || text_input_active() ||
+          !state.discussion().generation_supported() || state.discussion().busy() || state.discussion().exchange_busy()) {
+        return;
+      }
+      for (const auto *other : screens_) {
+        for (const auto *base : other->areas()) {
+          const auto *area = dynamic_cast<const EditorArea *>(base);
+          if (area && !saved_conversation_dispatch_safe(area->editor(), state, request_id)) { return; }
+        }
+      }
+      const bool focused = workbench_is_focused(*screen);
+      const auto result = activate_editor_if(screen, kEditorAI, focused, [&](const Editor &destination) {
+        return can_reveal_saved_conversation(destination, state) &&
+               saved_conversation_dispatch_safe(destination, state, request_id);
+      });
+      if (!result) {
+        if (store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
+        return;
+      }
+      auto *area = dynamic_cast<EditorArea *>(screen->find_area(io::get_string(result.value(), "area_id")));
+      if (!area || !reveal_saved_conversation(area->editor(), state, request_id)) { return; }
+      if (focused) { focused_workbenches_[screen] = screen->visibility_epoch(); }
+      store_.changed();
+    });
+  };
 }
 
 void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std::string handle,
