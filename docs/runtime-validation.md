@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-10 20:46 UTC · 聚焦会话的项目概览入口
+
+`3055fbf3` 将聚焦会话页头的次要入口标为「项目概览」及 `Overview`，保留原项目引导、分栏恢复与点击路径。一级「工作台」继续表示聚焦会话，普通分栏与其他编辑器仍使用旧名。旧版定向回归的唯一失败是英文泛称 `Home`。最终工作台及问答 60/60、窗口 88/88，零跳过。英文双倍缩放的控件宽度与六个默认窗口基线均通过。
+
+Linux X11 英文 1600×900 缩放 2、中文 680×620 缩放 1。固定起点为已打开隔离项目、历史读取结束的聚焦工作台，公开载荷此前已在结果页转动。准备 4 次点击和一次中键拖动。两端各 1 次点击输入草稿、1 次打开概览、1 次顶栏工作台返回、1 次查看结果，零滚轮。两种文字完整显示，项目概览内容区与旧版相同，返回同一会话及未提交草稿。相机正对照先改变英文 235513 与中文 111096 像素，往返后相同画布区域英文 880384 与中文 318528 像素均无差异。测量只观察既有 `modules.list` 读取，SQLite 和 Runtime 快照一致。收据在外部 `root-delivery-20261110-140/overview-window`，二进制 SHA256 为 `182f37f75f8dd1cbb50cace3dbaa1d3e58e0a829eb8a29874ebf30137f04f1ff`。
+
+远端仍为 `9ce87c63`。两项 Linux 打包已通过，其他 Desktop 作业与 Runtime 仍运行。最终空会话候选的原生全量套件也在运行。当前两条旧 PR 的头分别仍为 `c9f13994` 和 `2dd3e4ee`。另在独立工作树准备三跳 HDF5 合成验收，核对 Hub、NodeAgent 与 Runtime 转发后的字段、步号、容器摘要及拒绝路径，沿用发布契约。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42895759127) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42895759007)
+
 ## 2026-11-10 20:35 UTC · 主线发布与 Web 返回焦点
 
 `9ce87c63` 已快进推送并核对远端 `main`。这批含空会话与归档修复、双端结果保留及 Cocoa 对照。新源码头 Secret scan 与 Pages 通过，Desktop 和 Runtime 已运行。上一批 Desktop、Windows 工件和 macOS 失败阶段见下方终态记录。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42895759127) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42895759007)
