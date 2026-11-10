@@ -22,7 +22,8 @@ type Section='workbench'|'tasks'|'results';
 type EnvironmentDisclosure='setup'|'auto-closed'|'open'|'closed';
 const SECTIONS:readonly (readonly [Section,string])[]=[['workbench','工作台'],['tasks','任务'],['results','结果']];
 // Up to this width the conversation history is opened on demand over the active section instead of a fixed column.
-const COMPACT='(max-width: 1050px)';
+// The native workbench switches its rail at the same logical width.
+const COMPACT='(max-width: 700px)';
 // The secondary line of a history entry: what it is, then any unsent draft or message it holds.
 function entryNote(entry:Entry){
   const kind=entry.kind==='local'?'未保存':entry.kind==='missing'?`已不存在 · ${entry.id.slice(0,6)}`:entry.kind==='unconfirmed'?`正在确认 · ${entry.id.slice(0,6)}`:
@@ -419,7 +420,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const resultText=analysis==='graph'?graphProbeText:shown?probeText:'';
   return <div className="app"><header><div className="wordmark">STK <span>科学工作台</span></div><span className={online?'connection':'connection offline'}>{online?'控制服务已连接':'连接中断 · 显示最近状态'}</span><button className="quiet" onClick={disconnect}>断开</button></header>
     {notice&&<div className="notice" role="alert">{notice}<button onClick={()=>error?setError(''):analysis==='file'?setViewError(''):setGraphError('')}>关闭</button></div>}
-    <div className={wide?'workspace with-history':'workspace'}>
+    <div className="workspace">
     <nav className="section-nav" aria-label="工作区">{SECTIONS.map(([key,label])=><button type="button" className={tab===key?'active':''} aria-current={tab===key?'page':undefined} key={key} onClick={()=>openSection(key)}>{label}</button>)}
       {!wide&&<button type="button" ref={historyToggle} className={historyOpen?'history-toggle open':'history-toggle'} aria-expanded={historyOpen} aria-controls="conversation-history" aria-label="对话历史" onClick={toggleHistory}>历史</button>}</nav>
     <section id="conversation-history" ref={historyPanel} aria-label="对话历史" className={`history${wide?'':' history-overlay'}${historyShown?'':' surface-hidden'}`} inert={!historyShown}>

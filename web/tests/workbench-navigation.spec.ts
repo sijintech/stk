@@ -1517,7 +1517,7 @@ test('the analysis mode switch keeps its height on a short wide page', async ({p
   await expect(page.getByRole('tab', {name: '图谱'})).toHaveAttribute('aria-selected', 'true');
 });
 
-// Conversation history in the common navigation: a left column beside the rail on a wide page, on demand from the
+// Conversation history in the common navigation: below the navigation in the left rail, on demand from the top
 // strip on a narrow one. Choosing a conversation is read-only (history GET only); only 发送 writes.
 const A = '1'.repeat(32), B = '2'.repeat(32), X = '3'.repeat(32);
 function conversations(hub: Hub, {listMissing = false} = {}) {
@@ -1559,8 +1559,8 @@ test('history distinguishes generic saved conversations with their first questio
   expect(hub.calls.filter(call => call.startsWith('POST sessions/'))).toEqual([]);
 });
 const box = async (page: Page, selector: string) => (await page.locator(selector).boundingBox())!;
-// Up to 1050 px (the app's compact width) the history is opened from the navigation on demand.
-const isNarrow = (page: Page) => page.viewportSize()!.width <= 1050;
+// The Web and native workbenches use the same logical width for the compact navigation.
+const isNarrow = (page: Page) => page.viewportSize()!.width <= 700;
 // One explicit action in the history; on a narrow page the history is opened first.
 async function choose(page: Page, name: string | RegExp) {
   if (isNarrow(page)) await historyToggle(page).click();
@@ -1589,12 +1589,13 @@ for (const viewport of viewports) {
         const surface = surfaces[section];
         const held = await box(page, surface);
         if (viewport.name === 'wide') {
-          // Rail, readable history column, then the active section.
+          // Navigation and history share a rail to the left of the active section.
           await expect(page.getByRole('region', {name: '对话历史'})).toBeVisible();
           expect(await historyPanel(page).evaluate(el => (el as HTMLElement).inert)).toBe(false);
           await expect(historyToggle(page)).toHaveCount(0);
           const rail = (await nav(page).boundingBox())!, column = (await historyPanel(page).boundingBox())!;
-          expect([rail.x, rail.width, column.x, column.width]).toEqual([0, 76, 76, 248]);
+          expect([rail.x, rail.width, column.x, column.width]).toEqual([0, 144, 0, 144]);
+          expect(column.y).toBe(rail.y + rail.height);
           expect(held.x).toBeGreaterThanOrEqual(column.x + column.width);
           for (const name of ['相场参数讨论', '铁电回线分析']) {
             await expect(item(page, new RegExp(name))).toBeInViewport({ratio: 1});
@@ -2444,6 +2445,38 @@ for (const viewport of viewports) {
     });
   });
 }
+
+test('at the native rail breakpoint, history moves from the left rail to the top navigation', async ({page}) => {
+  await page.setViewportSize({width: 701, height: 844});
+  const hub = new Hub();
+  conversations(hub);
+  const errors = await setup(page, hub, {scene: false});
+  await expect(historyToggle(page)).toHaveCount(0);
+  const rail = (await nav(page).boundingBox())!;
+  const history = (await historyPanel(page).boundingBox())!;
+  const tasks = await box(page, 'aside.tasks');
+  expect([rail.x, rail.width, history.x, history.width, history.y]).toEqual([0, 144, 0, 144, rail.y + rail.height]);
+  expect(tasks.x).toBeGreaterThanOrEqual(144);
+  await item(page, /相场参数讨论/).click();
+  await shows(page, ['A 的问题', 'A 的回答']);
+  await go(page, '任务');
+  await page.setViewportSize({width: 700, height: 844});
+  const strip = (await nav(page).boundingBox())!;
+  expect([strip.x, strip.width]).toEqual([0, 700]);
+  expect((await box(page, 'aside.tasks')).y).toBe(strip.y + strip.height);
+  await expect(historyPanel(page)).toBeHidden();
+  await historyToggle(page).click();
+  await expect(item(page, /相场参数讨论/)).toBeInViewport({ratio: 1});
+  await page.keyboard.press('Escape');
+  await expect(historyToggle(page)).toBeFocused();
+  await choose(page, /新对话.*有草稿/);
+  await expectActive(page, '工作台');
+  await expect(draft(page)).toHaveValue('未发送的草稿：分析 phi 场');
+  expect(hub.calls).toEqual([`history ${A}`]);
+  expect(hub.messages).toEqual([]);
+  expect(hub.actionRows).toEqual([]);
+  expect(errors).toEqual([]);
+});
 
 // The compact history overlay from the keyboard: it opens on the selected conversation, keeps input away from the
 // section under it, closes with Escape from anywhere, and keeps the focus in the history across the compact width.
