@@ -566,8 +566,8 @@ def verify(args):
     return 0 if result["verification"]["status"] == "passed" else 3
 
 
-def check(args):
-    """Diagnose this node's MuPRO toolchain; licence contents are never read."""
+def check_toolchain(args):
+    """Collect this process's toolchain diagnostics; licence contents are never read."""
     checks = []
 
     def add(check_id, status, message):
@@ -630,11 +630,46 @@ def check(args):
         add("example_case", "warn", "The SDK example case is missing: " + ", ".join(missing))
     else:
         add("example_case", "pass", str(example / "input.toml"))
-    report = {"ok": not any(item["status"] == "fail" for item in checks), "checks": checks}
+    return {"ok": not any(item["status"] == "fail" for item in checks), "checks": checks}
+
+
+def preflight_observation(args):
+    """Observe configured local prerequisites without claiming a runnable MuPRO installation.
+
+    The legacy diagnostic messages remain local. This projection deliberately contains
+    fixed check identities and statuses, not paths, environment values or command output.
+    Configured environment scripts are still explicitly sourced by the local check.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    started = now()
+    report = check_toolchain(args)
+    statuses = {item["id"]: item["status"] for item in report["checks"]}
+    try:
+        distribution_version = version("suan_toolkits")
+    except PackageNotFoundError:
+        distribution_version = None
+    summary = ("checks_failed" if "fail" in statuses.values() else
+               "checks_incomplete" if any(value in {"warn", "skip"} for value in statuses.values()) else
+               "checks_passed")
+    checks = [{"id": "env_scripts", "status": statuses.get("env_scripts", "not_configured")}]
+    checks.extend({"id": name, "status": statuses[name]} for name in (
+        "sdk_prefix", "program", "shared_libraries", "mpi_launcher", "license_dir", "example_case"))
+    return {"schema": "stk.mupro-preflight/1", "scope": "local_process",
+            "producer": {"component": "suan.mupro", "distribution_version": distribution_version},
+            "process_id": os.getpid(), "started_at": started, "observed_at": now(),
+            "summary": summary, "checks": checks,
+            "unverified": {"program_version": "unobserved", "license_checkout": "not_checked",
+                           "solver_execution": "not_run"}}
+
+
+def check(args):
+    """Print the existing compute-side diagnostic contract and exit code."""
+    report = check_toolchain(args)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
-        _print_checks(checks)
+        _print_checks(report["checks"])
     return 0 if report["ok"] else 1
 
 

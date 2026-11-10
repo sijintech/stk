@@ -18,6 +18,36 @@ def mupro():
     """MuPRO jobs queued by the STK Runtime."""
 
 
+@mupro.command("check")
+@click.option("--sdk-prefix", help="SDK prefix in this process's environment (default: MUPRO_SDK_PREFIX).")
+@click.option("--program", default="muFerro", show_default=True, help="Configured program name or path to locate.")
+@click.option("--env-script", "env_scripts", multiple=True, help="Local trusted bash script to source before checking.")
+@click.option("--license-dir", help="Local licence directory; its contents are never read.")
+@click.option("--json", "as_json", is_flag=True, help="Print the versioned observation without diagnostic paths.")
+def check(sdk_prefix, program, env_scripts, license_dir, as_json):
+    """Observe this machine's configured prerequisites, without running MuPRO.
+
+    Run on the compute node to inspect that node. This does not connect to a Runtime,
+    select a placement, check out a licence or test a solver. Configured environment
+    scripts are sourced. Detailed local diagnostics remain in python -m suan.mupro check.
+    """
+    from types import SimpleNamespace
+    from .run import preflight_observation
+
+    report = preflight_observation(SimpleNamespace(sdk_prefix=sdk_prefix, program=program,
+        env_scripts=list(env_scripts), license_dir=license_dir))
+    if as_json:
+        dump(report)
+    else:
+        click.echo(f"MuPRO preflight: {report['summary']} ({report['scope']}, pid {report['process_id']})")
+        click.echo(f"Observed at {report['observed_at']}")
+        for item in report["checks"]:
+            click.echo(f"[{item['status'].upper()}] {item['id']}")
+        click.echo("MuPRO version unobserved; licence checkout not checked; solver not run.")
+    if report["summary"] == "checks_failed":
+        raise click.exceptions.Exit(1)
+
+
 def _case_uploads(folder, case_dir):
     from .run import case_input_info
 

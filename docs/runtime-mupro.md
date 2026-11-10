@@ -66,6 +66,28 @@ Slurm 作业默认带上提交时的环境（sbatch 默认 `--export=ALL`，站�
 
 站点配置的规则见 [runtime 使用指南](runtime.md) 的“站点配置（scheduler）”。
 
+## 本机预检观察
+
+在要检查的实际计算节点上，复用该节点已经配置的环境，执行：
+
+```bash
+suan mupro check --json
+```
+
+也可明确传入本机的 `--sdk-prefix`、`--program`、`--env-script` 和 `--license-dir`。
+命令会 source 已配置的受信任环境脚本；它检查调用进程的环境，不连接 Runtime 或选择远端节点。
+因此，在桌面机器执行后得到的结果不能当作另一计算节点的就绪状态。
+
+输出使用 [`stk.mupro-preflight/1`](specs/mupro-preflight-1.md)，包含观察时间、进程与 STK 版本，
+以及程序文件、动态库、MPI 启动器、许可目录和样例文件的固定检查状态，不含路径和原始诊断。
+`checks_failed` 表示有失败项；`checks_incomplete` 表示没有失败但有警告或跳过项；`checks_passed`
+表示这些前置检查都通过。退出 0 仍可能是 `checks_incomplete`。
+
+所有结果都明确保留“软件版本未观察、许可未签出、求解器未运行”。空许可目录存在或找到可执行文件，
+均不能证明实际许可有效或算例可运行；已有任务与逐次核验仍是运行证据。
+需要本机路径和详细诊断时，原命令 `python -m suan.mupro check --json` 继续返回既有 `{ok, checks}`。
+其中 `ok` 只表示没有 `fail`，不会把 `warn` 或 `skip` 算作失败。
+
 ## 提交与查看
 
 ```bash
