@@ -4,6 +4,7 @@
 #include "stk/io/json.hh"
 #include "path_picker.hh"
 #include "simulation_target.hh"
+#include "simulation_preflight.hh"
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -34,6 +35,7 @@ class ProjectSimulationView {
   io::Json workspace_pending_;
   SimulationTarget target_;
   SimulationTarget lammps_target_;
+  SimulationPreflight preflight_;
   int engine_ = 0;
   uint64_t generation_ = 0;
   std::string source_;

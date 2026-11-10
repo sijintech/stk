@@ -32,6 +32,7 @@ stk_editor_module(project
   src/editors/project_review_view.cc
   src/editors/project_discussion_view.cc
   src/editors/project_simulation_view.cc
+  src/editors/simulation_preflight.cc
   src/editors/simulation_target.cc
   src/editors/project_context_picker.cc
 )

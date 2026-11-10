@@ -18,6 +18,7 @@ bool SimulationTarget::load_workspace_state(const io::Json &value)
 {
   if (!workspace_fields(value, {"options"}, {}, {}, {}, 65536)) { return false; }
   options_ = value.value("options", std::string(R"({"backend":"local","ranks":1,"threads_per_rank":1})"));
+  ++options_epoch_;
   return true;
 }
 
@@ -54,7 +55,8 @@ std::optional<Json> SimulationTarget::options_controls(ui::Layout &panel, Editor
     if (!edited.is_object()) { return; }
     if (value.is_null()) { edited.erase(key); }
     else { edited[key] = std::move(value); }
-    options_ = edited.dump();
+    const auto text = edited.dump();
+    if (options_ != text) { options_ = text; ++options_epoch_; }
   };
   const auto number = [this](const char *key, const double fallback) {
     const Json current = Json::parse(options_, nullptr, false);
@@ -82,7 +84,9 @@ std::optional<Json> SimulationTarget::options_controls(ui::Layout &panel, Editor
   if (auto *advanced = panel.panel("advanced_options", ctx.tr("simulation.options_advanced"), false)) {
     hint(*advanced, ctx, engine == "lammps/1" ? "simulation.lammps_options_hint" :
                          engine == "muferro/1" ? "simulation.muferro_options_hint" : "simulation.options_hint");
-    advanced->text_field("options", ui::bind(options_), {.max_length = 65536, .mono = true});
+    advanced->text_field("options", ui::Binding<std::string>{[this] { return options_; }, [this](std::string text) {
+      if (options_ != text) { options_ = std::move(text); ++options_epoch_; }
+    }}, {.max_length = 65536, .mono = true});
   }
   if (!valid) {
     panel.paragraph(ctx.tr("simulation.options_invalid"));

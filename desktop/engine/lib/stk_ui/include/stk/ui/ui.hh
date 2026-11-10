@@ -594,6 +594,8 @@ class Context {
   const TextEdit *edit_state() const { return edit_.id ? &edit_.edit : nullptr; }
   double now() const { return now_; }
   bool panel_open(WidgetId id, bool default_open) const;
+  /** Changes at the toggle event, including close/open without an intervening layout frame. */
+  uint64_t panel_epoch(WidgetId id) const;
   float scroll_of(WidgetId id) const;
 
  private:
@@ -775,6 +777,7 @@ class Context {
   uint64_t toast_serial_ = 0;
 
   std::unordered_map<WidgetId, bool> panels_;
+  std::unordered_map<WidgetId, uint64_t> panel_epochs_;
   std::unordered_map<WidgetId, float> scroll_;
   std::unordered_map<WidgetId, bool> follow_;
   std::unordered_map<WidgetId, TableState> tables_;

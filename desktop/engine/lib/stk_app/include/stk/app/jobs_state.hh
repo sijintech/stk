@@ -227,6 +227,8 @@ class JobsState {
   void refresh_connections();
   /** Connects (health check, nodes / templates / policy for hubs, workspaces); "" disconnects. */
   void select_connection(const std::string &id);
+  /** Also changes for A→B→A selection, independently of the current connection's name. */
+  uint64_t connection_epoch() const { return conn_epoch_; }
   void check_connection(const std::string &id);
   void ssh_connection(const std::string &id, const std::string &action);
   /** The connection to pick once the list is known (saved with the layout). */

@@ -170,6 +170,7 @@ void EditorArea::on_removed()
 
 void EditorArea::sync_regions()
 {
+  ++activity_epoch_;
   if (tabs_.empty() || !tabs_[size_t(active_)]) {
     return;
   }

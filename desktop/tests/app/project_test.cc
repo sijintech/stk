@@ -23,6 +23,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include "stk/platform/file_dialog.hh"
 
@@ -3837,6 +3838,362 @@ class SimulationPython : public ProjectPython {
     ProjectPython::TearDown();
   }
 };
+
+/** A real Bridge/Runtime, with only main-loop delivery held for completed-ACK races. */
+class PreflightCallbackGate {
+ public:
+  explicit PreflightCallbackGate(bridge::Executor next) : next_(std::move(next)) {}
+  bridge::Executor executor()
+  {
+    return [this](std::function<void()> task) {
+      { std::lock_guard lock(mutex_); if (holding_) { held_.push_back(std::move(task)); return; } }
+      next_(std::move(task));
+    };
+  }
+  void hold() { std::lock_guard lock(mutex_); holding_ = true; }
+  void release()
+  {
+    std::vector<std::function<void()>> tasks;
+    { std::lock_guard lock(mutex_); holding_ = false; tasks.swap(held_); }
+    for (auto &task : tasks) { task(); }
+  }
+ private:
+  bridge::Executor next_;
+  std::mutex mutex_;
+  bool holding_ = false;
+  std::vector<std::function<void()>> held_;
+};
+
+class NativePreflightPython : public ProjectPython {
+ protected:
+  PreflightCallbackGate gate{loop.executor()};
+  virtual bool scriptless() const { return false; }
+  virtual int existing_workspaces() const { return 0; }
+  void configure_bridge(bridge::ClientOptions &options, const std::string &python) override
+  {
+    options.env.erase("STK_TOKEN_PLAN_MODEL");
+    options.env["STK_TEST_MUPRO_PREFIX"] = "";
+    options.env["PYTHONPYCACHEPREFIX"] = dir.str() + "/bytecode";
+    options.executor = gate.executor();
+    const auto wrapper = dir.str() + "/preflight_bridge.py";
+    std::ofstream out(core::path_from_utf8(wrapper));
+    out << "import sys\nsys.path.insert(0, " << Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() << ")\n";
+    out << R"PY(import json, os, shlex, threading
+from pathlib import Path
+from simulation_fixture import SimulationRuntime
+from suan.desktop_bridge import server
+from suan.desktop_bridge.__main__ import main
+from suan.desktop_bridge.connections import ConnectionStore
+from suan.desktop_bridge.protocol import BridgeError, decode_line
+control = Path(sys.argv.pop(1))
+scriptless = sys.argv.pop(1) == '1'
+existing_workspaces = int(sys.argv.pop(1))
+runtime = SimulationRuntime(control / 'runtime')
+for index in range(existing_workspaces):
+    runtime.server.service.create_workspace('Existing workspace ' + str(index), 'fixture-existing:' + str(index))
+sdk = Path(runtime.source).parents[4]
+tools, licence = control / 'worker-bin', control / 'empty-licence'
+tools.mkdir(); licence.mkdir()
+for program in (sdk / 'bin/muFerro', tools / 'mpiexec'):
+    program.write_text('#!/bin/sh\nprintf forbidden > ' + shlex.quote(str(control / 'solver-or-mpi-started')) + '\nexit 17\n')
+    program.chmod(0o700)
+script = control / 'worker-env.sh'
+script.write_text('printf "%s\\n" "$PPID" >> ' + shlex.quote(str(control / 'collected')) + '\n')
+env = {'PATH': str(tools) + ':/usr/bin:/bin', 'LANG': 'C.UTF-8', 'PYTHONPATH': os.environ['PYTHONPATH'],
+       'PYTHONPYCACHEPREFIX': str(control / 'worker-bytecode'), 'STK_TOKEN_PLAN_API_KEY': '',
+       'MUPRO_SDK_PREFIX': str(sdk), 'MUPROROOT': str(licence), 'STK_MUPRO_ENV_SCRIPTS': str(script)}
+interpreter = control / 'worker-python'
+interpreter.write_text('#!/bin/sh\nexec /usr/bin/env -i ' + shlex.join([*(k+'='+v for k,v in env.items()),sys.executable]) + ' "$@"\n')
+interpreter.chmod(0o700)
+runtime.config['python'] = str(interpreter)
+lock = threading.Lock()
+def record(name, value):
+    with lock, (control / name).open('a', encoding='utf-8') as file:
+        file.write(json.dumps(value) + '\n')
+submit = runtime.server.service.submit
+def recorded_submit(spec, key):
+    record('task-posts.jsonl', {'spec': spec, 'key': key})
+    return submit(spec, key)
+runtime.server.service.submit = recorded_submit
+create = runtime.server.service.create_workspace
+def recorded_create(name, key=None):
+    record('workspace-posts.jsonl', {'name': name, 'key': key})
+    return create(name, key)
+runtime.server.service.create_workspace = recorded_create
+store = ConnectionStore(control / 'bridge')
+for name in ('preflight-test', 'preflight-other'):
+    store.add_runtime(name, runtime.url, 'abcdefghijklmnopqrstu', check=False)
+class ObservedBridge(server.Bridge):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if scriptless:
+            def unavailable(params, context):
+                raise BridgeError('unsupported', 'Fixture intentionally has no Python session')
+            self.methods['script.open'] = unavailable
+    def handle_line(self, raw):
+        value = decode_line(raw)
+        method = value.get('method', '')
+        if method.startswith('mupro.preflight.') or method == 'script.execute':
+            record('wire.jsonl', {'kind': 'request', 'method': method})
+        return super().handle_line(raw)
+    def send(self, message, method=None):
+        answer = super().send(message, method)
+        if answer and method == 'mupro.preflight.reserve' and 'result' in message:
+            value = message['result']['record']
+            record('wire.jsonl', {'kind': 'reserve_sent', 'method': method, 'id': value['id'], 'phase': value['phase']})
+        return answer
+server.Bridge = ObservedBridge
+try:
+    main()
+finally:
+    runtime.close()
+)PY";
+    out.close();
+    options.command = {python, wrapper, dir.str(), scriptless() ? "1" : "0", std::to_string(existing_workspaces()), "--stdio", "--state-dir", options.state_dir,
+                       "--cache-dir", options.cache_dir, "--strict"};
+  }
+  void TearDown() override { gate.release(); ProjectPython::TearDown(); }
+  const ui::Widget *widget(const std::string &id)
+  {
+    const std::string root = "a2/main/project_simulation/";
+    return f.screen.ui()->find(root + (id.starts_with("preflight_") ? "execution_preflight/" : "") + id);
+  }
+  void frame() { f.screen.run_deferred(); f.drv->frame(); }
+  bool until(const std::function<bool()> &predicate)
+  {
+    return loop.pump_until([&] { frame(); return predicate(); }, 60);
+  }
+  Json lines(const std::string &name)
+  {
+    Json result = Json::array(); std::ifstream file(core::path_from_utf8(dir.str() + "/" + name)); std::string line;
+    while (std::getline(file, line)) {
+      const auto entry = Json::parse(line, nullptr, false);
+      if (!entry.is_discarded()) { result.push_back(entry); } // A concurrent append may expose an unfinished final line.
+    }
+    return result;
+  }
+  size_t calls(const std::string &method)
+  {
+    const auto wire = lines("wire.jsonl");
+    return size_t(std::count_if(wire.begin(), wire.end(), [&](const Json &entry) {
+      return entry.value("kind", "") == "request" && entry.value("method", "") == method;
+    }));
+  }
+  bool shows_summary()
+  {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) {
+        if (item.text.find("Some prerequisite checks are incomplete") != std::string::npos) { return true; }
+      }
+    }
+    return false;
+  }
+  Json journal()
+  {
+    const auto path = core::path_from_utf8(dir.str() + "/bridge/mupro-preflight");
+    if (!std::filesystem::exists(path)) { return Json::array(); }
+    Json result = Json::array();
+    for (const auto &file : std::filesystem::directory_iterator(path)) {
+      if (file.path().extension() == ".json") { std::ifstream input(file.path()); result.push_back(Json::parse(input)); }
+    }
+    return result;
+  }
+  void expand(const std::string &path)
+  {
+    const auto *header = f.screen.ui()->find(path);
+    ASSERT_NE(header, nullptr);
+    if (!f.screen.ui()->panel_open(header->id, false)) {
+      const auto [x, y] = f.widget_center(path);
+      f.drv->click(x, y);
+      frame();
+    }
+  }
+  void open_panel()
+  {
+    populated(); auto &jobs = f.shell->store().jobs(); jobs.sync(); jobs.refresh_connections();
+    ASSERT_TRUE(loop.pump_until([&] {
+      return std::any_of(jobs.connections().begin(), jobs.connections().end(), [](const auto &row) { return row.info.id == "runtime:preflight-test"; });
+    }, 30)) << client->bridge_log().text();
+    jobs.select_connection("runtime:preflight-test");
+    auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject)); f.screen.set_maximized(&area);
+    frame();
+    ASSERT_NO_FATAL_FAILURE(expand("a2/main/project_simulation"));
+    ASSERT_NO_FATAL_FAILURE(expand("a2/main/project_simulation/execution_preflight"));
+    ASSERT_TRUE(until([&] { const auto *button = widget("preflight_submit"); return button && button->enabled; }))
+        << client->bridge_log().text();
+    if (!scriptless()) { ASSERT_TRUE(until([&] { return f.shell->store().scripts().ready(); })); }
+    EXPECT_EQ(widget("preflight_workspace")->index.get(), 0);
+    EXPECT_EQ(widget("preflight_submit")->text, "Create diagnostic workspace and check");
+  }
+  void completed_reserve()
+  {
+    const auto barrier = client->call("connections.list").wait_for(std::chrono::seconds(30));
+    ASSERT_TRUE(barrier && barrier->ok()); loop.run_ready(); frame();
+    gate.hold(); widget("preflight_submit")->on_click();
+    ASSERT_TRUE(bridge::test::wait_until([&] {
+      const auto wire = lines("wire.jsonl");
+      return std::any_of(wire.begin(), wire.end(), [](const Json &r) { return r.value("kind", "") == "reserve_sent"; });
+    }, 30));
+    // Marker was written after the real response. This later wire reply proves
+    // the reader consumed that successful ACK while its continuation is held.
+    const auto fulfilled = client->call("connections.list").wait_for(std::chrono::seconds(30));
+    ASSERT_TRUE(fulfilled && fulfilled->ok());
+    ASSERT_EQ(journal().size(), 1u); EXPECT_EQ(journal().front().at("phase"), "prepared");
+    const auto wire = lines("wire.jsonl");
+    const auto sent = std::find_if(wire.begin(), wire.end(), [](const Json &r) { return r.value("kind", "") == "reserve_sent"; });
+    ASSERT_NE(sent, wire.end()); EXPECT_EQ(sent->at("id"), journal().front().at("id")); EXPECT_EQ(sent->at("phase"), "prepared");
+    EXPECT_TRUE(lines("task-posts.jsonl").empty()); EXPECT_TRUE(lines("workspace-posts.jsonl").empty());
+  }
+};
+
+class NativePreflightWithoutPython : public NativePreflightPython {
+ protected:
+  bool scriptless() const override { return true; }
+};
+
+struct PreflightPanelTransition { bool inner; bool reopen; };
+class NativePreflightPanel : public NativePreflightPython, public ::testing::WithParamInterface<PreflightPanelTransition> {};
+
+class NativePreflightManyWorkspaces : public NativePreflightWithoutPython {
+ protected:
+  int existing_workspaces() const override { return 256; }
+};
+
+TEST_F(NativePreflightWithoutPython, OneCheckCreatesOneDiagnosticTaskAndPreservesProjectViewerDraftAndUploads)
+{
+  ASSERT_NO_FATAL_FAILURE(open_panel());
+  auto &store = f.shell->store(); auto &scripts = store.scripts(); auto &jobs = store.jobs(); auto &viewer = store.viewer();
+  ASSERT_FALSE(scripts.ready()); ASSERT_TRUE(scripts.history().empty());
+  auto &bottom = f.area("a4"); ASSERT_TRUE(bottom.set_tabs({kEditorLogs, kEditorPython}, 0));
+  auto draft = bottom.tab(1).save_workspace_state(); draft["source"] = "print('keep exact hidden preflight draft')";
+  ASSERT_TRUE(bottom.tab(1).load_workspace_state(draft));
+  const auto payload = std::make_shared<io::Payload>(io::read_stkp(std::string(STK_REPO_ROOT) + "/desktop/tests/viewer/fixtures/muferro_domains.stkp"));
+  viewer.set_auto_evaluate(false); viewer.prefetch_neighbours = false; viewer.open_payload(payload, "Owned preflight protection fixture");
+  ASSERT_TRUE(until([&] { viewer.pump(); return !viewer.presets().empty() && viewer.catalog().is_object() && viewer.colormaps(); }));
+  const auto viewer_before = viewer.save_workspace_state(); const auto serial = viewer.payload_serial(), camera = viewer.camera_serial();
+  const auto revision = state().project()->revision; const auto history = scripts.history();
+  ASSERT_TRUE(jobs.workspace().empty());
+  const auto upload = dir.str() + "/pending.txt"; { std::ofstream file(core::path_from_utf8(upload)); file << "owned pending fixture"; }
+  jobs.upload({upload}); ASSERT_EQ(jobs.pending_uploads().size(), 1u);
+  frame(); ASSERT_TRUE(widget("preflight_submit")->enabled); widget("preflight_submit")->on_click();
+  ASSERT_TRUE(until([&] { const auto saved = journal(); return saved.size() == 1 && saved.front().at("phase") == "finished" &&
+      shows_summary(); }))
+      << client->bridge_log().text();
+  const auto record = journal().front(); ASSERT_FALSE(record.at("result").is_null());
+  ASSERT_NE(widget("preflight_workspace"), nullptr);
+  EXPECT_EQ(widget("preflight_workspace")->index.get(), 1);
+  ASSERT_GT(widget("preflight_workspace")->items.size(), 1u);
+  EXPECT_EQ(widget("preflight_workspace")->items.at(1), "STK MuPRO preflight");
+  EXPECT_EQ(record.at("result").at("observation").at("summary"), "checks_incomplete");
+  const auto tasks = lines("task-posts.jsonl"); ASSERT_EQ(tasks.size(), 1u); EXPECT_EQ(lines("workspace-posts.jsonl").size(), 1u);
+  EXPECT_EQ(tasks.front().at("spec").at("resources"), Json({{"cpus", 1}}));
+  EXPECT_EQ(tasks.front().at("spec").at("env"), Json::object()); EXPECT_TRUE(tasks.front().at("spec").at("inputs").empty());
+  EXPECT_EQ(tasks.front().at("spec").at("workspace_id"), record.at("workspace_id"));
+  const auto workspace = record.at("workspace_id").get<std::string>(), task = record.at("task_id").get<std::string>();
+  const auto task_root = dir.str() + "/runtime/shared/" + workspace + "/runs/" + task;
+  std::ifstream process(core::path_from_utf8(task_root + "/program.json")); const auto pid = Json::parse(process).at("pid");
+  EXPECT_EQ(record.at("result").at("observation").at("process_id"), pid);
+  std::ifstream collected(core::path_from_utf8(dir.str() + "/collected")); std::string first, second;
+  std::getline(collected, first); std::getline(collected, second); EXPECT_EQ(first, pid.dump()); EXPECT_TRUE(second.empty());
+  EXPECT_FALSE(std::filesystem::exists(core::path_from_utf8(dir.str() + "/solver-or-mpi-started")));
+  EXPECT_EQ(state().project()->revision, revision); EXPECT_EQ(viewer.save_workspace_state(), viewer_before);
+  EXPECT_EQ(viewer.base_payload(), payload); EXPECT_EQ(viewer.payload_serial(), serial); EXPECT_EQ(viewer.camera_serial(), camera);
+  EXPECT_EQ(bottom.tab(1).save_workspace_state(), draft); EXPECT_EQ(scripts.history(), history);
+  EXPECT_EQ(calls("script.execute"), 0u);
+  EXPECT_EQ(jobs.pending_uploads(), std::vector<std::string>{upload}); EXPECT_TRUE(jobs.workspace().empty()); EXPECT_TRUE(jobs.transfers().empty());
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+  std::cout << "PREFLIGHT_NATIVE " << Json({{"task", task}, {"pid", pid}, {"task_posts", tasks.size()},
+      {"workspace_posts", lines("workspace-posts.jsonl").size()}, {"script_ready", scripts.ready()},
+      {"project_revision", state().project()->revision}, {"protected", !HasFailure()}}).dump() << '\n';
+}
+
+TEST_P(NativePreflightPanel, CompletedReserveAckCannotExecuteAfterPanelCollapseBeforeRedraw)
+{
+  ASSERT_NO_FATAL_FAILURE(open_panel());
+  ASSERT_NO_FATAL_FAILURE(completed_reserve());
+  const auto id = journal().front().at("id");
+  const std::string path = GetParam().inner ? "a2/main/project_simulation/execution_preflight" : "a2/main/project_simulation";
+  const auto *header = f.screen.ui()->find(path); ASSERT_NE(header, nullptr);
+  const auto header_id = header->id;
+  const auto [x, y] = f.widget_center(path);
+  f.drv->move(x, y); f.drv->down(x, y); f.drv->up(x, y); // click() would itself render a frame.
+  ASSERT_FALSE(f.screen.ui()->panel_open(header_id, true));
+  if (GetParam().reopen) {
+    f.drv->time_ms += 500;
+    f.drv->move(x, y); f.drv->down(x, y); f.drv->up(x, y);
+    ASSERT_TRUE(f.screen.ui()->panel_open(header_id, true)); // Same visible state; old continuation remains invalid.
+  }
+  gate.release();
+  const auto barrier = client->call("connections.list").wait_for(std::chrono::seconds(30)); ASSERT_TRUE(barrier && barrier->ok());
+  loop.run_ready();
+  EXPECT_EQ(calls("mupro.preflight.retry"), 0u) << lines("wire.jsonl").dump();
+  EXPECT_TRUE(lines("task-posts.jsonl").empty()) << lines("wire.jsonl").dump();
+  EXPECT_TRUE(lines("workspace-posts.jsonl").empty()); EXPECT_EQ(journal().front().at("phase"), "prepared");
+  EXPECT_EQ(journal().front().at("id"), id);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(NativePreflightPanelLifecycle, NativePreflightPanel,
+    ::testing::Values(PreflightPanelTransition{false, false}, PreflightPanelTransition{false, true},
+                      PreflightPanelTransition{true, false}, PreflightPanelTransition{true, true}),
+    [](const ::testing::TestParamInfo<PreflightPanelTransition> &info) {
+      return std::string(info.param.inner ? "Check" : "Simulation") +
+             (info.param.reopen ? "CollapseExpandABA" : "Collapsed");
+    });
+
+TEST_F(NativePreflightPython, CompletedReserveAckStaysPreparedAcrossEngineABAAndEditorReopenUntilExplicitRecovery)
+{
+  ASSERT_NO_FATAL_FAILURE(open_panel());
+  ASSERT_NO_FATAL_FAILURE(completed_reserve());
+  const auto id = journal().front().at("id"); const auto revision = state().project()->revision;
+  auto *engine = widget("simulation_engine"); ASSERT_NE(engine, nullptr);
+  engine->index.assign(1); engine->index.assign(0); // Same visible value, different request generation.
+  gate.release();
+  const auto barrier = client->call("connections.list").wait_for(std::chrono::seconds(30)); ASSERT_TRUE(barrier && barrier->ok());
+  loop.run_ready();
+  EXPECT_EQ(calls("mupro.preflight.retry"), 0u); EXPECT_TRUE(lines("task-posts.jsonl").empty());
+  EXPECT_EQ(journal().front().at("phase"), "prepared");
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorLogs)); frame();
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject)); frame();
+  ASSERT_NO_FATAL_FAILURE(expand("a2/main/project_simulation"));
+  ASSERT_NO_FATAL_FAILURE(expand("a2/main/project_simulation/execution_preflight"));
+  ASSERT_TRUE(until([&] { const auto *retry = widget("preflight_retry"); return retry && retry->enabled; }));
+  EXPECT_EQ(journal().front().at("id"), id); EXPECT_EQ(journal().front().at("phase"), "prepared");
+  EXPECT_EQ(calls("mupro.preflight.retry"), 0u); EXPECT_TRUE(lines("workspace-posts.jsonl").empty());
+  EXPECT_FALSE(widget("preflight_submit")->enabled);
+  widget("preflight_retry")->on_click();
+  ASSERT_TRUE(until([&] { return journal().front().at("phase") == "finished" && shows_summary(); }));
+  EXPECT_EQ(journal().front().at("id"), id); EXPECT_EQ(lines("task-posts.jsonl").size(), 1u);
+  EXPECT_EQ(lines("workspace-posts.jsonl").size(), 1u); EXPECT_EQ(lines("task-posts.jsonl").front().at("key"), id);
+  EXPECT_EQ(state().project()->revision, revision); EXPECT_EQ(calls("script.execute"), 0u);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(NativePreflightManyWorkspaces, NewlyCreatedDiagnosticWorkspaceRemainsVisibleBeyondTheOldListLimit)
+{
+  ASSERT_NO_FATAL_FAILURE(open_panel());
+  auto &jobs = f.shell->store().jobs();
+  ASSERT_TRUE(until([&] { return !jobs.workspace().empty(); })); // Independent Jobs metadata may finish after preflight metadata.
+  const auto jobs_workspace = jobs.workspace(); ASSERT_FALSE(jobs_workspace.empty());
+  const auto revision = state().project()->revision;
+  widget("preflight_submit")->on_click();
+  ASSERT_TRUE(until([&] { const auto saved = journal(); return saved.size() == 1 && saved.front().at("phase") == "finished" && shows_summary(); }));
+  const auto record = journal().front(); const auto tasks = lines("task-posts.jsonl");
+  ASSERT_EQ(tasks.size(), 1u); EXPECT_EQ(lines("workspace-posts.jsonl").size(), 1u);
+  EXPECT_EQ(tasks.front().at("spec").at("workspace_id"), record.at("workspace_id"));
+  const auto *selection = widget("preflight_workspace"); ASSERT_NE(selection, nullptr);
+  const auto selected_index = selection->index.get(); ASSERT_GT(selected_index, 0);
+  ASSERT_LT(size_t(selected_index), selection->items.size());
+  EXPECT_EQ(selection->items.at(size_t(selected_index)), "STK MuPRO preflight");
+  const auto listing = client->call("workspace.list", {{"connection", "runtime:preflight-test"}}).wait_for(std::chrono::seconds(30));
+  ASSERT_TRUE(listing && listing->ok());
+  const auto &workspaces = listing->value().at("workspaces"); ASSERT_EQ(workspaces.size(), 257u);
+  EXPECT_EQ(workspaces.back().at("id"), record.at("workspace_id"));
+  EXPECT_NE(record.at("workspace_id"), jobs_workspace); EXPECT_EQ(jobs.workspace(), jobs_workspace);
+  EXPECT_EQ(state().project()->revision, revision); EXPECT_EQ(calls("script.execute"), 0u);
+  EXPECT_FALSE(std::filesystem::exists(core::path_from_utf8(dir.str() + "/solver-or-mpi-started")));
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
 
 class LammpsSimulationPython : public SimulationPython {
  protected:

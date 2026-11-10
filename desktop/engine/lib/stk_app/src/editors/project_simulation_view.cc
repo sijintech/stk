@@ -177,7 +177,7 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
 {
   sync_project(state);
   auto *panel = layout.panel("project_simulation", ctx.tr("simulation.title"), false);
-  if (!panel) { return; }
+  if (!panel) { preflight_.suspend(); return; }
   auto &scripts = ctx.store.scripts();
   auto &jobs = ctx.store.jobs();
   scripts.sync();
@@ -222,6 +222,16 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
   auto &target = engine_ == 1 ? lammps_target_ : target_;
   const auto connection = target.runtime_controls(*panel, ctx);
   const auto options = target.options_controls(*panel, ctx, engine.id);
+  auto *check_panel = engine_ == 0 && state.ready() && options ?
+      panel->panel("execution_preflight", ctx.tr("preflight.title"), false) : nullptr;
+  if (check_panel) {
+    const auto weak = std::weak_ptr<bool>(alive_);
+    preflight_.draw(*check_panel, ctx, state, target, connection, *options,
+        [this, weak, &state, project, handle, generation, data_view_current] {
+      return !weak.expired() && context_current(state, project, handle, generation) && engine_ == 0 && data_view_current();
+    });
+  }
+  else { preflight_.suspend(); }
   panel->button("simulation_prepare", ctx.tr("simulation.prepare"), [this, &state, &scripts, &jobs, project, handle, generation, revision, record, connection, options, engine] {
     if (!context_current(state, project, handle, generation) || state.record_id() != record || state.table_id() != engine.cases) { return; }
     error_.clear();

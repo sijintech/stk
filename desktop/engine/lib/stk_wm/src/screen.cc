@@ -882,6 +882,7 @@ void Screen::set_maximized(Area *area)
     return;
   }
   if (maximized_ != area) {
+    ++visibility_epoch_;
     invalidate_layout();
     maximized_ = area;
     splitters_.clear();

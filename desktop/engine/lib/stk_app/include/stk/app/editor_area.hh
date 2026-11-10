@@ -13,6 +13,7 @@
 #pragma once
 
 #include <memory>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -41,6 +42,8 @@ class EditorArea : public wm::Area {
   {
     return active_;
   }
+  /** Monotonic tab/region activity identity, including leaving and returning to the same editor. */
+  uint64_t activity_epoch() const { return activity_epoch_; }
   Editor &editor() const
   {
     return *tabs_[size_t(active_)];
@@ -103,6 +106,7 @@ class EditorArea : public wm::Area {
   AppShell &shell_;
   std::vector<std::unique_ptr<Editor>> tabs_;
   int active_ = 0;
+  uint64_t activity_epoch_ = 0;
   bool toolbar_open_ = true;
   bool sidebar_open_ = true;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);

@@ -90,6 +90,8 @@ suan mupro check --json
 
 ## 显式检查执行环境
 
+桌面操作见[在桌面检查 MuFerro 执行环境](mupro-desktop-preflight.md)。
+
 从客户端向已选 Runtime 提交一次独立诊断任务，使用执行端自己配置的环境：
 
 ```bash

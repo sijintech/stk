@@ -426,6 +426,8 @@ class Screen {
   }
   /** Maximizes `area`, or restores when it (or anything) is maximized. */
   void toggle_maximized(Area *area);
+  /** Monotonic maximize/restore identity for async views that must notice a hidden interval. */
+  uint64_t visibility_epoch() const { return visibility_epoch_; }
 
   /** \} */
 
@@ -643,6 +645,7 @@ class Screen {
   std::unique_ptr<ScreenNode> root_;
   std::unique_ptr<Area> top_, bottom_;
   Area *maximized_ = nullptr;
+  uint64_t visibility_epoch_ = 0;
   AreaFactory factory_;
   int next_id_ = 1;
 

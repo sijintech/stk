@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 #include "stk/io/json.hh"
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -26,8 +27,10 @@ class SimulationTarget {
   /** Recheck a retained prepare/submit callback against the visible target. */
   bool matches(const JobsState &jobs, const std::string &connection,
                const std::optional<io::Json> &options) const;
+  uint64_t options_epoch() const { return options_epoch_; }
 
  private:
   std::string options_ = R"({"backend":"local","ranks":1,"threads_per_rank":1})";
+  uint64_t options_epoch_ = 0;
 };
 }  // namespace stk::app

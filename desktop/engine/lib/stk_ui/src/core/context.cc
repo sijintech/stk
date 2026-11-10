@@ -145,6 +145,12 @@ bool Context::panel_open(WidgetId id, bool default_open) const
   return it == panels_.end() ? default_open : it->second;
 }
 
+uint64_t Context::panel_epoch(WidgetId id) const
+{
+  const auto it = panel_epochs_.find(id);
+  return it == panel_epochs_.end() ? 0 : it->second;
+}
+
 float Context::scroll_of(WidgetId id) const
 {
   const auto it = scroll_.find(id);
@@ -957,6 +963,7 @@ bool Context::activate_focused(const Event &e)
     case WidgetType::PanelHeader:
       if (confirm) {
         panels_[w->id] = !panel_open(w->id, true);
+        ++panel_epochs_[w->id];
         redraw_ = true;
         return true;
       }
@@ -1853,6 +1860,7 @@ EventResult Context::mouse_up(const Event &e)
           break;
         case WidgetType::PanelHeader:
           panels_[w->id] = !panel_open(w->id, true);
+          ++panel_epochs_[w->id];
           break;
         default:
           break;
