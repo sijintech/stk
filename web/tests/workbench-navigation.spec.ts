@@ -97,6 +97,9 @@ class Hub {
   // result; `hold('poll')` holds the next poll, which then answers as `queueGraph` is on release. `queuePolls` counts
   // those polls. `graphChunk` holds the lazy 图谱 module until it resolves.
   queueGraph = false;
+  graphReply: 'normal' | 'bad-payload' | 'outputs-only' = 'normal';
+  graphPayloadStep?: number | null;
+  graphVolume: 'normal' | 'omit' | 'fail' = 'normal';
   queuePolls = 0;
   private readonly queuedResults = new Map<string, unknown>();
   graphChunk?: Promise<void>;
@@ -120,6 +123,11 @@ class Hub {
     const request = route.request(), url = new URL(request.url());
     if (!url.pathname.startsWith('/api/v1/')) {
       if (this.graphChunk && /^\/assets\/GraphPanel-[^/]+\.js$/.test(url.pathname)) await this.graphChunk;
+      if (/^\/assets\/volume-[^/]+\.js$/.test(url.pathname)) {
+        await this.gate('volume chunk');
+        if (this.graphVolume === 'fail') return route.fulfill({status: 200, contentType: 'text/javascript',
+          body: "throw new Error('Synthetic volume actor failure');"});
+      }
       const file = join(DIST, url.pathname === '/' ? 'index.html' : url.pathname);
       if (!existsSync(file)) return route.fulfill({status: 404, body: ''});
       return route.fulfill({status: 200, contentType: types[extname(file)] || 'application/octet-stream', body: readFileSync(file)});
@@ -232,7 +240,15 @@ class Hub {
       }
       if (body.kind === 'graph.evaluate') {
         const asked = body.payload.parameters?.step, step = typeof asked === 'number' ? asked : STEPS[STEPS.length - 1];
-        const result = {outputs: {main: {manifest: JSON.parse(readFileSync(join(EXAMPLE, 'manifest.json'), 'utf8'))}},
+        const manifest = this.graphReply === 'bad-payload' ? {schema: 'stk.payload/2'} :
+          JSON.parse(readFileSync(join(EXAMPLE, 'manifest.json'), 'utf8'));
+        if (manifest.source?.time) manifest.source.time.step = this.graphPayloadStep === undefined ? step : this.graphPayloadStep;
+        if (this.graphVolume === 'omit' && Array.isArray(manifest.layers)) {
+          manifest.layers = manifest.layers.filter((layer: {type: string}) => layer.type !== 'volume');
+        }
+        const output = {info: {type: 'value', value: '可用的图谱输出'}};
+        const result = {outputs: this.graphReply === 'outputs-only' ? output :
+          {main: {manifest}, ...(this.graphReply === 'bad-payload' ? output : {})},
           parameters: {step: {value: step, choices: STEPS}}};
         if (this.queueGraph) { this.queuedResults.set(body.id, result); return json({id: body.id, state: 'queued'}); }
         return json({id: body.id, state: 'succeeded', result});
@@ -927,9 +943,9 @@ for (const viewport of viewports) {
       sent.stop();
       expect(sent.seen).toEqual(['/api/v1/nodes/{node}/read task.artifacts', '/api/v1/actions view.probe',
         '/api/v1/actions view.build', '/api/v1/actions view.probe']);
-      // 图谱 names the task only: its data sources are bound in the graph panel.
+      // Until a graph has actually been shown, the selected task/file are not graph provenance.
       await page.getByRole('tab', {name: '图谱'}).click();
-      await expect(source(page)).toHaveText('节点甲 · 项目一 · 解析场验证，图谱数据源在下方绑定');
+      await expect(source(page)).toHaveText('尚未显示图谱结果，选择数据源并计算图谱');
       await expect(source(page)).not.toHaveAttribute('title', /scalar-1\.vti/);
       await expect(probeLog(page)).not.toContainText('"values"');
       await expect(page.locator('section.analysis .view-title h1')).toHaveText('图谱视图');
@@ -1299,11 +1315,11 @@ for (const viewport of viewports) {
       expect(await work(page)).toEqual(kept);
       expect(await probeLog(page).textContent()).toBe(logText);
       expect((await viewerShot(page, 'details-returned')).equals(viewer)).toBe(true);
-      // 图谱 keeps its source at task level: its data sources are bound in the graph panel.
+      // Opening 图谱 without an evaluated result reveals no task or file provenance.
       await r.click(page.getByRole('tab', {name: '图谱'}), '图谱');
       await r.click(sourceToggle(page), '来源');
-      expect(await detailRows(page)).toEqual([['节点', `节点甲${node}`], ['项目', `项目一${ws}`], ['任务', `解析场验证${task}`],
-        ['数据源', '在下方图谱面板中绑定']]);
+      await expect(sourcePanel(page)).toContainText('尚未显示图谱结果');
+      expect(await detailValues(page)).toEqual([]);
       await expect(sourcePanel(page)).not.toContainText('scalar');
       await page.keyboard.press('Escape');
       await expect(sourcePanel(page)).toHaveCount(0);
@@ -2533,7 +2549,7 @@ for (const viewport of viewports) {
       await pause(page);
       const graphShot = await paneShot(page, graphPane(page), `${viewport.name}-graph-before`);
       const graphSource = [await source(page).textContent(), await source(page).getAttribute('title')];
-      expect(graphSource[0]).toBe('节点甲 · 项目一 · 解析场验证，图谱数据源在下方绑定');
+      expect(graphSource[0]).toBe('显示的三维结果，场视图 · 解析场验证 · 第 1000 步');
       expect(await tabWalk(page, '图谱')).toBe(false);
       sent.take();
       // 图谱 → 结果文件: the same canvas, camera pixels, probe, file, title, log and source; nothing moved.
@@ -2586,10 +2602,14 @@ for (const viewport of viewports) {
       const rows = async () => { await sourceToggle(page).click(); const value = await detailRows(page); await page.keyboard.press('Escape');
         await expect(sourcePanel(page)).toHaveCount(0); return value; };
       const fileRows = [['节点', `节点甲${node}`], ['项目', `项目一${ws}`], ['任务', `解析场验证${task}`], ['显示的文件', 'scalar-0.vti']];
-      const graphRows = [...fileRows.slice(0, 3), ['数据源', '在下方图谱面板中绑定']];
+      const graphRows = [
+        ['显示内容', '显示的三维结果'], ['图谱预设', '场视图field-view'], ['输出', 'main'], ['节点', '节点甲' + node],
+        ['计算绑定 field', '解析场验证' + task], ['运行工作区 field', '项目一' + ws], ['已显示时间步', '1000'],
+      ];
       expect(await rows()).toEqual(fileRows);
       await modeTab(page, '图谱').click();
       await computeGraph(page, hub);
+      await expect(source(page)).toHaveText(graphSourceA);
       expect(await rows()).toEqual(graphRows);
       await modeTab(page, '结果文件').click();
       expect(await rows()).toEqual(fileRows);
@@ -2915,7 +2935,7 @@ for (const viewport of viewports) {
       await project(page).selectOption(ws);
       // In 项目一, no task selected: a task bound by hand in 图谱 and computed; the node queues it.
       await showGraph(page);
-      await expect(source(page)).toHaveText('未选择任务，图谱数据源在下方绑定');
+      await expect(source(page)).toHaveText('尚未显示图谱结果，选择数据源并计算图谱');
       await binding(page).selectOption(task);
       await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
       await expect.poll(() => hub.queuePolls).toBeGreaterThan(0);
@@ -3562,4 +3582,170 @@ test('History opened by narrowing clears the old Tasks shortcut return', async (
   expect(await state(page)).toEqual(ready.before);
   expect([hub.calls, hub.replies]).toEqual([[], 0]);
   expect(ready.errors).toEqual([]);
+});
+
+const graphTaskB = {...row, id: task2, workspace_id: ws2, name: '图谱来源乙'};
+const graphTwoScopes = {...twoProjects, snapshot: {...twoProjects.snapshot, tasks: [row, graphTaskB]}};
+const graphSourceA = '显示的三维结果，场视图 · 解析场验证 · 第 1000 步';
+const graphSourceB = '显示的三维结果，场视图 · 图谱来源乙 · 第 1000 步';
+
+for (const viewport of viewports) {
+  test(`${viewport.name} source opens the displayed graph binding, even when Tasks selects a different workspace`, async ({page}) => {
+    await page.setViewportSize({width: viewport.width, height: viewport.height});
+    const hub = new Hub();
+    hub.device = graphTwoScopes;
+    hub.presets = [PRESET];
+    const errors = await setup(page, hub, {scene: false});
+    await showGraph(page);
+    await binding(page).selectOption(task2);
+    await computeGraph(page, hub);
+    await expect(source(page)).toHaveText(graphSourceB);
+    expect(hub.evaluations[0].bindings).toEqual({field: {task_id: task2}});
+    await sourceToggle(page).scrollIntoViewIfNeeded();
+    await pause(page);
+    const viewportArea = graphPane(page).locator('.viewport');
+    const canvas = vtkCanvas(graphPane(page));
+    await canvas.evaluate(el => { (el as any).__graphSource = 'same-canvas'; });
+    const geometry = await viewportArea.boundingBox();
+    const scroll = await page.locator('section.analysis').evaluate(el => el.scrollTop);
+    await page.screenshot({path: test.info().outputPath('graph-source-fixed-start.png')});
+    const sent = traffic(page), r = route(page, `${viewport.name}-graph-source`);
+    await r.click(sourceToggle(page), '来源');
+    await expect(sourcePanel(page)).toBeVisible();
+    expect(await detailRows(page)).toEqual([
+      ['显示内容', '显示的三维结果'], ['图谱预设', '场视图field-view'], ['输出', 'main'], ['节点', '节点甲' + node],
+      ['计算绑定 field', '图谱来源乙' + task2], ['运行工作区 field', '项目二' + ws2], ['已显示时间步', '1000'],
+    ]);
+    expect(await viewportArea.boundingBox()).toEqual(geometry);
+    await page.screenshot({path: test.info().outputPath('graph-source-open.png')});
+    await r.click(sourcePanel(page).getByRole('button', {name: '收起'}), '收起');
+    await expect(sourceToggle(page)).toBeFocused();
+    expect(await canvas.evaluate(el => (el as any).__graphSource)).toBe('same-canvas');
+    expect(await viewportArea.boundingBox()).toEqual(geometry);
+    expect(await page.locator('section.analysis').evaluate(el => el.scrollTop)).toBe(scroll);
+    sent.stop();
+    expect(sent.seen).toEqual([]);
+    expect(hub.evaluations).toHaveLength(1);
+    expect([hub.calls, hub.messages, hub.replies, errors]).toEqual([[], [], 0, []]);
+    expect(r.record).toMatchObject({clicks: 2, selects: 0});
+    r.save();
+    writeFileSync(test.info().outputPath('graph-source-requests.json'), JSON.stringify({
+      setup: hub.evaluations, measured: sent.seen, source: graphSourceB, fixedViewport: viewport,
+    }, null, 2));
+  });
+}
+
+test('graph source keeps the displayed scene through a stale binding reply and a failed scene decode', async ({page}) => {
+  const hub = new Hub();
+  hub.device = graphTwoScopes;
+  hub.presets = [{...PRESET, graph: {nodes: [
+    {id: 'src', type: 'stk.source.file@1', params: {binding: 'field', path: 'field.dat'}},
+  ]}}];
+  const errors = await setup(page, hub, {scene: false});
+  await showGraph(page);
+  await binding(page).selectOption(task2);
+  await computeGraph(page, hub);
+  await expect(source(page)).toHaveText(graphSourceB);
+  const canvas = vtkCanvas(graphPane(page));
+  await canvas.evaluate(el => { (el as any).__graphSource = 'same-canvas'; });
+  await canvas.scrollIntoViewIfNeeded();
+  const box = (await canvas.boundingBox())!;
+  const picked = graphPane(page).locator('.probe small');
+  for (const [x, y] of [[.5, .52], [.45, .55], [.55, .55], [.42, .48], [.5, .63]]) {
+    await page.mouse.click(box.x + box.width * x, box.y + box.height * y);
+    if ((await picked.textContent())?.includes('Domains')) break;
+  }
+  await expect(picked).toContainText('Domains');
+  await graphPane(page).getByRole('button', {name: '查询原始值'}).click();
+  await expect(probeLog(page)).toContainText('field.dat');
+  expect(hub.probes).toMatchObject([{task_id: task2, path: 'field.dat'}]);
+  await graphPane(page).getByLabel('探针X').fill('1.5');
+  const release = hub.hold('graph.evaluate');
+  await binding(page).selectOption(task);
+  const response = page.waitForResponse(res => res.request().method() === 'POST' &&
+    res.url().endsWith('/api/v1/actions') && res.request().postDataJSON()?.kind === 'graph.evaluate');
+  await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+  await expect.poll(() => hub.reached.has('graph.evaluate')).toBe(true);
+  await expect(source(page)).toHaveText(graphSourceB);
+  await binding(page).selectOption(task2);
+  await expect(graphPane(page).getByRole('button', {name: '计算图谱'})).toBeEnabled();
+  release();
+  await response;
+  await expect(source(page)).toHaveText(graphSourceB);
+  await binding(page).selectOption(task);
+  hub.graphReply = 'bad-payload';
+  await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+  await expect(page.getByRole('alert')).toContainText('三维结果无法显示');
+  await expect(graphPane(page).locator('.graph-outputs')).toContainText('可用的图谱输出');
+  await expect(source(page)).toHaveText(graphSourceB);
+  await sourceToggle(page).click();
+  expect(await detailValues(page)).toContain(task2);
+  expect(await detailValues(page)).not.toContain(task);
+  await page.keyboard.press('Escape');
+  expect(await canvas.evaluate(el => (el as any).__graphSource)).toBe('same-canvas');
+  await expect(graphPane(page).getByLabel('探针X')).toHaveValue('1.5');
+  await expect(probeLog(page)).toContainText('field.dat');
+  hub.graphReply = 'normal';
+  hub.graphPayloadStep = 500;
+  await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+  await expect(source(page)).toHaveText('显示的三维结果，场视图 · 解析场验证 · 第 500 步');
+  await expect(probeLog(page)).not.toContainText('field.dat');
+  expect(hub.evaluations.map(request => request.bindings.field.task_id)).toEqual([task2, task, task, task]);
+  expect(errors).toEqual([]);
+});
+
+test('graph provenance waits for the renderer and survives a delayed actor failure', async ({page}) => {
+  const hub = new Hub();
+  hub.device = graphTwoScopes;
+  hub.presets = [PRESET];
+  hub.graphPayloadStep = null;
+  hub.graphVolume = 'omit';
+  const errors = await setup(page, hub, {scene: false});
+  await showGraph(page);
+  await binding(page).selectOption(task2);
+  await computeGraph(page, hub);
+  await expect(source(page)).toHaveText(graphSourceB);
+  const canvas = vtkCanvas(graphPane(page));
+  await canvas.evaluate(el => { (el as any).__graphSource = 'previous-actor'; });
+  hub.graphVolume = 'fail';
+  const release = hub.hold('volume chunk');
+  await binding(page).selectOption(task);
+  await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+  await expect.poll(() => hub.reached.has('volume chunk')).toBe(true);
+  await expect(source(page)).toHaveText(graphSourceB);
+  expect(await canvas.evaluate(el => (el as any).__graphSource)).toBe('previous-actor');
+  release();
+  await expect(graphPane(page).locator('.viewer-error')).toContainText('Synthetic volume actor failure');
+  await expect(source(page)).toHaveText(graphSourceB);
+  expect(await canvas.evaluate(el => (el as any).__graphSource)).toBe('previous-actor');
+  expect(hub.evaluations.map(e => e.bindings.field.task_id)).toEqual([task2, task]);
+  expect(errors).toEqual([]);
+});
+
+test('graph source distinguishes a local package and output cards without inventing a scene or task', async ({page}) => {
+  const hub = new Hub();
+  hub.device = graphTwoScopes;
+  hub.presets = [PRESET];
+  const errors = await setup(page, hub, {scene: false});
+  await showGraph(page);
+  await openPackage(page);
+  await expect(source(page)).toHaveText('本地数据包，example.stkp');
+  await sourceToggle(page).click();
+  expect(await detailRows(page)).toEqual([['本地数据包', 'example.stkp']]);
+  await page.keyboard.press('Escape');
+  await chooseProject(page, ws2);
+  await go(page, '结果');
+  await graphEmpty(page);
+  await expect(source(page)).toHaveText('尚未显示图谱结果，选择数据源并计算图谱');
+  await binding(page).selectOption(task2);
+  hub.graphReply = 'outputs-only';
+  await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+  await expect(graphPane(page).locator('.graph-outputs')).toContainText('可用的图谱输出');
+  await expect(source(page)).toHaveText('显示的图谱输出，场视图 · 图谱来源乙 · 第 1000 步');
+  await expect(vtkCanvas(graphPane(page))).toHaveCount(0);
+  await sourceToggle(page).click();
+  expect(await detailValues(page)).toContain(task2);
+  expect(await detailValues(page)).not.toContain('main');
+  expect(hub.evaluations).toHaveLength(1);
+  expect(errors).toEqual([]);
 });

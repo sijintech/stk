@@ -4,6 +4,7 @@ import {createRoot} from 'react-dom/client';
 import {action,api,ApiError,events,hasToken,Json,readNode,setToken} from './api';
 import {conversationTitle,type Entry,useConversations} from './conversations';
 import ErrorBoundary from './ErrorBoundary';
+import type {GraphSource} from './GraphPanel';
 import TaskObservation from './TaskObservation';
 import {isTerminalTaskState,type TaskFact,type TaskScope} from './taskFacts';
 import './style.css';
@@ -84,6 +85,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   },[conv.session]);
   const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
   const [probeText,setProbeText]=useState(''),[graphProbeText,setGraphProbeText]=useState(''),[viewError,setViewError]=useState(''),[graphError,setGraphError]=useState('');
+  const [graphSource,setGraphSource]=useState<GraphSource|null>(null);
   // The Tasks shortcut that opened 结果 and the task scope it was pressed in. The next navigation forgets it; only
   // 任务 straight from 结果 gives it the focus back, and only while that exact scope is selected (a reselected task is a
   // new scope) and the shortcut is still there, enabled and wholly in view in 任务, which keeps its scroll offsets.
@@ -119,13 +121,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const exactTerminal=observed?.exactTerminal===true;
   let graphTasks=tasks;
   if(taskBound&&observed){
-    const row={id:task,name:observed.name,state:observed.state};
+    const row={id:task,name:observed.name,state:observed.state,workspace_id:observed.scope.workspace};
     graphTasks=tasks.some(item=>item.id===task)?tasks.map(item=>item.id===task?row:item):[row,...tasks];
   }
   const shown=taskBound&&displayed?.scope===selection?displayed:null,shownScene=shown?.scene??null;
   // The scope 图谱 works in: the chosen project, and the selected task with its own project once it is bound. Any change
   // (another project with no task selected included) starts the panel afresh and drops its late replies.
   const graphScope=JSON.stringify([workspace,task&&selection?selection.workspace:'',taskBound?task:'']);
+  const shownGraphSource=graphSource&&graphSource.node===graphKey&&graphSource.scope===graphScope?graphSource:null;
   const features:unknown=selected?.snapshot?.features;
   const canRead=Array.isArray(features)&&features.includes('read');
   const canReadArtifacts=canRead&&readKinds?.includes('task.artifacts')===true;
@@ -144,7 +147,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     !tasks.length?'节点快照中暂无任务。':!queue.length?`${workspaceName(workspace)} 中暂无任务，可在下方「新建任务」中提交。`:'';
   const clearTask=useCallback(()=>{
     generation.current++;scopeVersion.current++;activeScope.current=null;
-    setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);show(null);setLogs('');setGraphProbeText('');setLogRoom(false);
+    setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);show(null);setLogs('');setGraphProbeText('');setGraphSource(null);setLogRoom(false);
   },[show]);
   const clearNode=useCallback(()=>{clearTask();setNode('');setWorkspace('');},[clearTask]);
   const nodeGone=useCallback((scope:TaskScope)=>{if(activeScope.current===scope)clearNode();},[clearNode]);
@@ -344,14 +347,20 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       if(result.result&&active())setProbeText(JSON.stringify(result.result,null,2));
     },active);
   }
-  // The source of 结果 under its title: the selected task's node, project and name, then in file mode the artifact the
-  // Viewer shows and any other file chosen but not yet loaded (one line, cut short rather than wrapped, so choosing a
-  // file never moves the Viewer). Graph data sources are bound in the graph panel, so 图谱 names only the task.
+  // File mode uses the selected task and displayed artifact. Graph mode uses the accepted scene or output cards,
+  // whose calculation can bind different tasks than the one selected in the queue.
   const taskName=observed?.name||(heartbeat||null)?.name||task.slice(0,8);
-  const sourceTask=task&&selection?(taskBound?`${nodeName} · ${workspaceName(selection.workspace)} · ${taskName}`:`${nodeName} · ${workspaceName(selection.workspace)} · 正在确认任务`):'未选择任务';
-  const sourceFile=analysis==='graph'?'图谱数据源在下方绑定':!task?'在「任务」中选择任务':shown?`显示 ${shown.path}`:'尚未加载结果文件';
+  const graphKind=shownGraphSource?.kind==='local'?'本地数据包':shownGraphSource?.display==='scene'?'显示的三维结果':
+    shownGraphSource?.display==='outputs'?'显示的图谱输出':'尚未显示图谱结果';
+  const graphBinding=shownGraphSource?.kind==='evaluation'&&shownGraphSource.bindings.length===1?shownGraphSource.bindings[0]:null;
+  const graphSummary=shownGraphSource?.kind==='local'?shownGraphSource.file:shownGraphSource?.kind==='evaluation'?
+    [shownGraphSource.presetName||shownGraphSource.presetId,graphBinding?(graphBinding.taskName||graphBinding.task.slice(0,8)):
+      shownGraphSource.bindings.length>1?`${shownGraphSource.bindings.length} 个计算绑定`:'',
+      shownGraphSource.step===null?'':`第 ${shownGraphSource.step} 步`].filter(Boolean).join(' · '):'选择数据源并计算图谱';
+  const sourceTask=analysis==='graph'?graphKind:task&&selection?(taskBound?`${nodeName} · ${workspaceName(selection.workspace)} · ${taskName}`:`${nodeName} · ${workspaceName(selection.workspace)} · 正在确认任务`):'未选择任务';
+  const sourceFile=analysis==='graph'?graphSummary:!task?'在「任务」中选择任务':shown?`显示 ${shown.path}`:'尚未加载结果文件';
   const sourceNext=analysis==='file'&&taskBound&&path&&path!==shown?.path?`已选 ${path}，加载视图后显示`:'';
-  const sourceIds=task&&selection?`节点 ${selection.node}\n项目 ${selection.workspace}\n任务 ${selection.task}${analysis==='file'&&shown?`\n文件 ${shown.path}`:''}`:undefined;
+  const sourceIds=analysis==='file'&&task&&selection?`节点 ${selection.node}\n项目 ${selection.workspace}\n任务 ${selection.task}${shown?`\n文件 ${shown.path}`:''}`:undefined;
   function leaveSource(e:React.FocusEvent){
     const next=e.relatedTarget;
     if(sourceOpen&&next&&!sourcePanel.current?.contains(next)&&!sourceToggle.current?.contains(next))setSourceOpen(false);
@@ -360,14 +369,26 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // and task (name and ID), then in file mode the file the Viewer shows and, separately, a chosen file not yet loaded.
   const sourceNames=task&&selection?{node:selected?.name??'',workspace:workspaces.find(w=>w.id===selection.workspace)?.name??'',
     task:taskBound?observed?.name||(heartbeat||null)?.name||'':''}:null;
+  const graphSourceRows=shownGraphSource?.kind==='local'?<dl>
+    <div><dt>本地数据包</dt><dd><SourceValue value={shownGraphSource.file} selectable/></dd></div>
+  </dl>:shownGraphSource?.kind==='evaluation'?<dl>
+    <div><dt>显示内容</dt><dd>{graphKind}</dd></div>
+    <div><dt>图谱预设</dt><dd>{shownGraphSource.presetName&&<SourceValue value={shownGraphSource.presetName}/>}<SourceValue value={shownGraphSource.presetId} selectable/></dd></div>
+    {shownGraphSource.output&&<div><dt>输出</dt><dd><SourceValue value={shownGraphSource.output} selectable/></dd></div>}
+    <div><dt>节点</dt><dd><SourceValue value={nodeName}/><SourceValue value={shownGraphSource.node} selectable/></dd></div>
+    {shownGraphSource.bindings.map(binding=><React.Fragment key={binding.name}>
+      <div><dt>计算绑定 <bdi>{binding.name}</bdi></dt><dd>{binding.taskName&&<SourceValue value={binding.taskName}/>}<SourceValue value={binding.task} selectable/></dd></div>
+      {binding.workspace&&<div><dt>运行工作区 <bdi>{binding.name}</bdi></dt><dd><SourceValue value={workspaces.find(w=>w.id===binding.workspace)?.name??''}/><SourceValue value={binding.workspace} selectable/></dd></div>}
+    </React.Fragment>)}
+    {shownGraphSource.step!==null&&<div><dt>已显示时间步</dt><dd>{shownGraphSource.step}</dd></div>}
+  </dl>:<p className="muted">尚未显示图谱结果。选择数据源后明确计算，或打开本地数据包。</p>;
   const sourceDetails=<div id="result-source-details" ref={sourcePanel} className="source-details" role="region" aria-label="来源详情" tabIndex={-1}>
-    {sourceNames&&selection?<dl>
+    {analysis==='graph'?graphSourceRows:sourceNames&&selection?<dl>
       <div><dt>节点</dt><dd><SourceValue value={sourceNames.node}/><SourceValue value={selection.node} selectable/></dd></div>
       <div><dt>项目</dt><dd><SourceValue value={sourceNames.workspace}/><SourceValue value={selection.workspace} selectable/></dd></div>
       <div><dt>任务</dt><dd>{taskBound?<SourceValue value={sourceNames.task}/>:<span className="muted">正在确认任务</span>}<SourceValue value={selection.task} selectable/></dd></div>
-      {analysis==='graph'?<div><dt>数据源</dt><dd><span className="muted">在下方图谱面板中绑定</span></dd></div>:<>
-        <div><dt>显示的文件</dt><dd>{shown?<SourceValue value={shown.path} selectable/>:<span className="muted">尚未加载结果文件</span>}</dd></div>
-        {sourceNext&&<div><dt>已选文件</dt><dd><SourceValue value={path} selectable/><span className="muted">尚未加载，点「加载视图」后显示</span></dd></div>}</>}
+      <div><dt>显示的文件</dt><dd>{shown?<SourceValue value={shown.path} selectable/>:<span className="muted">尚未加载结果文件</span>}</dd></div>
+      {sourceNext&&<div><dt>已选文件</dt><dd><SourceValue value={path} selectable/><span className="muted">尚未加载，点「加载视图」后显示</span></dd></div>}
     </dl>:<p className="muted">未选择任务。在「任务」中选择任务后，这里显示它的节点、项目与文件。</p>}
     <div className="source-details-foot"><button type="button" className="quiet" onClick={closeSource}>收起</button></div>
   </div>;
@@ -423,7 +444,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       {sourceOpen&&sourceDetails}</div>
       <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>setAnalysis(key)}>{label}</button>)}</div>
       {/* Both analysis modes stay mounted once shown; the inactive one keeps its size but takes no space, focus or pointer. */}
-      {graphKept&&<div className={analysis==='graph'?'mode-pane graph-mode':'mode-pane graph-mode mode-hidden'} inert={analysis!=='graph'}><React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={graphKey} node={selected?node:''} scope={graphScope} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} canReadEvents={canReadEvents&&taskOnline&&graphActive} active={graphActive} onError={setGraphError} onLog={setGraphProbeText}/></React.Suspense></div>}
+      {graphKept&&<div className={analysis==='graph'?'mode-pane graph-mode':'mode-pane graph-mode mode-hidden'} inert={analysis!=='graph'}><React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={graphKey} node={selected?node:''} scope={graphScope} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} canReadEvents={canReadEvents&&taskOnline&&graphActive} active={graphActive} onError={setGraphError} onLog={setGraphProbeText} onSource={setGraphSource}/></React.Suspense></div>}
       <div className={analysis==='file'?'mode-pane file-mode':'mode-pane file-mode mode-hidden'} inert={analysis!=='file'}>
       <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{setPath(e.target.value);generation.current++;setViewError('');}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(a=>/\.(vti|vtk|npy|dat)$/.test(a.path)).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
       <label>视图<select value={mode} onChange={e=>setMode(e.target.value)}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>

@@ -15,8 +15,9 @@ export type {PickInfo};
 const isPayloadV2=(scene:Json|LoadedPayload|null):scene is LoadedPayload=>scene?.manifest?.schema===PAYLOAD_SCHEMA&&typeof (scene as LoadedPayload).accessor==='function';
 
 // Branch on the manifest schema: stk.payload/2 (graph results) or the unchanged scene v1 path (view.build).
-export default function Viewer({scene,onPick,resetKey}:{scene:Json|LoadedPayload|null,onPick:(p:number[],info?:PickInfo)=>void,resetKey?:string}){
-  if(isPayloadV2(scene))return <PayloadViewer payload={scene} onPick={onPick} resetKey={resetKey}/>;
+export default function Viewer({scene,onPick,resetKey,canShow,onShown}:{scene:Json|LoadedPayload|null,onPick:(p:number[],info?:PickInfo)=>void,
+  resetKey?:string,canShow?:(payload:LoadedPayload)=>boolean,onShown?:(payload:LoadedPayload)=>void}){
+  if(isPayloadV2(scene))return <PayloadViewer payload={scene} onPick={onPick} resetKey={resetKey} canShow={canShow} onShown={onShown}/>;
   return <SceneV1Viewer scene={scene} onPick={onPick}/>;
 }
 

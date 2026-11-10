@@ -6,7 +6,7 @@ import {cachedBlob, loadPayload, loadStkp, type LoadedPayload} from './payload';
 import {bindingNames, blobSha, coerceParameters, DISPLAYABLE, duration, editorKind, emptyProgress, EVENTS_POLL_MS, EVENTS_TAIL_BYTES, foldEvents,
   frameDataset, framesFromArtifacts, initialValues, nextEventsDelay, outputImages, payloadOutputs, presetParameters, progressText, resolveProbeTarget,
   selectOutputs, stepChoices, stepParameter, tableData, waitForAction, type Artifact, type GraphParameter, type GraphResult, type Preset,
-  type ProgressState, type TableData} from './graph';
+  type ProbeContext, type ProgressState, type TableData} from './graph';
 import ErrorBoundary from './ErrorBoundary';
 import type {PickInfo} from './PayloadViewer';
 
@@ -22,6 +22,14 @@ const FIELD_FILE = /\.(dat|npy|vti|vtk|vtkhdf|hdf|h5)$/i;
 /** A warning or error of a graph result: `{code, message, node?}` or plain text. */
 const issueText = (w: unknown) => (typeof w === 'string' ? w : w && typeof w === 'object' && typeof (w as any).message === 'string'
   ? `${(w as any).node ? `${(w as any).node}：` : ''}${(w as any).message}` : JSON.stringify(w));
+
+type EvaluationSource = {
+  kind: 'evaluation', scope: string, node: string, display: 'scene' | 'outputs',
+  presetId: string, presetName?: string, output?: string, step: number | null,
+  bindings: {name: string, task: string, taskName?: string, workspace?: string}[],
+};
+export type GraphSource = EvaluationSource | {kind: 'local', scope: string, node: string, file: string};
+type GraphView = {payload: LoadedPayload, source: GraphSource, key: string, probe?: ProbeContext};
 
 function ParamEditor({param, value, onChange, options}: {param: GraphParameter, value: unknown, onChange: (value: unknown) => void, options?: string[]}) {
   const label = `${param.label || param.name}${unitLabel(param.unit)}`;
@@ -157,9 +165,9 @@ function JsonView({out}: {out: any}) {
 // `active` is false while 图谱 is not in view (the file mode, another section or the compact history over 结果): the
 // panel stays mounted with its result and camera. `scope` names the page's project and task scope; a new one starts the
 // panel afresh, even at the same node with no task (local data packages and manually bound tasks included).
-export default function GraphPanel({node, scope, task, tasks, artifacts, canReadEvents, active = true, onError, onLog}: {node: string, scope: string, task: string,
+export default function GraphPanel({node, scope, task, tasks, artifacts, canReadEvents, active = true, onError, onLog, onSource}: {node: string, scope: string, task: string,
   tasks: Json[], artifacts: Json[], canReadEvents: boolean, active?: boolean,
-  onError: (text: string) => void, onLog: (text: string) => void}) {
+  onError: (text: string) => void, onLog: (text: string) => void, onSource: (source: GraphSource | null) => void}) {
   const [presets, setPresets] = useState<Preset[] | null>(null);
   const [presetError, setPresetError] = useState('');
   const [presetId, setPresetId] = useState('');
@@ -167,16 +175,17 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [includeImages, setIncludeImages] = useState(false);
   const [result, setResult] = useState<GraphResult | null>(null);
-  const [payload, setPayload] = useState<LoadedPayload | null>(null);
-  const [localName, setLocalName] = useState('');
+  const [view, setView] = useState<GraphView | null>(null);
+  const [shownView, setShownView] = useState<GraphView | null>(null);
+  const [outputsSource, setOutputsSource] = useState<EvaluationSource | null>(null);
   const [status, setStatus] = useState('');
   const [running, setRunning] = useState(false);
   const [probe, setProbe] = useState<{position: number[], info?: PickInfo} | null>(null);
   const [progress, setProgress] = useState<ProgressState | null>(null);
-  // Parameter values and bindings the shown result was computed with (the probe reads the same frame/file).
-  const [evaluated, setEvaluated] = useState<{values: Record<string, unknown>, bindings: Record<string, string>} | null>(null);
   // Bumped whenever a pending evaluation is superseded (new request, preset/source change, local file, unmount).
   const generation = useRef(0);
+  const offeredView = useRef<GraphView | null>(null);
+  const displayedView = useRef<GraphView | null>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // The step value from before a scrub whose evaluation is still debounced (not yet sent).
   const scrubFrom = useRef<{value: unknown} | null>(null);
@@ -191,7 +200,24 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
   const requested = stepName ? values[stepName] : undefined;
   const shownStep = typeof requested === 'number' || (typeof requested === 'string' && /^\d+$/.test(requested)) ? Number(requested) : steps.value;
   const stepIndex = shownStep === null ? -1 : steps.choices.indexOf(shownStep);
-  const resetKey = `${presetId}|${JSON.stringify(bindings)}`;
+  const localName = shownView?.source.kind === 'local' ? shownView.source.file : '';
+  // Output cards may arrive without a new scene. In that case the displayed canvas keeps its own source.
+  const source = shownView?.source ?? outputsSource;
+  useLayoutEffect(() => { onSource(source); }, [source, onSource]);
+
+  function offerView(next: GraphView | null) {
+    offeredView.current = next;
+    setView(next);
+  }
+
+  function sceneShown(payload: LoadedPayload) {
+    const next = offeredView.current, previous = displayedView.current;
+    if (next?.payload !== payload || next === previous) return;
+    displayedView.current = next;
+    setShownView(next);
+    if (previous?.key !== next.key) setProbe(null);
+    onLog('');
+  }
 
   const mounted = useRef(false);
   useEffect(() => {
@@ -213,15 +239,25 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
     }).catch(e => { if (mounted.current) { setPresets([]); setPresetError(message(e)); } });
   }, [active]);
 
-  // A new preset, data source or scope starts from the preset defaults and a fresh camera. This runs in the commit of
+  // A new preset or scope starts from the preset defaults and a fresh camera. This runs in the commit of
   // the change, so a reply of the old scope that arrives later (a queued evaluation, a probe, an error) is never shown.
   useLayoutEffect(() => {
     generation.current++;
     clearTimeout(debounce.current); scrubFrom.current = null;
     setValues(initialValues(params));
     setBindings(Object.fromEntries(names.map(n => [n, task])));
-    setResult(null); setPayload(null); setProbe(null); setStatus(''); setRunning(false); setLocalName(''); setEvaluated(null);
-  }, [preset, params, names, node, scope, task]);
+    offerView(null); displayedView.current = null; setShownView(null); setOutputsSource(null);
+    setResult(null); setProbe(null); setStatus(''); setRunning(false); onLog('');
+  }, [preset, params, names, node, scope, task, onLog]);
+
+  function changeBinding(name: string, taskId: string) {
+    if (bindings[name] === taskId) return;
+    generation.current++;
+    clearTimeout(debounce.current); scrubFrom.current = null;
+    offerView(displayedView.current);
+    setBindings(current => ({...current, [name]: taskId}));
+    setRunning(false); setStatus('');
+  }
 
   async function evaluate(overrides: Record<string, unknown> = {}) {
     if (!preset) return;
@@ -235,7 +271,14 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
     if (missing.length) { onError(`请为数据源 ${missing.join('、')} 选择任务`); return; }
     const current = ++generation.current;
     const isCurrent = () => generation.current === current;
+    offerView(displayedView.current);
     const bound = Object.fromEntries(names.map(n => [n, bindings[n]]));
+    const boundSources = names.map(name => {
+      const taskId = bound[name];
+      const row = tasks.find(t => t.id === taskId);
+      return {name, task: taskId, taskName: typeof row?.name === 'string' ? row.name : undefined,
+        workspace: typeof row?.workspace_id === 'string' ? row.workspace_id : undefined};
+    });
     const request: Json = {preset: preset.id, bindings: Object.fromEntries(names.map(n => [n, {task_id: bound[n]}])), parameters, profile: 'web'};
     const outputs = selectOutputs(preset.graph, includeImages);
     if (outputs) request.outputs = outputs;
@@ -262,10 +305,26 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
         try { loaded = await loadPayload(views[0].manifest, {fetchBlob}); } catch (e) { payloadError = message(e); }
       }
       if (!isCurrent()) return;
+      const resolved = stepChoices(graphResult, stepName, []).value;
+      const graphSource: EvaluationSource = {
+        kind: 'evaluation', scope, node, display: 'outputs', presetId: preset.id, presetName: preset.name,
+        step: resolved !== null && resolved >= 0 ? resolved : null,
+        bindings: boundSources,
+      };
       setResult(graphResult);
-      setEvaluated({values: chosen, bindings: bound});
-      setLocalName('');
-      if (loaded) setPayload(loaded);
+      setOutputsSource(Object.values(graphResult.outputs ?? {}).some(out => out?.manifest?.schema !== 'stk.payload/2')
+        ? graphSource : null);
+      if (loaded) {
+        const output = views[0].name, payloadStep: unknown = loaded.manifest.source?.time?.step;
+        const step = typeof payloadStep === 'number' && Number.isSafeInteger(payloadStep) && payloadStep >= 0
+          ? payloadStep : graphSource.step;
+        const key = JSON.stringify([preset.id, bound, output]);
+        offerView({payload: loaded, source: {...graphSource, display: 'scene', output, step}, key, probe: {
+          bindings: bound, values: chosen, result: graphResult,
+          // The artifact list is for the selected task. It cannot resolve a different binding's paths.
+          artifacts: Object.values(bound).every(id => id === task) ? artifacts as Artifact[] : undefined,
+        }});
+      }
       setStatus('');
       if (payloadError) onError(`三维结果无法显示：${payloadError}`);
     } catch (e) {
@@ -360,24 +419,27 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
     if (!file) return;
     // A local payload replaces the graph result, so a pending evaluation is abandoned.
     const current = ++generation.current;
+    clearTimeout(debounce.current); scrubFrom.current = null;
+    offerView(displayedView.current);
     setRunning(false);
     setStatus('正在读取本地数据包…');
     try {
       const loaded = await loadStkp(await file.arrayBuffer());
       if (generation.current !== current) return;
-      setPayload(loaded); setResult(null); setEvaluated(null); setProbe(null); setLocalName(file.name); setStatus('');
+      offerView({payload: loaded, source: {kind: 'local', scope, node, file: file.name}, key: `local|${file.name}`});
+      setResult(null); setOutputsSource(null); setStatus('');
     } catch (e) { if (generation.current === current) { setStatus(''); onError(message(e)); } }
   }
 
   async function queryProbe() {
-    if (!probe) return;
-    const target = resolveProbeTarget(preset?.graph, probe.info?.probe, {bindings: evaluated?.bindings ?? bindings, values: evaluated?.values ?? values,
-      result, artifacts: artifacts as Artifact[]});
+    const displayed = displayedView.current;
+    if (!probe || !displayed?.probe) return;
+    const target = resolveProbeTarget(preset?.graph, probe.info?.probe, displayed.probe);
     if ('error' in target) { onError(target.error); return; }
     const body: Json = {task_id: target.task_id, path: target.path, position: probe.position};
     if (target.metadata) body.metadata = target.metadata;
     const current = generation.current;
-    const active = () => generation.current === current;
+    const active = () => generation.current === current && displayedView.current === displayed;
     setStatus('正在读取原始数据…');
     try {
       const item = await action(node, 'view.probe', body, () => { if (active()) setStatus('探针查询等待复核。'); }, {active});
@@ -397,7 +459,7 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
       <label>图谱预设<select aria-label="图谱预设" value={presetId} onChange={e => setPresetId(e.target.value)}>
         {!presets?.length && <option value="">{presets ? '暂无预设' : '正在读取预设…'}</option>}
         {presets?.map(p => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}</select></label>
-      {names.map(name => <label key={name}>数据源 {name}<select value={bindings[name] ?? ''} onChange={e => setBindings(b => ({...b, [name]: e.target.value}))}>
+      {names.map(name => <label key={name}>数据源 {name}<select value={bindings[name] ?? ''} onChange={e => changeBinding(name, e.target.value)}>
         <option value="">选择任务</option>{tasks.map(t => <option key={t.id} value={t.id}>{t.name || String(t.id).slice(0, 8)} · {t.state}</option>)}</select></label>)}
       <button className="primary" disabled={running || !preset || !node} onClick={() => void evaluate()}>{running ? '计算中…' : '计算图谱'}</button>
     </div>
@@ -415,12 +477,13 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
     </div>}
     {progress && <p className="progress-line"><span className="running">● 运行中</span> {progressText(progress)}{newerFrame && <button className="quiet" onClick={latest}>查看最新帧</button>}</p>}
     {status && <p className="muted status-line">{status}</p>}
-    {payload
-      ? <ErrorBoundary resetKey={payload}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}>
-        <Viewer scene={payload} resetKey={localName ? `local|${localName}` : resetKey} onPick={(position, info) => setProbe({position, info})}/></React.Suspense></ErrorBoundary>
+    {view
+      ? <ErrorBoundary resetKey={view.payload}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}>
+        <Viewer scene={view.payload} resetKey={view.key} canShow={payload => offeredView.current?.payload === payload}
+          onShown={sceneShown} onPick={(position, info) => setProbe({position, info})}/></React.Suspense></ErrorBoundary>
       : <div className="viewport"><div className="empty"><span className="orbit">◇</span><h2>用节点图描述要看的结果</h2><p>选择预设并绑定任务。计算在数据所在的节点完成，这里只接收渲染数据。</p></div></div>}
     {localName && <p className="muted">本地数据包 {localName} · 无法查询原始值</p>}
-    {payload && !localName && <div className="probe"><strong>物理坐标探针</strong>
+    {shownView?.probe && <div className="probe"><strong>物理坐标探针</strong>
       {(probe?.position ?? [0, 0, 0]).map((v, i) => <input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={Number(v.toPrecision(8))}
         onChange={e => setProbe(p => ({...(p ?? {}), position: (p?.position ?? [0, 0, 0]).map((n, j) => (i === j ? Number(e.target.value) : n))}))}/>)}
       <button disabled={!probe || running} onClick={() => void queryProbe()}>查询原始值</button>

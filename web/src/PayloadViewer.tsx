@@ -39,10 +39,14 @@ const count = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v 
 
 interface Context {view: any, renderer: any, picker: any, scene: BuiltScene | null, payload: LoadedPayload | null, origin: number[] | null, cameraKey: string | null}
 
-export default function PayloadViewer({payload, onPick, resetKey}: {payload: LoadedPayload, onPick?: (position: number[], info: PickInfo) => void, resetKey?: string}) {
+export default function PayloadViewer({payload, onPick, resetKey, canShow, onShown}: {payload: LoadedPayload,
+  onPick?: (position: number[], info: PickInfo) => void, resetKey?: string,
+  canShow?: (payload: LoadedPayload) => boolean, onShown?: (payload: LoadedPayload) => void}) {
   const host = useRef<HTMLDivElement>(null);
   const pick = useRef(onPick);
   pick.current = onPick;
+  const display = useRef({canShow, onShown});
+  display.current = {canShow, onShown};
   const context = useRef<Context | null>(null);
   const toggled = useRef<Record<string, boolean>>({});
   const [basis, setBasis] = useState<CameraBasis | null>(null);
@@ -100,9 +104,11 @@ export default function PayloadViewer({payload, onPick, resetKey}: {payload: Loa
   useEffect(() => {
     let cancelled = false;
     setError('');
+    const key = `${resetKey ?? ''}|${cameraSignature(payload)}`;
+    if (context.current?.payload === payload && context.current.cameraKey === key) return;
     buildScene(payload).then(scene => {
       const c = context.current;
-      if (cancelled || !c) { scene.dispose(); return; }
+      if (cancelled || !c || display.current.canShow?.(payload) === false) { scene.dispose(); return; }
       const {renderer, picker, view} = c;
       // Swap in the new layers only once they are complete, so step scrubbing never shows an empty view.
       for (const layer of c.scene?.layers ?? []) if (layer.prop) layer.type === 'volume' ? renderer.removeVolume(layer.prop) : renderer.removeActor(layer.prop);
@@ -119,7 +125,6 @@ export default function PayloadViewer({payload, onPick, resetKey}: {payload: Loa
       c.scene?.dispose();
       const background = backgroundOf(payload);
       renderer.setBackground(background[0], background[1], background[2]);
-      const key = `${resetKey ?? ''}|${cameraSignature(payload)}`;
       if (key !== c.cameraKey || !c.origin) applyViewCamera(renderer, payload);
       else {
         const o = payload.manifest.render_origin;
@@ -133,7 +138,10 @@ export default function PayloadViewer({payload, onPick, resetKey}: {payload: Loa
       setWarnings(scene.warnings);
       setShown(payload);
       setBasis(cameraBasis(renderer.getActiveCamera()));
-    }).catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
+      display.current.onShown?.(payload);
+    }).catch(e => {
+      if (!cancelled && display.current.canShow?.(payload) !== false) setError(e instanceof Error ? e.message : String(e));
+    });
     return () => { cancelled = true; };
   }, [payload, resetKey]);
 
