@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-10 20:27 UTC · Desktop CI 终态与 Cocoa 对照
+
+远端 `bacdc753` 的 Desktop CI 于 20:17:40 UTC 完成，6 个作业中 5 个通过。Linux 2198/2198、两个 Linux 打包作业、Windows CPU 1505/1505 和 Windows 原生 6/6 通过。Windows 原生零跳过，1313.35 秒。下载工件并校验归档摘要后复核，PDF 20/20 轮、160/160 张截图摘要匹配，最后一轮重新准备第一页，记录的最长捕获启动 81 ms。MP4 和 HTML 视频均 20/20 轮，各 161 张截图摘要匹配。同源码头 Runtime 13/13、Secret scan 和 Pages 通过。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42883444412) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42883444412/artifacts/13800016347) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42883444505)
+
+macOS 依赖、CPU 1565/1565、Metal 254/254 与包内烟雾均通过。生产原生 4/6，两种视频均通过首次明确可见暂停。MP4 隐藏后暂停保持失败，HTML 视频未能在颜色变化和自然结束前确认隐藏暂停。可见暂停后直接隐藏且不重复发命令的对照通过，隐藏时新发暂停的对照失败。macOS 证据文件数 1786 来自官方上传日志，原生计数和失败阶段来自官方作业日志。 [macOS 作业](https://github.com/sijintech/stk/actions/runs/42883444412/job/130065470967) · [macOS 工件](https://github.com/sijintech/stk/actions/runs/42883444412/artifacts/13798991845)
+
+`7ab5d972` 集成独立对照 `7bc0f837`。同一可见 Cocoa 视图的首次暂停独立核验后，立即发出第二次暂停，保持导航、可见性、焦点和取证采样不变。保存两次媒体代次、ACK、首个非播放回执和失败时的关闭信息。Linux 与 Apple 条件 C++ 语法检查通过，隔离注册确认 Apple 2 项、Linux 0 项，CI 配置与 shell 检查通过。生产路径、必测项和时限沿用已发布契约。MP4 与 HTML 实际对照待新 macOS CI。收据在外部 `root-delivery-20261110-139/ci` 与 `mac-visible-repeat`。
+
 ## 2026-11-10 20:07 UTC · Web 结果切换与项目隔离
 
 `9bc16d66` 集成 Claude90 `d636e94c`、Claude91 最终 `ebb2e951` 和 Root 复审修订。文件与图谱保留各自 Viewer、相机、已显示结果和探针。隐藏期间停止图谱进度读取和尚未发送的拖动，允许明确发出的同范围计算完成。首次图谱真正显示才读预设。项目、节点或任务变化清理旧图谱，迟到回执不能显示到新范围。Root 复现了旧 `.stkp` 选择框残留及窄窗历史上方迟到错误，修订后可在新范围重新选择同一文件，结果通知回到当前结果页才显示。Claude 最终独立 Chromium 133/133，定向 18/18、重复 150/150。Root 整合版构建通过，Chromium 133/133，零跳过及重试。
