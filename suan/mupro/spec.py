@@ -1,7 +1,7 @@
 """Client-side TaskSpec builder for muFerro runs; safe on any client OS."""
 
 from suan.runtime.launch import LAUNCHERS  # noqa: F401 - re-exported for the MuPRO CLI and launcher
-from suan.runtime.models import BACKENDS, relative_path
+from suan.runtime.models import BACKENDS, TaskSpec, relative_path
 
 
 def muferro_spec(workspace_id, *, case_dir=".", inputs=None, example=False, ranks=1, threads_per_rank=1,
@@ -48,3 +48,28 @@ def muferro_spec(workspace_id, *, case_dir=".", inputs=None, example=False, rank
     return {"workspace_id": workspace_id, "argv": argv, "backend": backend, "name": name,
             "inputs": [] if example else (None if inputs is None else list(inputs)),
             "outputs": ["stk-mupro.json"], "env": {}, "resources": resources}
+
+
+def preflight_spec(workspace_id, *, backend="local", walltime_seconds=None, memory_mb=None, queue=None,
+                   account=None, name=""):
+    """Return validated TaskSpec keyword arguments for an explicit compute-side preflight task.
+
+    The task runs ``python -m suan.mupro.preflight`` in the selected environment and observes
+    that worker's configured MuPRO settings. The client stages no case and passes no SDK,
+    program, script, licence or environment values; only scheduler resources are accepted.
+    """
+    if backend not in BACKENDS:
+        raise ValueError("backend must be local, pbs or slurm")
+    if backend != "local" and walltime_seconds is None:
+        raise ValueError("Cluster MuPRO jobs require walltime_seconds")
+    resources = {"cpus": 1}
+    for key, value in (("walltime_seconds", walltime_seconds), ("memory_mb", memory_mb),
+                       ("queue", queue), ("account", account)):
+        if value is not None:
+            resources[key] = value
+    spec = {"workspace_id": workspace_id, "argv": ["{python}", "-m", "suan.mupro.preflight"],
+            "backend": backend, "name": name, "inputs": [], "outputs": ["stk-mupro-preflight.json"],
+            "env": {}, "resources": resources}
+    # Full Runtime validation (numbers, local queue/account, IDs) before any submission effect.
+    TaskSpec(**spec)
+    return spec
