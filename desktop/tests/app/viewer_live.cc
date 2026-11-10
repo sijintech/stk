@@ -199,6 +199,13 @@ int run(const gfx::Backend backend, const Options &opt)
   auto elapsed = [&] { return wm->time_ms() - step_start; };
   auto new_frame = [&] { return win->frames_drawn() > frames_at_step; };
   auto main_rect = [&]() { return area("a2")->find_region("main")->rect(); };
+  auto pick_center = [&]() {
+    const wm::Rect r = main_rect();
+    const int x = (r.xmin + r.xmax) / 2, y = (r.ymin + r.ymax) / 2;
+    send(wm::EventType::MouseMove, x, y);
+    send(wm::EventType::MouseDown, x, y);
+    send(wm::EventType::MouseUp, x, y);
+  };
 
   wm->add_timer(30, 30, [&] {
     switch (step) {
@@ -262,15 +269,39 @@ int run(const gfx::Backend backend, const Options &opt)
           wm->quit(1);
         }
         else if (new_frame()) {
-          const wm::Rect r = main_rect();
-          const int x = (r.xmin + r.xmax) / 2, y = (r.ymin + r.ymax) / 2;
-          send(wm::EventType::MouseMove, x, y);
-          send(wm::EventType::MouseDown, x, y);
-          send(wm::EventType::MouseUp, x, y);
+          // The window manager drains both posted callbacks before the next GPU draw.
+          check(wm->post([&vs, payload = vs.payload()] {
+            vs.open_payload(payload, "replacement payload");
+          }), "queue a replacement ahead of the drawn frame's pick");
+          pick_center();
           next();
         }
         break;
-      case 4: /* the probe answered */
+      case 4:
+        if (elapsed() > 10000) {
+          check(false, "redraw after the replacement", "timeout");
+          wm->quit(1);
+        }
+        else if (new_frame()) {
+          check(vs.source().kind == app::SourceKind::Payload &&
+                vs.probe().status == app::ProbeState::Status::Empty,
+                "the replaced frame's queued click leaves the new probe empty",
+                std::to_string(int(vs.probe().status)));
+          check(vs.open_path(run_dir, "muferro-domains"), "reopen the run for a current-frame pick", vs.open_error());
+          next();
+        }
+        break;
+      case 5:
+        if (vs.payload() && !vs.evaluating() && new_frame()) {
+          pick_center();
+          next();
+        }
+        else if (!vs.eval_error().empty() || elapsed() > 120000) {
+          check(false, "re-evaluation after the replacement", vs.eval_error().empty() ? "timeout" : vs.eval_error());
+          wm->quit(1);
+        }
+        break;
+      case 6: /* the probe answered */
         if (vs.probe().status == app::ProbeState::Status::Done || vs.probe().status == app::ProbeState::Status::Failed ||
             vs.probe().status == app::ProbeState::Status::Unavailable)
         {
@@ -300,7 +331,7 @@ int run(const gfx::Backend backend, const Options &opt)
           wm->quit(1);
         }
         break;
-      case 5: /* the Probe editor shows the value */
+      case 7: /* the Probe editor shows the value */
         if (elapsed() > 10000) {
           check(false, "redraw with the Probe editor", "timeout");
           wm->quit(1);

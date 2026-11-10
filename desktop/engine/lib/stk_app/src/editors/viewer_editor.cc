@@ -806,12 +806,18 @@ class ViewerEditor final : public Editor {
 
   void pick_at(const EditorContext &ctx, const double x, const double y)
   {
-    if (!gpu_ || !has_payload_) {
+    if (!gpu_ || !has_payload_ || !vs_) {
       return;
     }
     const int w = view_w_, h = view_h_;
+    const uint64_t drawn_payload = payload_serial_;
     ViewerState *vs = vs_;
-    later(ctx, [this, vs, x, y, w, h]() {
+    later(ctx, [this, vs, x, y, w, h, drawn_payload]() {
+      // The model can accept a new frame before the posted GPU pick runs.
+      if (!gpu_ || !has_payload_ || vs_ != vs || payload_serial_ != drawn_payload ||
+          vs->payload_serial() != drawn_payload) {
+        return;
+      }
       const viewer_gpu::PickResult hit = gpu_->pick(x, y, w, h);
       if (!hit.hit) {
         last_pick_miss_ = true;
