@@ -402,6 +402,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure -L "unit|wm|ui|bridge|project|literature" -LE "gpu|window" --output-junit "$PWD/build/ctest-cpu.xml"
 
       - name: Test on Metal (headless goldens, viewer, e2e, install layout)
+        if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
         # macos-15 runners expose the "Apple Paravirtual device" (argument buffers tier 2,
         # barycentrics, MTLGPUFamilyMac2); macos-14 runners have no Metal device at all.
         # Metal compiles shaders with fast math, so stk_viewer_gpu never relies on NaN/Inf in a
@@ -409,7 +410,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure -L gpu -LE window --output-junit "$PWD/build/ctest-metal.xml"
 
       - name: The Python-backed tests ran (the Runtime ones are Linux-only)
-        if: success() || failure()
+        if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
         run: |
           python3 desktop/tests/check_required_tests.py build/ctest-cpu.xml --literature-layouts \
             'native_evidence_gate' 'ReportDocumentHost\..*' 'NativeViewport\..*' 'NativeViewInvalidation\..*' 'AreaRemoval\..*' 'ProjectScopeNotifications\..*' 'document_preview_memory_.*' 'Schema\.ReportsSourceReviewAndOptionalCompareAndSwap' 'Schema\.ReportsPreviewResources' 'DocumentResources\..*' 'NativeMediaProbe\..*' 'DocumentEvidence\..*' 'ReportsPreviewPython\..*' 'ReportGenerationPython\..*' 'LanguagesAndWidths/ReportGenerationMouse\..*' 'Receipts/ReportsPreviewInvalid\..*' 'Generation/ReportsGeneratedInvalid\..*' 'Receipts/ReportsPdfInvalid\..*' 'Scopes/ReportsPdfInvalidation\..*' 'VideoReceipts/ReportsVideoInvalid\..*' 'LanguagesWidthsAndScales/ReportsVideoMouse\..*' 'LayoutObserver(Test|Lifetime)\..*' \
