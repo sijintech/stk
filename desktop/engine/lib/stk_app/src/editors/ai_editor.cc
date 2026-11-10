@@ -254,6 +254,26 @@ class AIEditor final : public Editor {
     const std::string key = state.project()->directory + "\n" + state.project()->id;
     active_draft_ = key;
     auto &draft = project_draft(*state.project(), key);
+    if (focused && saved_questions_handle_ == opening && discussion.recent_requests_supported()) {
+      opened_history_ = true; // Browsing has no implicit question selection.
+      discussion.sync_archive();
+      const auto &page = discussion.page("requests");
+      if (!page.loaded && !state.busy() && !discussion.busy()) {
+        discussion.load_page("requests", page.offset, true);
+      }
+      auto &header = layout.row();
+      header.label(ctx.tr("ai.history"));
+      header.button("ai_close_saved_questions", ctx.tr("ui.close"), [this, store = &ctx.store] {
+        saved_questions_handle_.clear();
+        store->changed();
+      }).width(6);
+      if (!discussion.error().empty()) { layout.paragraph(discussion.error()); }
+      else if (discussion.busy() && page.items.empty()) { layout.label(ctx.tr("workbench.history.loading")); }
+      else if (page.loaded && page.items.empty()) { layout.label(ctx.tr("workbench.history.empty")); }
+      draw_saved_questions(layout, ctx, state, true);
+      return;
+    }
+    saved_questions_handle_.clear();
     // Agent sessions (format 13): a fourth purpose with its own view (steps, wait cards, record).
     auto &agent = state.agent();
     if (!pending_session_.empty()) {
@@ -957,6 +977,52 @@ class AIEditor final : public Editor {
     return &transcript_positions_.back().second;
   }
 
+  void draw_saved_questions(ui::Layout &body, EditorContext &ctx, ProjectState &state, const bool browsing = false)
+  {
+    auto &discussion = state.discussion();
+    const bool enabled = !state.busy() && !discussion.busy();
+    const std::string handle = state.project()->handle;
+    const auto &page = discussion.page("requests");
+    std::vector<std::string> ids, titles;
+    for (const auto &item : page.items) {
+      ids.push_back(io::get_string(item, "id"));
+      titles.push_back(io::get_string(item.at("configuration"), "model") + " · " +
+          std::string(ctx.tr("discussion.requests." + io::get_string(item, "status"))) + " · " + ids.back().substr(0, 8));
+    }
+    auto &history = body.row();
+    history.dropdown("ai_history", std::move(titles), {
+      [ids, &discussion] {
+        const auto id = io::get_string(discussion.exchange_request(), "id");
+        const auto it = std::find(ids.begin(), ids.end(), id);
+        return it == ids.end() ? -1 : int(it - ids.begin());
+      },
+      [this, ids, &discussion, &state, handle, browsing, area = &ctx.area](int index) {
+        if (!state.project() || state.project()->handle != handle || index < 0 || size_t(index) >= ids.size()) { return; }
+        const auto &id = ids[size_t(index)];
+        if (browsing) {
+          if (auto open = area->shell().saved_conversation_action(*area, id)) { open(); }
+        }
+        else if (discussion.load_exchange(id)) { opened_history_ = true; }
+      }
+    }).disable(!enabled || discussion.exchange_busy() || ids.empty());
+    history.button("ai_history_refresh", ctx.tr("ai.refresh_history"), [&discussion, &state, handle, offset = page.offset] {
+      if (state.project() && state.project()->handle == handle) { discussion.load_page("requests", offset); }
+    }).width(6).disable(!enabled);
+    archive_switch(body, ctx, "request", {[&discussion] { return discussion.show_archived("requests"); },
+        [&discussion](const bool show) { discussion.set_show_archived("requests", show); }}, "ai_history_show_archived");
+    if (page.offset > 0 || page.next >= 0) {
+      auto &pages = body.row();
+      pages.button("ai_previous", ctx.tr("project.drafts.previous"), [&discussion, &state, handle, offset = page.offset] {
+        if (state.project() && state.project()->handle == handle) {
+          discussion.load_page("requests", std::max<int64_t>(0, offset - 100));
+        }
+      }).disable(!enabled || page.offset == 0);
+      pages.button("ai_next", ctx.tr("project.drafts.next"), [&discussion, &state, handle, next = page.next] {
+        if (state.project() && state.project()->handle == handle) { discussion.load_page("requests", next); }
+      }).disable(!enabled || page.next < 0);
+    }
+  }
+
   void conversation(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft,
                     const std::string &key, const bool wide, const bool settings_open = false,
                     const bool focused = false)
@@ -968,51 +1034,15 @@ class AIEditor final : public Editor {
     discussion.sync_archive();  // archived questions leave the history unless switched to them
     const auto &page = discussion.page("requests");
     if (!page.loaded && enabled) { discussion.load_page("requests", page.offset, true); }
-    const auto items = page.items;
+    const auto &items = page.items;
     if (!discussion.exchange_id().empty()) { opened_history_ = true; }
     if (!opened_history_ && page.loaded && !items.empty() && enabled && !discussion.exchange_busy()) {
       opened_history_ = discussion.load_exchange(io::get_string(items.back(), "id"));
     }
     const bool history_on_rail = focused && discussion.recent_requests_supported();
-    const auto draw_saved_questions = [&](ui::Layout &body) {
-      std::vector<std::string> ids, titles;
-      for (const auto &item : items) {
-        ids.push_back(io::get_string(item, "id"));
-        titles.push_back(io::get_string(item.at("configuration"), "model") + " · " +
-            std::string(ctx.tr("discussion.requests." + io::get_string(item, "status"))) + " · " + ids.back().substr(0, 8));
-      }
-      auto &history = body.row();
-      history.dropdown("ai_history", std::move(titles), {
-        [ids, &discussion] {
-          const auto id = io::get_string(discussion.exchange_request(), "id");
-          const auto it = std::find(ids.begin(), ids.end(), id);
-          return it == ids.end() ? -1 : int(it - ids.begin());
-        },
-        [this, ids, &discussion, &state, handle](int index) {
-          if (!state.project() || state.project()->handle != handle || index < 0 || size_t(index) >= ids.size()) { return; }
-          if (discussion.load_exchange(ids[size_t(index)])) { opened_history_ = true; }
-        }
-      }).disable(!enabled || discussion.exchange_busy() || ids.empty());
-      history.button("ai_history_refresh", ctx.tr("ai.refresh_history"), [&discussion, &state, handle, offset = page.offset] {
-        if (state.project() && state.project()->handle == handle) { discussion.load_page("requests", offset); }
-      }).width(6).disable(!enabled);
-      archive_switch(body, ctx, "request", {[&discussion] { return discussion.show_archived("requests"); },
-          [&discussion](const bool show) { discussion.set_show_archived("requests", show); }}, "ai_history_show_archived");
-      if (page.offset > 0 || page.next >= 0) {
-        auto &pages = body.row();
-        pages.button("ai_previous", ctx.tr("project.drafts.previous"), [&discussion, &state, handle, offset = page.offset] {
-          if (state.project() && state.project()->handle == handle) {
-            discussion.load_page("requests", std::max<int64_t>(0, offset - 100));
-          }
-        }).disable(!enabled || page.offset == 0);
-        pages.button("ai_next", ctx.tr("project.drafts.next"), [&discussion, &state, handle, next = page.next] {
-          if (state.project() && state.project()->handle == handle) { discussion.load_page("requests", next); }
-        }).disable(!enabled || page.next < 0);
-      }
-    };
     if (!history_on_rail) {
       layout.label(ctx.tr("ai.history"));
-      draw_saved_questions(layout);
+      draw_saved_questions(layout, ctx, state);
     }
     const auto request = discussion.exchange_request();
     const auto question = discussion.exchange_question();
@@ -1173,7 +1203,7 @@ class AIEditor final : public Editor {
     }
     if (history_on_rail) {
       if (auto *history = layout.panel("ai_all_saved_questions", ctx.tr("ai.history"), false)) {
-        draw_saved_questions(*history);
+        draw_saved_questions(*history, ctx, state);
       }
     }
   }
@@ -1278,6 +1308,7 @@ class AIEditor final : public Editor {
   bool reveal_saved(ProjectState &state, const std::string &request_id)
   {
     if (!state.discussion().load_exchange(request_id)) { return false; }
+    saved_questions_handle_.clear();
     const auto &project = *state.project();
     auto &draft = project_draft(project, project.directory + "\n" + project.id);
     if (draft.intent == kAgentIntent) { draft.intent = 0; }
@@ -1285,10 +1316,18 @@ class AIEditor final : public Editor {
     return true;
   }
 
+  bool reveal_saved_question_history(const ProjectState &state)
+  {
+    if (!state.project()) { return false; }
+    saved_questions_handle_ = state.project()->handle;
+    return true;
+  }
+
   bool reveal_saved_agent(ProjectState &state, const std::string &session_id)
   {
     auto &agent = state.agent();
     if (!agent.select_history_session(session_id)) { return false; }
+    saved_questions_handle_.clear();
     const auto &project = *state.project();
     project_draft(project, project.directory + "\n" + project.id).intent = kAgentIntent;
     return true;
@@ -1299,6 +1338,7 @@ class AIEditor final : public Editor {
   {
     const auto session = io::get_string(target, "session_id");
     if (session.empty()) { return false; }
+    saved_questions_handle_.clear();
     pending_session_ = session;  // taken by the next draw (navigation redraws the area)
     pending_project_ = io::get_string(target, "project_id");
     return true;
@@ -1660,6 +1700,7 @@ class AIEditor final : public Editor {
   std::unordered_map<std::string, Draft> drafts_, workspace_drafts_;
   std::string active_draft_, opening_, shown_context_, shown_exchange_;
   bool opened_history_ = false;
+  std::string saved_questions_handle_;
   bool model_has_text_ = false;
   struct NewEndpoint { std::string id, name, base_url, models; bool internal = false; int tier = 0; } new_endpoint_;
   int import_entry_ = -1;
@@ -1697,6 +1738,12 @@ bool reveal_saved_conversation(Editor &editor, ProjectState &project, const std:
 {
   auto *ai = dynamic_cast<AIEditor *>(&editor);
   return ai && ai->reveal_saved(project, request_id);
+}
+
+bool reveal_saved_question_history(Editor &editor, const ProjectState &project)
+{
+  auto *ai = dynamic_cast<AIEditor *>(&editor);
+  return ai && ai->reveal_saved_question_history(project);
 }
 
 bool reveal_saved_agent_session(Editor &editor, ProjectState &project, const std::string &session_id)

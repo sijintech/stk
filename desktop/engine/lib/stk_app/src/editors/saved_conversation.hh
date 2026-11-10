@@ -15,6 +15,8 @@ bool can_reveal_saved_conversation(const Editor &editor, const ProjectState &pro
 bool saved_conversation_dispatch_safe(const Editor &editor, ProjectState &project, const std::string &request_id);
 /** Select the saved exchange for display, preserving the editor's compose draft. */
 bool reveal_saved_conversation(Editor &editor, ProjectState &project, const std::string &request_id);
+/** Show the existing paged question list in this AI editor. */
+bool reveal_saved_question_history(Editor &editor, const ProjectState &project);
 /** Select a saved agent session for display without starting a turn. */
 bool reveal_saved_agent_session(Editor &editor, ProjectState &project, const std::string &session_id);
 /** One readable line from the saved session summary. */

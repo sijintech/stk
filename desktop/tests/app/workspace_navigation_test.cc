@@ -717,6 +717,14 @@ def init(self, *args, **kwargs):
         raise BridgeError("unavailable", "fixture forbids writes during navigation")
     self.methods["project.requests.create"] = save
     self.methods["project.agent.get"] = read_agent
+    def observe(method, original_read):
+        def read(params, call):
+            with Path(__file__).with_name("history_reads").open("a") as trace:
+                trace.write(method + "\n")
+            return original_read(params, call)
+        return read
+    for method in ("project.requests.list", "project.requests.get", "project.requests.progress"):
+        self.methods[method] = observe(method, self.methods[method])
     for method in ("project.requests.start", "project.agent.create", "project.agent.say",
                    "project.agent.start", "project.agent.run_target", "project.agent.run_decide",
                    "models.local.start", "project.attention.viewed"):
@@ -964,7 +972,7 @@ TEST_F(SavedConversationNavigationPython, RecentQuestionsOpenFromTasksAndResults
     }
   }
   ASSERT_NE(second, nullptr);
-  EXPECT_EQ(second->menu_index, 0);  // Newest comes first even after visiting the older question.
+  EXPECT_EQ(second->menu_index, 1);  // Browse comes first, then the newest question.
   const auto key = second->key;
   ASSERT_NO_FATAL_FAILURE(click(key));
   ASSERT_NO_FATAL_FAILURE(wait_for_question(kSecond));
@@ -1003,6 +1011,124 @@ TEST_F(SavedConversationNavigationPython, RecentQuestionsOpenFromTasksAndResults
     return page.loaded && page.items.size() == 1 && io::get_string(page.items.front(), "id") == kSecond;
   }, 30)) << discussion.error();
   EXPECT_EQ(widget(question)->string.value(), "Draft stays in the workbench");
+}
+
+TEST_F(SavedConversationNavigationPython, BrowseSavedQuestionsBeyondTheRecentRailWithoutSelectingOrWriting)
+{
+  auto &state = project();
+  auto &discussion = state.discussion();
+  auto &viewer = f.shell->store().viewer();
+  struct CloseViewer {
+    ViewerState &state;
+    ~CloseViewer() { state.close(); }
+  } close_viewer{viewer};
+  ASSERT_NO_FATAL_FAILURE(prepare_table());
+  ASSERT_NO_FATAL_FAILURE(save_question(kFirst, "Question older than the recent list", true));
+  for (char digit = '1'; digit <= '8'; ++digit) {
+    const std::string id = std::string(8, digit) + "-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    ASSERT_NO_FATAL_FAILURE(save_question(id.c_str(), "Newer saved question"));
+  }
+  const auto payload = std::make_shared<io::Payload>(io::read_stkp(std::string(STK_REPO_ROOT) +
+      "/desktop/tests/viewer/fixtures/muferro_domains.stkp"));
+  viewer.open_payload(payload, "Already open");
+  f.shell->open_workbench(f.screen, true);
+  f.screen.run_deferred();
+  f.drv->frame();
+  auto *results = f.screen.maximized();
+  ASSERT_NE(results, nullptr);
+  const auto camera = viewer.camera_serial();
+  const auto reads = [&] {
+    std::ifstream log(dir.path() / "history_reads");
+    std::vector<std::string> methods;
+    for (std::string line; std::getline(log, line);) { methods.push_back(std::move(line)); }
+    return methods;
+  };
+  const auto click = [&](const std::string &key) {
+    ASSERT_NE(widget(key), nullptr) << key;
+    const auto [x, y] = f.widget_center(key);
+    ASSERT_TRUE(f.drv->click(x, y)) << key;
+    f.screen.run_deferred();
+    f.drv->frame();
+  };
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    const auto *recent = discussion.recent_requests();
+    return recent && recent->size() == 8;
+  }, 30));
+  ASSERT_EQ(widget(std::string("workbench_question/") + kFirst), nullptr);
+  ASSERT_TRUE(discussion.exchange_id().empty());
+  const auto before = reads();
+  ASSERT_NO_FATAL_FAILURE(click("workbench_saved_questions"));
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    const auto *history = widget("ai_history");
+    return history && history->items.size() == 9 && history->enabled;
+  }, 30));
+  ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
+  auto *ai = f.screen.maximized();
+  ASSERT_NE(ai, results);
+  EXPECT_TRUE(discussion.exchange_id().empty());
+  const auto loaded = reads();
+  ASSERT_EQ(loaded.size(), before.size() + 1);
+  EXPECT_EQ(loaded.back(), "project.requests.list");
+  const auto context = discussion.context();
+  ASSERT_NO_FATAL_FAILURE(click("ai_history"));
+  ASSERT_TRUE(f.drv->key(wm::Key::Home));
+  ASSERT_TRUE(f.drv->key(wm::Key::Enter));
+  f.screen.run_deferred();
+  const auto draft = "ai_question/" + handle();
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    return !discussion.exchange_busy() && discussion.exchange_id() == kFirst && widget(draft);
+  }, 30));
+  EXPECT_EQ(io::get_string(discussion.exchange_question(), "text"), "Question older than the recent list");
+  EXPECT_EQ(io::get_string(discussion.exchange_reply(), "text"), "Saved answer");
+  EXPECT_EQ(discussion.context(), context);
+  EXPECT_EQ(f.screen.maximized(), ai);
+  widget(draft)->string.assign("Keep the unsent question");
+  ASSERT_NO_FATAL_FAILURE(click("workbench_results"));
+  ASSERT_EQ(f.screen.maximized(), results);
+  f.drv->ctx.rect.xmax = 680;
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+  const auto *browse = widget("workbench_history");
+  ASSERT_NE(browse, nullptr);
+  std::string entry;
+  for (const auto &block : f.screen.ui()->blocks()) {
+    for (const auto &item : block->widgets()) {
+      if (item.type == ui::WidgetType::MenuItem && item.text == f.shell->store().tr("ai.history")) { entry = item.key; }
+    }
+  }
+  ASSERT_FALSE(entry.empty());
+  const auto warm = reads();
+  ASSERT_NO_FATAL_FAILURE(click(entry));
+  ASSERT_EQ(f.screen.maximized(), ai);
+  ASSERT_NE(widget("ai_history"), nullptr);
+  EXPECT_EQ(reads(), warm);
+  EXPECT_EQ(discussion.exchange_id(), kFirst);
+  ASSERT_NO_FATAL_FAILURE(click("ai_close_saved_questions"));
+  ASSERT_NE(widget(draft), nullptr);
+  EXPECT_EQ(widget(draft)->string.value(), "Keep the unsent question");
+  EXPECT_EQ(discussion.exchange_id(), kFirst);
+  EXPECT_EQ(viewer.payload(), payload);
+  EXPECT_EQ(viewer.camera_serial(), camera);
+  EXPECT_EQ(state.project()->revision, 1);
+
+  ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+  ASSERT_NO_FATAL_FAILURE(click(entry));
+  ASSERT_NE(widget("ai_close_saved_questions"), nullptr);
+  const auto directory = state.project()->directory;
+  const auto old_handle = handle();
+  ASSERT_TRUE(state.close());
+  ASSERT_NO_FATAL_FAILURE(idle());
+  EXPECT_EQ(widget("ai_close_saved_questions"), nullptr);
+  ASSERT_TRUE(state.open(directory));
+  ASSERT_NO_FATAL_FAILURE(idle());
+  EXPECT_NE(handle(), old_handle);
+  EXPECT_EQ(widget("ai_close_saved_questions"), nullptr);
+  const auto reopened = "ai_question/" + handle();
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget(reopened) != nullptr; }, 30));
+  EXPECT_EQ(widget(reopened)->string.value(), "Keep the unsent question");
 }
 
 TEST_F(SavedConversationNavigationPython, RecentQuestionsRestoreTheScrolledTranscript)

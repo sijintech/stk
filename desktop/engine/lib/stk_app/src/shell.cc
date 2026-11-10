@@ -310,7 +310,8 @@ std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, st
 {
   auto *screen = origin.screen();
   auto &project = store_.project();
-  if (!screen || !project.project() || id.empty()) { return {}; }
+  const bool browse = kind == SavedConversationKind::QuestionHistory;
+  if (!screen || !project.project() || (!browse && id.empty())) { return {}; }
   const bool agent_session = kind == SavedConversationKind::AgentSession;
   if (agent_session && (project.busy() || !project.agent().supported() ||
                         !project.agent().history_selection_available())) {
@@ -337,9 +338,9 @@ std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, st
     return state.project() && state.project()->handle == handle && state.project()->id == project_id &&
            state.discussion().exchange_generation() == exchange && state.agent().selection_epoch() == selection;
   };
-  return [this, screen, current, id = std::move(id), agent_session] {
+  return [this, screen, current, id = std::move(id), agent_session, browse] {
     if (!current()) { return; }
-    screen->defer([this, screen, current, id, agent_session] {
+    screen->defer([this, screen, current, id, agent_session, browse] {
       if (!current()) { return; }
       auto &state = store_.project();
       state.sync();
@@ -352,9 +353,10 @@ std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, st
       }
       else if (state.discussion().busy() || state.discussion().exchange_busy()) { return; }
       const bool focused = workbench_is_focused(*screen);
+      if (browse && (!focused || !state.discussion().recent_requests_supported())) { return; }
+      const auto &request = agent_session || browse ? state.discussion().exchange_id() : id;
       if (!agent_session || !focused) {
         // Leaving an ordinary maximized area reveals the other active editors on this screen.
-        const auto &request = agent_session ? state.discussion().exchange_id() : id;
         for (const auto *other : screens_) {
           if (agent_session && other != screen) { continue; }
           for (const auto *base : other->areas()) {
@@ -365,7 +367,7 @@ std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, st
       }
       const auto result = activate_editor_if(screen, kEditorAI, focused, [&](const Editor &destination) {
         return can_reveal_saved_conversation(destination, state) &&
-               (agent_session || saved_conversation_dispatch_safe(destination, state, id));
+               (agent_session || saved_conversation_dispatch_safe(destination, state, request));
       });
       if (!result) {
         if (store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
@@ -373,8 +375,10 @@ std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, st
       }
       auto *area = dynamic_cast<EditorArea *>(screen->find_area(io::get_string(result.value(), "area_id")));
       if (!area) { return; }
-      const bool opened = agent_session ? reveal_saved_agent_session(area->editor(), state, id) :
-                                          reveal_saved_conversation(area->editor(), state, id);
+      bool opened;
+      if (browse) { opened = reveal_saved_question_history(area->editor(), state); }
+      else if (agent_session) { opened = reveal_saved_agent_session(area->editor(), state, id); }
+      else { opened = reveal_saved_conversation(area->editor(), state, id); }
       if (!opened) { return; }
       ++saved_conversation_epoch_;
       if (focused) { focused_workbenches_[screen] = screen->visibility_epoch(); }
@@ -1043,6 +1047,11 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
       }
     };
     if (questions_supported) {
+      auto browse = shell_.saved_conversation_action(origin, {}, SavedConversationKind::QuestionHistory);
+      const auto label = shell_.store_.tr("ai.history");
+      const bool enabled = !project.busy() && !discussion.busy() && !discussion.exchange_busy() && bool(browse);
+      if (rail) { rail->button("workbench_saved_questions", label, std::move(browse)).disable(!enabled); }
+      else { menu.push_back({std::string(label), std::move(browse), enabled}); }
       heading("workbench.history.recent");
       const auto *questions = discussion.recent_requests();
       const auto &error = discussion.recent_requests_error();
