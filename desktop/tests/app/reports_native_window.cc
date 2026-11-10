@@ -59,6 +59,11 @@ constexpr size_t kMediaSize = 41558;
 constexpr const char *kFrameClockMediaSha256 = "c2bbcb873b7628c22b512051443adde6ff2e6c8688c6d84f0307d6bab2a34eef";
 constexpr size_t kFrameClockMediaSize = 44339;
 using Clock = std::chrono::steady_clock;
+// Only --fresh-native-visible-dom-delay-control: one fixed passive event-pump interval between the
+// play() return and the visible native pause request, on the original clip. Not a product timing.
+[[maybe_unused]] constexpr auto kPassiveDelay = std::chrono::milliseconds(270);
+// Declared bound for the delay end; an overrun is recorded (delay_within_declared_bound), not hidden.
+[[maybe_unused]] constexpr auto kPassiveDelayTolerance = std::chrono::milliseconds(20);
 void require(bool ok, const std::string &message) { if (!ok) { throw std::runtime_error(message); } }
 void write(const fs::path &path, const std::string &text)
 {
@@ -82,6 +87,8 @@ struct Options {
   FreshPause fresh_pause = FreshPause::None;
   // Runs the fresh-visible sequence with the frame-clock clip; adds OS frame-ID captures only.
   bool frame_clock_control = false;
+  // Runs the fresh-visible sequence with the same clip; adds only kPassiveDelay before the pause request.
+  bool delay_control = false;
   bool fresh_pause_diagnostic() const { return fresh_pause != FreshPause::None; }
   bool pause_order_diagnostic() const { return visible_pause_diagnostic() || hide_after_verified_pause_control; }
   int reading_cycles() const
@@ -159,7 +166,8 @@ void log_last_media_observation(const Json &result) noexcept
 {
   try {
     for (const auto *key : {"last_hidden_media_observation", "last_explicit_pause_observation",
-                            "hidden_media_native_close", "frame_clock_verdict"}) {
+                            "hidden_media_native_close", "frame_clock_verdict",
+                            "fresh_native_visible_dom_delay"}) {
       const auto item = result.find(key);
       if (item == result.end() || !item->is_object()) continue;
       // These objects contain only fixed phase names, hashes and numerical probe facts.
@@ -672,7 +680,7 @@ class Exercise {
     auto next = [&] {
       const auto began = Clock::now();
       if (!pending) {
-        ++capture_requests;
+        ++capture_requests; ++os_capture_requests_;
         pending = document_preview::capture_window_evidence(window_.native_window_handle());
         last_activity = Clock::now();
         longest_start_ms = std::max(longest_start_ms, elapsed_ms(began, last_activity));
@@ -818,6 +826,7 @@ class Exercise {
   {
     auto reply = std::make_shared<MediaProbeObservation>();
     last_media_probe_ = reply;
+    ++dom_probe_requests_;
     if (hidden_media_) {
       auto &phase = *hidden_media_;
       if (phase.current_valid) phase.last_valid = phase.current;
@@ -1141,10 +1150,13 @@ class Exercise {
   void fresh_native_pause_dom_diagnostic(app::EditorArea &area, const std::string &session,
                                          const Media &playing, const Media &last_seek, const NativePause &previous,
                                          const std::shared_ptr<document_preview::ResourceSession> &resources,
-                                         bool keep_visible, const frame_clock::Plan *plan = nullptr)
+                                         bool keep_visible, const frame_clock::Plan *plan = nullptr,
+                                         std::optional<Clock::time_point> passive_delay_from = std::nullopt)
   {
     using namespace document_preview;
     require(!plan || keep_visible, "The frame-clock diagnostic only extends the visible sequence");
+    require(!passive_delay_from || (keep_visible && !plan),
+        "The passive delay control only extends the visible sequence on the original clip");
     constexpr auto budget = detail::MediaPauseVerification::timeout;
     constexpr auto first_sample_offset = std::chrono::milliseconds(200);
     constexpr auto interval = std::chrono::milliseconds(400);
@@ -1158,7 +1170,8 @@ class Exercise {
     // ordered_json objects are vector-backed: later result_ insertions (trace, close, verdict)
     // must not reallocate under the evidence reference below.
     result_.get_ref<Json::object_t &>().reserve(result_.size() + 16);
-    auto &evidence = result_[plan ? "visible_frame_clock" : keep_visible ? "fresh_native_visible_dom" : "fresh_native_hide_dom"];
+    auto &evidence = result_[plan ? "visible_frame_clock" : passive_delay_from ? "fresh_native_visible_dom_delay" :
+                             keep_visible ? "fresh_native_visible_dom" : "fresh_native_hide_dom"];
     evidence = {{"session_sha256", core::Sha256::hex(session)}, {"media_generation", trace.media_generation},
         {"navigation_generation", trace.navigation_generation},
         {keep_visible ? "playing_before_pause" : "playing_before_hide", media_json(playing)},
@@ -1267,6 +1280,91 @@ class Exercise {
       evidence["stage"] = "pause";
       save();
     }
+    std::optional<Clock::time_point> delay_ended;
+    if (passive_delay_from) {
+      // Only the ordinary event pump runs between play() return and the unchanged pause request:
+      // no DOM/media probe, OS capture, seek, pause, tab, visibility, layout or clip change.
+      const auto target = *passive_delay_from + kPassiveDelay;
+      const auto prior_dom = last_media_probe_;
+      const auto dom_before = dom_probe_requests_, os_before = os_capture_requests_;
+      evidence["fixture"] = {{"name", "frozen-preview.mp4"}, {"size", kMediaSize}, {"sha256", kMediaSha256}};
+      evidence["playing_before_pause_observed"] =
+          "Last DOM sample, at play() return before the passive delay; never re-read or extrapolated after it";
+      evidence["passive_delay"] = {{"declared_seconds", std::chrono::duration<double>(kPassiveDelay).count()},
+          {"declared_overrun_bound_seconds", std::chrono::duration<double>(kPassiveDelayTolerance).count()},
+          {"origin", "play() return, after its last DOM sample"},
+          {"pump", "ordinary non-blocking UI event pump against one absolute deadline; no OS event wait"},
+          {"binding", "Every pump: same session resources active, no native close, next-pause trace still empty, "
+              "Reports tab active, exact viewport layout and client size, no native interaction block, unchanged "
+              "DOM-probe and OS-capture request counters. Navigation cannot be read without a DOM probe; the "
+              "exact navigation is then required by the visible pause request"},
+          {"viewport_rect", {clock_layout.x, clock_layout.y, clock_layout.w, clock_layout.h}},
+          {"client_size", {clock_width, clock_height}},
+          {"dom_probe_requests_before", dom_before}, {"os_capture_requests_before", os_before},
+          {"play_return_to_delay_start_seconds", media_seconds(*passive_delay_from, Clock::now())}};
+      evidence["stage"] = "passive-delay";
+      save();
+      // First failed binding check, or nullptr while the exact visible target is unchanged.
+      const auto drift = [&]() -> const char * {
+        if (!resources->active()) { return "session resources inactive"; }
+        if (!close->reason.empty()) { return "native close"; }
+        if (trace.overflow || trace.event_count != 0) { return "pause or hide trace before the pause request"; }
+        if (area.active_tab() != 0) { return "Reports tab no longer active"; }
+        if (!clock_layout_same()) { return "viewport layout, client size or native interaction changed"; }
+        if (last_media_probe_ != prior_dom || dom_probe_requests_ != dom_before) { return "DOM probe"; }
+        if (os_capture_requests_ != os_before) { return "OS capture"; }
+        return nullptr;
+      };
+      size_t pumps = 0;
+      double longest_pump = 0;
+      const auto delay_facts = [&] {
+        const auto end = delay_ended.value_or(Clock::now());
+        auto &delay = evidence["passive_delay"]; // Looked up again: evidence may have grown.
+        delay["pump_count"] = pumps; delay["longest_pump_seconds"] = longest_pump;
+        delay["dom_probe_requests_after"] = dom_probe_requests_;
+        delay["os_capture_requests_after"] = os_capture_requests_;
+        delay["dom_probe_counter_unchanged"] = dom_probe_requests_ == dom_before && last_media_probe_ == prior_dom;
+        delay["os_capture_counter_unchanged"] = os_capture_requests_ == os_before;
+        delay["play_return_to_delay_end_seconds"] = media_seconds(*passive_delay_from, end);
+        delay["delay_end_overrun_seconds"] = media_seconds(target, end);
+        delay["delay_within_declared_bound"] = end >= target && end - target <= kPassiveDelayTolerance;
+      };
+      const auto delay_abort = [&](const std::string &reason) {
+        try {
+          delay_facts();
+          record_native_pause_trace(close.get(), session, "visible_media_native_pause_trace");
+          evidence["close_reason"] = close->reason.empty() ? Json(nullptr) : Json(close->reason);
+          evidence["outcome"] = !close->reason.empty() ? "native_close" : "aborted";
+          evidence["outcome_reason"] = reason;
+          save();
+        }
+        catch (...) {} // Keep the original abort reason.
+      };
+      const char *drifted = nullptr;
+      try {
+        reports_native_test::poll_before<Clock>(target, [&] { return (drifted = drift()) != nullptr; },
+            [&](bool wait_for_event) {
+              const auto began = Clock::now();
+              process(wait_for_event);
+              ++pumps; longest_pump = std::max(longest_pump, media_seconds(began, Clock::now()));
+            }, [] {});
+        delay_ended = Clock::now();
+        // poll_before also returns false when the deadline crosses a predicate that just fired.
+        if (!drifted) { drifted = drift(); }
+      }
+      catch (const std::exception &error) {
+        delay_abort(std::string("event pump failed during the passive delay: ") + error.what());
+        throw;
+      }
+      catch (...) { delay_abort("event pump failed during the passive delay"); throw; }
+      if (drifted) {
+        delay_abort(std::string("binding drifted during the passive delay: ") + drifted);
+        throw std::runtime_error("Passive delay control lost its exact visible binding before the pause request");
+      }
+      // In memory only; delay_end_to_pause_request_seconds records the cost before the request.
+      delay_facts();
+      evidence["stage"] = "pause";
+    }
     std::shared_ptr<const test::VisiblePauseObservation> visible_pause;
     const auto requested = Clock::now();
     if (plan) {
@@ -1294,6 +1392,18 @@ class Exercise {
       return area.active_tab() == 1 && pause && pause->acknowledged && !pause->isolated_actuator;
     };
     const auto record = [&] {
+      if (passive_delay_from) {
+        auto &delay = evidence["passive_delay"];
+        const auto target = *passive_delay_from + kPassiveDelay;
+        delay["play_return_to_pause_request_seconds"] = media_seconds(*passive_delay_from, requested);
+        delay["delay_end_to_pause_request_seconds"] = media_seconds(*delay_ended, requested);
+        delay["pause_request_within_declared_bound"] =
+            requested >= target && requested - target <= kPassiveDelayTolerance;
+        delay["play_return_to_native_dispatch_seconds"] = trace.event_count ?
+            Json(media_seconds(*passive_delay_from, trace.dispatched)) : Json(nullptr);
+        delay["native_dispatch_within_declared_bound"] = trace.event_count &&
+            trace.dispatched >= target && trace.dispatched - target <= kPassiveDelayTolerance;
+      }
       if (keep_visible) {
         record_native_pause_trace(close.get(), session, "visible_media_native_pause_trace");
         evidence["native_non_playing_verified"] = visible_pause && visible_pause->verified;
@@ -1390,6 +1500,23 @@ class Exercise {
         evidence["native_pause_after_sampling"] = final_pause ? native_pause_json(*final_pause) : Json(nullptr);
       }
       evidence["session_active_after_sampling"] = resources->active();
+      if (passive_delay_from) {
+        // Only the two bounded DOM samples decide; native verification is reported separately.
+        // A sample below the earlier play-return DOM time (same 0.05 s floor) is an observed rollback.
+        const double floor = playing.current_time - 0.05;
+        const bool first_below = before.current_time < floor, second_below = after.current_time < floor;
+        const bool hold_rollback = delta < -0.10;
+        evidence["rollback_basis"] = {{"first_sample_below_play_return_floor", first_below},
+            {"second_sample_below_play_return_floor", second_below},
+            {"second_minus_first_below_hold_limit", hold_rollback}};
+        evidence["outcome"] = !(paused(before) && paused(after)) ? "not_paused_in_both_dom_samples" :
+            (first_below || second_below || hold_rollback) ? "paused_rollback_observed" :
+            delta > 0.10 ? "paused_advance_beyond_hold_limit" : "paused_hold_within_0_10";
+        evidence["outcome_reason"] = "Two bounded DOM samples after the native-first reply: 0.10 s hold limit and "
+            "0.05 s floor below the play-return DOM time. A hold does not exclude a reset before the first sample; "
+            "see the raw delta_from_playing_seconds and passive_delay timings. native_non_playing_verified is the "
+            "separate unchanged watchdog result";
+      }
       if (plan) {
         // After the unchanged DOM samples and native settle: no new pause, seek, play, DOM probe,
         // visibility or layout change. Only completed captures of the same verified target count.
@@ -1423,6 +1550,16 @@ class Exercise {
     }
     catch (...) {
       try { record(); } catch (...) {} // Keep the original observation failure.
+      if (passive_delay_from && !evidence.contains("outcome")) {
+        try {
+          evidence["outcome"] = !close->reason.empty() ? "native_close" : !resources->active() ? "session_closed" :
+                                                                          "aborted";
+          evidence["outcome_reason"] = "the visible pause sequence failed after the passive delay at stage " +
+                                       evidence.at("stage").get<std::string>();
+          save();
+        }
+        catch (...) {}
+      }
       if (plan && !evidence.contains("outcome")) {
         clock_record("inconclusive", "the visible pause sequence failed before frame-clock classification");
       }
@@ -1922,7 +2059,11 @@ class Exercise {
     std::unique_ptr<document_preview::WindowEvidenceCapture> pending;
     int consecutive = 0;
     wait([&] {
-      if (!pending) { pending = document_preview::capture_window_evidence(window_.native_window_handle()); return false; }
+      if (!pending) {
+        ++os_capture_requests_;
+        pending = document_preview::capture_window_evidence(window_.native_window_handle());
+        return false;
+      }
       auto captured = pending->poll();
       if (!captured) { return false; } pending.reset();
       require(captured->error.empty(), "OS media client capture: " + captured->error);
@@ -1973,6 +2114,7 @@ class Exercise {
     out.requested = Clock::now();
     if (out.requested >= deadline) { out.completed = out.requested; out.status = "late"; return out; }
     if (!bound()) { out.completed = out.requested; out.status = "unbound"; return out; }
+    ++os_capture_requests_;
     auto pending = document_preview::capture_window_evidence(window_.native_window_handle());
     std::optional<document_preview::WindowEvidence> image;
     const bool delivered = reports_native_test::poll_before<Clock>(deadline, [&] {
@@ -2055,8 +2197,11 @@ class Exercise {
   }
   wm::WindowManager &manager_; wm::Window &window_; wm::Screen &screen_;
   Json &result_; fs::path directory_;
+  // Every own-window OS capture request; the delay control proves it unchanged.
+  size_t os_capture_requests_ = 0;
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
   std::shared_ptr<MediaProbeObservation> last_media_probe_;
+  size_t dom_probe_requests_ = 0; // Every media() DOM probe request.
   std::optional<HiddenMediaObservation> hidden_media_;
 #endif
   reports_native_test::ScrollGuard scroll_guard_;
@@ -2468,7 +2613,8 @@ raise SystemExit(main())
         }
         ui.fresh_native_pause_dom_diagnostic(*area, session, playing, *last_seek, (*before_hide_pause)[1], resources,
                                              options.fresh_pause == Options::FreshPause::Visible,
-                                             clock_plan ? &*clock_plan : nullptr);
+                                             clock_plan ? &*clock_plan : nullptr,
+                                             options.delay_control ? std::optional(playing_returned) : std::nullopt);
         require(area->tab(1).save_workspace_state() == draft_state && area->tab(1).has_unsaved_changes() &&
             shell.store().scripts().history().empty(), "Fresh pause preserves the unexecuted Python draft");
         require(viewer.save_workspace_state() == viewer_state && viewer.camera_serial() == camera &&
@@ -2779,6 +2925,13 @@ int main(int argc, char **argv)
       options.frame_clock_control = true;
       continue;
     }
+    if (arg == "--fresh-native-visible-dom-delay-control") {
+      // Rides the fresh-visible sequence on the original clip; every other control mode is rejected below.
+      if (options.fresh_pause_diagnostic()) { return 2; }
+      options.fresh_pause = Options::FreshPause::Visible;
+      options.delay_control = true;
+      continue;
+    }
     if (arg == "--fresh-native-hide-dom-control" || arg == "--fresh-native-visible-dom-control") {
       if (options.fresh_pause_diagnostic()) { return 2; }
       options.fresh_pause = arg == "--fresh-native-visible-dom-control" ? Options::FreshPause::Visible :
@@ -2823,7 +2976,7 @@ int main(int argc, char **argv)
        && options.source != "video" && options.source != "html-video"
 #endif
       )) {
-    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control|--visible-native-pause-control|--second-visible-native-pause-control|--hide-after-verified-native-pause-control|--hide-without-repeat-native-pause-control|--hide-without-repeat-native-pause-dom-control|--fresh-native-hide-dom-control|--fresh-native-visible-dom-control|--visible-frame-clock-control]\n"); return 2;
+    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control|--visible-native-pause-control|--second-visible-native-pause-control|--hide-after-verified-native-pause-control|--hide-without-repeat-native-pause-control|--hide-without-repeat-native-pause-dom-control|--fresh-native-hide-dom-control|--fresh-native-visible-dom-control|--visible-frame-clock-control|--fresh-native-visible-dom-delay-control]\n"); return 2;
   }
   Json result = {{"format", "stk.reports-native-evidence/1"}, {"status", "running"}, {"required_cycles", options.reading_cycles()},
       {"completed_cycles", 0}, {"images", Json::array()}, {"native_scroll_requests", Json::array()},
@@ -2872,6 +3025,16 @@ int main(int argc, char **argv)
     result["matched_control"] = "reports_fresh_native_visible_dom_" + options.source + "_metal";
     result["not_a_gate"] = "Non-gating diagnostic; frame-ID captures are kept out of images and required_images";
   }
+  if (options.delay_control) {
+    result["scenario"] = "fresh-native-visible-dom-delay-control";
+    result["claim"] = "Fresh-visible sequence on the original frozen clip with one fixed passive event-pump delay "
+        "between play() return and the native pause request, then the native-first reply and two bounded DOM samples";
+    result["matched_control"] = "reports_fresh_native_visible_dom_" + options.source + "_metal";
+    result["deviation"] = "Only a fixed 270 ms passive event pump before the visible native pause request; no DOM/media "
+        "probe, OS capture, seek, extra pause, visibility/layout or clip change during it";
+    result["production_ui_acceptance"] = false;
+    result["not_a_gate"] = "Experimental timing control; not a product fix and not a replacement for the mandatory gate";
+  }
   if (options.pre_seek_hide_control) {
     result["scenario"] = options.isolated_pause_control ? "isolated-quiet-pre-seek-hide-control" :
         (options.quiet_hidden_hold ? "quiet-pre-seek-hide-control" : "pre-seek-hide-control");
@@ -2899,11 +3062,33 @@ int main(int argc, char **argv)
       require(outcome == "picture_backward" || outcome == "clock_reset_within_observation" ||
           outcome == "no_clock_reset_observed", "Visible frame clock finished without a conclusive outcome");
     }
+    if (options.delay_control) {
+      const auto evidence = result.find("fresh_native_visible_dom_delay");
+      outcome = evidence != result.end() && evidence->is_object() ? evidence->value("outcome", "") : "";
+      require(outcome == "paused_hold_within_0_10" || outcome == "paused_rollback_observed" ||
+          outcome == "paused_advance_beyond_hold_limit" || outcome == "not_paused_in_both_dom_samples",
+          "Passive delay control finished without an observed DOM outcome");
+      const auto &delay = evidence->at("passive_delay");
+      require(delay.value("pause_request_within_declared_bound", false) &&
+          delay.value("native_dispatch_within_declared_bound", false),
+          "Passive delay observations retained, but pause request or native dispatch exceeded the declared timing bound");
+    }
     result["status"] = "passed";
     write(directory / "result.json", result.dump(2));
     if (options.frame_clock_control) {
       std::fprintf(stdout, "PASS: Cocoa visible frame clock diagnostic; outcome=%s; cycles=%d; %s\n",
           outcome.c_str(), options.reading_cycles(), core::path_to_utf8(directory).c_str());
+      return 0;
+    }
+    if (options.delay_control) {
+      // PASS means the sequence was observed; outcome= carries the observed DOM result, rollback included.
+      const auto &delay = result.at("fresh_native_visible_dom_delay").at("passive_delay");
+      std::fprintf(stdout, "PASS: Cocoa fresh native visible dom delay control diagnostic; outcome=%s; "
+          "play_return_to_pause_request=%.6fs; within_declared_bound=%s; cycles=%d; %s\n", outcome.c_str(),
+          delay.value("play_return_to_pause_request_seconds", -1.0),
+          delay.value("pause_request_within_declared_bound", false) &&
+                  delay.value("native_dispatch_within_declared_bound", false) ? "true" : "false",
+          options.reading_cycles(), core::path_to_utf8(directory).c_str());
       return 0;
     }
     if (options.fresh_pause_diagnostic()) {

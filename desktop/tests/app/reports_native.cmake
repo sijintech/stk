@@ -135,6 +135,18 @@ if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW AND (APPLE OR WIN32))
       set_tests_properties(${_clock} PROPERTIES LABELS "project;gpu;window;document_preview;diagnostic"
         TIMEOUT 180 RESOURCE_LOCK native_window
         FAIL_REGULAR_EXPRESSION "FAIL:|Error: Not freed memory|leaked")
+      # Optional timing control: the original clip plus one fixed passive delay before the native pause.
+      set(_delay reports_fresh_native_visible_dom_delay_${_source}_metal)
+      add_test(NAME ${_delay} COMMAND "${STK_BRIDGE_TEST_PYTHON}"
+        "${CMAKE_SOURCE_DIR}/tests/check_native_evidence.py"
+        --success-marker "PASS: Cocoa fresh native visible dom delay control diagnostic" --timeout 150 --
+        $<TARGET_FILE:stk-reports-native-window>
+        --python "${STK_BRIDGE_TEST_PYTHON}" --gpu-backend metal --source ${_source}
+        --media-fixture "${_reports_spike}/fixtures/frozen-preview.mp4" --fresh-native-visible-dom-delay-control
+        --evidence-dir "${CMAKE_CURRENT_BINARY_DIR}/reports-fresh-native-visible-dom-delay-${_source}")
+      set_tests_properties(${_delay} PROPERTIES LABELS "project;gpu;window;document_preview;diagnostic"
+        TIMEOUT 180 RESOURCE_LOCK native_window
+        FAIL_REGULAR_EXPRESSION "FAIL:|Error: Not freed memory|leaked")
     endforeach()
   endif()
 endif()
