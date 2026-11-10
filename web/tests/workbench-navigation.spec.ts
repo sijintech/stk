@@ -2,8 +2,8 @@
 // shortcuts in Tasks open 结果 in one click with their target in view, and a late result never moves the user.
 // It drives the built app (`npm run build` first, or STK_WEB_DIST=<dir>) in Chromium; page.route serves the
 // files and a mocked hub, so no server, model or network is used. Without a build these tests are skipped.
-import {expect, test, type Page, type Request, type Route} from '@playwright/test';
-import {existsSync, readFileSync} from 'node:fs';
+import {expect, test, type Locator, type Page, type Request, type Route} from '@playwright/test';
+import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 import {extname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -69,6 +69,12 @@ class Hub {
   }
   later = false;
   field = 'phi';
+  // 任务: `device` is the node the hub lists; `down` makes every hub call fail as an unreachable control service;
+  // `review` sends a task.submit to execution review, which GET actions then lists until it is approved or refused.
+  device: typeof device = device;
+  down = false;
+  review = false;
+  readonly actionRows: Record<string, any>[] = [];
   logsFail = false;
   readonly pending = new Map<string, Promise<void>>();
   readonly reached = new Set<string>();
@@ -95,9 +101,17 @@ class Hub {
     }
     const path = url.pathname.slice('/api/v1/'.length);
     const json = (body: unknown, status = 200) => route.fulfill({status, contentType: 'application/json', body: JSON.stringify(body)});
+    if (this.down) return json({detail: '控制服务不可用'}, 503);
     if (path === 'events') { this.streams.push(route); return; } // open and silent until the hub publishes
-    if (path === 'devices') return json([device]);
-    if (path === 'actions' && request.method() === 'GET') return json([]);
+    if (path === 'devices') return json([this.device]);
+    if (path === 'actions' && request.method() === 'GET') return json(this.actionRows);
+    const reviewed = /^actions\/([^/]+)\/review$/.exec(path);
+    if (reviewed && request.method() === 'POST') {
+      const item = this.actionRows.find(a => a.id === reviewed[1]);
+      if (!item) return json({detail: 'Action not found'}, 404);
+      item.state = request.postDataJSON().approved ? 'succeeded' : 'rejected';
+      return json(item);
+    }
     if (path === 'sessions') return json(this.rows);
     if (path === 'policy') return json({read_kinds: ['task.get', 'task.artifacts', 'task.events']});
     if (path === 'graphs/presets') return json([]);
@@ -154,6 +168,12 @@ class Hub {
       const body = request.postDataJSON();
       await this.gate(body.kind);
       if (body.kind === 'view.build') return json({id: body.id, state: 'succeeded', result: {...scene, manifest: {...scene.manifest, field: this.field}}});
+      if (body.kind === 'task.submit') {
+        if (!this.review) return json({id: body.id, state: 'succeeded', result: {id: task}});
+        const item = {id: body.id, state: 'review', review_reason: '新命令需要执行复核', request: {kind: body.kind, payload: body.payload}};
+        this.actionRows.unshift(item);
+        return json(item);
+      }
       if (body.kind === 'task.logs') return json(this.logsFail ? {id: body.id, state: 'failed', error: '日志暂不可读'} :
         {id: body.id, state: 'succeeded', result: {data: Buffer.from(LOG).toString('base64')}});
     }
@@ -166,6 +186,9 @@ const go = (page: Page, label: string) => nav(page).getByRole('button', {name: l
 const shortcut = (page: Page, label: '结果' | '读取日志') => page.locator('aside.tasks .inline').getByRole('button', {name: label, exact: true});
 const surfaces = {工作台: 'aside.chat', 任务: 'aside.tasks', 结果: 'section.analysis'} as const;
 const footer = (page: Page) => page.locator('footer');
+// 任务 keeps the run environment and the new task form in disclosures under the queue.
+const project = (page: Page) => page.locator('aside.tasks label', {hasText: /^项目/}).locator('select');
+const disclosure = (page: Page, name: '运行环境' | '新建任务') => page.locator('aside.tasks details.setting > summary', {hasText: name});
 
 // covered: the compact history is open over the active section, which then stays shown but takes no input.
 async function expectActive(page: Page, label: keyof typeof surfaces, {covered = false} = {}) {
@@ -202,11 +225,11 @@ async function setup(page: Page, hub: Hub, {scene: withScene = true} = {}) {
   await page.getByLabel('对话内容').fill('未发送的草稿：分析 phi 场');
   await go(page, '任务');
   await page.getByLabel('执行节点').selectOption(node);
-  await page.locator('aside.tasks select').nth(1).selectOption(ws);
+  await project(page).selectOption(ws);
   await page.getByRole('button', {name: /解析场验证/}).click();
   await expectActive(page, '任务');
   await expect(page.getByRole('region', {name: '所选任务状态'})).toContainText('已读取 Runtime 状态');
-  await page.locator('aside.tasks summary', {hasText: '自定义任务'}).click();
+  await disclosure(page, '新建任务').click();
   await page.getByLabel('TaskSpec').fill('{"argv":["python3","draft.py"],"outputs":[]}');
   if (withScene) {
     await go(page, '结果');
@@ -252,7 +275,7 @@ async function state(page: Page) {
   return {
     draft: await page.getByLabel('对话内容').inputValue(),
     node: await page.getByLabel('执行节点').inputValue(),
-    workspace: await page.locator('aside.tasks select').nth(1).inputValue(),
+    workspace: await project(page).inputValue(),
     selected: (await page.locator('aside.tasks .task.selected').allTextContents()).join(),
     spec: await page.getByLabel('TaskSpec').inputValue(),
     analysis: await page.locator('section.analysis [role=tab][aria-selected=true]').textContent(),
@@ -473,6 +496,255 @@ for (const viewport of viewports) {
       expect(await graph.evaluate(el => (el as any).__marker ?? null)).toBe('same-graph');
       sent.stop();
       expect(sent.seen).toEqual(['/api/v1/nodes/{node}/read task.artifacts']);
+      expect(errors).toEqual([]);
+    });
+  });
+}
+
+// 任务 as the native focused Tasks page: the queue and the selected task come first, the run environment (node and
+// project) and the new task form are one-click disclosures under it, and only their explicit buttons submit.
+const queue = (page: Page) => page.getByRole('region', {name: '任务队列'});
+const status = (page: Page) => page.getByRole('region', {name: '所选任务状态'});
+const settings = (page: Page, name: '运行环境' | '新建任务') => disclosure(page, name).locator('..');
+// Node reads (task.get, task.artifacts) are POSTs too; everything else POSTed is a write.
+const writes = (seen: string[]) => seen.filter(s => !s.startsWith('/api/v1/nodes/{node}/read '));
+const top = async (target: Locator) => (await target.boundingBox())!.y;
+// Counts the measured clicks and <select> choices of one route, apart from its setup, and keeps them as evidence.
+function route(page: Page, name: string) {
+  const record = {route: name, clicks: 0, selects: 0, steps: [] as string[]};
+  return {
+    record,
+    click: async (target: Locator, step: string) => { record.clicks++; record.steps.push(`click ${step}`); await target.click(); },
+    select: async (target: Locator, value: string, step: string) => { record.selects++; record.steps.push(`select ${step}`); await target.selectOption(value); },
+    save: () => writeFileSync(test.info().outputPath(`route-${name}.json`), JSON.stringify(record, null, 2)),
+  };
+}
+async function start(page: Page, hub: Hub) {
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(String(e)));
+  page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  await page.clock.install();
+  await hub.install(page);
+  await page.goto(ORIGIN + '/');
+  await expectActive(page, '工作台');
+  return errors;
+}
+
+for (const viewport of viewports) {
+  test.describe(`${viewport.name} queue-first 任务`, () => {
+    test.use({viewport: {width: viewport.width, height: viewport.height}});
+
+    test('from a fresh connected start the queue comes first and the open 运行环境 chooses its scope', async ({page}) => {
+      const hub = new Hub();
+      const errors = await start(page, hub);
+      await expect(footer(page)).toContainText('就绪');
+      const sent = posts(page);
+      const r = route(page, `${viewport.name}-connected`);
+      await r.click(nav(page).getByRole('button', {name: '任务', exact: true}), '任务');
+      await expectActive(page, '任务');
+      await expect(queue(page)).toContainText('在下方「运行环境」中选择执行节点和项目，这里显示任务队列。');
+      await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
+      await expect(settings(page, '新建任务')).not.toHaveAttribute('open', '');
+      await expect(disclosure(page, '运行环境')).toHaveText('运行环境 · 未选择节点');
+      await expect(disclosure(page, '新建任务')).toHaveText('新建任务 · 先选择项目');
+      await expect(page.getByLabel('执行节点')).toBeInViewport({ratio: 1});
+      expect(await top(queue(page))).toBeLessThan(await top(disclosure(page, '运行环境')));
+      expect(await top(disclosure(page, '运行环境'))).toBeLessThan(await top(disclosure(page, '新建任务')));
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-connected-start.png`)});
+      await r.select(page.getByLabel('执行节点'), node, '执行节点');
+      await expect(queue(page).locator('.queue-head')).toHaveText('任务队列节点甲 · 在线 · 全部项目');
+      await expect(project(page)).toBeInViewport({ratio: 1});
+      await r.select(project(page), ws, '项目');
+      await expect(queue(page).locator('.queue-head')).toHaveText('任务队列节点甲 · 在线 · 项目一');
+      await expect(disclosure(page, '运行环境')).toHaveText('运行环境 · 节点甲 · 项目一');
+      await expect(disclosure(page, '新建任务')).toHaveText('新建任务 · 项目一');
+      const row = queue(page).getByRole('button', {name: /解析场验证/});
+      await expect(row).toBeInViewport({ratio: 1});
+      await r.click(row, '任务行');
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await expect(page.locator('aside.tasks .task-scope')).toHaveText('所选任务 · 节点甲 · 项目一');
+      await expect(shortcut(page, '结果')).toBeInViewport({ratio: 1});
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-connected-selected.png`)});
+      // One click folds the environment to its readable summary; the queue and the selected task do not move.
+      const at = [await top(queue(page)), await top(status(page))];
+      await r.click(disclosure(page, '运行环境'), '收起运行环境');
+      await expect(page.getByLabel('执行节点')).toBeHidden();
+      expect([await top(queue(page)), await top(status(page))]).toEqual(at);
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-connected-folded.png`)});
+      await r.click(disclosure(page, '运行环境'), '展开运行环境');
+      await expect(page.getByLabel('执行节点')).toHaveValue(node);
+      await expect(project(page)).toHaveValue(ws);
+      await r.click(disclosure(page, '新建任务'), '展开新建任务');
+      await expect(page.getByRole('button', {name: '运行解析场示例'})).toBeEnabled();
+      await expect(page.getByLabel('TaskSpec')).toBeVisible();
+      await expect(page.locator('aside.tasks .task.selected')).toHaveText(/解析场验证/);
+      sent.stop();
+      expect(writes(sent.seen)).toEqual([]);
+      expect([...new Set(sent.seen)].sort()).toEqual(['/api/v1/nodes/{node}/read task.artifacts', '/api/v1/nodes/{node}/read task.get']);
+      expect(hub.calls).toEqual([]);
+      expect(r.record).toMatchObject({clicks: 5, selects: 2});
+      r.save();
+      expect(errors).toEqual([]);
+    });
+
+    test('an established 任务 keeps the queue first and its drafts, scope and Viewer with the disclosures folded', async ({page}) => {
+      const hub = new Hub();
+      const errors = await setup(page, hub);
+      await go(page, '结果');
+      const viewer = await viewerShot(page, 'before');
+      await go(page, '任务');
+      await page.locator('aside.tasks').evaluate(el => { el.scrollTop = 0; });
+      const before = await state(page);
+      expect(before).toMatchObject({node, workspace: ws, selected: '解析场验证succeeded', spec: '{"argv":["python3","draft.py"],"outputs":[]}'});
+      const sent = posts(page);
+      const r = route(page, `${viewport.name}-established`);
+      // Zero clicks: the queue row, the selected task's status and its shortcuts are in view above both disclosures.
+      await expect(queue(page).getByRole('button', {name: /解析场验证/})).toBeInViewport({ratio: 1});
+      await expect(status(page)).toBeInViewport({ratio: 1});
+      await expect(shortcut(page, '读取日志')).toBeInViewport({ratio: 1});
+      expect(await top(status(page))).toBeLessThan(await top(disclosure(page, '运行环境')));
+      await r.click(disclosure(page, '运行环境'), '收起运行环境');
+      await r.click(disclosure(page, '新建任务'), '收起新建任务');
+      await expect(page.getByLabel('TaskSpec')).toBeHidden();
+      await expect(disclosure(page, '运行环境')).toHaveText('运行环境 · 节点甲 · 项目一');
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-established-folded.png`)});
+      await r.click(nav(page).getByRole('button', {name: '结果', exact: true}), '结果');
+      await expectActive(page, '结果');
+      expect((await viewerShot(page, 'folded')).equals(viewer)).toBe(true);
+      await r.click(nav(page).getByRole('button', {name: '工作台', exact: true}), '工作台');
+      await expect(draft(page)).toHaveValue('未发送的草稿：分析 phi 场');
+      await r.click(nav(page).getByRole('button', {name: '任务', exact: true}), '任务');
+      await expectActive(page, '任务');
+      await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+      await expect(settings(page, '新建任务')).not.toHaveAttribute('open', '');
+      expect(await state(page)).toEqual(before);
+      // One click each opens them again with the same choices and the same unsubmitted TaskSpec.
+      await r.click(disclosure(page, '运行环境'), '展开运行环境');
+      await expect(page.getByLabel('执行节点')).toBeVisible();
+      await r.click(disclosure(page, '新建任务'), '展开新建任务');
+      await expect(page.getByLabel('TaskSpec')).toHaveValue('{"argv":["python3","draft.py"],"outputs":[]}');
+      expect(await state(page)).toEqual(before);
+      sent.stop();
+      expect(writes(sent.seen)).toEqual([]);
+      expect(r.record).toMatchObject({clicks: 7, selects: 0});
+      r.save();
+      await go(page, '结果');
+      expect((await viewerShot(page, 'after')).equals(viewer)).toBe(true);
+      expect(errors).toEqual([]);
+    });
+
+    test('from a disconnected start 任务 says the Hub is unreachable and offers no submission', async ({page}) => {
+      const hub = new Hub();
+      hub.down = true;
+      const errors = await start(page, hub);
+      await expect(page.locator('header .connection')).toHaveText('连接中断 · 显示最近状态');
+      const sent = posts(page);
+      const r = route(page, `${viewport.name}-disconnected`);
+      await r.click(nav(page).getByRole('button', {name: '任务', exact: true}), '任务');
+      await expectActive(page, '任务');
+      await expect(queue(page)).toContainText('控制服务未连接。恢复连接后，这里显示执行节点的任务队列。');
+      await expect(disclosure(page, '运行环境')).toHaveText('运行环境 · 未选择节点');
+      await expect(page.getByLabel('执行节点').locator('option')).toHaveText(['选择节点']);
+      await expect(page.locator('aside.tasks .inline').getByRole('button', {name: '新建', exact: true})).toBeDisabled();
+      await r.click(disclosure(page, '新建任务'), '展开新建任务');
+      await expect(page.getByRole('button', {name: '运行解析场示例'})).toBeDisabled();
+      await expect(page.getByRole('button', {name: '提交复核'})).toBeDisabled();
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-disconnected.png`)});
+      // An explicit 刷新 after the Hub is back lists the node; still nothing is chosen or written.
+      hub.down = false;
+      await r.click(page.locator('aside.tasks .section-title').getByRole('button', {name: '刷新'}), '刷新');
+      await expect(page.locator('header .connection')).toHaveText('控制服务已连接');
+      await expect(queue(page)).toContainText('在下方「运行环境」中选择执行节点和项目');
+      await expect(page.getByLabel('执行节点')).toHaveValue('');
+      sent.stop();
+      expect(sent.seen).toEqual([]);
+      expect(r.record).toMatchObject({clicks: 3, selects: 0});
+      r.save();
+      expect(unexpected(errors, 503)).toEqual([]);
+    });
+
+    test('the queue names an offline node and a project without tasks', async ({page}) => {
+      const hub = new Hub();
+      const other = 'd'.repeat(32);
+      hub.device = {...device, online: false, snapshot: {...device.snapshot, workspaces: [...device.snapshot.workspaces, {id: other, name: '项目二'}]}};
+      const errors = await start(page, hub);
+      await go(page, '任务');
+      await page.getByLabel('执行节点').selectOption(node);
+      await expect(queue(page).locator('.queue-head')).toHaveText('任务队列节点甲 · 离线 · 全部项目');
+      // The whole node is listed while no project is chosen; the selected task shows its own project.
+      await queue(page).getByRole('button', {name: /解析场验证/}).click();
+      await expect(page.locator('aside.tasks .task-scope')).toHaveText('所选任务 · 节点甲 · 项目一');
+      await expect(status(page)).toContainText('暂时无法读取 Runtime 状态');
+      await project(page).selectOption(other);
+      await expect(queue(page)).toContainText('项目二 中暂无任务，可在下方「新建任务」中提交。');
+      await expect(page.locator('aside.tasks .task')).toHaveCount(0);
+      await expect(disclosure(page, '运行环境')).toHaveText('运行环境 · 节点甲 · 项目二');
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-offline-empty-project.png`)});
+      expect(errors).toEqual([]);
+    });
+
+    test('a long queue keeps the selected task and run environment within reach', async ({page}) => {
+      const hub = new Hub();
+      const more = Array.from({length: 199}, (_, index) => ({
+        ...row, id: (index + 1).toString(16).padStart(32, '0'), name: `额外任务 ${index + 1}`,
+      }));
+      hub.device = {...device, snapshot: {...device.snapshot, tasks: [row, ...more]}};
+      const errors = await start(page, hub);
+      await go(page, '任务');
+      await page.getByLabel('执行节点').selectOption(node);
+      await project(page).selectOption(ws);
+      const list = queue(page).locator('.task-list');
+      const rows = list.getByRole('button');
+      await expect(rows).toHaveCount(200);
+      expect(await list.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+
+      const sent = posts(page);
+      await rows.first().click();
+      await expect(status(page)).toBeInViewport();
+      await expect(disclosure(page, '运行环境')).toBeInViewport();
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-long-queue.png`)});
+      await rows.last().focus();
+      await expect(rows.last()).toBeInViewport();
+      await expect(rows.last()).toBeFocused();
+      await expect(rows.first()).toHaveClass(/selected/);
+      sent.stop();
+      expect(writes(sent.seen)).toEqual([]);
+      expect(errors).toEqual([]);
+    });
+
+    test('only the explicit buttons in 新建任务 submit; a pending review is approved in place', async ({page}) => {
+      const hub = new Hub();
+      hub.review = true;
+      const errors = await setup(page, hub, {scene: false});
+      const sent = posts(page);
+      for (const name of ['运行环境', '新建任务', '运行环境', '新建任务'] as const) await disclosure(page, name).click();
+      await go(page, '结果');
+      await go(page, '任务');
+      await expect(footer(page)).toContainText('就绪');
+      expect(writes(sent.seen)).toEqual([]);
+      await page.getByRole('button', {name: '运行解析场示例'}).click();
+      const card = page.locator('aside.tasks article.review');
+      await expect(card).toHaveCount(1);
+      await expect(footer(page)).toContainText('就绪');
+      expect(writes(sent.seen)).toEqual(['/api/v1/actions task.submit']);
+      expect(hub.actionRows[0].request.payload).toMatchObject({template: 'demo-field', spec: {workspace_id: ws, name: '解析场验证'}});
+      // The review sits with the selected task, above the folded settings, and needs no disclosure to approve.
+      for (const name of ['运行环境', '新建任务'] as const) await disclosure(page, name).click();
+      expect(await card.evaluate(el => el.closest('details'))).toBeNull();
+      expect(await top(card)).toBeLessThan(await top(disclosure(page, '运行环境')));
+      await expect(card).toContainText('新命令需要执行复核');
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-review.png`)});
+      await card.getByRole('button', {name: '批准执行'}).click();
+      await expect(card).toHaveCount(0);
+      expect(writes(sent.seen)).toEqual(['/api/v1/actions task.submit', `/api/v1/actions/${hub.actionRows[0].id}/review undefined`]);
+      expect(hub.actionRows[0].state).toBe('succeeded');
+      // The custom TaskSpec is sent once, by 提交复核, with the draft that was kept while folded.
+      await disclosure(page, '新建任务').click();
+      await page.getByRole('button', {name: '提交复核'}).click();
+      await expect(card).toHaveCount(1);
+      sent.stop();
+      expect(writes(sent.seen).slice(2)).toEqual(['/api/v1/actions task.submit']);
+      expect(hub.actionRows[0].request.payload).toEqual({spec: {workspace_id: ws, argv: ['python3', 'draft.py'], outputs: []}});
       expect(errors).toEqual([]);
     });
   });

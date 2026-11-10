@@ -47,7 +47,7 @@ function Connect({connected}:{connected:()=>void}){
 }
 
 function Workbench({disconnect}:{disconnect:()=>void}){
-  const [devices,setDevices]=useState<Json[]>([]),[actions,setActions]=useState<Json[]>([]),[node,setNode]=useState(''),[workspace,setWorkspace]=useState('');
+  const [devices,setDevices]=useState<Json[]>([]),[devicesRead,setDevicesRead]=useState(false),[actions,setActions]=useState<Json[]>([]),[node,setNode]=useState(''),[workspace,setWorkspace]=useState('');
   const [selection,setSelection]=useState<TaskScope|null>(null),[artifacts,setArtifacts]=useState<Json[]>([]),[path,setPath]=useState(''),[scene,setScene]=useState<Json|null>(null);
   const [observedTask,setObservedTask]=useState<ObservedTask|null>(null);
   const [readKinds,setReadKinds]=useState<string[]|null>(null),[taskRefresh,setTaskRefresh]=useState(0);
@@ -85,6 +85,16 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const canReadEvents=canRead&&features.includes('task.events')&&readKinds?.includes('task.events')===true;
   const canReadTask=readKinds===null?null:canRead&&features.includes('task.get')&&readKinds.includes('task.get');
   const taskOnline=online&&selected?.online===true;
+  // Readable scope of 任务: the queue lists the chosen node, filtered by the chosen project; the selected task keeps its
+  // own scope, which can be another project of the node while no project is chosen.
+  const nodes=devices.filter(d=>d.role==='node'&&!d.revoked),workspaces:Json[]=selected?.snapshot?.workspaces||[];
+  const workspaceName=(id:string)=>workspaces.find(w=>w.id===id)?.name||id.slice(0,8);
+  const nodeName=selected?selected.name||node.slice(0,8):'';
+  const queue=tasks.filter(t=>!workspace||t.workspace_id===workspace);
+  const queueScope=`${nodeName} · ${!online?'最近状态':selected?.online?'在线':'离线'} · ${workspace?workspaceName(workspace):'全部项目'}`;
+  const queueEmpty=!selected?(!devicesRead?(online?'正在读取执行节点…':'控制服务未连接。恢复连接后，这里显示执行节点的任务队列。'):
+      !nodes.length?'控制服务中暂无执行节点。节点配对后，这里显示它的任务队列。':'在下方「运行环境」中选择执行节点和项目，这里显示任务队列。'):
+    !tasks.length?'节点快照中暂无任务。':!queue.length?`${workspaceName(workspace)} 中暂无任务，可在下方「新建任务」中提交。`:'';
   const clearTask=useCallback(()=>{
     generation.current++;scopeVersion.current++;activeScope.current=null;
     setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);setScene(null);setLogs('');setLogRoom(false);
@@ -115,7 +125,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         return error instanceof ApiError&&(error.status===404||error.status===501)?{}:null;
       })]);
       if(!alive.current)return;
-      setDevices(d);setActions(a);mergeList(s);setOnline(true);
+      setDevices(d);setDevicesRead(true);setActions(a);mergeList(s);setOnline(true);
       if(p!==null)setReadKinds(Array.isArray(p?.read_kinds)?p.read_kinds:[]);
     }catch(error){
       if(!alive.current)return;
@@ -229,25 +239,31 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     </section>
     {overlay&&<div className="history-backdrop" aria-hidden="true" onClick={closeHistory}/>}
     <aside className={`tasks panel surface${tab==='tasks'?'':' surface-hidden'}`} inert={tab!=='tasks'||overlay}><div className="section-title"><h2>项目与任务</h2><button className="quiet" onClick={()=>{setTaskRefresh(value=>value+1);void refresh();}}>刷新</button></div>
-      <label>执行节点<select value={node} onChange={e=>{clearTask();setNode(e.target.value);setWorkspace('');}}><option value="">选择节点</option>{devices.filter(d=>d.role==='node'&&!d.revoked).map(d=><option key={d.id} value={d.id}>{d.online?'●':'○'} {d.name}</option>)}</select></label>
-      {selected&&<p className="muted">{selected.online?'在线':'离线'} · 最近更新 {selected.last_seen?new Date(selected.last_seen*1000).toLocaleString():'尚未连接'}{selected.snapshot.cpu_percent!==undefined&&<><br/>CPU {selected.snapshot.cpu_percent}% · 内存 {selected.snapshot.memory_percent}%</>}</p>}
-      <label>项目<select value={workspace} onChange={e=>selectWorkspace(e.target.value)}><option value="">选择项目</option>{(selected?.snapshot?.workspaces||[]).map((w:Json)=><option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
-      <div className="inline"><input aria-label="项目名称" value={name} onChange={e=>setName(e.target.value)}/><button disabled={busy||!node} onClick={()=>void run(async()=>{const version=scopeVersion.current;const a=await invoke('workspace.create',{name});if(a.result&&scopeVersion.current===version)selectWorkspace(a.result.id);})}>新建</button></div>
-      <button className="primary wide" disabled={busy||!workspace} onClick={()=>void run(async()=>{const version=scopeVersion.current;const a=await invoke('task.submit',{template:'demo-field',spec:{workspace_id:workspace,name:'解析场验证',argv:['@python','-m','suan.control.demo_job'],outputs:['scalar-0.vti','scalar-1.vti','vector.vti']}});if(a.result&&scopeVersion.current===version)selectTask(a.result.id,workspace);})}>运行解析场示例</button>
-      <details><summary>自定义任务</summary><p className="muted">输入 TaskSpec JSON。新命令将先进入执行复核。</p><form onSubmit={e=>{e.preventDefault();const form=new FormData(e.currentTarget);void run(async()=>{const spec=JSON.parse(String(form.get('spec')));await invoke('task.submit',{spec:{workspace_id:workspace,...spec}});});}}><textarea name="spec" aria-label="TaskSpec" defaultValue={'{"argv":["python3","analysis.py"],"outputs":[]}'}/><button disabled={busy||!workspace}>提交复核</button></form></details>
+      <section className="queue" aria-label="任务队列"><div className="queue-head"><h3>任务队列</h3>{selected&&<span className="muted">{queueScope}</span>}</div>
+      <div className="task-list">{queue.map(t=><button className={`task ${task===t.id?'selected':''}`} key={t.id} onClick={()=>selectTask(t.id,t.workspace_id)}><span>{t.name||t.id.slice(0,8)}</span><small className={`state ${t.state}`}>{t.state}</small></button>)}{queueEmpty&&<p className="muted">{queueEmpty}</p>}</div>
       {selected&&<p className="muted">节点快照 · 最多 200 条任务</p>}
-      <div className="task-list">{tasks.filter(t=>!workspace||t.workspace_id===workspace).map(t=><button className={`task ${task===t.id?'selected':''}`} key={t.id} onClick={()=>selectTask(t.id,t.workspace_id)}><span>{t.name||t.id.slice(0,8)}</span><small className={`state ${t.state}`}>{t.state}</small></button>)}{!tasks.length&&<p className="muted">快照中暂无任务。</p>}</div>
-      {workspace&&<form key={`${node}/${workspace}`} onSubmit={event=>{
+      {workspace&&<form className="task-lookup" key={`${node}/${workspace}`} onSubmit={event=>{
         event.preventDefault();selectTask(String(new FormData(event.currentTarget).get('task-id')).trim(),workspace);
       }}>
         <label>按任务 ID 查看<input name="task-id" pattern="[0-9a-f]{32}" required/></label>
         <button className="quiet">查看任务</button>
-      </form>}
+      </form>}</section>
+      {task&&selection&&<p className="muted task-scope">所选任务 · {nodeName} · {workspaceName(selection.workspace)}</p>}
       {task&&selection&&<TaskObservation key={`${node}/${selection.workspace}/${task}`} scope={selection}
         heartbeat={heartbeat} online={taskOnline} supported={canReadTask} refresh={taskRefresh}
         onObservation={observeTask} onAccessLost={disconnect} onNodeGone={nodeGone}/>}
       {taskBound&&<div className="inline"><button disabled={busy} onClick={()=>{openResults('logs');void run(readLogs);}}>读取日志</button><button disabled={busy} onClick={()=>{openResults('files');void run(files);}}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
       {actions.filter(a=>a.state==='review').map(a=><article className="review" key={a.id}><strong>等待执行复核</strong><p>{a.review_reason}</p><pre>{JSON.stringify(a.request.payload,null,2)}</pre>{[true,false].map(approved=><button key={String(approved)} disabled={busy} onClick={()=>void run(async()=>{await api(`actions/${a.id}/review`,'POST',{approved});})}>{approved?'批准执行':'拒绝'}</button>)}</article>)}
+      <details className="setting" open><summary>运行环境 · {nodeName||'未选择节点'}{selected&&` · ${workspace?workspaceName(workspace):'未选择项目'}`}</summary>
+      <label>执行节点<select value={node} onChange={e=>{clearTask();setNode(e.target.value);setWorkspace('');}}><option value="">选择节点</option>{nodes.map(d=><option key={d.id} value={d.id}>{d.online?'●':'○'} {d.name}</option>)}</select></label>
+      {selected&&<p className="muted">{selected.online?'在线':'离线'} · 最近更新 {selected.last_seen?new Date(selected.last_seen*1000).toLocaleString():'尚未连接'}{selected.snapshot.cpu_percent!==undefined&&<><br/>CPU {selected.snapshot.cpu_percent}% · 内存 {selected.snapshot.memory_percent}%</>}</p>}
+      <label>项目<select value={workspace} onChange={e=>selectWorkspace(e.target.value)}><option value="">选择项目</option>{workspaces.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
+      <div className="inline"><input aria-label="项目名称" value={name} onChange={e=>setName(e.target.value)}/><button disabled={busy||!node} onClick={()=>void run(async()=>{const version=scopeVersion.current;const a=await invoke('workspace.create',{name});if(a.result&&scopeVersion.current===version)selectWorkspace(a.result.id);})}>新建</button></div>
+      </details>
+      <details className="setting"><summary>新建任务{workspace?` · ${workspaceName(workspace)}`:' · 先选择项目'}</summary>
+      <button type="button" className="primary wide" disabled={busy||!workspace} onClick={()=>void run(async()=>{const version=scopeVersion.current;const a=await invoke('task.submit',{template:'demo-field',spec:{workspace_id:workspace,name:'解析场验证',argv:['@python','-m','suan.control.demo_job'],outputs:['scalar-0.vti','scalar-1.vti','vector.vti']}});if(a.result&&scopeVersion.current===version)selectTask(a.result.id,workspace);})}>运行解析场示例</button>
+      <p className="muted">自定义任务：输入 TaskSpec JSON。新命令将先进入执行复核。</p><form onSubmit={e=>{e.preventDefault();const form=new FormData(e.currentTarget);void run(async()=>{const spec=JSON.parse(String(form.get('spec')));await invoke('task.submit',{spec:{workspace_id:workspace,...spec}});});}}><textarea name="spec" aria-label="TaskSpec" defaultValue={'{"argv":["python3","analysis.py"],"outputs":[]}'}/><button disabled={busy||!workspace}>提交复核</button></form>
+      </details>
       <details><summary>最近操作与重试</summary>{actions.filter(a=>a.request.kind!=='task.events').slice(0,20).map(a=><p key={a.id}><small>{a.request.kind} · {a.state}<br/>{a.error}</small></p>)}<button onClick={()=>void run(async()=>{const saved=sessionStorage.getItem('stk-last-action');if(saved)await api('actions','POST',JSON.parse(saved));})}>以相同 ID 重试上次操作</button></details>
     </aside>
     <section className={`analysis surface${tab==='results'?'':' surface-hidden'}`} inert={tab!=='results'||overlay}><div className="view-title"><div><span className="eyebrow">RESULT EXPLORER</span><h1>{analysis==='graph'?'图谱视图':shownScene?.manifest.field||'科学结果'}</h1></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span></div>

@@ -154,6 +154,60 @@ label.check input{width:auto}
 .status-line{margin:0 0 10px}
 .task-observation{margin:12px 0;padding:8px 10px;border:1px solid #343747;border-radius:4px}
 .task-observation p{margin:4px 0 0}
+/* 任务 puts the queue and the selected task first; the run environment and new tasks are one-click disclosures. */
+.queue-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+.queue-head span,.queue .task span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.queue-head h3 {
+  font-size: 13px;
+  font-weight: 500;
+  color: #a6a69c;
+  margin: 0;
+}
+.queue .task-list {
+  margin: 8px 0 12px;
+  max-block-size: min(38vh, 18rem);
+  overflow-y: auto;
+}
+.task-scope {
+  margin: 16px 0 0;
+  overflow-wrap: anywhere;
+}
+.task-scope+.task-observation {
+  margin-top: 4px;
+}
+.tasks .setting {
+  border: 1px solid #343747;
+  border-radius: 4px;
+  padding: 0 12px;
+}
+.tasks .setting>summary {
+  padding: 10px 0;
+  color: #c8c8c5;
+  overflow-wrap: anywhere;
+}
+.tasks .setting[open] {
+  padding-bottom: 12px;
+}
+.task-lookup {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.task-lookup label {
+  flex: 1;
+  margin: 0;
+}
+.tasks .inline>button,.task-lookup button {
+  flex: none;
+}
 .payload-view{display:flex;flex-direction:column;min-width:0}
 .viewport.v2{container-type:size}
 .vtk-host{position:absolute;inset:0}
