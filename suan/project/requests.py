@@ -26,8 +26,12 @@ SUPPORTED_PROMPT_VERSIONS = frozenset({PROMPT_VERSION, PARAMETER_EDITS_PROMPT_VE
 MAX_INPUT_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = 8192
 MAX_REPORT_REQUEST_BYTES = 1024 * 1024
+RECENT_DEFAULT = 8
+RECENT_LIMIT = 20
+RECENT_LABEL_CHARS = 80
 _SAFE_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
 _HASH = re.compile(r"[a-f0-9]{64}\Z")
+_LABEL_CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 SETTLEMENT_CODES = frozenset({"executor_lost", "adapter_unavailable", "adapter_failed", "response_invalid",
                             "cancel_confirmed", "cancel_unconfirmed", "transport_uncertain", "dispatch_failed",
                             "local_save_failed"})
@@ -300,6 +304,27 @@ class Requests:
             ancestors = {}
             return {"requests": [self._public(*self._decode(db, row, ancestors)) for row in rows[:limit]],
                     "next_offset": offset + limit if len(rows) > limit else None}
+
+    def recent(self, *, limit=RECENT_DEFAULT):
+        """Newest nonarchived saved questions in insertion order, for the local conversation rail."""
+        if type(limit) is not int or not 1 <= limit <= RECENT_LIMIT:
+            raise ProjectError(f"Recent request limit must be between 1 and {RECENT_LIMIT}")
+        with self.store._connect() as db:
+            _require(db)
+            where, extra = archive.where(db, "request", False)
+            rows = db.execute("SELECT * FROM project_requests" + where + " ORDER BY rowid DESC LIMIT ?",
+                              (*extra, limit)).fetchall()
+            ancestors = {}
+            requests = []
+            for row in rows:
+                identity, state = self._decode(db, row, ancestors)
+                question = ancestors["message", identity["message_id"]]["text"]
+                label = " ".join(_LABEL_CONTROLS.sub(" ", question).split())
+                if len(label) > RECENT_LABEL_CHARS:
+                    label = label[:RECENT_LABEL_CHARS - 1].rstrip() + "…"
+                requests.append({"request_id": identity["id"], "status": state["status"],
+                                 "created_at": identity["created_at"], "label": label or "…"})
+            return {"requests": requests}
 
     def usage(self):
         """Token counts the provider reported with completed requests, in total and per model (UX package U2).

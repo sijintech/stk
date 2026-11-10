@@ -595,6 +595,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.requests.get` | `{handle, request_id}` | `{request}` |
 | `project.requests.progress` | `{handle, request_id}` | `{request, progress: {executor_id, sequence, text, text_bytes}\|null}` (bounded unsaved text; no send) |
 | `project.requests.list` | `{handle, offset?, limit?}` | `{requests: [request], next_offset: integer|null}` |
+| `project.requests.recent` | `{handle, limit?}` | `{requests: [{request_id, status, created_at, label}]}` (local desktop, read only) |
 | `project.requests.cancel` | `{handle, request_id}` | `{request}` |
 | `project.requests.provider` | `{handle}` | `{provider}` (local configuration presence only) |
 | `project.requests.usage` | `{handle}` | `{requests, completed, reported, input_tokens, output_tokens, models: [{model, requests, input_tokens, output_tokens}]}` (read-only sum of provider receipts with completed replies; failed, cancelled and uncertain requests are not counted; no amounts of money) |
@@ -1203,6 +1204,15 @@ for native navigation, explicit import into an empty shared Viewer, and project-
   Parameter proposals are also optional: require both proposal methods before exposing that mode,
   and use ordinary text requests with older bridges. The default Python create call omits
   `prompt_version` from the wire for compatibility.
+- `project.requests.recent` is an optional local desktop capability advertised in `hello.methods`
+  under protocol 1. It requires project format 8 or newer and reads at most `limit` questions (1–20,
+  default 8), newest saved first by insertion order, excluding archived requests. Each summary
+  carries the request UUID, saved status, original creation timestamp and a single-line excerpt
+  of the saved user question. The excerpt replaces C0/C1 and bidirectional embedding and isolation
+  controls with spaces and collapses whitespace. It uses an ellipsis when clipped to 80 Unicode
+  code points or when no text remains. This read is local to the desktop project store. The
+  script and agent catalogs retain their existing scope. `project.requests.list` keeps its
+  oldest-first order, pagination and metadata-only response.
 - Provider returns exactly `{adapter, base_url, key_env, model_env, configured, model}` inside
   `{provider}`. The built-in adapter is `aliyun-token-plan/1`, with fixed base URL
   `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`, key environment variable

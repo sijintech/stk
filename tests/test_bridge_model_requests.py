@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from suan.agent.levels import DESKTOP_ONLY, OPERATIONS, TOOL_USES
 from suan.project import ProjectStore
 from suan.desktop_bridge.schema import validate_outgoing, validate_params
 from suan.project.aliyun import ALIYUN_ADAPTER, API_KEY_ENV, MODEL_ENV, BASE_URL
@@ -45,6 +46,81 @@ def completed_parameter(harness, model, *, prompt_version='stk.parameter-edits/1
     store.requests._complete(saved['id'], executor_id=owner,
                              text=parameter_reply(model, saved) if text is None else text)
     return p, saved
+
+
+def test_recent_requests_reads_the_newest_active_questions_beyond_legacy_page(inproc, model, monkeypatch):
+    h = inproc()
+    store, _ = model
+    context = capture(model)
+    handle = h.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+
+    def question(text):
+        return store.discussion.add(text, message_id=str(uuid4()), context_id=context["id"])
+
+    def save(message):
+        return store.requests.create(message["id"], request_id=str(uuid4()),
+                                     configuration={"adapter": "controlled/1", "model": "text-fixture"})
+
+    old = question("Older question")
+    records = [save(old) for _ in range(101)]
+    controls_only = save(question("\0\u202e"))
+    cancelled = store.requests.cancel(save(question("Cancelled question"))["id"])
+    completed = save(question("Completed question"))
+    owner = str(uuid4())
+    assert store.requests._claim(completed["id"], executor_id=owner)[1]
+    completed = store.requests._complete(completed["id"], executor_id=owner, text="Saved response")
+    text = " \t问题\r\n观察\u2028样品\u202e\0" + "磁畴🙂" * 30 + " \n"
+    pending = save(question(text))
+    archived = save(question("Archived newest question"))
+    store.archive.set([{"kind": "request", "id": archived["id"]}], archived=True)
+    records.extend([controls_only, cancelled, completed, pending, archived])
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Reading recent questions must not use the executor")
+
+    executor = h.bridge.projects._executor
+    monkeypatch.setattr(executor, "start", forbidden)
+    monkeypatch.setattr(executor, "progress", forbidden)
+    before, history = store.snapshot(), store.history()
+    method = "project.requests.recent"
+    result = h.call(method, {"handle": handle})["requests"]
+    assert [row["request_id"] for row in result] == [row["id"] for row in reversed(records[-9:-1])]
+    normal = "问题 观察 样品 " + "磁畴🙂" * 30
+    assert result[:3] == [
+        {"request_id": saved["id"], "created_at": saved["created_at"], "status": saved["status"], "label": label}
+        for saved, label in ((pending, normal[:79] + "…"), (completed, "Completed question"),
+                             (cancelled, "Cancelled question"))
+    ]
+    assert len(result[0]["label"]) == 80 and len(result[0]["label"].encode("utf-8")) > 80
+    assert result[3]["request_id"] == controls_only["id"] and result[3]["label"] == "…"
+    assert h.call(method, {"handle": handle, "limit": 1}) == {"requests": result[:1]}
+    assert len(h.call(method, {"handle": handle, "limit": 20})["requests"]) == 20
+    assert h.call("project.requests.list", {"handle": handle}) == {"requests": records[:100], "next_offset": 100}
+    assert h.call("project.requests.list", {"handle": handle, "offset": 100}) == {
+        "requests": records[100:], "next_offset": None}
+    assert store.snapshot() == before and store.history() == history
+    assert h.events_of("project.changed") == [] and not h.violations
+
+
+def test_recent_requests_is_optional_desktop_only_and_strictly_bounded(inproc, model):
+    h = inproc()
+    store, _ = model
+    method = "project.requests.recent"
+    hello = h.call("hello", {"protocol": 1, "resume_transfers": False})
+    assert hello["protocol"] == 1 and method in hello["methods"]
+    assert method in DESKTOP_ONLY and method not in OPERATIONS
+    assert all(method not in operations for operations in TOOL_USES.values())
+    assert method not in h.call("script.catalog")["operations"]
+    handle = h.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    assert h.call(method, {"handle": handle}) == {"requests": []}
+    for value in (0, 21, -1, True, None, "8", 1.5):
+        assert h.error(method, {"handle": handle, "limit": value})["code"] == "invalid_params"
+    assert h.error(method, {"handle": handle, "offset": 1})["code"] == "invalid_params"
+    row = {"request_id": str(uuid4()), "created_at": "2026-11-10T00:00:00Z", "status": "pending"}
+    assert not validate_outgoing({"id": "1", "result": {"requests": [{**row, "label": "问🙂"}]}}, method)
+    for label in ("", "🙂" * 81, "ends with newline\n", "a\u2028b", "a\0b"):
+        assert validate_outgoing({"id": "1", "result": {"requests": [{**row, "label": label}]}}, method)
+    assert not h.violations
 
 
 def test_parameter_reply_requires_explicit_conversion_and_separate_apply(inproc, model):

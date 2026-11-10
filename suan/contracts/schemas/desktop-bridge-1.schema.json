@@ -6486,6 +6486,75 @@
           "additionalProperties": false
         }
       },
+      "project.requests.recent": {
+        "description": "Read a bounded newest-first list of nonarchived saved questions for local desktop navigation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "description": "Defaults to 8."
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "requests": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "request_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "status": {
+                    "enum": [
+                      "pending",
+                      "running",
+                      "completed",
+                      "failed",
+                      "cancelled",
+                      "uncertain"
+                    ]
+                  },
+                  "created_at": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\\u2028-\\u202e\\u2066-\\u2069]+(?![\\s\\S])",
+                    "description": "Single-line excerpt of the saved user question."
+                  }
+                },
+                "required": [
+                  "request_id",
+                  "status",
+                  "created_at",
+                  "label"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "requests"
+          ],
+          "additionalProperties": false
+        }
+      },
       "project.requests.usage": {
         "description": "Provider-reported token counts of completed requests, in total and per model (read-only; the provider's console is authoritative).",
         "params": {

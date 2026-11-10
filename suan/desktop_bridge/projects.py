@@ -24,6 +24,7 @@ from suan.project.aliyun import TokenPlanCredentials, provider_info
 from suan.project.agent_sessions import AgentSessionNotFound
 from suan.agent.executor import AgentBusy
 from suan.project.request_executor import RequestBusy, RequestExecutor
+from suan.project.requests import RECENT_DEFAULT
 
 from suan.project.archive import Archived
 
@@ -593,6 +594,8 @@ class ProjectSessions:
             if action == "list":
                 return requests.list(offset=params.get("offset", 0), limit=params.get("limit", 100),
                                   archived=params.get("archived"))
+            if action == "recent":
+                return requests.recent(limit=params.get("limit", RECENT_DEFAULT))
             if action == "usage":
                 return requests.usage()
             return {"request": requests.get(params["request_id"])}

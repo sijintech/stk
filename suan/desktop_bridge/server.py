@@ -320,6 +320,7 @@ class Bridge:
             "project.requests.propose_edits": lambda p, c: self.projects.requests("propose_edits", p),
             "project.requests.edit_proposal": lambda p, c: self.projects.requests("edit_proposal", p),
             "project.requests.list": lambda p, c: self.projects.requests("list", p),
+            "project.requests.recent": lambda p, c: self.projects.requests("recent", p),
             "project.requests.usage": lambda p, c: self.projects.requests("usage", p),
             "project.requests.cancel": lambda p, c: self.projects.requests("cancel", p),
             "project.requests.provider": lambda p, c: self.projects.requests("provider", p),
