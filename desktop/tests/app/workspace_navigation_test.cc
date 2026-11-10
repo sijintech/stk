@@ -142,6 +142,39 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
   EXPECT_NE(f.screen.ui()->find("tool_files"), nullptr);
 }
 
+TEST(WorkspaceNavigation, SavedFocusedWorkbenchAndOrdinaryMaximizationRestoreSeparately)
+{
+  wmtest::AppFixture source;
+  source.shell->open_workbench(source.screen, true);
+  source.drv->frame();
+  ASSERT_EQ(source.screen.maximized(), &source.area("a2"));
+  ASSERT_NE(source.screen.ui()->find("workbench_results"), nullptr);
+  const auto saved = source.shell->capture_layout(source.screen, nullptr);
+  ASSERT_EQ(saved.screen.at("workbench_focused"), true);
+
+  wmtest::AppFixture reopened;
+  ASSERT_TRUE(reopened.shell->apply_layout(reopened.screen, saved));
+  reopened.drv->frame();
+  ASSERT_EQ(reopened.screen.maximized(), &reopened.area("a2"));
+  EXPECT_NE(reopened.screen.ui()->find("workbench_split"), nullptr);
+  EXPECT_EQ(reopened.screen.areas().size(), source.screen.areas().size());
+
+  auto invalid = saved;
+  invalid.screen["maximized"] = nullptr;
+  auto *viewer = &reopened.area("a2").editor();
+  EXPECT_FALSE(reopened.shell->apply_layout(reopened.screen, invalid));
+  EXPECT_EQ(reopened.screen.maximized(), &reopened.area("a2"));
+  EXPECT_EQ(&reopened.area("a2").editor(), viewer);
+
+  auto legacy = saved;
+  legacy.screen.erase("workbench_focused");
+  ASSERT_TRUE(reopened.shell->apply_layout(reopened.screen, legacy));
+  reopened.drv->frame();
+  EXPECT_EQ(reopened.screen.maximized(), &reopened.area("a2"));
+  EXPECT_EQ(reopened.screen.ui()->find("workbench_split"), nullptr);
+  EXPECT_NE(reopened.screen.ui()->find("tool_workbench"), nullptr);
+}
+
 class WorkspaceNavigationPython : public ::testing::Test {
  protected:
   bridge::test::TempDir dir{"workspace-navigation"};

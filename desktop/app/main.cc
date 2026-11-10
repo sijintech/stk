@@ -352,10 +352,11 @@ stk::app::ShellOptions shell_options(const Args &a, const bool interactive)
 }
 
 /** Loads `--layout` (or the saved layout) into the screen, else the default layout. */
-void restore_or_default(stk::app::AppShell &shell, stk::wm::Screen &screen, const Args &a, const std::string &path)
+bool restore_or_default(stk::app::AppShell &shell, stk::wm::Screen &screen, const Args &a, const std::string &path)
 {
   const bool explicit_file = !a.layout.empty();
-  if (!shell.restore(screen, stk::core::path_from_utf8(path), !explicit_file)) {
+  const bool restored = shell.restore(screen, stk::core::path_from_utf8(path), !explicit_file);
+  if (!restored) {
     if (explicit_file) {
       fprintf(stderr, "stk-desktop: cannot use layout %s, using the default layout\n", path.c_str());
     }
@@ -365,6 +366,7 @@ void restore_or_default(stk::app::AppShell &shell, stk::wm::Screen &screen, cons
     /* An explicit --lang wins over the saved language. */
     shell.set_language(a.lang);
   }
+  return restored;
 }
 
 int run_sample_headless(const Args &a, stk::gfx::Gpu &gpu, const int w, const int h)
@@ -751,7 +753,10 @@ int run_gui(const Args &a, const stk::gfx::Backend backend)
   wm::Screen &screen = win->screen();
   shell.install(screen, win);
   shell.set_ui_scale(opts.user_scale);
-  restore_or_default(shell, screen, a, layout_path);
+  const bool restored = restore_or_default(shell, screen, a, layout_path);
+  if ((!restored && a.layout.empty()) || (!a.open.empty() && shell.workbench_is_focused(screen))) {
+    shell.open_workbench(screen, !a.open.empty());
+  }
   if (a.scale_given) {
     shell.set_ui_scale(a.scale);
   }

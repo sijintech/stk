@@ -123,6 +123,9 @@ class AppShell {
   std::weak_ptr<void> lifetime() const { return alive_; }
   /** Replaces the screen's tree with the default layout. */
   void build_default_layout(wm::Screen &screen);
+  /** Enter the focused workbench in the conversation or the Viewer, without rebuilding editors. */
+  void open_workbench(wm::Screen &screen, bool show_result = false);
+  bool workbench_is_focused(const wm::Screen &screen) const;
 
   /** Screen, language, UI scale and window geometry as a layout file. */
   wm::LayoutFile capture_layout(const wm::Screen &screen, const wm::Window *window) const;

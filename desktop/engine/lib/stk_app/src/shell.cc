@@ -695,18 +695,34 @@ constexpr WorkbenchSection workbench_sections[] = {
     {kEditorJobs, "workbench_tasks", "workbench.nav.tasks"},
     {kEditorViewer, "workbench_results", "workbench.nav.results"},
 };
+
+int workbench_section(const wm::Area *area)
+{
+  const auto *editor = dynamic_cast<const EditorArea *>(area);
+  if (editor) {
+    for (int i = 0; i < int(std::size(workbench_sections)); ++i) {
+      if (editor->editor().type().id == workbench_sections[i].editor) { return i; }
+    }
+  }
+  return -1;
+}
 }  // namespace
 
 int AppShell::focused_workbench_section(const wm::Screen &screen) const
 {
-  const auto *focused = dynamic_cast<const EditorArea *>(screen.maximized());
   const auto mark = focused_workbenches_.find(&screen);
-  if (focused && mark != focused_workbenches_.end() && mark->second == screen.visibility_epoch()) {
-    for (int i = 0; i < int(std::size(workbench_sections)); ++i) {
-      if (focused->editor().type().id == workbench_sections[i].editor) { return i; }
-    }
-  }
-  return -1;
+  return mark != focused_workbenches_.end() && mark->second == screen.visibility_epoch() ?
+      workbench_section(screen.maximized()) : -1;
+}
+
+void AppShell::open_workbench(wm::Screen &screen, bool show_result)
+{
+  workbench_navigation_action(screen, show_result ? kEditorViewer : kEditorAI)();
+}
+
+bool AppShell::workbench_is_focused(const wm::Screen &screen) const
+{
+  return focused_workbench_section(screen) >= 0;
 }
 
 std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, const char *editor_id)
@@ -1147,6 +1163,7 @@ wm::LayoutFile AppShell::capture_layout(const wm::Screen &screen, const wm::Wind
   f.ui_scale = store_.ui_scale();
   f.screen = screen.to_json();
   f.screen["work_modes"] = capture_work_modes(screen);
+  if (focused_workbench_section(screen) >= 0) { f.screen["workbench_focused"] = true; }
   f.window.width = kDefaultWindowWidth;
   f.window.height = kDefaultWindowHeight;
   if (window) {
@@ -1175,8 +1192,17 @@ bool AppShell::apply_layout(wm::Screen &screen, const wm::LayoutFile &file, std:
   if (!prepared.from_json(file.screen, r_error) || !read_work_modes(prepared, file.screen, modes, r_error)) {
     return false;
   }
+  bool workbench_focused = false;
+  if (const auto mode = file.screen.find("workbench_focused"); mode != file.screen.end()) {
+    if (!mode->is_boolean() || (mode->get<bool>() && workbench_section(prepared.maximized()) < 0)) {
+      if (r_error) { *r_error = "Invalid focused workbench layout"; }
+      return false;
+    }
+    workbench_focused = mode->get<bool>();
+  }
   screen.adopt_tree_from(prepared);
   focused_workbenches_.erase(&screen);
+  if (workbench_focused) { focused_workbenches_[&screen] = screen.visibility_epoch(); }
   work_modes_[&screen] = std::move(modes);
   const std::vector<std::string> langs = store_.catalog().languages();
   if (!file.language.empty() && std::find(langs.begin(), langs.end(), file.language) != langs.end()) {

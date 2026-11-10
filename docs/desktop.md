@@ -35,6 +35,10 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 
 ## 项目工作台
 
+首次启动显示聚焦工作台。用左侧的**工作台、任务、结果**切换对话、运行和查看器。窄窗口将入口移到横栏。
+点**分栏视图**即可继续在文件、Viewer、节点/Python 和表格中并行工作。已有布局按保存的区域树恢复；
+保存聚焦工作台也会保留当前页。首次启动或打开已保存的聚焦工作台时，`--open` 指定的结果直接显示在查看器。
+
 界面中文/英文术语见[术语表](design/glossary.md)。各面板说明只显示第一句，末尾的“…”表示悬停可看完整说明
 （范围、上限以及不会发生的操作）。UUID、哈希与 JSON 命令默认收在“技术详情”或“高级”折叠面板中；
 修改检查以“表 / 字段 / 第 N 行”定位，JSON 命令编辑器在“高级：以 JSON 编辑命令”中。
@@ -91,7 +95,7 @@ MuFerro 仿真与仿真批次面板可直接选择**运行环境**并用字段�
 5. **结果**：进入“保存的分析”，或切到查看器（不最大化，保留属性面板）。
 
 “其他”中有 AI 对话、文件页、项目的**工作流**与跨项目的技能库。后台 Python 服务未就绪时，工作台顶部用一句话说明原因。
-已保存布局的用户继续使用自己的布局；**文件 → 恢复默认布局** 可换成新的默认布局。
+已保存布局的用户继续使用自己的布局。**文件 → 恢复默认布局**可换回标准分栏。
 普通导航复用已有标签并维持分栏；明确聚焦后的目标可通过 **视图 → 恢复分栏布局** 返回。
 工作台的项目入口会检查所有窗口的活动文本编辑；先完成或取消输入再导航。未发送问题和分析参数草稿保留。
 文件树独立维护展开/选择，搜索定位文件也不改共享表格选择；表格跨行/字段/表切换仍检查所有窗口及隐藏标签的单元格和名称草稿。
@@ -497,11 +501,11 @@ ParaView 导航（侧栏“显示”中切换）：左键旋转、中键平移�
 关闭窗口时（以及文件 > 保存布局、Ctrl+S）保存布局：Linux 为 `$XDG_CONFIG_HOME/stk/desktop/layout.json`
 （通常是 `~/.config/stk/desktop/layout.json`），macOS 为 `~/Library/Application Support/stk/desktop/`，
 Windows 为 `%APPDATA%\stk\desktop\`。内容包括窗口大小与位置、语言、界面缩放和区域树（分割比例、编辑器类型、
-区域大小、标签页等）。
+区域大小、标签页等），以及是否以聚焦工作台打开当前页。
 
-- 文件损坏、无效或来自更新的版本时，改名为 `layout.json.corrupt`，记录日志并使用默认布局。
+- 默认布局文件损坏、无效或来自更新的版本时，改名为 `layout.json.corrupt`，记录日志并进入聚焦工作台。
 - `--layout FILE` 使用指定布局且不写回；`--no-save-layout` 不保存；`--save-layout FILE` 写出布局。
-- 文件（或视图）> 恢复默认布局回到新组合工作区：侧边文件树，Viewer 与节点/Python 并排，下方表格；工作台、项目、任务、属性和日志等保留为标签。
+- 文件（或视图）> 恢复默认布局回到标准分栏：侧边文件树，Viewer 与节点/Python 并排，下方表格；工作台、项目、任务、属性和日志等保留为标签。
   未保存的代码/单元格/节点/流程草稿或活动文本输入会阻止实例销毁，先保存或放弃；现有自定义布局不自动覆盖。
 
 ## 输入法
@@ -572,7 +576,9 @@ sequence export) and **Transfers / Logs / Service log**. The D1 acceptance run i
 
 ### Home (start page)
 
-The default layout opens on **Home** (left, with Jobs as its second tab). It walks through
+On first launch, **Workbench** opens the conversation. Its navigation switches between Workbench,
+Tasks and Results, with a horizontal strip in narrow windows. **Split view** reveals the live editor
+panes. The guided Workspace editor in the split layout walks through
 Project → Parameters → Where to run → Run → Results (with **Create example project**, synthetic data and no
 server, while no project is open), shows what is already known for each step (open
 project, parameter tables and rows, current connection and its health, whether a result is shown) and
@@ -766,9 +772,10 @@ zoom.
 
 Saved on close and with Ctrl+S to `$XDG_CONFIG_HOME/stk/desktop/layout.json` (`~/Library/Application
 Support/stk/desktop/`, `%APPDATA%\stk\desktop\`): window geometry, language, UI scale and the area tree. A
-corrupt, invalid or newer file is moved to `layout.json.corrupt` and the default layout is used.
-`--layout FILE` (not written back), `--no-save-layout`, `--save-layout FILE`; File > Reset layout (or
-deleting `layout.json`) restores the default layout: the guided Workspace (with Jobs as a second tab) | Viewer | Properties.
+corrupt, invalid or newer default file is moved to `layout.json.corrupt` and the app opens Workbench.
+`--layout FILE` (not written back), `--no-save-layout`, and `--save-layout FILE` control the layout file.
+Saved layouts retain their focused section or split geometry. File > Reset layout restores the standard
+split with Files, Viewer, Nodes and Table.
 
 ### IME
 

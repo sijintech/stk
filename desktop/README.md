@@ -89,9 +89,9 @@ stk-desktop --version | --help
 ### Screen (WP3)
 
 The window shows a top bar (menus File / View / Language / UI scale, title), a tree of areas and a
-status bar (bridge state, connection, hints). The default layout is Jobs | Viewer | Properties over
-a bottom strip with the tabs Logs / Probe / Transfers / Service log (WP9: Jobs, Logs, Transfers and
-Service log; WP10: Viewer, Properties and Probe; see below).
+status bar (bridge state, connection, hints). A fresh window opens the focused Workbench. Its navigation
+switches between conversation, Tasks and Results. Split view reveals the Files, Viewer, Nodes and Table
+areas with their other tabs. Saved layouts retain their chosen presentation.
 
 - Areas: drag a splitter to resize (minimum sizes hold, the other areas keep their size),
   double-click it to join the two areas beside it (the larger stays). The area menu (header button
