@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-10 21:49 UTC · 主线发布与任务页运行环境
+
+远端 `main` 已由 `9ce87c63` 快进至 `a64941b4`，推送后核对全 SHA 一致。上一批 Desktop 整轮终态见下一节。推送范围 15 个提交的 gitleaks 通过。新头 Secret scan 通过，Desktop 与 Runtime 已开始。原生阅读位置、Web 图谱真实来源、MuPRO HDF5 三跳验收及可选 Cocoa 对照均包含在本次推送。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42908396134) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42908396193)
+
+`629f964b` 集成 `528d6715`。首次有效工作区选定后收起 Web「运行环境」，标题保留节点与工作区。焦点原在收起的控件中时回到标题，外部焦点和滚动保留。手动开合沿用用户选择，自动收起后失去范围会展开恢复，重新选择后由用户决定开合。队列顺序和既有任务入口保留。独立定向 18/18，独立及 Root 完整 Chromium 各 171/171，零跳过及重试，生产构建与扫描通过。
+
+模拟 Hub 的中文 1440×900、390×844，固定起点为首次选定节点、工作区及队列任务，队列外层滚动 0。宽窗的 1 行、200 行和窄窗的 1 行队列都以 1 次点击打开「新建任务」，零滚轮。窄窗 200 行实际滚动 53 px，再 1 次点击打开。旧版部分路线须先收起高约 274 px 的运行环境，收起后约 42 px。四条路线测量无新增请求或动作，所选任务、草稿及返回位置保留。焦点、手动展开、项目切换、节点撤销和重选另有定向回归。收据在外部 `root-delivery-20261110-144/tasks-environment` 与 `tasks-environment-root`。该提交已在本地 `main`，发布待 `a64941b4` 的整轮 Desktop 终态。
+
+Web MuPRO HDF5 明确入口在另一独立 worktree 开发。Root 的真实本机 Hub、NodeAgent 和 Runtime 合成夹具验证 `case/run.h5` 第 2 步的单分量场和显式选择的 Polar 分量 1，各 24 个 `float32` 体素。元数据只从发布摘要对应容器读取，另含第 4 步用于排除默认末帧。保留普通 DAT 任务作为浏览器兼容对照。API 收据在外部 `root-delivery-20261110-144/hdf5-live-proof/api-baseline`。真实许可求解与研究参数仍待验。最新原生项目全量测试继续运行。
+
 ## 2026-11-10 21:46 UTC · 上一 Desktop 批次终态
 
 远端 `9ce87c63` 的 Desktop `42895759127` 整批终态失败，4/6 作业通过。Linux 主作业 2201/2201、两个 Linux 打包、Windows CPU 1506/1506 均通过。macOS CPU 1566/1566、Metal 254/254，原生必测 4/6，媒体和可选对照的阶段见下一节。同头 Runtime 13/13，Pages 和 Secret scan 通过。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42895759127) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42895759007)
