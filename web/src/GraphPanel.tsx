@@ -2,7 +2,7 @@
 // stk.payload/2, scrub steps with the camera kept, show plots/images/tables, and a task.events progress line.
 import React, {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {action, api, blob, readNode, type Json} from './api';
-import {cachedBlob, loadPayload, loadStkp, type LoadedPayload} from './payload';
+import {cachedBlob, loadPayload, loadStkp, sha256Hex, type LoadedPayload} from './payload';
 import {bindingNames, blobSha, coerceParameters, DISPLAYABLE, duration, editorKind, emptyProgress, EVENTS_POLL_MS, EVENTS_TAIL_BYTES, foldEvents,
   frameDataset, framesFromArtifacts, initialValues, nextEventsDelay, outputImages, payloadOutputs, presetParameters, progressText, resolveProbeArtifact, resolveProbeTarget,
   selectOutputs, stepChoices, stepParameter, tableData, waitForAction, type Artifact, type GraphParameter, type GraphResult, type Preset,
@@ -10,7 +10,8 @@ import {bindingNames, blobSha, coerceParameters, DISPLAYABLE, duration, editorKi
 import ErrorBoundary from './ErrorBoundary';
 import {taskStateLabel} from './taskFacts';
 import type {PickInfo} from './PayloadViewer';
-import {muProArtifact, muProFrames, muProManifest, muProRequest, type MuProArtifact, type MuProFrame, type MuProSource} from './muproHdf5';
+import {isGridPoint, muProArtifact, muProFrames, muProManifest, muProRequest, muProVoxelBlob, muProVoxelRequest,
+  muProVoxelValue, type MuProArtifact, type MuProFrame, type MuProSource} from './muproHdf5';
 
 const Viewer = React.lazy(() => import('./Viewer'));
 const fetchBlob = (sha: string, signal?: AbortSignal) => blob(sha, signal);
@@ -31,7 +32,7 @@ type EvaluationSource = {
   bindings: {name: string, task: string, taskName?: string, workspace?: string}[],
 } & ({presetId: string, presetName?: string, hdf5?: never} | {hdf5: MuProSource, presetId?: never, presetName?: never});
 export type GraphSource = EvaluationSource | {kind: 'local', scope: string, node: string, file: string};
-type GraphView = {payload: LoadedPayload, source: GraphSource, key: string, probe?: ProbeContext, signal?: AbortSignal};
+type GraphView = {payload: LoadedPayload, source: GraphSource, key: string, probe?: ProbeContext, signal?: AbortSignal, voxelKey?: number};
 type CompletedTask = {name: string, workspace: string};
 
 async function evaluateGraph(node: string, request: Json, isCurrent: () => boolean,
@@ -101,6 +102,72 @@ function MuProHdf5Control({node, task, artifact, onOpen}: {node: string, task: s
     {status && <p className="muted" role="status">{status}</p>}
     {error && <p className="muted" role="alert">{error}</p>}
   </details>;
+}
+
+function MuProHdf5Voxel({node, task, source, active}: {node: string, task: string, source: MuProSource, active: boolean}) {
+  const [coordinates, setCoordinates] = useState(['0', '0', '0']);
+  const [status, setStatus] = useState('');
+  const [error, setError] = useState('');
+  const [value, setValue] = useState<string | null>(null);
+  const request = useRef<AbortController | null>(null);
+  const point = coordinates.map(text => /^\d+$/.test(text) ? Number(text) : NaN);
+  const valid = isGridPoint(point, source.frame);
+
+  function cancel() {
+    request.current?.abort();
+    request.current = null;
+    setStatus('');
+  }
+  useLayoutEffect(() => {
+    if (!active) cancel();
+    return () => request.current?.abort();
+  }, [active]);
+
+  async function read(event: React.FormEvent) {
+    event.preventDefault();
+    if (!active || !valid || request.current) return;
+    const abort = new AbortController();
+    request.current = abort;
+    const isCurrent = () => !abort.signal.aborted;
+    setStatus('正在读取 HDF5 体素…');
+    setError(''); setValue(null);
+    try {
+      const result = await evaluateGraph(node, muProVoxelRequest(task, source, point), isCurrent, setStatus, abort.signal);
+      if (!result || !isCurrent()) return;
+      const file = muProVoxelBlob(result, source, point);
+      const bytes = await blob(file.sha, abort.signal, file.size);
+      if (!isCurrent()) return;
+      if (bytes.byteLength !== file.size || await sha256Hex(new Uint8Array(bytes)) !== file.sha) {
+        throw new Error('HDF5 体素数据文件的大小或 SHA-256 不符。');
+      }
+      if (isCurrent()) setValue(muProVoxelValue(bytes, source.frame.dtype));
+    } catch (e) { if (isCurrent()) setError(message(e)); }
+    finally {
+      if (isCurrent()) { request.current = null; setStatus(''); }
+    }
+  }
+
+  return <form className="probe" aria-label="HDF5 原始体素" onSubmit={event => void read(event)}>
+    <strong>原始体素</strong>
+    <small className="result-source">已显示 · {source.frame.name} · 第 {source.frame.step} 步
+      {source.component !== null && ` · 分量 ${source.component}`}</small>
+    <div className="hdf5-voxel-coordinates">
+      {coordinates.map((text, index) => {
+        const axis = 'XYZ'[index];
+        return <label key={axis}>{axis} <input aria-label={`HDF5 网格 ${axis}`} type="number" min={0}
+          max={source.frame.shape[index] - 1} step={1} required value={text} onChange={event => {
+            const coordinate = event.target.value;
+            cancel(); setError(''); setValue(null);
+            setCoordinates(values => values.map((previous, i) => i === index ? coordinate : previous));
+          }}/></label>;
+      })}
+    </div>
+    <button type="submit" disabled={!active || !valid || !!status}>读取体素</button>
+    {value !== null && <output aria-label="HDF5 原始值">{value} · {source.frame.dtype}</output>}
+    <small className="muted">网格索引从 0 开始</small>
+    {status && <small role="status">{status}</small>}
+    {error && <small role="alert">{error}</small>}
+  </form>;
 }
 
 function ParamEditor({param, value, onChange, options}: {param: GraphParameter, value: unknown, onChange: (value: unknown) => void, options?: string[]}) {
@@ -281,7 +348,8 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
   const stepIndex = shownStep === null ? -1 : steps.choices.indexOf(shownStep);
   const localName = shownView?.source.kind === 'local' ? shownView.source.file : '';
   const hdf5 = completedTask && node && task ? muProArtifact(artifacts as Artifact[]) : null;
-  const shownHdf5 = shownView?.source.kind === 'evaluation' && !!shownView.source.hdf5;
+  const acceptedHdf5 = shownView?.source.kind === 'evaluation' && shownView.source.hdf5 ? shownView.source : null;
+  const shownHdf5 = !!acceptedHdf5;
   // Output cards may arrive without a new scene. In that case the displayed canvas keeps its own source.
   const source = shownView?.source ?? outputsSource;
   useLayoutEffect(() => { onSource(source); }, [source, onSource]);
@@ -442,7 +510,7 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
       if (!payload.layers.some(layer => layer.type === 'volume' && layer.visible !== false)) {
         throw new Error('HDF5 渲染数据没有可显示的体数据。');
       }
-      offerView({payload, signal, key: JSON.stringify(['mupro.hdf5@1', task, hdf5Source.artifact.sha256, hdf5Source.frame.name, hdf5Source.component]),
+      offerView({payload, signal, voxelKey: current, key: JSON.stringify(['mupro.hdf5@1', task, hdf5Source.artifact.sha256, hdf5Source.frame.name, hdf5Source.component]),
         source: {kind: 'evaluation', scope, node, display: 'scene', output: 'view', step: hdf5Source.frame.step, hdf5: hdf5Source,
           bindings: [{name: 'run', task, taskName: completedTask.name, workspace: completedTask.workspace}]}});
     } catch (e) { if (isCurrent()) throw e; }
@@ -597,6 +665,8 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
   const editable = params.filter(p => p.name !== stepName || !steps.choices.length);
   return <div className="graph-panel">
     {hdf5 && presets !== null && <MuProHdf5Control key={JSON.stringify([scope, task, hdf5.sha256, hdf5.size])} node={node} task={task} artifact={hdf5} onOpen={openHdf5}/>}
+    {acceptedHdf5?.hdf5 && acceptedHdf5.bindings[0] && <MuProHdf5Voxel key={shownView?.voxelKey}
+      node={acceptedHdf5.node} task={acceptedHdf5.bindings[0].task} source={acceptedHdf5.hdf5} active={active}/>}
     <div className="view-controls graph-controls">
       <label>图谱预设<select aria-label="图谱预设" value={presetId} onChange={e => setPresetId(e.target.value)}>
         {!presets?.length && <option value="">{presets ? '暂无预设' : '正在读取预设…'}</option>}

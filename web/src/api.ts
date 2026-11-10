@@ -43,11 +43,28 @@ export async function action(node_id:string,kind:string,payload:Json,onReview?:(
 }
 // Content-addressed hub blob (payload buffers, plots, images) with the same bearer credential.
 // The hub marks blobs private and immutable; the viewer also keeps a verified in-memory cache.
-export async function blob(sha256:string,signal?:AbortSignal):Promise<ArrayBuffer>{
+export async function blob(sha256:string,signal?:AbortSignal,maxBytes?:number):Promise<ArrayBuffer>{
   if(!/^[0-9a-f]{64}$/.test(sha256))throw new Error('无效的数据块标识');
   const response=await fetch(`/api/v1/blobs/${sha256}`,{headers:{Authorization:`Bearer ${credential}`},signal});
   if(!response.ok)throw new Error(response.status===404?'数据块尚未上传到控制服务':`数据块读取失败 (${response.status})`);
-  return response.arrayBuffer();
+  if(maxBytes===undefined)return response.arrayBuffer();
+  const tooLarge=()=>new Error('数据块超过声明的大小');
+  if(Number(response.headers.get('content-length'))>maxBytes){
+    await response.body?.cancel();
+    throw tooLarge();
+  }
+  const reader=response.body?.getReader();
+  if(!reader)throw new Error('无法读取数据块内容');
+  const bytes=new Uint8Array(maxBytes);
+  let offset=0;
+  try{
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)return bytes.buffer.slice(0,offset);
+      if(value.length>maxBytes-offset){await reader.cancel();throw tooLarge();}
+      bytes.set(value,offset);offset+=value.length;
+    }
+  }finally{reader.releaseLock();}
 }
 export async function events(onEvent:()=>void,signal:AbortSignal){
   const token=credential;

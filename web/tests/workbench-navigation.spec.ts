@@ -3,9 +3,11 @@
 // It drives the built app (`npm run build` first, or STK_WEB_DIST=<dir>) in Chromium; page.route serves the
 // files and a mocked hub, so no server, model or network is used. Without a build these tests are skipped.
 import {expect, test, type Locator, type Page, type Request, type Route} from '@playwright/test';
+import {createHash} from 'node:crypto';
 import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 import {extname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {scalarNpy} from './mupro-npy-fixture';
 
 const DIST = process.env.STK_WEB_DIST || fileURLToPath(new URL('../dist/', import.meta.url));
 test.skip(!existsSync(join(DIST, 'index.html')), `no built app in ${DIST}: run npm run build or set STK_WEB_DIST`);
@@ -87,6 +89,9 @@ class Hub {
   taskReadError?: number;
   readonly hdf5Artifacts = new Map<string, typeof HDF5_ARTIFACT>();
   hdf5Fault?: 'wrong-digest' | 'invalid_data' | 'wrong-step';
+  hdf5Fields = HDF5_FIELDS;
+  voxelFault?: 'source' | 'digest' | 'size';
+  private readonly voxelBlobs = new Map<string, Buffer>();
   field = 'phi';
   // 任务: `device` is the node the hub lists; `down` makes every hub call fail as an unreachable control service;
   // `review` sends a task.submit to execution review, which GET actions then lists until it is approved or refused.
@@ -178,6 +183,8 @@ class Hub {
     if (path === 'graphs/presets') return json(this.presets);
     const stored = /^blobs\/([0-9a-f]{64})$/.exec(path);
     if (stored) {
+      const voxel = this.voxelBlobs.get(stored[1]);
+      if (voxel) return route.fulfill({status: 200, contentType: 'application/octet-stream', body: voxel});
       const file = join(EXAMPLE, `${stored[1]}.bin`);
       return existsSync(file) ? route.fulfill({status: 200, contentType: 'application/octet-stream', body: readFileSync(file)}) : json({detail: 'no blob'}, 404);
     }
@@ -266,15 +273,37 @@ class Hub {
           const fields = type === 'stk.source.mupro_hdf5_fields@1';
           const artifact = this.hdf5Artifacts.get(body.payload.bindings?.run?.task_id);
           const fault = this.hdf5Fault;
-          await this.gateOnce(fields ? 'hdf5 fields' : 'hdf5 open');
+          const voxel = body.payload.outputs?.includes('voxel');
+          const voxelFault = this.voxelFault;
+          await this.gateOnce(fields ? 'hdf5 fields' : voxel ? 'hdf5 voxel' : 'hdf5 open');
           if (!artifact || artifact.sha256 !== hdf5.params.expected_sha256 || fault === 'invalid_data') {
             return json({id: body.id, state: 'failed', error: 'invalid_data: expected SHA-256'});
+          }
+          if (voxel) {
+            const field = this.hdf5Fields.find(item => item.selector === hdf5.params.selector)!;
+            const point = [0, 2, 4].map(axis => hdf5.params.extent[axis]);
+            const bits = Buffer.alloc(field.dtype === 'uint64' ? 8 : 4);
+            if (field.dtype === 'uint64') bits.writeBigUInt64LE(9223372036854775931n);
+            else bits.writeFloatLE(0.3125);
+            const bytes = scalarNpy(field.dtype === 'uint64' ? '<u8' : '<f4', bits);
+            const sha = createHash('sha256').update(bytes).digest('hex');
+            const served = Buffer.from(bytes);
+            if (voxelFault === 'digest') served[served.length - 1] ^= 1;
+            this.voxelBlobs.set(sha, voxelFault === 'size' ? Buffer.concat([served, Buffer.from([0])]) : served);
+            const descriptor = {schema: 'stk.dataset/1', id: field.name, kind: 'image',
+              geometry: {length_unit: 'grid_index', origin: voxelFault === 'source' ? [99, 99, 99] : point,
+                spacing: [1, 1, 1], dimensions: [1, 1, 1]},
+              time: {step: field.step}, fields: [{name: field.name, dtype: field.dtype, association: 'point', components: field.shape[3]}],
+              frames: [{step: field.step, sources: {[field.name]: {...artifact, reader: 'mupro.hdf5@1', selector: field.selector}}}]};
+            const outputs = {source: {type: 'dataset', descriptor}, voxel: {type: 'file', name: 'voxel.npy',
+              media_type: 'application/x-npy', size: bytes.length, blob: sha}};
+            return json({id: body.id, state: 'succeeded', result: {schema: 'stk.graph-result/1', profile: 'web', outputs}});
           }
           const manifest = JSON.parse(readFileSync(join(EXAMPLE, 'manifest.json'), 'utf8'));
           manifest.length_unit = 'grid_index';
           manifest.source.time = {step: fault === 'wrong-step' ? 4 : Number(hdf5.params.selector?.slice(2, 10)), time: null};
           const outputs = fields ? {fields: {type: 'value', value: {...artifact,
-            sha256: fault === 'wrong-digest' ? 'e'.repeat(64) : artifact.sha256, reader: 'mupro.hdf5@1', fields: HDF5_FIELDS}}} :
+            sha256: fault === 'wrong-digest' ? 'e'.repeat(64) : artifact.sha256, reader: 'mupro.hdf5@1', fields: this.hdf5Fields}}} :
             {view: {type: 'payload', manifest}};
           return json({id: body.id, state: 'succeeded', result: {schema: 'stk.graph-result/1', profile: 'web', outputs}});
         }
@@ -3869,6 +3898,140 @@ for (const viewport of viewports) {
     expect(errors).toEqual([]);
   });
 }
+
+const voxelForm = (page: Page) => graphPane(page).getByRole('form', {name: 'HDF5 原始体素'});
+const voxelRead = (page: Page) => voxelForm(page).getByRole('button', {name: '读取体素', exact: true});
+const voxelCoordinate = (page: Page, axis: string) => voxelForm(page).getByRole('spinbutton', {name: `HDF5 网格 ${axis}`, exact: true});
+const voxelValue = (page: Page) => voxelForm(page).getByLabel('HDF5 原始值', {exact: true});
+
+async function openHdf5Field(page: Page, selector: string, component?: string) {
+  await muproPanel(page).locator('summary').click();
+  await muproList(page).click();
+  await muproFrame(page).selectOption(selector);
+  if (component !== undefined) await muproComponent(page).fill(component);
+  await muproOpen(page).click();
+  await expect(voxelForm(page)).toBeVisible();
+}
+
+for (const viewport of viewports) {
+  test(`${viewport.name} HDF5 voxel reads only the accepted frame and exact component`, async ({page}) => {
+    await page.setViewportSize({width: viewport.width, height: viewport.height});
+    const hub = new Hub();
+    hub.presets = [PRESET];
+    hub.hdf5Artifacts.set(task, HDF5_ARTIFACT);
+    hub.hdf5Fields = HDF5_FIELDS.map(item => item.name === 'Polar' ? {...item, dtype: 'uint64'} : item);
+    const errors = await setup(page, hub, {scene: false});
+    await showGraph(page);
+    await expect(voxelForm(page)).toHaveCount(0);
+    await openHdf5Field(page, '/t00000002/Polar', '1');
+    await expect(source(page)).toHaveText(muproSource);
+    const canvas = vtkCanvas(graphPane(page));
+    await canvas.evaluate(el => { (el as any).__voxelCanvas = true; });
+    await page.locator('section.analysis').evaluate(el => { el.scrollTop = 0; });
+    const sent = posts(page);
+    // Unopened selector/component edits do not become the source of the displayed frame.
+    await muproFrame(page).selectOption('/t00000004/Polar');
+    await muproComponent(page).fill('0');
+    await expect(voxelForm(page)).toContainText('已显示 · Polar · 第 2 步 · 分量 1');
+    await voxelCoordinate(page, 'X').fill('4');
+    await expect(voxelRead(page)).toBeDisabled();
+    await voxelCoordinate(page, 'X').fill('2');
+    await voxelCoordinate(page, 'Y').fill('1');
+    await expect(voxelCoordinate(page, 'Z')).toHaveValue('0');
+    expect(sent.seen.filter(call => !call.endsWith('task.get'))).toEqual([]);
+    await expect(voxelRead(page)).toBeInViewport({ratio: 1});
+    const scroll = await page.locator('section.analysis').evaluate(el => el.scrollTop);
+    const measured = route(page, `${viewport.name}-hdf5-voxel`);
+    if (viewport.name === 'narrow') {
+      await voxelRead(page).focus();
+      await page.keyboard.press('Enter');
+    } else {
+      await measured.click(voxelRead(page), '读取体素');
+    }
+    await expect(voxelValue(page)).toHaveText('9223372036854775931 · uint64');
+    await expect(voxelValue(page)).toBeInViewport({ratio: 1});
+    expect(sent.seen.filter(call => !call.endsWith('task.get'))).toEqual(['/api/v1/actions graph.evaluate']);
+    expect(hub.evaluations.at(-1)).toMatchObject({bindings: {run: {task_id: task}}, outputs: ['source', 'voxel'],
+      graph: {nodes: [
+        {params: {expected_sha256: HDF5_ARTIFACT.sha256, path: 'case/run.h5', selector: '/t00000002/Polar', extent: [2, 2, 1, 1, 0, 0]}},
+        {params: {operation: 'component', component: 1}},
+        {params: {format: 'npy'}},
+      ]}});
+    expect(await page.locator('section.analysis').evaluate(el => el.scrollTop)).toBe(scroll);
+    expect(await canvas.evaluate(el => (el as any).__voxelCanvas)).toBe(true);
+    await expect(source(page)).toHaveText(muproSource);
+    expect(hub.probes).toEqual([]);
+    expect(errors).toEqual([]);
+    sent.stop();
+    writeFileSync(test.info().outputPath('voxel-route.json'), JSON.stringify({viewport, scroll,
+      pointerClicks: measured.record.clicks, enterKeys: viewport.name === 'narrow' ? 1 : 0, editedAxes: 2}, null, 2));
+  });
+}
+
+test('HDF5 voxel ignores stale results after edits, hiding, frame replacement and task replacement', async ({page}) => {
+  const hub = new Hub();
+  hub.presets = [PRESET];
+  hub.device = graphTwoScopes;
+  hub.hdf5Artifacts.set(task, HDF5_ARTIFACT);
+  await setup(page, hub, {scene: false});
+  await showGraph(page);
+  await openHdf5Field(page, '/t00000002/Scalar');
+
+  async function holdRead() {
+    hub.reached.delete('hdf5 voxel');
+    const release = hub.holdNext('hdf5 voxel');
+    const completed = page.waitForResponse(response => response.request().method() === 'POST' &&
+      response.request().postDataJSON()?.payload?.outputs?.includes('voxel'));
+    await voxelRead(page).click();
+    await expect.poll(() => hub.reached.has('hdf5 voxel')).toBe(true);
+    return async () => {release(); await completed;};
+  }
+
+  let finish = await holdRead();
+  await voxelCoordinate(page, 'X').fill('2');
+  await finish();
+  await expect(voxelValue(page)).toHaveCount(0);
+  await expect(voxelRead(page)).toBeEnabled();
+
+  finish = await holdRead();
+  await go(page, '任务');
+  await finish();
+  await go(page, '结果');
+  await expect(voxelForm(page)).toBeVisible();
+  await expect(voxelValue(page)).toHaveCount(0);
+  await expect(voxelCoordinate(page, 'X')).toHaveValue('2');
+
+  finish = await holdRead();
+  await muproFrame(page).selectOption('/t00000004/Polar');
+  await muproComponent(page).fill('2');
+  await muproOpen(page).click();
+  await expect(source(page)).toHaveText('显示的三维结果，MuPRO HDF5 · 解析场验证 · 第 4 步');
+  await finish();
+  await expect(voxelValue(page)).toHaveCount(0);
+  await expect(voxelCoordinate(page, 'X')).toHaveValue('0');
+
+  for (const [fault, error] of [['source', '坐标或类型'], ['digest', 'SHA-256'], ['size', '超过声明的大小']] as const) {
+    hub.voxelFault = fault;
+    await voxelRead(page).click();
+    await expect(voxelForm(page).getByRole('alert')).toContainText(error);
+    await expect(voxelValue(page)).toHaveCount(0);
+    await expect(vtkCanvas(graphPane(page))).toHaveCount(1);
+  }
+  hub.voxelFault = undefined;
+  await voxelRead(page).click();
+  await expect(voxelValue(page)).toHaveText('0.3125 · float32');
+
+  finish = await holdRead();
+  await go(page, '任务');
+  await chooseProject(page, ws2);
+  await page.getByRole('button', {name: /图谱来源乙/}).click();
+  await showGraph(page);
+  await computeGraph(page, hub);
+  await finish();
+  await expect(source(page)).toHaveText(graphSourceB);
+  await expect(voxelForm(page)).toHaveCount(0);
+  expect(hub.probes).toEqual([]);
+});
 
 test('MuPRO HDF5 replies from a former task cannot populate or replace the current graph', async ({page}) => {
   const hub = new Hub();

@@ -298,6 +298,9 @@ label.check input{width:auto}
 .data-table th small{display:block;font-size:10px;color:#8d8f96}
 .data-table .swatch{display:inline-block;width:9px;height:9px;margin-right:5px;border-radius:2px;border:1px solid #454555;vertical-align:-1px}
 .result-summary{margin:8px 0 0}
+.hdf5-voxel-coordinates{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));flex:0 0 min(100%,282px);gap:6px}
+.hdf5-voxel-coordinates label{flex-direction:row;align-items:center;margin:0}
+.hdf5-voxel-coordinates input{width:100%}
 .graph-extra{margin:12px 0 0}
 .graph-extra label{max-width:360px}
 .example-view{min-height:100vh;display:flex;flex-direction:column}
