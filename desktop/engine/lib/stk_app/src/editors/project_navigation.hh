@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <string_view>
 
 #include "stk/app/editor_area.hh"
 #include "stk/app/jobs_state.hh"
@@ -54,10 +55,10 @@ inline const char *health_key(const Health health)
   return "workspace.health.unknown";
 }
 
-inline void workspace_link(ui::Layout &row, EditorContext &ctx)
+inline void workspace_link(ui::Layout &row, EditorContext &ctx, std::string_view title_key = "editor.workspace.title")
 {
   // Widget callbacks can be retained by a menu or an integration after this frame.
-  row.button("project_workspace", ctx.tr("editor.workspace.title"),
+  row.button("project_workspace", ctx.tr(title_key),
              project_navigation_action(ctx, "workspace")).width(ctx.draw && ctx.ui ?
                  std::min(6.0f, float(ctx.draw->rect.width()) / ctx.ui->style().unit * .4f) : 6.0f);
 }

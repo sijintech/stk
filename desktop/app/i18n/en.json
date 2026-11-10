@@ -2517,6 +2517,7 @@
   "workbench.nav.results": "Results",
   "workbench.nav.split": "Split view",
   "workbench.nav.history": "History",
+  "workbench.project_overview": "Overview",
   "workbench.history.recent": "Recent questions",
   "workbench.history.agent_sessions": "Agent sessions",
   "workbench.history.agent_loading": "Loading agent sessions…",

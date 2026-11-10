@@ -357,6 +357,58 @@ TEST_F(WorkspaceNavigationPython, FocusedConversationKeepsDataAndModelControlsOn
   EXPECT_EQ(project().project()->revision, 0);
 }
 
+TEST_F(WorkspaceNavigationPython, FocusedOverviewAndWorkbenchNameDifferentDestinations)
+{
+  f.drv->ctx.rect.xmax = 1600;
+  f.drv->ctx.rect.ymax = 900;
+  f.drv->ctx.ui_scale = 2.0f;
+  auto &viewer = f.shell->store().viewer();
+  const auto payload = std::make_shared<io::Payload>(io::read_stkp(
+      std::string(STK_REPO_ROOT) + "/desktop/tests/viewer/fixtures/muferro_domains.stkp"));
+  viewer.open_payload(payload, "Existing result");
+  const auto camera = viewer.camera_serial();
+  auto *viewer_editor = &f.area("a2").tab(0);
+  auto *overview_editor = &home().editor();
+  const auto areas = f.screen.areas();
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  f.drv->frame();
+  auto *conversation = f.screen.maximized();
+  ASSERT_NE(conversation, nullptr);
+  ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
+  const auto *overview = widget("project_workspace");
+  ASSERT_NE(overview, nullptr);
+  EXPECT_EQ(overview->text, "Overview");
+  const auto &ui = *f.screen.ui();
+  EXPECT_GE(overview->rect.w, ui.measurer().width("Overview", ui.style().font) + 2 * ui.style().text_margin);
+  const auto question = "ai_question/" + handle();
+  ASSERT_NE(widget(question), nullptr);
+  widget(question)->string.assign("Keep my question while checking the overview");
+  const auto click = [&](const char *key) {
+    ASSERT_NE(widget(key), nullptr) << key;
+    const auto [x, y] = f.widget_center(key);
+    EXPECT_TRUE(f.drv->click(x, y)) << key;
+  };
+
+  ASSERT_NO_FATAL_FAILURE(click("project_workspace"));
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  EXPECT_EQ(f.screen.areas(), areas);
+  EXPECT_EQ(&home().editor(), overview_editor);
+  EXPECT_NE(widget("workspace_project"), nullptr);
+  ASSERT_NE(widget("project_workspace"), nullptr);
+  EXPECT_EQ(widget("project_workspace")->text, "Home");
+  ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
+  EXPECT_EQ(f.screen.maximized(), conversation);
+  ASSERT_NE(widget(question), nullptr);
+  EXPECT_EQ(widget(question)->string.value(), "Keep my question while checking the overview");
+  ASSERT_NO_FATAL_FAILURE(click("workbench_results"));
+  EXPECT_EQ(&f.area("a2").editor(), viewer_editor);
+  EXPECT_EQ(viewer.base_payload(), payload);
+  EXPECT_EQ(viewer.camera_serial(), camera);
+  EXPECT_EQ(project().project()->revision, 0);
+  viewer.close();
+}
+
 TEST_F(WorkspaceNavigationPython, VisibleButtonsReuseEditorsAndRevealFilesAndBothRunHistories)
 {
   auto &viewer = f.shell->store().viewer();
