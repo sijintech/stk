@@ -611,6 +611,18 @@ struct ViewerState::Impl {
     return presets_loaded && !catalog.is_null();
   }
 
+  void select_open_preset()
+  {
+    if (!preset_id.empty()) { return; }
+    constexpr const char *task_default = "muferro-domains";
+    if (source.kind == SourceKind::Task && (presets.empty() || preset(task_default))) {
+      preset_id = task_default;
+    }
+    else if (!presets.empty()) {
+      preset_id = presets.front().id;
+    }
+  }
+
   void metadata_arrived()
   {
     if (workspace_suspended) { changed(); return; }
@@ -620,9 +632,7 @@ struct ViewerState::Impl {
       }
       if (waiting_for_metadata) {
         waiting_for_metadata = false;
-        if (preset_id.empty() && !presets.empty()) {
-          preset_id = presets.front().id;
-        }
+        select_open_preset();
         build_form(false);
         start_eval("open");
       }
@@ -1672,18 +1682,13 @@ bool ViewerState::open(const OpenResultRequest &request, const bool fit_initial_
     m.camera_serial++;
     m.initial_fit_serial = fit_initial_view ? m.camera_serial : 0;
     m.preset_id = request.preset;
-    if (m.preset_id.empty() && m.have_metadata()) {
-      m.preset_id = "muferro-domains";
-      if (!m.preset(m.preset_id) && !m.presets.empty()) {
-        m.preset_id = m.presets.front().id;
-      }
-    }
     if (!m.have_metadata()) {
       m.waiting_for_metadata = true;
       m.request_metadata(false);
       m.changed();
       return true;
     }
+    m.select_open_preset();
     m.build_form(false);
     m.start_eval("open");
     m.changed();

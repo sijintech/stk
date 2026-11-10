@@ -60,6 +60,37 @@ void open_task(FakeViewer &f, const std::string &connection)
 
 }  // namespace
 
+TEST(ViewerFake, ColdTaskOpenUsesTheSameDefaultPresetAsWarmTaskOpen)
+{
+  FakeViewer f;
+  f.vs->prefetch_neighbours = false;
+  auto request = task_source("runtime:source");
+  request.preset.clear();
+
+  ASSERT_FALSE(f.vs->presets_loaded());
+  ASSERT_TRUE(f.vs->open(request));
+  EXPECT_EQ(f.vs->evaluations_started(), 0);
+  ASSERT_TRUE(f.pump_until([&] { return f.vs->last_eval().has_value(); })) << f.vs->eval_error();
+  ASSERT_FALSE(f.vs->presets().empty());
+  EXPECT_NE(f.vs->presets().front().id, "muferro-domains");
+  EXPECT_EQ(f.vs->preset_id(), "muferro-domains");
+  EXPECT_EQ(f.vs->shown_step(), Json(2));
+  EXPECT_EQ(f.vs->evaluations_started(), 1);
+
+  ASSERT_TRUE(f.vs->open(request));
+  ASSERT_TRUE(f.pump_until([&] { return f.vs->last_eval().has_value(); })) << f.vs->eval_error();
+  EXPECT_EQ(f.vs->preset_id(), "muferro-domains");
+  EXPECT_EQ(f.vs->shown_step(), Json(2));
+  const auto evaluations = f.stats().at("evaluate_requests");
+  ASSERT_EQ(evaluations.size(), 2u);
+  for (const auto &evaluation : evaluations) {
+    const auto &params = evaluation.at("request");
+    EXPECT_EQ(params.at("preset"), "muferro-domains");
+    EXPECT_EQ(params.at("bindings"), (Json{{"run", {{"task_id", request.task_id}}}}));
+    EXPECT_EQ(evaluation.at("connection"), request.connection);
+  }
+}
+
 TEST(ViewerFake, HubBudgetUsesTheSourceConnectionWithoutAJobsSelection)
 {
   const Json policies = {{"hub:source", {{"desktop_auto", true}, {"desktop_auto_bytes", 12345678}}}};
