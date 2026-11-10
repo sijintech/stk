@@ -8,6 +8,7 @@ import {bindingNames, blobSha, coerceParameters, DISPLAYABLE, duration, editorKi
   selectOutputs, stepChoices, stepParameter, tableData, waitForAction, type Artifact, type GraphParameter, type GraphResult, type Preset,
   type ProbeContext, type ProgressState, type TableData} from './graph';
 import ErrorBoundary from './ErrorBoundary';
+import {taskStateLabel} from './taskFacts';
 import type {PickInfo} from './PayloadViewer';
 import {muProArtifact, muProFrames, muProManifest, muProRequest, type MuProArtifact, type MuProFrame, type MuProSource} from './muproHdf5';
 
@@ -601,7 +602,7 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
         {!presets?.length && <option value="">{presets ? '暂无预设' : '正在读取预设…'}</option>}
         {presets?.map(p => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}</select></label>
       {names.map(name => <label key={name}>数据源 {name}<select value={bindings[name] ?? ''} onChange={e => changeBinding(name, e.target.value)}>
-        <option value="">选择任务</option>{tasks.map(t => <option key={t.id} value={t.id}>{t.name || String(t.id).slice(0, 8)} · {t.state}</option>)}</select></label>)}
+        <option value="">选择任务</option>{tasks.map(t => <option key={t.id} value={t.id}>{t.name || String(t.id).slice(0, 8)} · {taskStateLabel(t.state, t.cancel_requested === true)}</option>)}</select></label>)}
       <button className="primary" disabled={running || !preset || !node} onClick={() => void evaluate()}>{running ? '计算中…' : '计算图谱'}</button>
     </div>
     {presetError && <p className="muted">图谱预设不可用：{presetError}</p>}

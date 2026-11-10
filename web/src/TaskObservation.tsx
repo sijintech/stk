@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import {ApiError, readNode} from './api';
-import {acceptsTaskFact, taskFact, type TaskFact, type TaskScope} from './taskFacts';
+import {acceptsTaskFact, taskFact, taskStateLabel, type TaskFact, type TaskScope} from './taskFacts';
 
 type Phase = 'checking' | 'verified' | 'unsupported' | 'unavailable' | 'unconfirmed';
 type Observation = {fact: TaskFact | null; phase: Phase; verifiedIdentity: boolean};
@@ -75,7 +75,7 @@ export default function TaskObservation({scope, heartbeat, online, supported, re
   return <section className="task-observation" aria-label="所选任务状态">
     <strong>{current?.name || task.slice(0, 8)}</strong>
     <p className="muted" role="status">
-      {current && <>{current.exact ? '最近 Runtime 状态' : '最近节点快照'} · <span className={`state ${current.state}`}>{current.state}</span><br/></>}
+      {current && <>{current.exact ? '最近 Runtime 状态' : '最近节点快照'} · <span className={`state ${current.state}`}>{taskStateLabel(current.state, current.cancelRequested)}</span><br/></>}
       {labels[phase === 'verified' && current && !current.exact ? 'checking' : phase]}
       {current?.cancelRequested && current.state !== 'cancelled' && <><br/>Runtime 已记录取消请求</>}
       {current?.reason && <><br/>{current.reason}</>}

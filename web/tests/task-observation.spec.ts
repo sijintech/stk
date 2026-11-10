@@ -1,5 +1,5 @@
 import {expect, test} from '@playwright/test';
-import {acceptsTaskFact, taskFact} from '../src/taskFacts';
+import {acceptsTaskFact, taskFact, taskStateLabel} from '../src/taskFacts';
 
 const scope = {node: 'a'.repeat(32), workspace: 'b'.repeat(32), task: 'c'.repeat(32)};
 const running = {id: scope.task, workspace_id: scope.workspace, state: 'running', name: 'simulation',
@@ -31,4 +31,13 @@ test('a later observation cannot erase terminal state or a pending cancellation'
   expect(acceptsTaskFact(taskFact({...newer, state: 'failed'}, scope, true)!, succeeded)).toBe(false);
   expect(acceptsTaskFact(taskFact(newer, scope, true)!, cancelling)).toBe(false);
   expect(acceptsTaskFact(taskFact({...newer, state: 'cancelled'}, scope, true)!, cancelling)).toBe(true);
+});
+
+test('task display distinguishes cancellation, an unresolved state and unfamiliar Runtime states', () => {
+  expect(taskStateLabel('unknown')).toBe('待核实');
+  expect(taskStateLabel('unknown', true)).toBe('正在取消');
+  expect(taskStateLabel('cancelled', true)).toBe('已取消');
+  expect(taskStateLabel('succeeded', true)).toBe('成功');
+  expect(taskStateLabel('constructor', true)).toBe('constructor');
+  expect(taskStateLabel(null)).toBe('');
 });

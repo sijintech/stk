@@ -83,6 +83,8 @@ class Hub {
   artifactPaths?: string[];
   readonly artifactPathsByTask = new Map<string, string[]>();
   readKinds = ['task.get', 'task.artifacts', 'task.events'];
+  readonly taskReadResults = new Map<string, unknown>();
+  taskReadError?: number;
   readonly hdf5Artifacts = new Map<string, typeof HDF5_ARTIFACT>();
   hdf5Fault?: 'wrong-digest' | 'invalid_data' | 'wrong-step';
   field = 'phi';
@@ -224,7 +226,10 @@ class Hub {
       // The node's own row for the asked task, as the Runtime has it.
       if (kind === 'task.get') {
         const id = request.postDataJSON().payload?.task_id;
-        return json({result: this.device.snapshot.tasks.find(t => t.id === id) ?? row});
+        await this.gateOnce('task.get');
+        if (this.taskReadError) return json({detail: 'task read unavailable'}, this.taskReadError);
+        const result = this.taskReadResults.get(id) ?? this.device.snapshot.tasks.find(t => t.id === id) ?? row;
+        return json({result});
       }
       // The running task's event log: no new events yet.
       if (kind === 'task.events') return json({result: {events: [], next_offset: 0, size: 0, terminal: false}});
@@ -712,7 +717,7 @@ for (const viewport of viewports) {
       await go(page, '任务');
       await page.locator('aside.tasks').evaluate(el => { el.scrollTop = 0; });
       const before = await state(page);
-      expect(before).toMatchObject({node, workspace: ws, selected: '解析场验证succeeded', spec: '{"argv":["python3","draft.py"],"outputs":[]}'});
+      expect(before).toMatchObject({node, workspace: ws, selected: '解析场验证成功', spec: '{"argv":["python3","draft.py"],"outputs":[]}'});
       const sent = posts(page);
       const r = route(page, `${viewport.name}-established`);
       // Zero clicks: the queue row, the selected task's status and its shortcuts are in view above both disclosures.
@@ -792,12 +797,82 @@ for (const viewport of viewports) {
       await queue(page).getByRole('button', {name: /解析场验证/}).click();
       await expect(page.locator('aside.tasks .task-scope')).toHaveText('所选任务 · 节点甲 · 项目一');
       await expect(status(page)).toContainText('暂时无法读取 Runtime 状态');
+      await expect(status(page)).toContainText('最近节点快照 · 成功');
+      await expect(status(page).locator('.state')).toHaveClass('state succeeded');
       await selectEnvironment(page, project(page), other);
       await expect(queue(page)).toContainText('项目二 中暂无任务，可在下方「新建任务」中提交。');
       await expect(page.locator('aside.tasks .task')).toHaveCount(0);
       await expect(disclosure(page, '运行环境')).toHaveText('运行环境 · 节点甲 · 项目二');
       await page.screenshot({path: test.info().outputPath(`${viewport.name}-offline-empty-project.png`)});
       expect(errors).toEqual([]);
+    });
+
+    test('task states match desktop labels while preserving the Runtime observation and result binding', async ({page}) => {
+      const hub = new Hub();
+      const known = [
+        ['preparing', '准备中'], ['queued', '排队中'], ['submitting', '提交中'], ['running', '运行中'],
+        ['succeeded', '成功'], ['failed', '失败'], ['cancelled', '已取消'], ['unknown', '待核实'],
+        ['verifying', 'verifying'], ['running', '正在取消'],
+      ] as const;
+      const rows = known.map(([state, label], index) => ({
+        ...row, id: state === 'queued' ? task : (index + 1).toString(16).padStart(32, '0'),
+        name: state === 'queued' ? row.name : `任务 ${index + 1}`, state,
+        cancel_requested: label === '正在取消' || state === 'cancelled',
+      }));
+      hub.device = {...device, snapshot: {...device.snapshot, tasks: rows}};
+      hub.presets = [PRESET];
+      const exact = {...row, state: 'running', cancel_requested: true, reason: '运行节点已收到请求',
+        updated_at: '2026-11-10T12:01:00.000000Z'};
+      hub.taskReadResults.set(task, exact);
+      const errors = await start(page, hub);
+      await go(page, '任务');
+      await selectEnvironment(page, page.getByLabel('执行节点'), node);
+      await selectEnvironment(page, project(page), ws);
+      const states = queue(page).locator('.task .state');
+      await expect(states).toHaveText(known.map(([, label]) => label));
+      expect(await states.evaluateAll(items => items.map(item => item.className))).toEqual(known.map(([state]) => `state ${state}`));
+      const target = queue(page).getByRole('button', {name: /解析场验证.*排队中/});
+      await expect(target).toBeInViewport({ratio: 1});
+      const initialScroll = await page.locator('aside.tasks').evaluate(el => el.scrollTop);
+      const release = hub.holdNext('task.get');
+      const sent = posts(page), measured = route(page, `${viewport.name}-task-state-selection`);
+      await measured.click(target, '任务行');
+      await expect(status(page)).toContainText('最近节点快照 · 排队中');
+      await expect(status(page)).toContainText('正在读取 Runtime 状态');
+      release();
+      await expect(status(page)).toContainText('最近 Runtime 状态 · 正在取消');
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await expect(status(page)).toContainText('Runtime 已记录取消请求');
+      await expect(status(page)).toContainText('运行节点已收到请求');
+      await expect(status(page).locator('.state')).toHaveClass('state running');
+      await expect(target).toHaveClass('task selected');
+      await expect.poll(() => sent.seen.toSorted()).toEqual([
+        '/api/v1/nodes/{node}/read task.artifacts', '/api/v1/nodes/{node}/read task.get',
+      ]);
+      expect(await page.locator('aside.tasks').evaluate(el => el.scrollTop)).toBe(initialScroll);
+      sent.stop();
+      expect(measured.record).toMatchObject({clicks: 1, selects: 0});
+      measured.save();
+      await page.screenshot({path: test.info().outputPath('task-states.png')});
+
+      const refresh = page.locator('aside.tasks .section-title').getByRole('button', {name: '刷新'});
+      hub.taskReadResults.set(task, {...exact, state: 'verifying'});
+      await refresh.click();
+      await expect(status(page)).toContainText('Runtime 状态未确认');
+      await expect(status(page)).toContainText('最近 Runtime 状态 · 正在取消');
+      hub.taskReadError = 503;
+      await refresh.click();
+      await expect(status(page)).toContainText('暂时无法读取 Runtime 状态');
+      await expect(status(page)).toContainText('最近 Runtime 状态 · 正在取消');
+      await expect(target).toHaveClass('task selected');
+
+      await showGraph(page);
+      const options = binding(page).locator('option');
+      await expect(options).toHaveText(['选择任务', ...rows.map((item, index) =>
+        `${item.name} · ${item.id === task ? '正在取消' : known[index][1]}`)]);
+      await expect(binding(page)).toHaveValue(task);
+      expect(hub.evaluations).toEqual([]);
+      expect(unexpected(errors, 503)).toEqual([]);
     });
 
     test('a long queue keeps the selected task and run environment within reach', async ({page}) => {
@@ -4079,7 +4154,7 @@ for (const viewport of viewports) {
       await r.click(summary, '新建任务');
       await expect(page.getByLabel('TaskSpec')).toBeVisible();
       await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
-      await expect(queue(page).locator('.task.selected')).toHaveText('解析场验证succeeded');
+      await expect(queue(page).locator('.task.selected')).toHaveText('解析场验证成功');
       sent.stop();
       expect(sent.seen).toEqual([]);
       expect(hub.evaluations).toHaveLength(0);

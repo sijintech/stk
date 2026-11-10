@@ -6,14 +6,14 @@ import {conversationTitle,type Entry,useConversations} from './conversations';
 import ErrorBoundary from './ErrorBoundary';
 import type {GraphSource} from './GraphPanel';
 import TaskObservation from './TaskObservation';
-import {isTerminalTaskState,type TaskFact,type TaskScope} from './taskFacts';
+import {isTerminalTaskState,taskStateLabel,type TaskFact,type TaskScope} from './taskFacts';
 import './style.css';
 const Viewer=React.lazy(()=>import('./Viewer'));
 const GraphPanel=React.lazy(()=>import('./GraphPanel'));
 // Development only: `?example=1` renders the payload v2 example without a hub (not part of production builds).
 const ExampleView=import.meta.env.DEV&&new URLSearchParams(location.search).has('example')?React.lazy(()=>import('./ExampleView')):null;
 const lostAccess=(error:unknown)=>error instanceof ApiError&&(error.status===401||error.status===403);
-type ObservedTask = {scope:TaskScope;name:string;state:string;verifiedIdentity:boolean;exactTerminal:boolean};
+type ObservedTask = {scope:TaskScope;name:string;state:string;cancelRequested:boolean;verifiedIdentity:boolean;exactTerminal:boolean};
 // The scene 结果 shows in file mode, bound to the task scope and artifact path of the view.build that produced it.
 // Choosing another file only edits the choice: the canvas and its source stay until a new build succeeds.
 type Displayed = {scope:TaskScope;path:string;scene:Json};
@@ -124,7 +124,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const exactTerminal=observed?.exactTerminal===true;
   let graphTasks=tasks;
   if(taskBound&&observed){
-    const row={id:task,name:observed.name,state:observed.state,workspace_id:observed.scope.workspace};
+    const row={id:task,name:observed.name,state:observed.state,cancel_requested:observed.cancelRequested,workspace_id:observed.scope.workspace};
     graphTasks=tasks.some(item=>item.id===task)?tasks.map(item=>item.id===task?row:item):[row,...tasks];
   }
   const shown=taskBound&&displayed?.scope===selection?displayed:null,shownScene=shown?.scene??null;
@@ -170,9 +170,9 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     setObservedTask(previous=>{
       const known=previous?.scope===scope?previous:null;
       const exactTerminal=known?.exactTerminal===true||(fact.exact&&isTerminalTaskState(fact.state));
-      if(known&&known.state===fact.state&&known.name===fact.name&&known.verifiedIdentity===verifiedIdentity&&
+      if(known&&known.state===fact.state&&known.name===fact.name&&known.cancelRequested===fact.cancelRequested&&known.verifiedIdentity===verifiedIdentity&&
          known.exactTerminal===exactTerminal)return known;
-      return {scope,name:fact.name,state:fact.state,verifiedIdentity,exactTerminal};
+      return {scope,name:fact.name,state:fact.state,cancelRequested:fact.cancelRequested,verifiedIdentity,exactTerminal};
     });
   },[]);
   const acceptArtifacts=useCallback((version:number,request:number,result:unknown)=>{
@@ -432,7 +432,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     {overlay&&<div className="history-backdrop" aria-hidden="true" onClick={closeHistory}/>}
     <aside className={`tasks panel surface${tab==='tasks'?'':' surface-hidden'}`} inert={tab!=='tasks'||overlay}><div className="section-title"><h2>项目与任务</h2><button className="quiet" onClick={()=>{setTaskRefresh(value=>value+1);void refresh();}}>刷新</button></div>
       <section className="queue" aria-label="任务队列"><div className="queue-head"><h3>任务队列</h3>{selected&&<span className="muted">{queueScope}</span>}</div>
-      <div className="task-list">{queue.map(t=><button className={`task ${task===t.id?'selected':''}`} key={t.id} onClick={()=>selectTask(t.id,t.workspace_id)}><span>{t.name||t.id.slice(0,8)}</span><small className={`state ${t.state}`}>{t.state}</small></button>)}{queueEmpty&&<p className="muted">{queueEmpty}</p>}</div>
+      <div className="task-list">{queue.map(t=><button className={`task ${task===t.id?'selected':''}`} key={t.id} onClick={()=>selectTask(t.id,t.workspace_id)}><span>{t.name||t.id.slice(0,8)}</span><small className={`state ${t.state}`}>{taskStateLabel(t.state,t.cancel_requested===true)}</small></button>)}{queueEmpty&&<p className="muted">{queueEmpty}</p>}</div>
       {selected&&<p className="muted">节点快照 · 最多 200 条任务</p>}
       {workspace&&<form className="task-lookup" key={`${node}/${workspace}`} onSubmit={event=>{
         event.preventDefault();selectTask(String(new FormData(event.currentTarget).get('task-id')).trim(),workspace);

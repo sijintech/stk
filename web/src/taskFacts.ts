@@ -2,9 +2,26 @@ export type TaskScope = {node: string; workspace: string; task: string};
 export type TaskFact = {name: string; state: string; updated: string; cancelRequested: boolean; reason: string; exact: boolean};
 
 const terminal = new Set(['succeeded', 'failed', 'cancelled']);
-const states = new Set(['preparing', 'queued', 'submitting', 'running', 'unknown', ...terminal]);
+// Chinese labels match the desktop jobs.state catalog for the published Runtime states.
+const stateLabels: Record<string, string> = {
+  preparing: '准备中',
+  queued: '排队中',
+  submitting: '提交中',
+  running: '运行中',
+  succeeded: '成功',
+  failed: '失败',
+  cancelled: '已取消',
+  unknown: '待核实',
+};
+const states = new Set(Object.keys(stateLabels));
 
 export const isTerminalTaskState = (state: string) => terminal.has(state);
+
+export function taskStateLabel(state: unknown, cancelRequested = false): string {
+  if (typeof state !== 'string') return '';
+  if (!states.has(state)) return state;
+  return cancelRequested && !isTerminalTaskState(state) ? '正在取消' : stateLabels[state];
+}
 
 export function taskFact(value: unknown, scope: TaskScope, exact: boolean): TaskFact | null {
   if (!value || typeof value !== 'object') return null;
