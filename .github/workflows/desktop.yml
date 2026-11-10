@@ -577,6 +577,15 @@ jobs:
           python3 desktop/tests/check_required_tests.py build/ctest-native-first-toolbar-pause-delay.xml 'reports_first_toolbar_pause_delay_video_metal' 'reports_first_toolbar_pause_delay_html-video_metal' || status=$?
           exit "$status"
 
+      - name: Native WKWebView repeat of a verified pause while visible
+        if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          status=0
+          ctest --test-dir build --output-on-failure -R '^reports_repeat_verified_visible_native_pause_(video|html-video)_metal$' --timeout 180 --output-junit "$PWD/build/ctest-native-repeat-verified-visible-pause.xml" || status=$?
+          python3 desktop/tests/check_required_tests.py build/ctest-native-repeat-verified-visible-pause.xml 'reports_repeat_verified_visible_native_pause_video_metal' 'reports_repeat_verified_visible_native_pause_html-video_metal' || status=$?
+          exit "$status"
+
       - name: Upload rendered frames
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -600,6 +609,7 @@ jobs:
             build/ctest-native-visible-pause.xml
             build/ctest-native-second-visible-pause.xml
             build/ctest-native-hide-after-verified-pause.xml
+            build/ctest-native-repeat-verified-visible-pause.xml
             build/ctest-native-hide-without-repeat-pause.xml
             build/ctest-native-hide-without-repeat-pause-dom.xml
             build/ctest-native-fresh-hide-dom.xml
@@ -624,6 +634,8 @@ jobs:
             build/tests/app/reports-second-visible-native-pause-html-video/**
             build/tests/app/reports-hide-after-verified-native-pause-video/**
             build/tests/app/reports-hide-after-verified-native-pause-html-video/**
+            build/tests/app/reports-repeat-verified-visible-native-pause-video/**
+            build/tests/app/reports-repeat-verified-visible-native-pause-html-video/**
             build/tests/app/reports-hide-without-repeat-native-pause-video/**
             build/tests/app/reports-hide-without-repeat-native-pause-html-video/**
             build/tests/app/reports-hide-without-repeat-native-pause-dom-video/**

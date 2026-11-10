@@ -108,6 +108,7 @@ if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW AND (APPLE OR WIN32))
           FAIL_REGULAR_EXPRESSION "FAIL:|Error: Not freed memory|leaked")
       endforeach()
       foreach(_arm IN ITEMS visible_native_pause second_visible_native_pause hide_after_verified_native_pause
+                            repeat_verified_visible_native_pause
                             hide_without_repeat_native_pause hide_without_repeat_native_pause_dom
                             fresh_native_hide_dom fresh_native_visible_dom)
         set(_control reports_${_arm}_${_source}_metal)
@@ -123,6 +124,9 @@ if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW AND (APPLE OR WIN32))
         set_tests_properties(${_control} PROPERTIES LABELS "project;gpu;window;document_preview"
           TIMEOUT 180 RESOURCE_LOCK native_window
           FAIL_REGULAR_EXPRESSION "FAIL:|Error: Not freed memory|leaked")
+        if(_arm STREQUAL "repeat_verified_visible_native_pause")
+          set_property(TEST ${_control} APPEND PROPERTY LABELS diagnostic)
+        endif()
       endforeach()
       set(_clock reports_visible_frame_clock_${_source}_metal)
       add_test(NAME ${_clock} COMMAND "${STK_BRIDGE_TEST_PYTHON}"
