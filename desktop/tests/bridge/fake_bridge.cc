@@ -71,6 +71,7 @@
 #include <sstream>
 
 #include "stk/core/utf8.hh"
+#include "stk/io/graph.hh"
 #include "stk/io/json.hh"
 
 #include "fake_jobs.hh"
@@ -413,10 +414,17 @@ Json evaluate_request(const Json &params)
     ev.push_back(n);
   }
   const int nodes = int(kDataNodes.size() + kClientNodes.size());
+  std::string graph_hash = "sha256:" + std::string(64, '0');
+  if (!g_presets_dir.empty() && !preset.empty()) {
+    const auto document = read_file_json(g_presets_dir + "/" + preset + ".json");
+    if (document.is_object() && document.contains("graph")) {
+      graph_hash = stk::io::graph_hash(document.at("graph"));
+    }
+  }
   return Json{{"result",
                {{"schema", "stk.graph-result/1"},
-                {"graph_sha256", std::string(64, '0')},
-                {"graph_hash", "sha256:" + std::string(64, '0')},
+                {"graph_sha256", graph_hash.substr(7)},
+                {"graph_hash", graph_hash},
                 {"profile", request.value("profile", "desktop")},
                 {"outputs", outputs},
                 {"parameters", {{"step", {{"value", step}, {"choices", choices}}}}},

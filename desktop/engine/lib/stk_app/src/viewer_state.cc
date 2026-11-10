@@ -69,12 +69,16 @@ void set_source_proof(ViewerSource &source, const Json &proof)
   source.source_proof = proof;
 }
 
-bool same_graph_configuration(const ViewerGraphConfiguration &a, const ViewerGraphConfiguration &b)
+bool same_viewer_source(const ViewerSource &x, const ViewerSource &y)
 {
-  const auto &x = a.source, &y = b.source;
   return x.kind == y.kind && x.path == y.path && x.field_file == y.field_file &&
       x.connection == y.connection && x.node == y.node && x.workspace_id == y.workspace_id &&
-      x.task_id == y.task_id && x.series == y.series && x.source_proof == y.source_proof && a.preset_id == b.preset_id &&
+      x.task_id == y.task_id && x.series == y.series && x.source_proof == y.source_proof;
+}
+
+bool same_graph_configuration(const ViewerGraphConfiguration &a, const ViewerGraphConfiguration &b)
+{
+  return same_viewer_source(a.source, b.source) && a.preset_id == b.preset_id &&
       a.requested_outputs == b.requested_outputs && dumps(a.graph) == dumps(b.graph) &&
       dumps(a.parameters) == dumps(b.parameters);
 }
@@ -406,10 +410,15 @@ struct ViewerState::Impl {
   double pending_at = kInf;
 
   /* Evaluations. */
+  struct ProbeOrigin {
+    ViewerSource source;
+    std::string preset, binding;
+  };
   struct Running {
     std::string eval_id, key, reason;
     Json params;
     std::optional<ViewerGraphConfiguration> configuration;
+    ProbeOrigin probe_origin;
     double t0 = 0.0;
     bridge::Future<bridge::HubPolicy> policy_future;
     bridge::Future<bridge::EvaluateResult> future;
@@ -420,6 +429,7 @@ struct ViewerState::Impl {
   std::optional<io::GraphResult> result;
   Json shown_params;
   std::optional<ViewerGraphConfiguration> shown_configuration;
+  std::optional<ProbeOrigin> shown_probe_origin;
   Json shown_resolved_parameters;
   mutable std::shared_ptr<const ViewerGraphInspection> inspection;
   std::string eval_error;
@@ -432,6 +442,7 @@ struct ViewerState::Impl {
     Json step;
     Json params;
     std::optional<ViewerGraphConfiguration> configuration;
+    std::optional<ProbeOrigin> probe_origin;
     Json resolved_parameters;
     uint64_t use = 0;
   };
@@ -667,10 +678,26 @@ struct ViewerState::Impl {
     return ViewerGraphConfiguration{source, preset_id, *document, params, payload_outputs()};
   }
 
-  std::string binding_name() const
+  std::string binding_name(const std::string &id) const
   {
-    const PresetInfo *p = preset(preset_id);
+    const PresetInfo *p = preset(id);
     return p && !p->bindings.empty() && !p->bindings.front().empty() ? p->bindings.front() : "run";
+  }
+
+  void restore_probe_origin()
+  {
+    // Old workspace files carry the shown graph and saved preset metadata, not the dispatch binding.
+    if (!base || !result || !shown_configuration ||
+        !shown_configuration->source.evaluates() || !same_viewer_source(shown_configuration->source, source) ||
+        !verify_shown_graph(*shown_configuration, *result).value_or(false)) {
+      return;
+    }
+    const auto &configuration = *shown_configuration;
+    const auto *p = preset(configuration.preset_id);
+    if (p && p->raw.contains("graph") && dumps(p->raw.at("graph")) == dumps(configuration.graph)) {
+      shown_probe_origin = ProbeOrigin{configuration.source, configuration.preset_id,
+                                       binding_name(configuration.preset_id)};
+    }
   }
 
   void build_form(const bool keep_values)
@@ -924,12 +951,32 @@ struct ViewerState::Impl {
     show_frame(f, rec);
   }
 
+  bool same_probe_origin(const Frame &frame) const
+  {
+    if (!shown_probe_origin || !frame.probe_origin ||
+        !same_viewer_source(shown_probe_origin->source, frame.probe_origin->source) ||
+        shown_probe_origin->preset != frame.probe_origin->preset ||
+        shown_probe_origin->binding != frame.probe_origin->binding) {
+      return false;
+    }
+    if (!shown_configuration || !frame.configuration) {
+      return !shown_configuration && !frame.configuration;
+    }
+    return dumps(shown_configuration->graph) == dumps(frame.configuration->graph);
+  }
+
   void show_frame(const Frame &f, EvalRecord record)
   {
+    // A new graph or source needs a pick on its own layer. Retire completed callbacks too.
+    if (probe.status != ProbeState::Status::Empty && !same_probe_origin(f)) {
+      probe_future.cancel();
+      probe = ProbeState{.serial = probe.serial + 1};
+    }
     frozen_workspace_result = false;
     result = f.result;
     shown_params = f.params;
     shown_configuration = f.configuration;
+    shown_probe_origin = f.probe_origin;
     shown_resolved_parameters = f.resolved_parameters;
     base = f.payload;
     apply_display();
@@ -1098,7 +1145,7 @@ struct ViewerState::Impl {
       request["outputs"] = o;
     }
     request["profile"] = "desktop";
-    const std::string binding = binding_name();
+    const std::string binding = binding_name(preset_id);
     if (source.kind == SourceKind::RunDir) {
       ep.local_bindings[binding] = source.path;
       if (!source.source_proof.is_null()) {
@@ -1120,6 +1167,7 @@ struct ViewerState::Impl {
     run.reason = reason;
     run.params = params;
     run.configuration = graph_configuration(params);
+    run.probe_origin = {source, preset_id, binding};
     run.t0 = now();
     const std::string eval_id = ep.eval_id;
     started++;
@@ -1272,6 +1320,7 @@ struct ViewerState::Impl {
     }
     f.params = run.params;
     f.configuration = std::move(run.configuration);
+    f.probe_origin = std::move(run.probe_origin);
     f.resolved_parameters = run.params;
     for (const auto &[name, parameter] : f.result.parameters) {
       f.resolved_parameters[name] = parameter.value;
@@ -1404,9 +1453,9 @@ struct ViewerState::Impl {
     probe.error.clear();
     probe_future.cancel();
     bridge::Client *c = client();
-    if (!source.evaluates()) {
+    if (!shown_probe_origin || !base || !result) {
       probe.status = ProbeState::Status::Unavailable;
-      probe.error = std::string(store.tr("probe.unavailable.local"));
+      probe.error = std::string(store.tr(source.evaluates() ? "analysis_graph.unavailable" : "probe.unavailable.local"));
       changed();
       return;
     }
@@ -1422,27 +1471,35 @@ struct ViewerState::Impl {
       changed();
       return;
     }
+    if (shown_configuration) {
+      const auto verified = verify_shown_graph(*shown_configuration, *result);
+      if (!verified.value_or(false)) {
+        probe.status = ProbeState::Status::Unavailable;
+        probe.error = std::string(store.tr(verified ? "analysis_graph.graph_mismatch" : "analysis_graph.graph_unverified"));
+        changed();
+        return;
+      }
+    }
+    const auto &origin = *shown_probe_origin;
     bridge::ProbeParams pp;
-    pp.preset = preset_id;
+    if (shown_configuration) { pp.graph = shown_configuration->graph; }
+    else { pp.preset = origin.preset; }
     pp.node = pick.probe_node;
     pp.dataset = pick.probe_dataset;
     Json context = Json::object();
-    const std::string binding = binding_name();
-    if (source.kind == SourceKind::Task) {
-      context["bindings"] = Json::object({{binding, source.task_id}});
-      pp.target.connection = source.connection;
-      pp.target.node = source.node;
+    if (origin.source.kind == SourceKind::Task) {
+      context["bindings"] = Json::object({{origin.binding, origin.source.task_id}});
+      pp.target.connection = origin.source.connection;
+      pp.target.node = origin.source.node;
     }
     else {
-      pp.local_bindings[binding] = source.path;
-      if (!source.source_proof.is_null()) {
-        pp.local_proofs = Json::object({{binding, source.source_proof}});
+      pp.local_bindings[origin.binding] = origin.source.path;
+      if (!origin.source.source_proof.is_null()) {
+        pp.local_proofs = Json::object({{origin.binding, origin.source.source_proof}});
       }
     }
-    context["values"] = shown_params.is_object() ? shown_params : parameters();
-    if (result) {
-      context["result"] = result->raw;
-    }
+    context["values"] = shown_configuration ? shown_configuration->parameters : shown_params;
+    context["result"] = result->raw;
     pp.context = std::move(context);
     pp.position = pick.physical;
     probe.status = ProbeState::Status::Pending;
@@ -1900,6 +1957,7 @@ void ViewerState::close()
   m.shown_step = Json();
   m.shown_params = Json();
   m.shown_configuration.reset();
+  m.shown_probe_origin.reset();
   m.shown_resolved_parameters = Json();
   m.result.reset();
   m.last.reset();
@@ -2854,6 +2912,7 @@ bool ViewerState::load_workspace_state(const Json &state, std::shared_ptr<const 
     m.result = std::move(result);
     m.visibility = std::move(visibility); m.opacity = std::move(opacity); m.overlays = overlays;
     m.base = std::move(payload); m.apply_display(); m.camera_serial++;
+    m.restore_probe_origin();
     m.probe = std::move(probe_state); m.probe.serial++;
     m.pending_reason = pending; m.pending_at = kInf;
     m.open_error = open_error; m.eval_error = eval_error;
@@ -2933,6 +2992,7 @@ void ViewerState::finish_opening()
   frame.step = candidate->shown_step;
   frame.params = candidate->shown_params;
   frame.configuration = std::move(candidate->shown_configuration);
+  frame.probe_origin = std::move(candidate->shown_probe_origin);
   frame.resolved_parameters = candidate->shown_resolved_parameters;
   Impl &m = *impl_;
   m.alive = std::make_shared<int>(0);

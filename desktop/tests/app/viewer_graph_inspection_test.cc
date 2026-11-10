@@ -53,6 +53,7 @@ root, temporary = map(Path, sys.argv[1:3])
 fixture = root / 'desktop/tests/viewer/fixtures/muferro_domains'
 blob_dir = temporary / 'blobs'
 requests = []
+probes = []
 pending = {}
 cancels = 0
 
@@ -104,7 +105,7 @@ for line in sys.stdin:
         respond(identity, {'protocol': 1,
             'server': {'name': 'inspection-fixture', 'version': '1', 'python': sys.version,
                        'platform': sys.platform, 'pid': os.getpid()},
-            'methods': ['hello', 'graph.presets', 'graph.catalog', 'graph.evaluate', 'graph.cancel'],
+                       'methods': ['hello', 'graph.presets', 'graph.catalog', 'graph.evaluate', 'graph.cancel', 'probe'],
             'events': [], 'limits': {'max_line_bytes': 16777216, 'max_inflight': 64},
             'paths': {'state_dir': str(temporary), 'cache_dir': str(temporary),
                       'blob_dir': str(blob_dir), 'download_dir': str(temporary)}, 'resumed_transfers': []})
@@ -124,10 +125,19 @@ for line in sys.stdin:
     elif method == 'inspection.release':
         ready, pending = pending, {}
         for request_id, result in ready.values():
-            respond(request_id, result)
+            if params.get('fail'):
+                print(json.dumps({'id': request_id, 'error': {'code': 'graph_error',
+                      'message': 'Fixture evaluation failed', 'retryable': False}}), flush=True)
+            else:
+                respond(request_id, result)
         respond(identity, {})
+    elif method == 'probe':
+        probes.append(copy.deepcopy(params))
+        respond(identity, {'target': {'node': params['pick']['node']},
+                           'sample': {'position': params['position'], 'values': [0.25, -0.5, 0.75]}})
     elif method == 'stats':
-        respond(identity, {'evaluations': len(requests), 'cancels': cancels, 'evaluate_requests': requests})
+        respond(identity, {'evaluations': len(requests), 'cancels': cancels, 'evaluate_requests': requests,
+                           'probe_requests': probes})
     elif method == 'colormaps.list':
         respond(identity, {'colormaps': []})
     else:
@@ -190,7 +200,7 @@ class ViewerGraphInspectionTest : public ::testing::Test {
     }, 30)) << viewer.eval_error() << client->bridge_log().text();
   }
 
-  void release() { client->call("inspection.release"); }
+  void release(const bool fail = false) { client->call("inspection.release", {{"fail", fail}}); }
 
   void write_backend_presets(const Json &presets)
   {
@@ -367,6 +377,118 @@ TEST_F(ViewerGraphInspectionTest, PresetAndSourceSwitchesCannotReuseAnotherReque
   EXPECT_EQ(viewer.evaluations_cancelled(), 1);
 }
 
+TEST_F(ViewerGraphInspectionTest, ProbeUsesDisplayedGraphWhileDifferentPresetIsPendingOrFailed)
+{
+  ASSERT_NO_FATAL_FAILURE(open_run());
+  ASSERT_NO_FATAL_FAILURE(settled());
+  const auto a = viewer.graph_inspection();
+  ASSERT_TRUE(a->shown_configuration);
+  ASSERT_TRUE(a->shown_result);
+  const auto a_payload = viewer.base_payload();
+  const auto &source = a->shown_configuration->source.path;
+  ASSERT_EQ(a->shown_configuration->parameters.at("step"), "latest");
+  ASSERT_EQ(a->shown_resolved_parameters.at("step"), 2);
+
+  auto changed_presets = inspection_presets();
+  auto &next = changed_presets["presets"][1];
+  next["bindings"][0]["name"] = "alternate";
+  next["graph"]["nodes"][0]["params"]["binding"] = "alternate";
+  write_backend_presets(changed_presets);
+  viewer.set_metadata(changed_presets, inspection_catalog());
+  viewer.select_preset("muferro-polarization-glyphs");
+  ASSERT_TRUE(viewer.evaluating());
+
+  PickInfo pick;
+  pick.layer_id = "surface_layer";
+  pick.probe_node = "polar";
+  pick.probe_dataset = "Polar";
+  pick.physical = {1.0, 2.0, 3.0};
+  const auto check_a = [&](const Json &request) {
+    EXPECT_EQ(request.value("graph", Json()), a->shown_configuration->graph);
+    EXPECT_EQ(request.value("local_bindings", Json()), Json({{"run", source}}));
+    EXPECT_EQ(request.at("context").at("values"), a->shown_configuration->parameters);
+    EXPECT_EQ(request.at("context").at("result"), a->shown_result->raw);
+  };
+  viewer.set_pick(pick);
+  auto probes = stats().at("probe_requests");
+  ASSERT_EQ(probes.size(), 1u);
+  ASSERT_TRUE(viewer.evaluating());
+  EXPECT_EQ(viewer.base_payload(), a_payload);
+  check_a(probes.back());
+
+  release(true);
+  ASSERT_TRUE(loop.pump_until([&] { return !viewer.evaluating(); }, 30));
+  EXPECT_FALSE(viewer.eval_error().empty());
+  EXPECT_EQ(viewer.base_payload(), a_payload);
+  EXPECT_EQ(viewer.graph_inspection()->shown_configuration->preset_id, "muferro-domains");
+  viewer.probe_position({3.0, 2.0, 1.0});
+  probes = stats().at("probe_requests");
+  ASSERT_EQ(probes.size(), 2u);
+  check_a(probes.back());
+
+  viewer.evaluate_now();
+  ASSERT_NO_FATAL_FAILURE(settled());
+  const auto b = viewer.graph_inspection();
+  ASSERT_TRUE(b->shown_configuration);
+  ASSERT_TRUE(b->shown_result);
+  ASSERT_TRUE(b->shown_graph_verified.value_or(false));
+  EXPECT_EQ(b->shown_configuration->preset_id, "muferro-polarization-glyphs");
+  EXPECT_EQ(viewer.probe().status, ProbeState::Status::Empty);
+  EXPECT_EQ(stats().at("probe_requests").size(), 2u);
+
+  viewer.set_pick(pick);
+  probes = stats().at("probe_requests");
+  ASSERT_EQ(probes.size(), 3u);
+  EXPECT_EQ(probes.back().at("graph"), b->shown_configuration->graph);
+  EXPECT_EQ(probes.back().at("local_bindings"), Json({{"alternate", source}}));
+  EXPECT_EQ(probes.back().at("context").at("values"), b->shown_configuration->parameters);
+  EXPECT_EQ(probes.back().at("context").at("result"), b->shown_result->raw);
+  EXPECT_EQ(viewer.probe().status, ProbeState::Status::Done);
+
+  viewer.set_step_index(1);
+  now += 0.11;
+  ASSERT_NO_FATAL_FAILURE(settled());
+  probes = stats().at("probe_requests");
+  ASSERT_EQ(probes.size(), 4u);
+  EXPECT_EQ(probes.back().at("graph"), b->shown_configuration->graph);
+  EXPECT_EQ(probes.back().at("context").at("result").at("parameters").at("step").at("value"), 1);
+  EXPECT_EQ(viewer.probe().status, ProbeState::Status::Done);
+}
+
+TEST_F(ViewerGraphInspectionTest, OlderPresetMetadataUsesTheAcceptedPresetIdForProbe)
+{
+  auto legacy = inspection_presets();
+  legacy["presets"][0].erase("graph");
+  viewer.set_metadata(legacy, inspection_catalog());
+  ASSERT_NO_FATAL_FAILURE(open_run());
+  ASSERT_NO_FATAL_FAILURE(settled());
+  ASSERT_FALSE(viewer.graph_inspection()->shown_configuration);
+  viewer.select_preset("muferro-polarization-glyphs");
+  ASSERT_TRUE(viewer.evaluating());
+  PickInfo pick;
+  pick.probe_node = "polar";
+  viewer.set_pick(pick);
+  const auto probes = stats().at("probe_requests");
+  ASSERT_EQ(probes.size(), 1u);
+  EXPECT_EQ(probes.back().value("preset", ""), "muferro-domains");
+  EXPECT_FALSE(probes.back().contains("graph"));
+  EXPECT_EQ(viewer.probe().status, ProbeState::Status::Done);
+}
+
+TEST_F(ViewerGraphInspectionTest, RestoredProbeRequiresTheRecordedPresetDefinition)
+{
+  ASSERT_NO_FATAL_FAILURE(open_run());
+  ASSERT_NO_FATAL_FAILURE(settled());
+  auto state = viewer.save_workspace_state();
+  state["presets"][0]["graph"]["nodes"][0]["params"]["binding"] = "unknown";
+  ASSERT_TRUE(viewer.load_workspace_state(state, viewer.base_payload()));
+  PickInfo pick;
+  pick.probe_node = "polar";
+  viewer.set_pick(pick);
+  EXPECT_EQ(viewer.probe().status, ProbeState::Status::Unavailable);
+  EXPECT_TRUE(stats().at("probe_requests").empty());
+}
+
 TEST_F(ViewerGraphInspectionTest, PrefetchedConfigurationIsPublishedOnlyWhenItsFrameIsShown)
 {
   viewer.prefetch_neighbours = true;
@@ -416,6 +538,11 @@ TEST_F(ViewerGraphInspectionTest, BackendPresetMismatchRetainsLocalIntentButDoes
   EXPECT_NE(shown->shown_result->graph_hash, io::graph_hash(shown->shown_configuration->graph));
   EXPECT_EQ(shown->shown_configuration->graph, shown->desired->graph);
   EXPECT_EQ(viewer.evaluations_started(), 1); EXPECT_EQ(stats().at("evaluations"), 1);
+  PickInfo pick;
+  pick.probe_node = "polar";
+  viewer.set_pick(pick);
+  EXPECT_EQ(viewer.probe().status, ProbeState::Status::Unavailable);
+  EXPECT_TRUE(stats().at("probe_requests").empty());
 }
 
 TEST_F(ViewerGraphInspectionTest, SemanticVerificationIgnoresBackendLabelsAndNodeOrder)

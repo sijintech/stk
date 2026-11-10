@@ -6,6 +6,7 @@
 #include <string>
 
 #include "stk/core/paths.hh"
+#include "stk/io/graph.hh"
 #include "stk/io/json.hh"
 
 namespace fs = std::filesystem;
@@ -13,11 +14,12 @@ using stk::io::Json;
 
 int main(int argc, char **argv)
 {
-  fs::path payload_dir, blob_dir;
+  fs::path payload_dir, blob_dir, presets_dir;
   for (int i = 1; i + 1 < argc; ++i) {
     const std::string option = argv[i];
     if (option == "--payload-dir") { payload_dir = stk::core::path_from_utf8(argv[++i]); }
     else if (option == "--blob-dir") { blob_dir = stk::core::path_from_utf8(argv[++i]); }
+    else if (option == "--presets-dir") { presets_dir = stk::core::path_from_utf8(argv[++i]); }
   }
   if (payload_dir.empty() || blob_dir.empty()) { return 2; }
   auto manifest = stk::io::read_json_file(payload_dir / "manifest.json");
@@ -58,9 +60,14 @@ int main(int argc, char **argv)
       frame["view"]["time"] = {{"step", step}};
       const auto outputs = graph.value("outputs", Json::array({"view"}));
       const auto output = outputs.empty() ? "view" : outputs.at(0).get<std::string>();
+      const auto preset = graph.value("preset", "");
+      std::string graph_hash = "sha256:" + std::string(64, '0');
+      if (!presets_dir.empty() && !preset.empty()) {
+        graph_hash = stk::io::graph_hash(stk::io::read_json_file(presets_dir / (preset + ".json")).at("graph"));
+      }
       result = {{"result", {{"schema", "stk.graph-result/1"},
-                            {"graph_sha256", std::string(64, '0')},
-                            {"graph_hash", "sha256:" + std::string(64, '0')},
+                            {"graph_sha256", graph_hash.substr(7)},
+                            {"graph_hash", graph_hash},
                             {"profile", graph.value("profile", "desktop")},
                             {"outputs", {{output, {{"type", "payload"}, {"manifest", frame}}}}},
                             {"parameters", {{"step", {{"value", step}, {"choices", {0, 1, 2}}}}}},

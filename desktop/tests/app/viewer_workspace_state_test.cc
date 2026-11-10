@@ -74,6 +74,7 @@ void completed_probe_cannot_overwrite_repick(const bool reopen)
   ProbeCallbackGate gate(loop.executor());
   bridge::ClientOptions options;
   options.command = {fake_bridge_path(), "--payload-dir", fixture_payload_dir().string(),
+                     "--presets-dir", repo_root() + "/suan/graph/presets",
                      "--blob-dir", (dir.path() / "blobs").string()};
   options.executor = gate.executor();
   auto client = bridge::Client::create(std::move(options));
@@ -203,6 +204,7 @@ struct GuardedOpenViewer {
   {
     bridge::ClientOptions options;
     options.command = {fake_bridge_path(), "--payload-dir", fixture_payload_dir().string(),
+                       "--presets-dir", repo_root() + "/suan/graph/presets",
                        "--blob-dir", (dir.path() / "blobs").string()};
     options.executor = gate.executor();
     client = bridge::Client::create(std::move(options));
@@ -462,6 +464,45 @@ TEST(ViewerWorkspace, GuardedOpenMetadataFailureKeepsThePreviousPayload)
   viewer.pump();
   EXPECT_FALSE(viewer.evaluating());
   EXPECT_EQ(f.barrier()["evaluate_requests"].size(), 0u);
+}
+
+TEST(ViewerWorkspace, CompletedProbeForAnotherPresetCannotReplaceTheNewPick)
+{
+  GuardedOpenViewer f;
+  ASSERT_TRUE(f.start());
+  auto &viewer = f.viewer();
+  ASSERT_TRUE(f.open("first"));
+  ASSERT_TRUE(f.wait([&] { return viewer.payload() && !viewer.evaluating(); })) << viewer.eval_error();
+  ASSERT_TRUE(f.barrier().is_object());
+  f.loop.run_ready();
+  PickInfo pick;
+  pick.layer_id = "surface_layer";
+  pick.probe_node = "polar";
+  pick.physical = {1.0, 2.0, 3.0};
+  f.gate.hold();
+  viewer.set_pick(pick);
+  const auto before = f.barrier();
+  ASSERT_EQ(before.at("probe_requests").size(), 1u);
+  auto old_reply = f.gate.take();
+  ASSERT_EQ(old_reply.size(), 1u);
+  ASSERT_EQ(viewer.probe().status, ProbeState::Status::Pending);
+
+  viewer.select_preset("muferro-polarization-glyphs");
+  ASSERT_TRUE(f.wait([&] {
+    const auto shown = viewer.graph_inspection()->shown_configuration;
+    return shown && shown->preset_id == "muferro-polarization-glyphs" && !viewer.evaluating();
+  })) << viewer.eval_error();
+  EXPECT_EQ(viewer.probe().status, ProbeState::Status::Empty);
+  EXPECT_EQ(f.barrier().at("probe_requests").size(), 1u);
+  pick.physical = {3.0, 2.0, 1.0};
+  viewer.set_pick(pick);
+  ASSERT_TRUE(f.wait([&] { return viewer.probe().status == ProbeState::Status::Done; }));
+  const auto current = viewer.save_workspace_state().at("probe");
+  old_reply.front()();
+  EXPECT_EQ(viewer.save_workspace_state().at("probe"), current);
+  const auto after = f.barrier();
+  ASSERT_EQ(after.at("probe_requests").size(), 2u);
+  EXPECT_NE(after.at("probe_requests")[0].at("graph"), after.at("probe_requests")[1].at("graph"));
 }
 
 TEST(ViewerWorkspace, RestoresFrozenPayloadParametersLayersAndSettingsWithoutAnyReplay)
