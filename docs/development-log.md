@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-10 20:56 UTC · MuPRO HDF5 链路与原生全量复验
+
+`39b00f52` 集成独立候选 `11840923`，在测试退出时等待 NodeAgent 停止并关闭事件循环。测试使用真实本机 Hub、NodeAgent WebSocket、Runtime 和已配对 Web 客户端。合成完成任务发布 `case/run.h5`，通过已有图谱节点精确列出两个步号，选择第 2 步的 `Polar` 并按 Web 的 `f32` 编码验收。核对容器和线传载荷的 SHA-256、原生 `float32` 与 24 个体素值。先用错误摘要触发 `invalid_data`，断言动作无结果且 Hub 无新载荷。原 DAT 路线同时覆盖。独立候选定向 2/2、完整 37/37。Root 集成版独立完整 37/37，零跳过，已有 Starlette 弃用警告一项。验证范围为合成产物读取，真实 MuPRO 求解、许可、研究参数和仅凭 HDF5 判定任务完成仍待验。收据及日志在外部 `root-delivery-20261110-140/mupro-hdf5-hub`。
+
+`a7fffbf7` 的最终原生项目全量测试结束，964/964，零失败、零跳过，851.539 秒。日志、XML 和退出码在外部 `root-delivery-20261110-139/compose-project-final.*`。后续 `3055fbf3` 概览入口的实窗与 148 项定向结果见下一节。已定位多会话分栏中从概览返回可能选中另一个 AI 实例，精确返回的回归与修复在独立 worktree 开发。
+
+远端 `main` 仍为 `9ce87c63`。同头 Runtime 13/13 已完成，Desktop 的两项 Linux 打包通过，其余三个作业仍运行。本地提交等待该 Desktop 批次终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42895759127) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42895759007)
+
 ## 2026-11-10 20:46 UTC · 聚焦会话的项目概览入口
 
 `3055fbf3` 将聚焦会话页头的次要入口标为「项目概览」及 `Overview`，保留原项目引导、分栏恢复与点击路径。一级「工作台」继续表示聚焦会话，普通分栏与其他编辑器仍使用旧名。旧版定向回归的唯一失败是英文泛称 `Home`。最终工作台及问答 60/60、窗口 88/88，零跳过。英文双倍缩放的控件宽度与六个默认窗口基线均通过。
