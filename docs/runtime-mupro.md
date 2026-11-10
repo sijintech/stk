@@ -88,6 +88,33 @@ suan mupro check --json
 需要本机路径和详细诊断时，原命令 `python -m suan.mupro check --json` 继续返回既有 `{ok, checks}`。
 其中 `ok` 只表示没有 `fail`，不会把 `warn` 或 `skip` 算作失败。
 
+## 显式检查执行环境
+
+从客户端向已选 Runtime 提交一次独立诊断任务，使用执行端自己配置的环境：
+
+```bash
+suan mupro preflight --profile dev --workspace WORKSPACE_ID --key preflight-01 --wait
+# 重开客户端后读取同一任务；不会重新采集，也不会再提交
+suan mupro preflight-result --profile dev TASK_ID --output preflight-result.json
+# 在调度分配中检查，需要明确时限
+suan mupro preflight --profile cluster --workspace WORKSPACE_ID \
+  --backend slurm --queue PARTITION --walltime 120 --key preflight-cluster-01 --wait
+```
+
+该操作创建任务、申请一个 CPU，并 source 执行端配置的受信任脚本；没有案例上传、客户端环境覆盖、
+MuPRO/MPI 启动或许可签出。`local` 后端是在所选 Runtime 的机器上执行；登录节点上的配置仍须使用站点要求的调度后端。
+这是显式执行操作，不会附带在节点列表、心跳、刷新或 `graph.meta` 读取里。
+
+默认不带 `--wait` 时返回原任务记录。提交前打印的幂等键应保留；丢失答复后，只以同一键和相同选项明确重试。
+已经知道任务 ID 时，`preflight-result` 只观察该任务。仍在排队、运行、未知或已取消的任务不会产生可验证结果；
+可继续用原任务命令读取状态和日志，或明确取消，命令不会代提交新任务。
+
+返回 [`stk.mupro-preflight-result/1`](specs/mupro-preflight-task-1.md)，绑定所选连接的摘要、任务、后端和产物大小/SHA-256，
+内层保留原 `local_process` 观察。客户端不输出原始连接地址或 SSH 主机。连接摘要用于关联，不是物理主机认证。
+只有产物、严格格式和任务终态/退出码一致时才打印或保存结果。保存要求新文件，不覆盖已有路径。
+失败检查也保留有效观察并退出 1；未完成或通过的检查退出 0，均不代表实际软件或许可就绪。
+计算侧版本缺少该入口时明确失败，不回退为客户端检查。读取既有结果不会更新其采集时间；再次检查需要另一次明确提交。
+
 ## 提交与查看
 
 ```bash
