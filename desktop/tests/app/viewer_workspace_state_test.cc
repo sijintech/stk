@@ -8,6 +8,7 @@
 
 #include "stk/app/editor.hh"
 #include "stk/app/viewer_state.hh"
+#include "stk/core/paths.hh"
 #include "stk/io/payload.hh"
 #include "viewer_support.hh"
 #include "../wm/support.hh"
@@ -193,6 +194,11 @@ struct GuardedOpenViewer {
 
   ViewerState &viewer() { return store.viewer(); }
 
+  std::string source_path(const std::string &name) const
+  {
+    return core::path_to_utf8((dir.path() / name).lexically_normal());
+  }
+
   bool start(const bool metadata = true)
   {
     bridge::ClientOptions options;
@@ -278,7 +284,7 @@ TEST(ViewerWorkspace, GuardedOpenCommitsOneCompletedCandidateWithoutClearingTheO
   callbacks.front()();
   viewer.pump();
   EXPECT_FALSE(viewer.evaluating());
-  EXPECT_EQ(viewer.source().path, (f.dir.path() / "second").string());
+  EXPECT_EQ(viewer.source().path, f.source_path("second"));
   EXPECT_TRUE(viewer.payload());
   EXPECT_GT(viewer.camera_serial(), camera);
   EXPECT_GT(viewer.payload_serial(), serial);
@@ -313,7 +319,7 @@ TEST(ViewerWorkspace, RejectedOpenCannotCancelAnAcceptedCandidate)
   callbacks.front()();
   viewer.pump();
   EXPECT_FALSE(viewer.evaluating());
-  EXPECT_EQ(viewer.source().path, (f.dir.path() / "second").string());
+  EXPECT_EQ(viewer.source().path, f.source_path("second"));
   EXPECT_EQ(viewer.opening_status()["state"], "succeeded");
   EXPECT_EQ(f.barrier()["evaluate_requests"].size(), 2u);
 }
@@ -338,7 +344,7 @@ void completed_guarded_open_cannot_overwrite_a_newer_action(const OpenInterrupti
       break;
     case OpenInterruption::Edit:
       viewer.set_parameter("min_magnitude", ui::FormValue::number(0.7));
-      EXPECT_EQ(viewer.source().path, (f.dir.path() / "first").string());
+      EXPECT_EQ(viewer.source().path, f.source_path("first"));
       EXPECT_EQ(viewer.parameters()["min_magnitude"], Json(0.7));
       break;
     case OpenInterruption::Close:
@@ -348,7 +354,10 @@ void completed_guarded_open_cannot_overwrite_a_newer_action(const OpenInterrupti
       break;
     case OpenInterruption::NewerOpen:
       ASSERT_TRUE(f.open("third"));
-      ASSERT_TRUE(f.wait([&] { return viewer.source().path == (f.dir.path() / "third").string() && !viewer.evaluating(); }));
+      ASSERT_TRUE(f.wait([&] { return viewer.source().path == f.source_path("third") && !viewer.evaluating(); }))
+          << "expected=" << f.source_path("third") << " source=" << viewer.source().path
+          << " evaluating=" << viewer.evaluating() << " opening=" << viewer.opening_status()
+          << " open_error=" << viewer.open_error() << " eval_error=" << viewer.eval_error();
       ASSERT_EQ(f.barrier()["evaluate_requests"].size(), 3u);
       break;
   }
