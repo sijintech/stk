@@ -3177,3 +3177,312 @@ for (const viewport of viewports) {
     }
   });
 }
+
+// 任务 → 结果 → 任务 through a Tasks shortcut, as in the native focused workbench: the rail's 任务 straight from 结果
+// gives the keyboard focus back to the shortcut that opened it while the same task scope is selected and the shortcut
+// is there, enabled and wholly in view. 任务 keeps both scroll offsets, the queue and the draft; 结果 keeps its mode
+// and Viewer. Every other way back (plain rail trips, 工作台 or history, another scope, a removed, busy or clipped
+// shortcut) leaves the focus on the rail, and a late read never moves it.
+const longQueue = {...device, snapshot: {...device.snapshot, tasks: [row, ...Array.from({length: 199}, (_, index) => ({
+  ...row, id: (index + 1).toString(16).padStart(32, '0'), name: `额外任务 ${index + 1}`,
+}))]}};
+const railButton = (page: Page, name: keyof typeof surfaces) => nav(page).getByRole('button', {name, exact: true});
+const offsets = (page: Page) => page.locator('aside.tasks').evaluate(el =>
+  ({tasks: el.scrollTop, queue: el.querySelector('.task-list')!.scrollTop}));
+const focused = (page: Page) => page.evaluate(() => {
+  const element = document.activeElement as HTMLElement | null;
+  return element ? `${element.closest('nav,aside,section')?.className.split(' ')[0] ?? ''} ${element.tagName} ${element.textContent}` : '';
+});
+// The queue scrolled inside its own list and 任务 scrolled to centre the shortcuts (a nonzero offset where 任务 overflows).
+async function place(page: Page) {
+  await queue(page).locator('.task-list').evaluate(el => { el.scrollTop = 160; });
+  await page.locator('aside.tasks').evaluate(el => {
+    const at = [...el.querySelectorAll('.inline > button')].find(b => b.textContent === '结果')!.getBoundingClientRect();
+    const area = el.getBoundingClientRect();
+    el.scrollTop += at.top + at.height / 2 - (area.top + area.height / 2);
+  });
+  const at = await offsets(page);
+  expect(at.queue).toBe(160);
+  for (const name of ['结果', '读取日志'] as const) await expect(shortcut(page, name)).toBeInViewport({ratio: 1});
+  return at;
+}
+// Pixels of the scrolled queue and of the unsubmitted TaskSpec (apart from the shortcut, whose focus ring may differ).
+async function tasksPixels(page: Page, name: string) {
+  return [await queue(page).locator('.task-list').screenshot({path: test.info().outputPath(`queue-${name}.png`)}),
+    await page.getByLabel('TaskSpec').screenshot({path: test.info().outputPath(`taskspec-${name}.png`)})];
+}
+type How = 'pointer' | 'Enter' | 'Space';
+// Measured activations of one route, apart from its setup: real pointer clicks at the target's centre, or keys on it.
+function measured(page: Page, name: string) {
+  const record = {route: name, clicks: 0, keys: 0, steps: [] as string[]};
+  return {
+    record,
+    activate: async (target: Locator, how: How, step: string) => {
+      record.steps.push(`${how} ${step}`);
+      if (how === 'pointer') {
+        record.clicks++;
+        const at = (await target.boundingBox())!;
+        await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
+        return;
+      }
+      record.keys++;
+      await target.evaluate(el => (el as HTMLElement).focus({preventScroll: true}));
+      if (how === 'Enter') { await page.keyboard.down('Enter'); await page.keyboard.down('Enter'); await page.keyboard.up('Enter'); }
+      else await page.keyboard.press('Space');
+    },
+    save: () => writeFileSync(test.info().outputPath(`route-${name}.json`), JSON.stringify(record, null, 2)),
+  };
+}
+// The selected task's shortcut row in 任务 over a 200-task queue, a moved Viewer in 结果 and drafts in both pages.
+async function prepare(page: Page, hub: Hub, {graph = false} = {}) {
+  hub.device = longQueue;
+  const errors = await setup(page, hub);
+  await go(page, '结果');
+  // 图谱 is mounted before the clock is frozen (a paused clock holds its lazy module), then shown again after the shot.
+  if (graph) {
+    await modeTab(page, '图谱').click();
+    await expect(graphPane(page).locator('.graph-panel')).toHaveCount(1);
+    await graphPane(page).locator('.graph-panel').evaluate(el => { (el as any).__marker = 'same-graph'; });
+    await modeTab(page, '结果文件').click();
+  }
+  await pause(page);
+  const viewer = await paneShot(page, filePane(page), 'viewer-before');
+  if (graph) await modeTab(page, '图谱').click();
+  await go(page, '任务');
+  await place(page);
+  const pixels = await tasksPixels(page, 'before');
+  return {errors, viewer, pixels, at: await place(page), before: await state(page)};
+}
+async function expectKept(page: Page, ready: Awaited<ReturnType<typeof prepare>>, name: string) {
+  expect(await offsets(page)).toEqual(ready.at);
+  expect(await state(page)).toEqual(ready.before);
+  const pixels = await tasksPixels(page, name);
+  expect(pixels.map((shot, i) => shot.equals(ready.pixels[i]))).toEqual([true, true]);
+}
+
+for (const viewport of viewports) {
+  test.describe(`${viewport.name} 任务 return focus`, () => {
+    test.use({viewport: {width: viewport.width, height: viewport.height}});
+
+    for (const [launcher, how, graph] of [['结果', 'pointer', false], ['结果', 'Enter', false], ['读取日志', 'pointer', false],
+      ['读取日志', 'Space', false], ['结果', 'pointer', true]] as const) {
+      test(`${launcher} by ${how}${graph ? ' in 图谱' : ''} then 任务 returns the focus to ${launcher} and keeps 任务 and 结果`, async ({page}) => {
+        const hub = new Hub();
+        const ready = await prepare(page, hub, {graph});
+        const sent = posts(page), seen = traffic(page);
+        const r = measured(page, `${viewport.name}-${launcher}-${how}${graph ? '-graph' : ''}`);
+        await r.activate(shortcut(page, launcher), how, launcher);
+        await expectActive(page, '结果');
+        // The destination takes the focus, as before.
+        if (launcher === '读取日志') await expect(page.locator('section.analysis details.logs summary')).toBeFocused();
+        else if (graph) await expect(modeTab(page, '图谱')).toBeFocused();
+        else await expect(page.getByLabel('结果文件')).toBeFocused();
+        await expect(footer(page)).toContainText('就绪');
+        await r.activate(railButton(page, '任务'), how, '任务');
+        await expectActive(page, '任务');
+        await expect(shortcut(page, launcher)).toBeFocused();
+        expect(await focused(page)).toBe(`tasks BUTTON ${launcher}`);
+        await page.waitForTimeout(300);
+        await expect(shortcut(page, launcher)).toBeFocused();
+        // As returned, before the element shots below scroll 任务 to take them.
+        await page.screenshot({path: test.info().outputPath(`${viewport.name}-returned.png`)});
+        await expectKept(page, ready, 'after');
+        sent.stop(); seen.stop();
+        const read = launcher === '结果' ? '/api/v1/nodes/{node}/read task.artifacts' : '/api/v1/actions task.logs';
+        expect(sent.seen).toEqual([read]);
+        expect(seen.seen).toEqual([launcher === '结果' ? 'POST nodes/{node}/read task.artifacts' : 'POST actions task.logs']);
+        expect([hub.evaluations, hub.calls, hub.replies, hub.messages]).toEqual([[], [], 0, []]);
+        expect(r.record).toMatchObject(how === 'pointer' ? {clicks: 2, keys: 0} : {clicks: 0, keys: 2});
+        r.save();
+        await go(page, '结果');
+        await expectMode(page, graph ? '图谱' : '结果文件');
+        if (graph) {
+          expect(await graphPane(page).locator('.graph-panel').evaluate(el => (el as any).__marker ?? null)).toBe('same-graph');
+          await modeTab(page, '结果文件').click();
+        }
+        expect((await paneShot(page, filePane(page), 'viewer-after')).equals(ready.viewer)).toBe(true);
+        expect(ready.errors).toEqual([]);
+      });
+    }
+
+    for (const how of ['pointer', 'Enter'] as const) {
+      test(`rail 结果 by ${how} then 任务 leaves the focus on the rail`, async ({page}) => {
+        const hub = new Hub();
+        const ready = await prepare(page, hub);
+        const sent = posts(page);
+        const r = measured(page, `${viewport.name}-rail-${how}`);
+        // A shortcut trip earlier is used up by its own return and by a later plain one.
+        await r.activate(shortcut(page, '结果'), how, '结果');
+        await expect(footer(page)).toContainText('就绪');
+        await r.activate(railButton(page, '任务'), how, '任务');
+        await expect(shortcut(page, '结果')).toBeFocused();
+        for (const step of ['结果', '任务'] as const) await r.activate(railButton(page, step), how, step);
+        await expectActive(page, '任务');
+        await expect(railButton(page, '任务')).toBeFocused();
+        // The shortcut trip, then 结果 twice from the rail: 结果 again in place is passive as well.
+        await r.activate(shortcut(page, '结果'), how, '结果');
+        await expect(footer(page)).toContainText('就绪');
+        for (const step of ['结果', '任务'] as const) await r.activate(railButton(page, step), how, step);
+        await expect(railButton(page, '任务')).toBeFocused();
+        await page.waitForTimeout(300);
+        await expect(railButton(page, '任务')).toBeFocused();
+        await expectKept(page, ready, 'after');
+        sent.stop();
+        expect(writes(sent.seen)).toEqual([]);
+        r.save();
+        expect(ready.errors).toEqual([]);
+      });
+    }
+
+    test('a 工作台 or history trip from 结果 leaves the focus on the rail', async ({page}) => {
+      const hub = new Hub();
+      const ready = await prepare(page, hub);
+      const sent = posts(page);
+      const trips = [['工作台', async () => { await railButton(page, '工作台').click(); await expectActive(page, '工作台'); }]] as [string, () => Promise<void>][];
+      if (viewport.name === 'narrow') {
+        trips.push(['历史 Esc', async () => {
+          await historyToggle(page).click();
+          await expect(historyPanel(page)).toBeVisible();
+          await page.keyboard.press('Escape');
+          await expect(historyToggle(page)).toBeFocused();
+        }]);
+      } else {
+        trips.push(['新对话', async () => {
+          await historyPanel(page).getByRole('button', {name: '新对话', exact: true}).click();
+          await expectActive(page, '工作台');
+        }]);
+      }
+      for (const [name, trip] of trips) {
+        await shortcut(page, '结果').click();
+        await expectActive(page, '结果');
+        await expect(footer(page)).toContainText('就绪');
+        await trip();
+        await railButton(page, '任务').click();
+        await expectActive(page, '任务');
+        await expect(railButton(page, '任务'), name).toBeFocused();
+        expect(await offsets(page)).toEqual(ready.at);
+      }
+      const {draft: _, ...kept} = ready.before;
+      expect(await state(page)).toMatchObject(kept);
+      sent.stop();
+      expect(writes(sent.seen)).toEqual([]);
+      expect([hub.calls, hub.replies]).toEqual([[], 0]);
+      expect(ready.errors).toEqual([]);
+    });
+
+    test('a held read leaves the busy shortcut unfocused on return, and its late reply moves nothing', async ({page}) => {
+      const hub = new Hub();
+      const ready = await prepare(page, hub);
+      for (const [launcher, kind] of [['结果', 'task.artifacts'], ['读取日志', 'task.logs']] as const) {
+        const release = hub.hold(kind);
+        hub.reached.clear();
+        await shortcut(page, launcher).click();
+        await expectActive(page, '结果');
+        await expect.poll(() => hub.reached.has(kind)).toBe(true);
+        await railButton(page, '任务').click();
+        await expectActive(page, '任务');
+        await expect(shortcut(page, launcher)).toBeDisabled();
+        await expect(railButton(page, '任务')).toBeFocused();
+        release();
+        await expect(footer(page)).toContainText('就绪');
+        await expect(shortcut(page, launcher)).toBeEnabled();
+        await page.waitForTimeout(300);
+        await expect(railButton(page, '任务')).toBeFocused();
+        expect(await offsets(page)).toEqual(ready.at);
+      }
+      expect(ready.errors).toEqual([]);
+    });
+
+    for (const clip of ['partly', 'wholly'] as const) {
+      test(`a shortcut ${clip} out of view on return keeps the focus on the rail and the offsets`, async ({page}) => {
+        const hub = new Hub();
+        const ready = await prepare(page, hub);
+        await shortcut(page, '结果').click();
+        await expectActive(page, '结果');
+        await expect(footer(page)).toContainText('就绪');
+        // A shorter window in 结果 (the same side of the compact width) puts the shortcut under the bottom of 任务;
+        // the queue's height follows the window, so it is shortened 4 px at a time until the shortcut is clipped.
+        const clipped = () => page.locator('aside.tasks').evaluate((el, clip) => {
+          const at = [...el.querySelectorAll('.inline > button')].find(b => b.textContent === '结果')!.getBoundingClientRect();
+          const bottom = el.getBoundingClientRect().bottom;
+          return clip === 'partly' ? at.top < bottom - 4 && at.bottom > bottom : at.top >= bottom;
+        }, clip);
+        for (let height = viewport.height; !await clipped(); height -= 4) {
+          expect(height).toBeGreaterThan(300);
+          await page.setViewportSize({width: viewport.width, height});
+        }
+        const at = await offsets(page);
+        expect(at.queue).toBeGreaterThan(0);
+        await railButton(page, '任务').click();
+        await expectActive(page, '任务');
+        const visible = await shortcut(page, '结果').evaluate(el => {
+          const at = el.getBoundingClientRect(), area = el.closest('aside')!.getBoundingClientRect();
+          return [at.top < area.bottom, at.bottom <= area.bottom];
+        });
+        expect(visible).toEqual(clip === 'partly' ? [true, false] : [false, false]);
+        await expect(railButton(page, '任务')).toBeFocused();
+        expect(await offsets(page)).toEqual(at);
+        expect(ready.errors).toEqual([]);
+      });
+    }
+
+    test('another selection of the same task, or a node gone while in 结果, takes no focus back', async ({page}) => {
+      const hub = new Hub();
+      const ready = await prepare(page, hub);
+      // Leaving the task and selecting the same ID again, then a plain rail trip.
+      await shortcut(page, '结果').click();
+      await expect(footer(page)).toContainText('就绪');
+      await railButton(page, '任务').click();
+      await expect(shortcut(page, '结果')).toBeFocused();
+      await queue(page).locator('.task').filter({has: page.locator('span', {hasText: /^额外任务 5$/})}).click();
+      await expect(page.locator('aside.tasks .task.selected')).toHaveText(/额外任务 5/);
+      await queue(page).getByRole('button', {name: /解析场验证/}).click();
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await expect(footer(page)).toContainText('就绪');
+      for (const name of ['结果', '任务'] as const) await railButton(page, name).click();
+      await expect(railButton(page, '任务')).toBeFocused();
+      // The node is revoked while 结果 shows the shortcut's result: the scope and its shortcut are gone on return,
+      // and stay gone when the node is listed again.
+      await place(page);
+      await shortcut(page, '结果').click();
+      await expect(footer(page)).toContainText('就绪');
+      hub.device = {...longQueue, revoked: true};
+      hub.publish();
+      await expect(page.getByLabel('执行节点')).toHaveValue('');
+      hub.device = longQueue;
+      await page.clock.runFor(5000); // the next periodic refresh (the event stream reconnects on the frozen clock)
+      await expect(page.getByLabel('执行节点').locator('option')).toHaveCount(2);
+      await railButton(page, '任务').click();
+      await expectActive(page, '任务');
+      await expect(shortcut(page, '结果')).toHaveCount(0);
+      await expect(railButton(page, '任务')).toBeFocused();
+      expect(ready.errors).toEqual([]);
+    });
+  });
+}
+
+test('History opened by narrowing clears the old Tasks shortcut return', async ({page}) => {
+  const wide = {width: 1440, height: 900};
+  await page.setViewportSize(wide);
+  const hub = new Hub();
+  const ready = await prepare(page, hub);
+  await shortcut(page, '结果').click();
+  await expectActive(page, '结果');
+  await expect(footer(page)).toContainText('就绪');
+  await historyPanel(page).getByRole('button', {name: '新对话', exact: true}).focus();
+  await page.setViewportSize({width: 390, height: 844});
+  await expect(historyToggle(page)).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Escape');
+  await expect(historyToggle(page)).toHaveAttribute('aria-expanded', 'false');
+  await page.setViewportSize(wide);
+  await expect(historyToggle(page)).toHaveCount(0);
+  const at = await offsets(page);
+  await railButton(page, '任务').click();
+  await expectActive(page, '任务');
+  await expect(shortcut(page, '结果')).toBeInViewport({ratio: 1});
+  await expect(railButton(page, '任务')).toBeFocused();
+  expect(await offsets(page)).toEqual(at);
+  expect(await state(page)).toEqual(ready.before);
+  expect([hub.calls, hub.replies]).toEqual([[], 0]);
+  expect(ready.errors).toEqual([]);
+});

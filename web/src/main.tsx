@@ -78,6 +78,10 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const historyPanel=useRef<HTMLElement>(null),historyToggle=useRef<HTMLButtonElement>(null),messageList=useRef<HTMLDivElement>(null),composer=useRef<HTMLTextAreaElement>(null);
   const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
   const [probeText,setProbeText]=useState(''),[graphProbeText,setGraphProbeText]=useState(''),[viewError,setViewError]=useState(''),[graphError,setGraphError]=useState('');
+  // The Tasks shortcut that opened 结果 and the task scope it was pressed in. The next navigation forgets it; only
+  // 任务 straight from 结果 gives it the focus back, and only while that exact scope is selected (a reselected task is a
+  // new scope) and the shortcut is still there, enabled and wholly in view in 任务, which keeps its scroll offsets.
+  const returnFocus=useRef<{scope:TaskScope;launcher:HTMLButtonElement}|null>(null);
   const generation=useRef(0),scopeVersion=useRef(0),activeScope=useRef<TaskScope|null>(null),refreshing=useRef(false),alive=useRef(true);
   const artifactReads=useRef({started:0,applied:0});
   // The displayed record as of the latest change, so a late probe reply can tell whether its scene is still shown.
@@ -177,7 +181,9 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   useEffect(()=>{const query=matchMedia(COMPACT);const change=()=>{
     const focus=document.activeElement,inside=!!historyPanel.current?.contains(focus);
     keepHistoryFocus.current=!query.matches&&!!focus&&focus===historyToggle.current;
-    setWide(!query.matches);setHistoryOpen(query.matches&&inside);
+    const opensOverlay=query.matches&&inside;
+    if(opensOverlay)returnFocus.current=null;
+    setWide(!query.matches);setHistoryOpen(opensOverlay);
   };change();query.addEventListener('change',change);return()=>query.removeEventListener('change',change);},[]);
   useEffect(()=>{if(wide&&keepHistoryFocus.current){keepHistoryFocus.current=false;focusHistory();}},[wide]);
   // Escape closes the overlay from anywhere on the page and returns the focus to the 历史 toggle.
@@ -275,16 +281,29 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // keeps its own scope checks and never navigates on completion. The analysis mode and Viewer are left as they are.
   // 读取日志 also gives the open log pane its full bounded height (logRoom, until the task scope changes), so the
   // text that arrives later scrolls inside the pane and moves nothing in 结果, whichever page the user is on then.
-  function openResults(target:'files'|'logs'){
+  function openResults(target:'files'|'logs',launcher:HTMLButtonElement){
+    returnFocus.current=activeScope.current&&{scope:activeScope.current,launcher};
     flushSync(()=>{setTab('results');if(target==='logs')setLogRoom(true);});
     const pane=logPane.current;
     if(target==='logs'&&pane)pane.open=true;
     const element=target==='logs'?pane?.querySelector('summary'):analysis==='file'?fileChoice.current:modeChoice.current?.querySelector<HTMLElement>('[aria-selected="true"]');
     (target==='logs'?pane:element)?.scrollIntoView({block:'nearest'});element?.focus({preventScroll:true});
   }
+  // A held Enter repeats on the shortcut that just got the focus back; only a fresh press opens 结果 again.
+  const ignoreRepeat=(e:React.KeyboardEvent)=>{if(e.repeat&&e.key==='Enter')e.preventDefault();};
+  function openSection(key:Section){
+    const back=key==='tasks'&&tab==='results'&&!overlay?returnFocus.current:null;
+    returnFocus.current=null;
+    if(!back||activeScope.current!==back.scope){setTab(key);setHistoryOpen(false);return;}
+    flushSync(()=>setTab(key));
+    const {launcher}=back,box=launcher.getBoundingClientRect(),area=launcher.closest('.surface')?.getBoundingClientRect();
+    if(launcher.isConnected&&!launcher.disabled&&area&&box.height>0&&
+       box.top>=area.top&&box.bottom<=area.bottom&&box.left>=area.left&&box.right<=area.right)launcher.focus({preventScroll:true});
+  }
   // Choosing a conversation (or a new one) is one explicit action: it opens 工作台 with that conversation's own
   // transcript and draft, and changes nothing in 任务 or 结果. On a compact page the history closes again.
   function openConversation(id:string|null){
+    returnFocus.current=null;
     flushSync(()=>{setTab('workbench');setHistoryOpen(false);if(id)conv.select(id);else conv.startNew();});
     if(!id)composer.current?.focus({preventScroll:true});
     else if(!wide)messageList.current?.focus({preventScroll:true});
@@ -298,6 +317,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   function closeHistory(){setHistoryOpen(false);historyToggle.current?.focus({preventScroll:true});}
   function toggleHistory(){
     if(historyOpen){setHistoryOpen(false);return;}
+    returnFocus.current=null;
     flushSync(()=>{setSourceOpen(false);setHistoryOpen(true);});
     focusHistory();
   }
@@ -351,7 +371,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   return <div className="app"><header><div className="wordmark">STK <span>科学工作台</span></div><span className={online?'connection':'connection offline'}>{online?'控制服务已连接':'连接中断 · 显示最近状态'}</span><button className="quiet" onClick={disconnect}>断开</button></header>
     {notice&&<div className="notice" role="alert">{notice}<button onClick={()=>error?setError(''):analysis==='file'?setViewError(''):setGraphError('')}>关闭</button></div>}
     <div className={wide?'workspace with-history':'workspace'}>
-    <nav className="section-nav" aria-label="工作区">{SECTIONS.map(([key,label])=><button type="button" className={tab===key?'active':''} aria-current={tab===key?'page':undefined} key={key} onClick={()=>{setTab(key);setHistoryOpen(false);}}>{label}</button>)}
+    <nav className="section-nav" aria-label="工作区">{SECTIONS.map(([key,label])=><button type="button" className={tab===key?'active':''} aria-current={tab===key?'page':undefined} key={key} onClick={()=>openSection(key)}>{label}</button>)}
       {!wide&&<button type="button" ref={historyToggle} className={historyOpen?'history-toggle open':'history-toggle'} aria-expanded={historyOpen} aria-controls="conversation-history" aria-label="对话历史" onClick={toggleHistory}>历史</button>}</nav>
     <section id="conversation-history" ref={historyPanel} aria-label="对话历史" className={`history${wide?'':' history-overlay'}${historyShown?'':' surface-hidden'}`} inert={!historyShown}>
       <div className="history-head"><h2>对话</h2><button type="button" className="new-conversation" onClick={()=>openConversation(null)}>新对话</button></div>
@@ -375,7 +395,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       {task&&selection&&<TaskObservation key={`${node}/${selection.workspace}/${task}`} scope={selection}
         heartbeat={heartbeat} online={taskOnline} supported={canReadTask} refresh={taskRefresh}
         onObservation={observeTask} onAccessLost={disconnect} onNodeGone={nodeGone}/>}
-      {taskBound&&<div className="inline"><button disabled={busy} onClick={()=>{openResults('logs');void run(readLogs);}}>读取日志</button><button disabled={busy} onClick={()=>{openResults('files');void run(files);}}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
+      {taskBound&&<div className="inline"><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{openResults('logs',e.currentTarget);void run(readLogs);}}>读取日志</button><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{openResults('files',e.currentTarget);void run(files);}}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
       {actions.filter(a=>a.state==='review').map(a=><article className="review" key={a.id}><strong>等待执行复核</strong><p>{a.review_reason}</p><pre>{JSON.stringify(a.request.payload,null,2)}</pre>{[true,false].map(approved=><button key={String(approved)} disabled={busy} onClick={()=>void run(async()=>{await api(`actions/${a.id}/review`,'POST',{approved});})}>{approved?'批准执行':'拒绝'}</button>)}</article>)}
       <details className="setting" open><summary>运行环境 · {nodeName||'未选择节点'}{selected&&` · ${workspace?workspaceName(workspace):'未选择项目'}`}</summary>
       <label>执行节点<select value={node} onChange={e=>{clearTask();setNode(e.target.value);setWorkspace('');}}><option value="">选择节点</option>{nodes.map(d=><option key={d.id} value={d.id}>{d.online?'●':'○'} {d.name}</option>)}</select></label>
