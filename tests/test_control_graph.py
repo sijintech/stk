@@ -619,82 +619,190 @@ def test_graph_evaluate_end_to_end_through_the_hub(runtime, fake_sdk, tmp_path):
             assert invalid.status_code == 400
 
 
-def test_agent_loop_over_loopback_http_and_websocket(runtime, fake_sdk, tmp_path):
+@pytest.fixture
+def loopback_graph_hub(runtime, tmp_path):
     """The real agent (outbound WebSocket, urllib blob uploads, lanes) against a loopback control server."""
-    pytest.importorskip("numpy")
-    pytest.importorskip("matplotlib")
     uvicorn = pytest.importorskip("uvicorn")
     httpx = pytest.importorskip("httpx")
     pytest.importorskip("websockets")
     from suan.control.agent import NodeAgent
     from suan.control.app import create_app
-    from suan.render.payload import decode
-    client, supervisor, _, _ = runtime
-    task_id = muferro_task(client, supervisor)
+    client, _, _, _ = runtime
     app = create_app(tmp_path / "control", OWNER)
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning", access_log=False,
                                            ws_max_size=16 * 1024 * 1024))
     server_thread = threading.Thread(target=server.run, daemon=True)
     server_thread.start()
-    deadline = time.monotonic() + 10
-    while not server.started:
-        assert time.monotonic() < deadline
-        time.sleep(.02)
-    url = f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}"
-    loop = asyncio.new_event_loop()
-    agent = NodeAgent(client, tmp_path / "agent", graph_workers=2)
-    holder = {}
-
-    def serve_agent():
-        asyncio.set_event_loop(loop)
-        holder["task"] = loop.create_task(agent.run(url, node["token"]))
-        try:
-            loop.run_until_complete(holder["task"])
-        except asyncio.CancelledError:
-            pass
-
     try:
+        deadline = time.monotonic() + 10
+        while not server.started:
+            assert time.monotonic() < deadline
+            time.sleep(.02)
+        url = f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}"
+        agent = NodeAgent(client, tmp_path / "agent", graph_workers=2)
         with httpx.Client(base_url=url, timeout=30) as http:
             code = http.post("/api/v1/pairings", json={"role": "node"}, headers=AUTH).json()["code"]
             node = http.post("/api/v1/pairings/claim", json={"code": code, "name": "node"}).json()
+            loop = asyncio.new_event_loop()
+            agent_task = loop.create_task(agent.run(url, node["token"]))
+
+            def serve_agent():
+                try:
+                    loop.run_until_complete(agent_task)
+                except asyncio.CancelledError:
+                    pass
+
             thread = threading.Thread(target=serve_agent, daemon=True)
             thread.start()
-            actions = {
-                "graph": {"kind": "graph.evaluate", "payload": {
-                    "graph": muferro_graph(), "bindings": {"run": {"task_id": task_id}},
-                    "outputs": ["payload", "energy_plot", "energy_png", "energy"]}},
-                "logs": {"kind": "task.logs", "payload": {"task_id": task_id}},
-                "events": {"kind": "task.events", "payload": {"task_id": task_id}},
-            }
-            ids = {}
-            for name, body in actions.items():
-                ids[name] = uuid.uuid4().hex
-                response = http.post("/api/v1/actions", headers=AUTH,
-                                     json={"id": ids[name], "node_id": node["device_id"], **body})
-                assert response.json()["state"] == "queued", response.text
-            deadline = time.monotonic() + 90
-            records = {}
-            while len(records) < len(ids):
-                assert time.monotonic() < deadline, records
-                for name, identity in ids.items():
-                    record = http.get("/api/v1/actions/" + identity, headers=AUTH).json()
-                    if record["state"] != "queued":
-                        records[name] = record
-                time.sleep(.1)
-            assert all(r["state"] == "succeeded" for r in records.values()), {k: r["error"] for k, r in records.items()}
-            assert agent.hub_features >= {"blobs", "graph"}
-
-            def fetch(digest):
-                response = http.get("/api/v1/blobs/" + digest, headers=AUTH)
-                assert response.status_code == 200
-                return response.content
-            check_graph_result(records["graph"]["result"], fetch)
-            decode(records["graph"]["result"]["outputs"]["payload"]["manifest"], fetch)
-            assert records["events"]["result"]["terminal"] is True
-            device = next(d for d in http.get("/api/v1/devices", headers=AUTH).json() if d["id"] == node["device_id"])
-            assert device["online"] and device["snapshot"]["features"] == AGENT_FEATURES
+            try:
+                yield http, node["device_id"], agent
+            finally:
+                loop.call_soon_threadsafe(agent_task.cancel)
+                thread.join(timeout=10)
+                assert not thread.is_alive(), "NodeAgent did not stop"
+                loop.close()
     finally:
-        if "task" in holder:
-            loop.call_soon_threadsafe(holder["task"].cancel)
         server.should_exit = True
         server_thread.join(timeout=10)
+
+
+def test_agent_loop_over_loopback_http_and_websocket(runtime, fake_sdk, loopback_graph_hub):
+    pytest.importorskip("numpy")
+    pytest.importorskip("matplotlib")
+    from suan.render.payload import decode
+    client, supervisor, _, _ = runtime
+    task_id = muferro_task(client, supervisor)
+    http, node_id, agent = loopback_graph_hub
+    actions = {
+        "graph": {"kind": "graph.evaluate", "payload": {
+            "graph": muferro_graph(), "bindings": {"run": {"task_id": task_id}},
+            "outputs": ["payload", "energy_plot", "energy_png", "energy"]}},
+        "logs": {"kind": "task.logs", "payload": {"task_id": task_id}},
+        "events": {"kind": "task.events", "payload": {"task_id": task_id}},
+    }
+    ids = {}
+    for name, body in actions.items():
+        ids[name] = uuid.uuid4().hex
+        response = http.post("/api/v1/actions", headers=AUTH, json={"id": ids[name], "node_id": node_id, **body})
+        assert response.json()["state"] == "queued", response.text
+    deadline = time.monotonic() + 90
+    records = {}
+    while len(records) < len(ids):
+        assert time.monotonic() < deadline, records
+        for name, identity in ids.items():
+            record = http.get("/api/v1/actions/" + identity, headers=AUTH).json()
+            if record["state"] != "queued":
+                records[name] = record
+        time.sleep(.1)
+    assert all(r["state"] == "succeeded" for r in records.values()), {k: r["error"] for k, r in records.items()}
+    assert agent.hub_features >= {"blobs", "graph"}
+
+    def fetch(digest):
+        response = http.get("/api/v1/blobs/" + digest, headers=AUTH)
+        assert response.status_code == 200
+        return response.content
+    check_graph_result(records["graph"]["result"], fetch)
+    decode(records["graph"]["result"]["outputs"]["payload"]["manifest"], fetch)
+    assert records["events"]["result"]["terminal"] is True
+    device = next(d for d in http.get("/api/v1/devices", headers=AUTH).json() if d["id"] == node_id)
+    assert device["online"] and device["snapshot"]["features"] == AGENT_FEATURES
+
+
+def test_agent_reads_pinned_mupro_hdf5_from_completed_runtime_task(runtime, loopback_graph_hub, tmp_path):
+    np = pytest.importorskip("numpy")
+    h5py = pytest.importorskip("h5py")
+    from conftest import finish
+    from suan.render.payload import decode
+
+    client, supervisor, _, _ = runtime
+    http, node_id, _ = loopback_graph_hub
+    code = http.post("/api/v1/pairings", json={"role": "client"}, headers=AUTH).json()["code"]
+    viewer = http.post("/api/v1/pairings/claim", json={"code": code, "name": "HDF5 viewer"}).json()
+    viewer_auth = {"Authorization": "Bearer " + viewer["token"]}
+    fixture = tmp_path / "fixture.h5"
+    values = np.arange(72, dtype=np.float32).reshape(4, 3, 2, 3) / 8
+    selector = "/t00000002/Polar"
+    with h5py.File(fixture, "w") as container:
+        container.create_dataset(selector, data=values)
+        container.create_dataset("/t00000004/Polar", data=values + 64)
+    workspace = client.create_workspace("Synthetic HDF5 artifact")["id"]
+    assert client.upload(workspace, fixture)["completed"]
+    artifact_path = "case/run.h5"
+    task = client.submit({"workspace_id": workspace, "inputs": [fixture.name], "outputs": [artifact_path],
+                          "argv": ["{python}", "-c", "from pathlib import Path; from shutil import copyfile; "
+                                   "Path('case').mkdir(); copyfile('fixture.h5', 'case/run.h5')"]})
+    task_id = task["id"]
+    assert finish(client, supervisor, task_id, timeout=60)["state"] == "succeeded"
+    artifact = next(a for a in client.artifacts(task_id) if a["path"] == artifact_path)
+    digest = artifact["sha256"]
+    assert digest == hashlib.sha256(fixture.read_bytes()).hexdigest()
+    assert artifact["size"] == fixture.stat().st_size
+
+    # Select a non-final frame and request lossless volume encoding in the Web profile.
+    source = {"binding": "run", "path": artifact_path, "expected_sha256": digest}
+    graph = {
+        "schema": "stk.graph/1", "catalog": {"stk": 1},
+        "nodes": [
+            {"id": "fields", "type": "stk.source.mupro_hdf5_fields@1", "params": source},
+            {"id": "field", "type": "stk.source.mupro_hdf5@1", "params": {**source, "selector": selector}},
+            {"id": "component", "type": "stk.filter.calculator@1", "inputs": {"in": {"from": "field.out"}},
+             "params": {"operation": "component", "field": "Polar", "component": 0, "keep_input": False}},
+            {"id": "volume", "type": "stk.render.volume@1", "inputs": {"in": {"from": "component.out"}},
+             "params": {"encoding": "f32"}},
+            {"id": "scene", "type": "stk.view.scene@1", "inputs": {"layers": [{"from": "volume.layer"}]}},
+        ],
+        "outputs": {"fields": "fields.out", "view": "scene.scene"},
+    }
+    request = {"graph": graph, "bindings": {"run": {"task_id": task_id}}, "profile": "web"}
+
+    def evaluate(payload):
+        action = evaluate_action(payload, node_id)
+        response = http.post("/api/v1/actions", headers=viewer_auth, json=action)
+        assert response.status_code == 202 and response.json()["state"] == "queued", response.text
+        deadline = time.monotonic() + 30
+        while True:
+            response = http.get("/api/v1/actions/" + action["id"], headers=viewer_auth)
+            assert response.status_code == 200, response.text
+            record = response.json()
+            if record["state"] != "queued":
+                return record
+            assert time.monotonic() < deadline, record
+            time.sleep(.05)
+
+    # Start with an empty Hub blob store, so a wrong pin cannot hide publication behind deduplication.
+    wrong = copy.deepcopy(graph)
+    wrong["nodes"][1]["params"]["expected_sha256"] = ("1" if digest[0] == "0" else "0") + digest[1:]
+    refused = evaluate({**request, "graph": wrong, "outputs": ["view"]})
+    assert (refused["state"], refused["result"]) == ("failed", None)
+    assert "invalid_data" in refused["error"] and "expected SHA-256" in refused["error"]
+    assert not any(path.is_file() for path in (tmp_path / "control" / "blobs").rglob("*"))
+
+    accepted = evaluate(request)
+    assert accepted["state"] == "succeeded", accepted["error"]
+    outputs = accepted["result"]["outputs"]
+    assert outputs["fields"] == {"type": "value", "value": {
+        "path": artifact_path, "size": artifact["size"], "sha256": digest, "reader": "mupro.hdf5@1",
+        "fields": [
+            {"selector": f"/t{step:08d}/Polar", "step": step, "name": "Polar",
+             "shape": [4, 3, 2, 3], "dtype": "float32"}
+            for step in (2, 4)
+        ],
+    }}
+    assert outputs["view"]["type"] == "payload"
+    manifest = outputs["view"]["manifest"]
+    assert manifest["source"]["time"] == {"step": 2, "time": None}
+
+    def fetch(digest):
+        response = http.get("/api/v1/blobs/" + digest, headers=viewer_auth)
+        assert response.status_code == 200
+        assert hashlib.sha256(response.content).hexdigest() == digest
+        return response.content
+
+    payload = decode(manifest, fetch)
+    volume = payload.layer("volume")
+    assert volume["grid"]["dimensions"] == [4, 3, 2]
+    assert volume["name"] == "Polar_x" and volume["unit"] == "unspecified"
+    data = payload.array(volume["data"])
+    assert data.dtype == np.dtype("float32")
+    np.testing.assert_array_equal(data, values[..., 0].transpose(2, 1, 0).ravel())
+    assert [record["id"] for record in client.tasks()] == [task_id]
