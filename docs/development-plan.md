@@ -1,5 +1,15 @@
 # STK 开发计划
 
+## 2026-11-10 22:03 UTC · Web 明确读取 MuPRO HDF5
+
+`db432922` 集成独立候选 `1dd5d2e8`，并保留本地任务页运行环境折叠。Web 的成功 Runtime 任务有唯一 `case/run.h5`、发布摘要和有效大小时，图谱顶部提供「MuPRO HDF5」。明确列出后，用户选择读取器返回的场与确切步号，多分量场再选从 0 开始的分量。列表与帧请求都绑定原任务和整个容器的摘要。原生 shape 和 dtype、网格坐标及未知物理单位在面板中显示。Viewer 接纳实际图层后才更新来源，摘要不符、无效列表、错误步号、失败图层或迟到回执保留当前画面。两次明确读取可在 Hub 操作记录追踪，选项编辑不会发起求值。
+
+独立候选构建、字段请求与数值对照 3/3、最终完整 Web 174/174。首轮一个既有日志用例在模拟时钟准备阶段遇到向过去快进，原用例双宽度 2/2 及完整重跑通过。Root 整合生产构建及 Web 180/180，零跳过及重试。旧版底部入口在固定起点未完全进入视口的反例已复现，上移后五个交互检查点的外层和窗口滚动均为 0。确切补丁、构建与回归收据在外部 `root-delivery-20261110-144/web-mupro-hdf5` 与 `root-delivery-20261110-145/web-hdf5-root`。
+
+Root 以整合产物连接真实本机 Hub、NodeAgent WebSocket 和 Runtime，使用合成 HDF5 生产任务及另一个普通 DAT 任务。中文 Chromium 1440×900 和 390×844，固定起点为成功任务已选、结果图谱已打开、外层滚动 0。打开矢量帧两端均为 4 次点击、1 次字段选择和1 次分量输入，零滚轮，所有目标操作前都完全在视口内。选择 `/t00000002/Polar` 的分量 1，容器另有第 4 步。来源显示正确任务、运行工作区、SHA、selector、分量及第 2 步。随后打开同一第 2 步 Scalar，验证单分量路径，再切换到普通 DAT 预设。每端只有列出、矢量打开、标量打开、DAT 计算四项明确图谱动作。来源展开及收起没有新增动作。API 数值对照核验两组各 24 个原始 `float32` 体素。该验收使用合成产物和软件渲染，真实许可求解仍待验证。实测收据在外部 `root-delivery-20261110-144/hdf5-live-proof/integrated-browser`。 [使用指南](https://github.com/sijintech/stk/blob/main/docs/simulation-muferro.md#mupro-hdf5-结果补充)
+
+原生 `8947053d` 的最终完整项目套件 967/967，零跳过与失败，887.629 秒，证据在外部 `root-delivery-20261110-144/native-current-full.*`。远端 `main` 仍为 `a64941b4`。该头两项 Linux 打包、Secret scan 和 Pages 已通过，Desktop 其余作业及 Runtime 仍运行。本节 HDF5 入口在本地 `main`，下一次推送等待该头的整轮 Desktop 终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42908396134) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42908396193)
+
 ## 2026-11-10 21:49 UTC · 主线发布与任务页运行环境
 
 远端 `main` 已由 `9ce87c63` 快进至 `a64941b4`，推送后核对全 SHA 一致。上一批 Desktop 整轮终态见下一节。推送范围 15 个提交的 gitleaks 通过。新头 Secret scan 通过，Desktop 与 Runtime 已开始。原生阅读位置、Web 图谱真实来源、MuPRO HDF5 三跳验收及可选 Cocoa 对照均包含在本次推送。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42908396134) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42908396193)
