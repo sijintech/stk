@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-10 16:52 UTC · 原生近期问答导航
+
+`159a21a6` 集成 `e88fd9f6` 的原生只读近期问答缓存及导航。支持当前项目和新桥接口时，宽屏左栏显示最近保存的未归档问答，窄窗用历史菜单。从任务、结果或工作台选择即打开原问答。列表变化时旧弹出菜单关闭。同项目打开期间共享一次在途读取，旧项目回执不能替换当前列表。Root 定向原生回归 62/62，零跳过，覆盖归档更新、旧回执与原编辑器复用。
+
+Linux X11/OpenGL，比例 1，英文 1600×1100 和中文 680×1000。固定任务页与结果页均已打开同一合成项目，含一条待处理和一条已完成问答，并预先输入草稿。英文两条路径各用 1 次点击，中文各用 2 次点击，先打开历史再选对应问题。另有 6 次设置、切页与回到结果的点击，每端各输入一次草稿，零键盘快捷键、滚轮或缩放。核对精确问题、保存来源、已完成回复和草稿。两端返回结果后，公开 `example.stkp` 第 1000 步的Viewer 画布逐像素一致。项目数据库字节一致，无任务、工作区、写入、发送或模型启动。较长标题在宽栏截短，悬停可读完整标签。新界面的 macOS 与 Windows 实窗待验证。证据见 `root-delivery-20261110-129/rail-native.xml` 与 `rail-window-proof/window-{en-wide,zh-narrow}/window-receipt.json`。
+
+前一批已推送 `79ea12f4`。推送前核对 `3c4f9bf9` 整轮终态，Desktop 5/6 作业通过。Linux 2177/2177、Windows CPU 1488/1488、Windows 原生 6/6。macOS 原生 4/6，首次可见暂停失败见上一节。`79ea12f4` 的 Secret scan 与文档部署通过，Desktop 仍运行，Runtime 排队。本节的近期问答提交仅在本地，待 `79ea12f4` 的 Desktop 整轮终态后推送。PR #53/#54 的原头分别为旧冲突补丁与旧交接，均未集成。 [新头 Desktop](https://github.com/sijintech/stk/actions/runs/42857730640) · [新头 Runtime](https://github.com/sijintech/stk/actions/runs/42857730952)
+
 ## 2026-11-10 16:43 UTC · 上一远端头 Desktop 终态
 
 远端 `3c4f9bf9` 的 Desktop 于 16:43:32 UTC 整轮结束，6 个作业均到终态。Linux 三个作业、Windows CPU 与 Windows 原生通过，macOS 原生必验失败。macOS CPU 1548/1548、Metal 254/254。原生必验 4/6，MP4 与 HTML 均在首次可见暂停低于 0.05 秒下限。两份 270–290 ms 被动延迟对照均在观察窗口内取得稳定暂停。Runtime 13/13 已通过。本次终态满足推送前提，随后推送截至 `4442342e` 的已验证批次及本记录。新头的桌面平台验证以其自身 CI 为准。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42845291750) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42845291916) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42845291750/artifacts/13783327194)
