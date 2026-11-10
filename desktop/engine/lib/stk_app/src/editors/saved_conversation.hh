@@ -3,6 +3,8 @@
 
 #include <string>
 
+#include "stk/io/json.hh"
+
 namespace stk::app {
 class Editor;
 class ProjectState;
@@ -13,4 +15,8 @@ bool can_reveal_saved_conversation(const Editor &editor, const ProjectState &pro
 bool saved_conversation_dispatch_safe(const Editor &editor, ProjectState &project, const std::string &request_id);
 /** Select the saved exchange for display, preserving the editor's compose draft. */
 bool reveal_saved_conversation(Editor &editor, ProjectState &project, const std::string &request_id);
+/** Select a saved agent session for display without starting a turn. */
+bool reveal_saved_agent_session(Editor &editor, ProjectState &project, const std::string &session_id);
+/** One readable line from the saved session summary. */
+std::string agent_session_label(const io::Json &session);
 }  // namespace stk::app

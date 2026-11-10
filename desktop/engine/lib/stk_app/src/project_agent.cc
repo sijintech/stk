@@ -117,7 +117,7 @@ bool ProjectAgent::call(const std::string &method, Json params, std::function<vo
 }
 
 bool ProjectAgent::read(const std::string &method, Json params, bool &flight, std::function<void(const Json &)> done,
-                        std::function<void()> failed)
+                        std::function<void()> failed, const bool selection_scoped)
 {
   if (!supported() || flight) { return false; }
   const auto handle = project_.project()->handle;
@@ -125,12 +125,16 @@ bool ProjectAgent::read(const std::string &method, Json params, bool &flight, st
   flight = true;
   const std::weak_ptr<bool> weak = alive_;
   const auto epoch = epoch_;
+  const auto selection = selection_;
   bridge::CallOptions options;
   options.retry = bridge::CallOptions::Retry::Never;
   options.timeout_s = 15;
   store_.bridge()->call(method, params, options).then(
-      [this, weak, epoch, handle, &flight, done = std::move(done), failed = std::move(failed)](bridge::Result<Json> result) {
+      [this, weak, epoch, selection, selection_scoped, handle, &flight, done = std::move(done),
+       failed = std::move(failed)](bridge::Result<Json> result) {
     if (!weak.lock() || epoch != epoch_ || !project_.project() || project_.project()->handle != handle) { return; }
+    // Switching away and back to the same session ID is a new selection: its own read owns ``flight`` now.
+    if (selection_scoped && selection != selection_) { return; }
     flight = false;
     if (!result.ok()) {
       error_ = result.error().message;
@@ -181,6 +185,36 @@ bool ProjectAgent::load_list()
   });
 }
 
+bool ProjectAgent::sync_session_list()
+{
+  // supported() first, as in pump: an early call must not mark the list asked before it can be read.
+  if (!supported() || list_asked_ || list_reading_) { return false; }
+  return load_list();
+}
+
+bool ProjectAgent::history_selection_available() const
+{
+  // What select() would drop: a deferred start, a lost create/say's IDs (a retry reuses them), the unsurfaced sent
+  // text. busy_ covers every call in flight. Unconfirmed targets and run decisions survive selection by design.
+  return !busy_ && !start_pending_ && attempt_.turn_id.empty() && sent_.empty();
+}
+
+bool ProjectAgent::select_history_session(const std::string &session_id)
+{
+  if (session_id.empty() || !supported() || !history_selection_available()) { return false; }
+  if (selected_ != session_id) {
+    error_.clear();
+    select(session_id);
+  }
+  else if (view_.empty() && !view_reading_) {
+    error_.clear();
+    view_pending_ = true;
+    ++version_;
+    store_.changed();
+  }
+  return true;
+}
+
 void ProjectAgent::select(const std::string &session_id)
 {
   if (session_id == selected_) { return; }
@@ -191,6 +225,7 @@ void ProjectAgent::select(const std::string &session_id)
   run_plans_.clear();
   view_ = Json::object(); verification_ = Json::object();
   was_running_ = false;
+  view_reading_ = false;  // an earlier selection's read no longer holds the guard; its reply is dropped
   view_pending_ = !session_id.empty();
   ++version_;
   store_.changed();
@@ -495,7 +530,8 @@ double ProjectAgent::pump(const double now)
   if (view_pending_ || (following && now >= due_)) {
     view_pending_ = false;
     if (now > 0) { due_ = now + kFollowSeconds; }
-    read("project.agent.get", {{"session_id", selected_}}, view_reading_, [this](const Json &result) { adopt(result); });
+    read("project.agent.get", {{"session_id", selected_}}, view_reading_, [this](const Json &result) { adopt(result); },
+         {}, true);
     return kNever;
   }
   return following ? due_ : kNever;

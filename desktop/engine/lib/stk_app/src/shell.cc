@@ -10,6 +10,7 @@
 #include <filesystem>
 
 #include "stk/app/editor_area.hh"
+#include "stk/app/project_agent.hh"
 #include "stk/app/project_attention.hh"
 #include "stk/app/project_discussion.hh"
 #include "stk/app/project_state.hh"
@@ -297,11 +298,17 @@ void AppShell::activate_editor_later(wm::Screen *screen, std::string editor_id, 
   });
 }
 
-std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, std::string request_id)
+std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, std::string id,
+                                                         const SavedConversationKind kind)
 {
   auto *screen = origin.screen();
   auto &project = store_.project();
-  if (!screen || !project.project() || request_id.empty()) { return {}; }
+  if (!screen || !project.project() || id.empty()) { return {}; }
+  const bool agent_session = kind == SavedConversationKind::AgentSession;
+  if (agent_session && (project.busy() || !project.agent().supported() ||
+                        !project.agent().history_selection_available())) {
+    return {};
+  }
   const auto handle = project.project()->handle;
   const auto project_id = project.project()->id;
   const auto scope = store_.project_scope_epoch();
@@ -309,45 +316,60 @@ std::function<void()> AppShell::saved_conversation_action(EditorArea &origin, st
   const auto visibility = screen->visibility_epoch();
   const auto activity = origin.activity_epoch();
   const auto exchange = project.discussion().exchange_generation();
+  const auto selection = project.agent().selection_epoch();
+  const auto navigation = saved_conversation_epoch_;
   const auto editor = origin.editor().lifetime();
   const auto weak = lifetime();
   const auto current = [this, weak, screen, area = &origin, editor, activity, visibility,
-                        handle, project_id, scope, bridge, exchange] {
+                        handle, project_id, scope, bridge, exchange, selection, navigation] {
     if (weak.expired() || editor.expired() || !has_screen(screen) || !has_area(area) ||
         area->screen() != screen || area->activity_epoch() != activity ||
         screen->visibility_epoch() != visibility || store_.bridge_epoch() != bridge ||
-        store_.project_scope_epoch() != scope) { return false; }
+        store_.project_scope_epoch() != scope || saved_conversation_epoch_ != navigation) { return false; }
     auto &state = store_.project();
     return state.project() && state.project()->handle == handle && state.project()->id == project_id &&
-           state.discussion().exchange_generation() == exchange;
+           state.discussion().exchange_generation() == exchange && state.agent().selection_epoch() == selection;
   };
-  return [this, screen, current, request_id = std::move(request_id)] {
+  return [this, screen, current, id = std::move(id), agent_session] {
     if (!current()) { return; }
-    screen->defer([this, screen, current, request_id] {
+    screen->defer([this, screen, current, id, agent_session] {
       if (!current()) { return; }
       auto &state = store_.project();
       state.sync();
       if (!current() || !state.ready() || !state.loaded() || state.busy() || text_input_active() ||
-          !state.discussion().generation_supported() || state.discussion().busy() || state.discussion().exchange_busy()) {
+          !state.discussion().generation_supported()) {
         return;
       }
-      for (const auto *other : screens_) {
-        for (const auto *base : other->areas()) {
-          const auto *area = dynamic_cast<const EditorArea *>(base);
-          if (area && !saved_conversation_dispatch_safe(area->editor(), state, request_id)) { return; }
+      if (agent_session) {
+        if (!state.agent().supported() || !state.agent().history_selection_available()) { return; }
+      }
+      else if (state.discussion().busy() || state.discussion().exchange_busy()) { return; }
+      const bool focused = workbench_is_focused(*screen);
+      if (!agent_session || !focused) {
+        // Leaving an ordinary maximized area reveals the other active editors on this screen.
+        const auto &request = agent_session ? state.discussion().exchange_id() : id;
+        for (const auto *other : screens_) {
+          if (agent_session && other != screen) { continue; }
+          for (const auto *base : other->areas()) {
+            const auto *area = dynamic_cast<const EditorArea *>(base);
+            if (area && !saved_conversation_dispatch_safe(area->editor(), state, request)) { return; }
+          }
         }
       }
-      const bool focused = workbench_is_focused(*screen);
       const auto result = activate_editor_if(screen, kEditorAI, focused, [&](const Editor &destination) {
         return can_reveal_saved_conversation(destination, state) &&
-               saved_conversation_dispatch_safe(destination, state, request_id);
+               (agent_session || saved_conversation_dispatch_safe(destination, state, id));
       });
       if (!result) {
         if (store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
         return;
       }
       auto *area = dynamic_cast<EditorArea *>(screen->find_area(io::get_string(result.value(), "area_id")));
-      if (!area || !reveal_saved_conversation(area->editor(), state, request_id)) { return; }
+      if (!area) { return; }
+      const bool opened = agent_session ? reveal_saved_agent_session(area->editor(), state, id) :
+                                          reveal_saved_conversation(area->editor(), state, id);
+      if (!opened) { return; }
+      ++saved_conversation_epoch_;
       if (focused) { focused_workbenches_[screen] = screen->visibility_epoch(); }
       store_.changed();
     });
@@ -859,67 +881,102 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
                                                         shell_.store_.tr("script.no_project");
       nav.label(name).tip(name);
     }
-    build_recent_questions(nav, project, static_cast<EditorArea &>(*area()));
+    build_history(nav, project, static_cast<EditorArea &>(*area()));
   }
 
  private:
-  void build_recent_questions(ui::Layout &nav, ProjectState &project, EditorArea &origin)
+  void build_history(ui::Layout &nav, ProjectState &project, EditorArea &origin)
   {
     auto &discussion = project.discussion();
-    if (!discussion.recent_requests_supported() || !discussion.generation_supported()) { return; }
-    discussion.sync_recent_requests();
-    const auto *questions = discussion.recent_requests();
-    const auto &error = discussion.recent_requests_error();
+    if (!discussion.generation_supported()) { return; }
+    auto &agent = project.agent();
+    const bool questions_supported = discussion.recent_requests_supported();
+    const bool agents_supported = agent.supported();
+    if (!questions_supported && !agents_supported) { return; }
+    if (questions_supported) { discussion.sync_recent_requests(); }
+    if (agents_supported) { agent.sync_session_list(); }
+    const bool show_agents = agents_supported &&
+                             (!questions_supported || !agent.list_loaded() || !agent.sessions().empty());
     const auto &info = *project.project();
     const auto scope = shell_.store_.project_scope_epoch();
     const auto refresh = [shell = &shell_, weak = shell_.lifetime(), scope] {
       if (!weak.expired() && shell->store_.project_scope_epoch() == scope) {
-        shell->store_.project().discussion().refresh_recent_requests();
+        auto &state = shell->store_.project();
+        if (state.discussion().recent_requests_supported()) { state.discussion().refresh_recent_requests(); }
+        if (state.agent().supported()) { state.agent().load_list(); }
       }
     };
-    const bool can_open = !project.busy() && !discussion.busy() && !discussion.exchange_busy();
-    const std::string title(shell_.store_.tr("workbench.history.recent"));
     const std::string refresh_label(shell_.store_.tr("ai.refresh_history"));
-    std::string identity = "recent_questions/" + info.handle;
+    std::string identity = "workbench_history/" + info.handle;
     auto *rail = rail_ ? &nav.scope(identity) : nullptr;
     const auto &style = nav.ctx().style();
     const float menu_text_width = std::max(1.0f, float(origin.screen()->rect().width()) -
                                                    2 * style.text_margin - style.unit);
     std::vector<ui::MenuEntry> menu;
-    if (rail) {
-      rail->separator();
-      rail->label(title);
-    }
-    if (questions) {
-      for (const auto &question : *questions) {
-        const auto id = io::get_string(question, "request_id");
-        const auto label = io::get_string(question, "label");
-        const auto text = mark(id == discussion.exchange_id(), label);
-        auto open = shell_.saved_conversation_action(origin, id);
-        const bool enabled = can_open && bool(open);
-        if (rail) {
-          rail->button("workbench_question/" + id, text, std::move(open)).disable(!enabled).tip(label);
-        }
-        else {
-          identity += "/" + id;
-          menu.push_back({ui::clip_text(text, menu_text_width, nav.ctx().measurer(), style.font),
-                          std::move(open), enabled});
+    const auto status = [&](std::string_view key, std::string_view tooltip = {}) {
+      const auto text = shell_.store_.tr(key);
+      if (rail) { rail->label(text).tip(tooltip); }
+      else {
+        identity += "/" + std::string(key);
+        menu.push_back({std::string(text), {}, false});
+      }
+    };
+    const auto heading = [&](std::string_view key) {
+      if (rail) { rail->separator(); }
+      if (rail || (questions_supported && show_agents)) { status(key); }
+    };
+    const auto item = [&](const char *prefix, const std::string &id, const std::string &label,
+                          const SavedConversationKind kind, const bool selected, const bool can_open) {
+      if (id.empty()) { return; }
+      const auto text = mark(selected, label);
+      auto open = shell_.saved_conversation_action(origin, id, kind);
+      const bool enabled = can_open && bool(open);
+      const auto key = std::string(prefix) + "/" + id;
+      if (rail) { rail->button(key, text, std::move(open)).disable(!enabled).tip(label); }
+      else {
+        identity += "/" + key;
+        menu.push_back({ui::clip_text(text, menu_text_width, nav.ctx().measurer(), style.font),
+                        std::move(open), enabled});
+      }
+    };
+    if (questions_supported) {
+      heading("workbench.history.recent");
+      const auto *questions = discussion.recent_requests();
+      const auto &error = discussion.recent_requests_error();
+      if (questions) {
+        const bool can_open = !project.busy() && !discussion.busy() && !discussion.exchange_busy();
+        for (const auto &question : *questions) {
+          const auto id = io::get_string(question, "request_id");
+          item("workbench_question", id, io::get_string(question, "label"), SavedConversationKind::Question,
+               id == discussion.exchange_id(), can_open);
         }
       }
+      if (!error.empty() || !questions || questions->empty()) {
+        status(!error.empty() ? "workbench.history.unavailable" :
+               questions ? "workbench.history.empty" : "workbench.history.loading", error);
+      }
     }
-    if (!error.empty() || !questions || questions->empty()) {
-      const auto status = shell_.store_.tr(!error.empty() ? "workbench.history.unavailable" :
-                                         questions ? "workbench.history.empty" : "workbench.history.loading");
-      if (rail) { rail->label(status).tip(error); }
-      else { menu.push_back({std::string(status), {}, false}); }
+    if (show_agents) {
+      heading("workbench.history.agent_sessions");
+      constexpr size_t max_recent_sessions = 5;
+      const bool can_open = !project.busy() && agent.history_selection_available();
+      for (size_t index = 0; index < std::min(agent.sessions().size(), max_recent_sessions); ++index) {
+        const auto &session = agent.sessions()[index];
+        const auto id = io::get_string(session, "id");
+        item("workbench_agent_session", id, agent_session_label(session), SavedConversationKind::AgentSession,
+             id == agent.selected(), can_open);
+      }
+      if (agent.sessions().empty()) {
+        status(agent.list_loaded() ? "workbench.history.agent_empty" :
+               agent.error().empty() ? "workbench.history.agent_loading" : "workbench.history.unavailable", agent.error());
+      }
     }
     if (rail) { rail->button("workbench_refresh_history", refresh_label, refresh); }
     else {
       // A popup dispatches by row index. Close it when a refresh or project switch replaces the rows.
-      if (!error.empty()) { identity += "/error"; }
       menu.push_back({refresh_label, refresh});
       nav.scope(identity).menu_button("workbench_history", shell_.store_.tr("workbench.nav.history"), std::move(menu))
-          .tip(error.empty() ? info.name : error);
+          .tip(info.name);
     }
   }
 

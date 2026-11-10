@@ -34,6 +34,7 @@ from suan.desktop_bridge.protocol import BridgeError
 
 control = Path(sys.argv.pop(1))
 original_init = server.Bridge.__init__
+original_send = server.Bridge.send
 original_validate = server.bridge_schema.validate_params
 server.bridge_schema.validate_params = lambda m, p: [] if m.startswith('project.agent.') else original_validate(m, p)
 
@@ -41,6 +42,7 @@ def init(self, *args, **kwargs):
     original_init(self, *args, **kwargs)
     sessions = {}
     calls_lock = threading.Lock()
+    gets = [0]  # selected-session reads (no limit), numbered in the order the service takes them
     def session(identity):
         if identity not in sessions:
             item = {'item_id': 'approve:' + identity, 'kind': 'start_run', 'run_id': 'run:' + identity,
@@ -50,8 +52,27 @@ def init(self, *args, **kwargs):
                 'run_approvals': [{'item': item, 'decision': None, 'receipt': None}]}
         return sessions[identity]
     def action(method, p):
+        serial = None
         with calls_lock, (control / 'calls.jsonl').open('a', encoding='utf-8') as out:
             out.write(json.dumps({'method': method, 'params': p}) + '\n')
+            if method == 'get' and 'limit' not in p:
+                gets[0] += 1
+                serial = gets[0]
+        if serial is not None:
+            # Per-call tokens: get N is held while hold_get existed when it arrived, until release_N; fail_get_N
+            # makes it an error. The send wrapper records when the actual response has been written.
+            if (control / 'hold_get').exists():
+                (control / ('held_%d' % serial)).write_text('held')
+                deadline = time.monotonic() + 10
+                while not (control / ('release_%d' % serial)).exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+            if (control / ('fail_get_%d' % serial)).exists():
+                raise BridgeError('unavailable', 'fixture get failure %d' % serial)
+            result = copy.deepcopy(session(p.get('session_id', 'session-a')))
+            result['get_serial'] = serial  # same total for every read: only this tells old and new replies apart
+            if (control / 'omit_cards').exists():
+                result['run_approvals'] = []
+            return result
         if method == 'route':
             return {'choice': {'model': 'fixture', 'endpoint': 'local-fixture'}, 'candidates': []}
         if method == 'list':
@@ -60,6 +81,8 @@ def init(self, *args, **kwargs):
         card = v['run_approvals'][0]
         if method in ('create', 'say'):
             v['state'] = 'ready'
+            if (control / 'lose_say').exists():
+                raise BridgeError('unavailable', 'fixture lost message reply')
             return copy.deepcopy(v)
         if method == 'run_target':
             deadline = time.monotonic() + 30
@@ -113,7 +136,20 @@ def init(self, *args, **kwargs):
     for name in names:
         self.methods['project.agent.' + name] = lambda p, c, n=name: action(n, p)
 
+def send(self, message, method=None):
+    flushed = original_send(self, message, method)
+    if flushed and method == 'project.agent.get':
+        serial = message.get('result', {}).get('get_serial')
+        failure = message.get('error', {}).get('message', '')
+        prefix = 'fixture get failure '
+        if serial is None and failure.startswith(prefix):
+            serial = int(failure[len(prefix):])
+        if serial is not None:
+            (control / ('replied_%d' % serial)).write_text('replied')
+    return flushed
+
 server.Bridge.__init__ = init
+server.Bridge.send = send
 main()
 )PY";
 
@@ -192,6 +228,33 @@ class NativeAgentRuns : public ::testing::Test {
     ASSERT_TRUE(loop.pump_until([&] { return !agent().view().empty(); })) << agent().error();
   }
   Json item() { return agent().run_cards().at(0).at("item"); }
+  bool exists(const std::string &name) { return std::filesystem::exists(dir.path() / name); }
+  /** The selected-session reads (project.agent.get without a limit), in the order the service took them. */
+  std::vector<Json> gets()
+  {
+    std::vector<Json> items;
+    for (const auto &call : calls()) {
+      if (call.at("method") == "get" && !call.at("params").contains("limit")) { items.push_back(call); }
+    }
+    return items;
+  }
+  void held(int n) { ASSERT_TRUE(bridge::test::wait_until([&] { return exists("held_" + std::to_string(n)); }, 5)); }
+  /** Let held get ``n`` answer, then make sure its reply reached the controller: a later list reply follows it. */
+  void release(int n)
+  {
+    marker(("release_" + std::to_string(n)).c_str());
+    ASSERT_TRUE(bridge::test::wait_until([&] { return exists("replied_" + std::to_string(n)); }, 5));
+    auto answer = std::make_shared<std::optional<bridge::Result<Json>>>();
+    client->call("project.agent.list", {{"handle", state().project()->handle}, {"limit", 1}})
+        .then([answer](bridge::Result<Json> result) { *answer = std::move(result); });
+    ASSERT_TRUE(loop.pump_until([&] { return answer->has_value(); }, 10));
+    ASSERT_TRUE(answer->value().ok()) << answer->value().error().describe();
+  }
+  void list_ready()
+  {
+    agent().pump(0);
+    ASSERT_TRUE(loop.pump_until([&] { return agent().list_loaded() && agent().route_loaded(); })) << agent().error();
+  }
   const ui::Widget *widget(const std::string &id) { return f.screen.ui()->find("a2/main/" + id); }
   void frame() { f.screen.run_deferred(); f.drv->frame(); }
   void open_ui()
@@ -295,6 +358,173 @@ TEST_F(NativeAgentRuns, AnUnconfirmedSetReplyCannotRestoreContinueWhenItsSession
   EXPECT_TRUE(agent().target_pending()); EXPECT_FALSE(agent().start()); EXPECT_EQ(count("start"), 0u);
   ASSERT_TRUE(agent().set_run_target(Json())); settle();
   EXPECT_FALSE(agent().target_pending());
+}
+
+TEST_F(NativeAgentRuns, AHeldReadOfAnEarlierSelectionNeitherFillsTheReselectedSessionNorBlocksItsRead)
+{
+  ASSERT_NO_FATAL_FAILURE(list_ready());
+  marker("hold_get");
+  agent().select("session-a"); agent().pump(0);
+  ASSERT_NO_FATAL_FAILURE(held(1));
+  agent().select("session-b"); agent().select("session-a"); agent().pump(0);
+  ASSERT_NO_FATAL_FAILURE(held(2));  // the reselection reads at once; the earlier flight does not hold its guard
+  auto requests = gets(); ASSERT_EQ(requests.size(), 2u);
+  for (const auto &call : requests) { EXPECT_EQ(call.at("params").at("session_id"), "session-a"); }
+  ASSERT_NO_FATAL_FAILURE(release(1));
+  EXPECT_TRUE(agent().view().empty()) << agent().view().dump();  // same session ID, earlier selection
+  EXPECT_TRUE(agent().error().empty()) << agent().error();
+  agent().draft_changed(""); agent().pump(0); loop.run_ready();
+  EXPECT_EQ(gets().size(), 2u);  // the old completion did not clear the newer flight's guard
+  ASSERT_NO_FATAL_FAILURE(release(2));
+  ASSERT_TRUE(loop.pump_until([&] { return !agent().view().empty(); }));
+  EXPECT_EQ(io::get_int(agent().view(), "get_serial", 0), 2);
+  std::filesystem::remove(dir.path() / "hold_get");
+  agent().pump(0);  // the refresh asked while the current read was in flight still follows
+  ASSERT_TRUE(loop.pump_until([&] { return io::get_int(agent().view(), "get_serial", 0) == 3; }));
+  EXPECT_TRUE(agent().error().empty()) << agent().error();
+  EXPECT_EQ(count("start"), 0u); EXPECT_EQ(count("create"), 0u); EXPECT_EQ(count("say"), 0u);
+  EXPECT_EQ(count("run_target"), 0u); EXPECT_EQ(count("run_decide"), 0u);
+}
+
+TEST_F(NativeAgentRuns, ALateSuccessOfAnEarlierSelectionIsNotAdoptedForTheSameSessionID)
+{
+  ASSERT_NO_FATAL_FAILURE(list_ready());
+  marker("hold_get");
+  agent().select("session-a"); agent().pump(0);
+  ASSERT_NO_FATAL_FAILURE(held(1));
+  std::filesystem::remove(dir.path() / "hold_get");
+  agent().select("session-b"); agent().select("session-a");  // A -> B -> A before the first read answers
+  ASSERT_NO_FATAL_FAILURE(release(1));
+  EXPECT_TRUE(agent().view().empty()) << agent().view().dump();
+  agent().pump(0);
+  ASSERT_TRUE(loop.pump_until([&] { return !agent().view().empty(); }));
+  EXPECT_EQ(io::get_int(agent().view(), "get_serial", 0), 2);
+  EXPECT_EQ(gets().size(), 2u);
+}
+
+TEST_F(NativeAgentRuns, AnErrorOfAnEarlierSelectionIsNotShownButTheCurrentReadsErrorIs)
+{
+  ASSERT_NO_FATAL_FAILURE(list_ready());
+  marker("hold_get"); marker("fail_get_1"); marker("fail_get_2");
+  agent().select("session-a"); agent().pump(0);
+  ASSERT_NO_FATAL_FAILURE(held(1));
+  std::filesystem::remove(dir.path() / "hold_get");
+  agent().select("session-b"); agent().select("session-a");
+  ASSERT_NO_FATAL_FAILURE(release(1));
+  EXPECT_TRUE(agent().error().empty()) << agent().error();
+  EXPECT_TRUE(agent().view().empty());
+  agent().pump(0);  // the reselection's own read, which fails too
+  ASSERT_TRUE(loop.pump_until([&] { return !agent().error().empty(); }));
+  EXPECT_NE(agent().error().find("fixture get failure 2"), std::string::npos) << agent().error();
+  EXPECT_TRUE(agent().view().empty());
+  agent().draft_changed(""); agent().pump(0);  // its failure released the guard: a current refresh reads again
+  ASSERT_TRUE(loop.pump_until([&] { return io::get_int(agent().view(), "get_serial", 0) == 3; }));
+  EXPECT_EQ(gets().size(), 3u);
+}
+
+TEST_F(NativeAgentRuns, AHeldReadDoesNotDelayAnotherSessionOrTheNewSessionFallback)
+{
+  ASSERT_NO_FATAL_FAILURE(list_ready());
+  marker("hold_get");
+  agent().select("session-a"); agent().pump(0);
+  ASSERT_NO_FATAL_FAILURE(held(1));
+  std::filesystem::remove(dir.path() / "hold_get");
+  agent().select("session-b"); agent().pump(0);
+  ASSERT_TRUE(loop.pump_until([&] { return !agent().view().empty(); }, 10));
+  EXPECT_EQ(io::get_string(agent().view().at("session"), "id"), "session-b");
+  EXPECT_EQ(io::get_int(agent().view(), "get_serial", 0), 2);
+  agent().select(""); agent().pump(0);  // a new session's first message: nothing to read
+  EXPECT_EQ(gets().size(), 2u);
+  ASSERT_NO_FATAL_FAILURE(release(1));
+  EXPECT_EQ(agent().selected(), ""); EXPECT_TRUE(agent().view().empty());
+  EXPECT_TRUE(agent().error().empty()) << agent().error();
+  agent().select("session-a"); agent().pump(0);
+  ASSERT_TRUE(loop.pump_until([&] { return !agent().view().empty(); }));
+  EXPECT_EQ(io::get_int(agent().view(), "get_serial", 0), 3);
+  EXPECT_EQ(count("start"), 0u); EXPECT_EQ(count("create"), 0u);
+}
+
+TEST_F(NativeAgentRuns, AHeldReadOfAReplacedProjectOpeningIsIgnoredAfterReopening)
+{
+  ASSERT_NO_FATAL_FAILURE(list_ready());
+  marker("hold_get");
+  agent().select("session-a"); agent().pump(0);
+  ASSERT_NO_FATAL_FAILURE(held(1));
+  std::filesystem::remove(dir.path() / "hold_get");
+  ASSERT_TRUE(state().open(dir.str() + "/project"));
+  ASSERT_TRUE(loop.pump_until([&] { return !state().busy(); }));
+  ASSERT_TRUE(state().loaded()) << state().error();
+  EXPECT_EQ(agent().selected(), "");
+  ASSERT_NO_FATAL_FAILURE(list_ready());
+  ASSERT_NO_FATAL_FAILURE(release(1));
+  EXPECT_TRUE(agent().view().empty()); EXPECT_TRUE(agent().error().empty()) << agent().error();
+  agent().select("session-a"); agent().pump(0);
+  ASSERT_TRUE(loop.pump_until([&] { return !agent().view().empty(); }));
+  EXPECT_EQ(io::get_int(agent().view(), "get_serial", 0), 2);
+}
+
+TEST_F(NativeAgentRuns, SyncSessionListReadsOnlyTheListUnderItsGuardsAndTheSelectionEpochOnlyAdvances)
+{
+  ASSERT_TRUE(calls().empty());
+  const auto epoch = agent().selection_epoch();
+  agent().select("session-a");  // a session read is now pending; only pump sends it
+  EXPECT_EQ(agent().selection_epoch(), epoch + 1);
+  agent().select("session-a"); EXPECT_EQ(agent().selection_epoch(), epoch + 1);
+  ASSERT_TRUE(agent().sync_session_list());
+  EXPECT_FALSE(agent().sync_session_list());  // in flight
+  ASSERT_TRUE(loop.pump_until([&] { return agent().list_loaded(); }));
+  EXPECT_FALSE(agent().sync_session_list());  // asked once, until something changes
+  agent().draft_changed("");
+  const auto version = agent().version();
+  ASSERT_TRUE(agent().sync_session_list());
+  ASSERT_TRUE(loop.pump_until([&] { return agent().version() > version; }));
+  const auto requests = calls(); ASSERT_EQ(requests.size(), 2u);
+  for (const auto &call : requests) { EXPECT_EQ(call.at("method"), "list"); }
+  EXPECT_TRUE(agent().view().empty()); EXPECT_FALSE(agent().route_loaded()); EXPECT_FALSE(agent().busy());
+  agent().select("session-b"); agent().select("session-a");
+  EXPECT_EQ(agent().selection_epoch(), epoch + 3);
+  ASSERT_TRUE(state().open(dir.str() + "/project"));
+  ASSERT_TRUE(loop.pump_until([&] { return !state().busy(); }));
+  ASSERT_TRUE(state().loaded()) << state().error();
+  EXPECT_GT(agent().selection_epoch(), epoch + 3);  // reopening never repeats an earlier epoch
+  EXPECT_EQ(agent().selected(), "");
+  ASSERT_TRUE(agent().sync_session_list());  // reset forgets the asked list
+  ASSERT_TRUE(loop.pump_until([&] { return agent().list_loaded(); }));
+  EXPECT_EQ(count("list"), 3u); EXPECT_EQ(calls().size(), 3u);
+}
+
+TEST_F(NativeAgentRuns, HistorySelectionWaitsForExplicitSendsAndTheirUnsurfacedReceiptOnly)
+{
+  select();
+  EXPECT_TRUE(agent().history_selection_available());
+  marker("hold_target");
+  ASSERT_TRUE(agent().ask("Next", Json()));
+  EXPECT_FALSE(agent().history_selection_available());  // the send is in flight
+  ASSERT_TRUE(loop.pump_until([&] { return count("run_target") == 1; }));
+  EXPECT_FALSE(agent().history_selection_available());  // its explicit target is in flight
+  std::filesystem::remove(dir.path() / "hold_target"); settle();
+  EXPECT_EQ(count("start"), 1u);
+  EXPECT_FALSE(agent().history_selection_available());  // the sent text is not surfaced yet
+  EXPECT_EQ(agent().take_sent(), "Next");
+  EXPECT_TRUE(agent().history_selection_available());
+  marker("lose_say");
+  ASSERT_TRUE(agent().ask("Lost reply", Json())); settle();
+  EXPECT_FALSE(agent().error().empty());
+  EXPECT_FALSE(agent().history_selection_available());  // a second click must reuse the lost send's IDs
+  const auto before = calls().size();
+  const auto epoch = agent().selection_epoch();
+  agent().select("session-b");  // an explicit choice stays available and sends nothing
+  EXPECT_EQ(agent().selection_epoch(), epoch + 1); EXPECT_EQ(calls().size(), before);
+  EXPECT_TRUE(agent().history_selection_available());
+  std::filesystem::remove(dir.path() / "lose_say");
+  agent().pump(0); ASSERT_TRUE(loop.pump_until([&] { return !agent().view().empty(); }));
+  marker("target_fail");
+  ASSERT_TRUE(agent().set_run_target(Json()));
+  EXPECT_FALSE(agent().history_selection_available());
+  settle();
+  EXPECT_TRUE(agent().target_pending());  // an unconfirmed target survives selection by design
+  EXPECT_TRUE(agent().history_selection_available());
+  EXPECT_EQ(count("start"), 1u); EXPECT_EQ(count("run_decide"), 0u); EXPECT_EQ(count("say"), 2u);
 }
 
 TEST_F(NativeAgentRuns, ApprovalRequiresTheCompleteMatchingPlanAndCurrentRevision)

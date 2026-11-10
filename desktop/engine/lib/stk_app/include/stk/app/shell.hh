@@ -156,8 +156,10 @@ class AppShell {
    * is allowed only for workspace/project management. Checks all windows for active input. */
   void open_project_page_later(wm::Screen *screen, std::string page, std::string handle,
                                std::function<bool()> valid = {}, std::string table_id = {}, std::string record_id = {});
-  /** Open an exact saved question in the current project without changing the saved record. */
-  std::function<void()> saved_conversation_action(EditorArea &origin, std::string request_id);
+  enum class SavedConversationKind { Question, AgentSession };
+  /** Open an exact saved question or agent session in the current project for reading. */
+  std::function<void()> saved_conversation_action(EditorArea &origin, std::string id,
+      SavedConversationKind kind = SavedConversationKind::Question);
   /** Deferred: show `target` (Editor::navigate) in an `editor_id` tab of the same area while
    * `origin` is still that area's active editor, reusing such a tab or adding one. A refusing
    * editor leaves the area as it was and its reason is shown as a toast. separate_object preserves
@@ -273,6 +275,7 @@ class AppShell {
   };
   std::map<const wm::Screen *, WorkModes> work_modes_;
   std::map<const wm::Screen *, uint64_t> focused_workbenches_;
+  uint64_t saved_conversation_epoch_ = 0;
   WorkModeLayout capture_work_mode(const wm::Screen &screen) const;
   WorkModeLayout adapt_work_mode(const wm::Screen &screen, const WorkModeLayout &saved) const;
   nlohmann::json capture_work_modes(const wm::Screen &screen) const;

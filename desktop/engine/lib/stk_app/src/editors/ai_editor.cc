@@ -9,6 +9,7 @@
 #include "stk/app/project_state.hh"
 #include "stk/app/project_table_view.hh"
 #include "stk/app/shell.hh"
+#include "stk/core/utf8.hh"
 #include "stk/wm/window.hh"
 #include "stk/ui/utf8.hh"
 #include "archive_controls.hh"
@@ -1246,6 +1247,15 @@ class AIEditor final : public Editor {
     return true;
   }
 
+  bool reveal_saved_agent(ProjectState &state, const std::string &session_id)
+  {
+    auto &agent = state.agent();
+    if (!agent.select_history_session(session_id)) { return false; }
+    const auto &project = *state.project();
+    project_draft(project, project.directory + "\n" + project.id).intent = kAgentIntent;
+    return true;
+  }
+
   /** {"session_id"}: show that agent session (for example from a Home attention item). */
   bool navigate(const nlohmann::json &target, const std::weak_ptr<void> &, std::string &) override
   {
@@ -1362,9 +1372,8 @@ class AIEditor final : public Editor {
     std::vector<std::string> ids = {""}, titles = {std::string(ctx.tr("ai.agent.new_session"))};
     for (const auto &session : agent.sessions()) {
       ids.push_back(io::get_string(session, "id"));
-      auto first = io::get_string(session, "first_message");
-      if (first.size() > 60) { first = first.substr(0, 57) + "..."; }
-      titles.push_back(first + " · " + std::string(catalog.tr_or("ai.agent.state." + io::get_string(session, "state"), io::get_string(session, "state"))));
+      titles.push_back(agent_session_label(session) + " · " +
+          std::string(catalog.tr_or("ai.agent.state." + io::get_string(session, "state"), io::get_string(session, "state"))));
     }
     if (!agent.selected().empty() && std::find(ids.begin(), ids.end(), agent.selected()) == ids.end()) {
       ids.push_back(agent.selected()); titles.push_back(agent.selected().substr(0, 8));
@@ -1460,7 +1469,10 @@ class AIEditor final : public Editor {
       }
     }
     // A message the service saved is no longer a draft (the same words typed again stay in the box).
-    if (const auto sent = agent.take_sent(); !sent.empty() && sent == draft.agent_text) { draft.agent_text.clear(); }
+    if (const auto sent = agent.take_sent(); !sent.empty()) {
+      if (sent == draft.agent_text) { draft.agent_text.clear(); }
+      ctx.store.changed();  // The history rail was built before this receipt was shown.
+    }
     auto &input = layout.text_area("ai_agent_text/" + handle, ui::bind(draft.agent_text), {.max_length = 8192, .visible_lines = 3});
     const bool has_text = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
         !ctx.ui->edit_state()->text().empty() : !draft.agent_text.empty();
@@ -1646,6 +1658,31 @@ bool reveal_saved_conversation(Editor &editor, ProjectState &project, const std:
 {
   auto *ai = dynamic_cast<AIEditor *>(&editor);
   return ai && ai->reveal_saved(project, request_id);
+}
+
+bool reveal_saved_agent_session(Editor &editor, ProjectState &project, const std::string &session_id)
+{
+  auto *ai = dynamic_cast<AIEditor *>(&editor);
+  return ai && ai->reveal_saved_agent(project, session_id);
+}
+
+std::string agent_session_label(const io::Json &session)
+{
+  const auto text = io::get_string(session, "first_message");
+  std::string label;
+  for (size_t pos = 0; pos < text.size();) {
+    size_t length = 0;
+    const auto cp = ui::utf8::decode(text, pos, &length);
+    pos += length;
+    if (cp < 0x20 || (cp >= 0x7f && cp <= 0x9f) || ui::utf8::is_space(cp) ||
+        cp == 0x61c || cp == 0x200e || cp == 0x200f || (cp >= 0x202a && cp <= 0x202e) ||
+        (cp >= 0x2066 && cp <= 0x2069)) {
+      if (!label.empty() && label.back() != ' ') { label += ' '; }
+    }
+    else { ui::utf8::append(label, cp); }
+  }
+  if (!label.empty() && label.back() == ' ') { label.pop_back(); }
+  return label.empty() ? io::get_string(session, "id").substr(0, 8) : core::utf8::truncate_display(label, 80);
 }
 
 std::unique_ptr<Editor> make_ai_editor(const EditorType &type)

@@ -536,14 +536,31 @@ from pathlib import Path
 from suan.desktop_bridge import server
 from suan.desktop_bridge.__main__ import main
 from suan.desktop_bridge.protocol import BridgeError
+from suan.project.agent_sessions import HARNESS, digest
 from uuid import uuid4
 
 original = server.Bridge.__init__
 def init(self, *args, **kwargs):
     original(self, *args, **kwargs)
     create = self.methods["project.requests.create"]
+    get_agent = self.methods["project.agent.get"]
+    def read_agent(params, call):
+        fail = Path(__file__).with_name("fail_next_agent_read")
+        if fail.exists():
+            fail.unlink()
+            raise BridgeError("unavailable", "fixture agent history read failed")
+        return get_agent(params, call)
     def save(params, call):
         result = create(params, call)
+        seed = Path(__file__).with_name("seed_agent_history")
+        if seed.exists():
+            seed.unlink()
+            sessions = self.projects._get(params["handle"]).agent_sessions
+            for identity, text in (("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Agent\nAlpha"),
+                                   ("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "Agent Bravo")):
+                turn = str(uuid4())
+                sessions.create(identity, {"id": identity, "harness": HARNESS}, text,
+                                turn_id=turn, request_sha256=digest({"text": text, "turn_id": turn}))
         if params["configuration"]["adapter"] == "test-completed":
             requests = self.projects._get(params["handle"]).requests
             request = result["request"]["id"]
@@ -555,8 +572,10 @@ def init(self, *args, **kwargs):
         Path(__file__).with_name("unexpected_write").touch()
         raise BridgeError("unavailable", "fixture forbids writes during navigation")
     self.methods["project.requests.create"] = save
+    self.methods["project.agent.get"] = read_agent
     for method in ("project.requests.start", "project.agent.create", "project.agent.say",
-                   "project.agent.start", "models.local.start", "project.attention.viewed"):
+                   "project.agent.start", "project.agent.run_target", "project.agent.run_decide",
+                   "models.local.start", "project.attention.viewed"):
         self.methods[method] = unexpected
 
 server.Bridge.__init__ = init
@@ -822,6 +841,115 @@ TEST_F(SavedConversationNavigationPython, RecentQuestionsOpenFromTasksAndResults
   EXPECT_EQ(widget(key), nullptr);
   EXPECT_EQ(f.screen.maximized(), results);
   EXPECT_EQ(discussion.exchange_id(), kSecond);
+}
+
+TEST_F(SavedConversationNavigationPython, AgentHistorySeparatesIdentitiesAndKeepsBothDrafts)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_table());
+  std::ofstream(dir.path() / "seed_agent_history") << "1";
+  ASSERT_NO_FATAL_FAILURE(save_question(kFirst, "Ordinary question"));
+  auto &discussion = project().discussion();
+  auto &agent = project().agent();
+  ASSERT_TRUE(agent.supported());
+  const auto question = "ai_question/" + handle();
+  const auto agent_text = "ai_agent_text/" + handle();
+  const auto intent = "ai_intent/" + handle();
+  const auto ordinary = std::string("workbench_question/") + kFirst;
+  const auto first = std::string("workbench_agent_session/") + kFirst;
+  const auto click = [&](const std::string &key) {
+    ASSERT_NE(widget(key), nullptr) << key;
+    const auto [x, y] = f.widget_center(key);
+    ASSERT_TRUE(f.drv->click(x, y)) << key;
+    f.screen.run_deferred();
+    f.drv->frame();
+  };
+  const auto wait_for_agent = [&](const char *id, const char *text) {
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.drv->frame();
+      return widget(agent_text) && io::get_string(agent.view().value("session", Json::object()), "id") == id;
+    }, 30)) << agent.error();
+    ASSERT_EQ(agent.selected(), id);
+    EXPECT_EQ(io::get_string(agent.view().at("events").at(0), "text"), text);
+    EXPECT_FALSE(agent.running());
+    EXPECT_EQ(widget(agent_text)->string.value(), "Unsent agent text");
+    EXPECT_TRUE(f.shell->workbench_is_focused(f.screen));
+  };
+
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    return widget(question) && widget(ordinary) && widget(first) && !discussion.exchange_busy();
+  }, 30));
+  auto *conversation = f.screen.maximized();
+  widget(question)->string.assign("Unsent ordinary text");
+  ASSERT_NE(widget(intent), nullptr);
+  widget(intent)->index.assign(3);
+  f.drv->frame();
+  ASSERT_NE(widget(agent_text), nullptr);
+  widget(agent_text)->string.assign("Unsent agent text");
+  ASSERT_NO_FATAL_FAILURE(click("workbench_tasks"));
+  ASSERT_NE(widget(first), nullptr);
+  EXPECT_TRUE(widget(first)->text.ends_with("Agent Alpha"));
+  std::ofstream(dir.path() / "fail_next_agent_read") << "1";
+  ASSERT_NO_FATAL_FAILURE(click(first));
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    return agent.error() == "fixture agent history read failed" && widget(agent_text);
+  }, 30));
+  EXPECT_TRUE(agent.view().empty());
+  ASSERT_NE(widget("ai_agent_send"), nullptr);
+  EXPECT_FALSE(widget("ai_agent_send")->enabled);
+  ASSERT_NO_FATAL_FAILURE(click(first));
+  ASSERT_NO_FATAL_FAILURE(wait_for_agent(kFirst, "Agent\nAlpha"));
+  EXPECT_EQ(f.screen.maximized(), conversation);
+
+  // The two ledgers may use the same UUID. Reselecting the agent still supersedes an old question callback.
+  ASSERT_NE(widget(ordinary), nullptr);
+  const auto stale = widget(ordinary)->on_click;
+  const auto exchange = discussion.exchange_generation();
+  const auto selection = agent.selection_epoch();
+  ASSERT_NO_FATAL_FAILURE(click(first));
+  EXPECT_EQ(agent.selection_epoch(), selection);
+  stale();
+  f.screen.run_deferred();
+  f.drv->frame();
+  EXPECT_NE(widget(agent_text), nullptr);
+  EXPECT_EQ(discussion.exchange_generation(), exchange);
+
+  ASSERT_NO_FATAL_FAILURE(click("workbench_results"));
+  auto *results = f.screen.maximized();
+  f.drv->ctx.rect.xmax = 680;
+  f.drv->frame();
+  const auto choose = [&](const char *text) {
+    ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+    std::string key;
+    bool question_group = false, agent_group = false;
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &candidate : block->widgets()) {
+        if (candidate.type != ui::WidgetType::MenuItem) { continue; }
+        question_group |= !candidate.enabled && candidate.text == "Recent questions";
+        agent_group |= !candidate.enabled && candidate.text == "Agent sessions";
+        if (candidate.text.ends_with(text)) { key = candidate.key; }
+      }
+    }
+    EXPECT_TRUE(question_group);
+    EXPECT_TRUE(agent_group);
+    ASSERT_FALSE(key.empty()) << text;
+    ASSERT_NO_FATAL_FAILURE(click(key));
+  };
+  ASSERT_NO_FATAL_FAILURE(choose("Agent Bravo"));
+  ASSERT_NO_FATAL_FAILURE(wait_for_agent(kSecond, "Agent Bravo"));
+  ASSERT_NO_FATAL_FAILURE(choose("Ordinary question"));
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    return widget(question) && io::get_string(discussion.exchange_question(), "text") == "Ordinary question";
+  }, 30));
+  EXPECT_EQ(widget(question)->string.value(), "Unsent ordinary text");
+  EXPECT_EQ(f.screen.maximized(), conversation);
+  EXPECT_EQ(project().project()->revision, 1);
+  ASSERT_NO_FATAL_FAILURE(click("workbench_results"));
+  EXPECT_EQ(f.screen.maximized(), results);
 }
 
 TEST_F(WorkspaceNavigationPython, CapturedConversationOpensWhileOnlyTheProjectCatalogIsRefreshing)

@@ -27,7 +27,8 @@ enum class AgentDraft { Unknown, None, Waiting, Running };
  * Asking saves the message, then starts the agent in the service, which answers in the background; the selected
  * session is read again every second while it runs. A draft the agent saved is applied or discarded only by a
  * person through project.agent.decide (ProjectState routes the review page's buttons there). Sessions never change
- * the project's revision; replies of a replaced project opening are ignored. */
+ * the project's revision; replies of a replaced project opening are ignored, and a read of the selected session
+ * answers only the selection that asked (even after switching away and back to the same session). */
 class ProjectAgent {
  public:
   ProjectAgent(AppStore &store, ProjectState &project) : store_(store), project_(project) {}
@@ -54,10 +55,21 @@ class ProjectAgent {
   bool list_loaded() const { return list_loaded_; }
   const io::Json &sessions() const { return sessions_; }
   bool load_list();
+  /** Load only the session list (for the rail) under the same once-asked and in-flight guards as pump: no session
+   * read, start or other call is sent. Returns whether a list read was sent. */
+  bool sync_session_list();
 
   /** Select a session ("" starts a new one with the next message). */
   void select(const std::string &session_id);
   const std::string &selected() const { return selected_; }
+  /** Changes whenever the selected session changes (and on reset); never repeats within a controller. */
+  uint64_t selection_epoch() const { return selection_; }
+  /** Whether passive history navigation may change the selection now: no explicit call is in flight, and nothing a
+   * selection change would drop is waiting (a deferred start, a lost send's reusable IDs, a sent message the editor
+   * has not taken). Navigation only; it grants no permission, and an explicit select stays available. */
+  bool history_selection_available() const;
+  /** Read an existing session from history, retrying an unsuccessful selection of the same ID. */
+  bool select_history_session(const std::string &session_id);
   /** The selected session (agentSessionView, with usage), empty until read. */
   const io::Json &view() const { return view_; }
   bool running() const { return view_.value("running", false); }
@@ -103,8 +115,10 @@ class ProjectAgent {
  private:
   bool call(const std::string &method, io::Json params, std::function<void(const io::Json &)> done,
             std::function<void()> failed = {});
+  /** ``selection_scoped``: the reply (success or error) is dropped once the selection changed; select() then
+   * releases ``flight`` for the new selection, so the dropped reply must not touch it. */
   bool read(const std::string &method, io::Json params, bool &flight, std::function<void(const io::Json &)> done,
-            std::function<void()> failed = {});
+            std::function<void()> failed = {}, bool selection_scoped = false);
   void adopt(const io::Json &view);
   bool ask_impl(const std::string &text, std::optional<io::Json> simulation);
   bool configure_target(const io::Json &simulation, bool start_after);

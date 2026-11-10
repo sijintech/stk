@@ -340,8 +340,20 @@ class WorkspaceEditor final : public Editor {
     auto *attention = &ctx.store.attention();
     const auto target = item.value("target", io::Json::object());
     const auto request = io::get_string(target, "request_id");
-    const bool saved = io::get_string(target, "page") == "conversation" && !request.empty();
-    const auto open = saved ? ctx.area.shell().saved_conversation_action(ctx.area, request) : navigation(ctx, target);
+    const bool saved_question = io::get_string(target, "page") == "conversation" && !request.empty();
+    const bool saved_agent = kind == "agent_session";
+    auto &shell = ctx.area.shell();
+    std::function<void()> open;
+    if (saved_question) { open = shell.saved_conversation_action(ctx.area, request); }
+    else if (saved_agent) {
+      const auto &project = ctx.store.project().project();
+      if (project && project->id == io::get_string(target, "project_id")) {
+        open = shell.saved_conversation_action(ctx.area, io::get_string(target, "session_id"),
+                                               AppShell::SavedConversationKind::AgentSession);
+      }
+    }
+    else { open = navigation(ctx, target); }
+    const bool saved = saved_question || saved_agent;
     row.button("workspace_attention_open/" + key, ctx.tr("workspace.attention.open"), [open, attention, key, seen, saved] {
       if (seen && !saved) { attention->mark_viewed({key}); }
       if (open) { open(); }
