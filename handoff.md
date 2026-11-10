@@ -1,5 +1,15 @@
 # STK 当前交接
 
+## 2026-11-10 22:13 UTC · Windows PDF 捕获生命周期与图谱探针取证
+
+`2a8afa4a` 集成独立候选 `78bb2f8a`。Windows 报告 PDF 原生验收为同一窗口保留一个 WGC 捕获目标。窗口销毁、目标关闭或宿主身份变化会使旧目标失效，窗口重开后重新绑定。每次取样仍创建新的图形设备、帧池和会话。新增目标创建与复用计数，原 20 轮、160 张图片和每阶段连续有效取样门槛照旧。此前远端 `9ce87c63` 在第 5 轮 PDF 重开的 `CreateForWindow` 同步调用耗时 120038 ms，返回 `0x8007041d`，零采样。新实现首次绑定仍使用该系统调用，实际 Windows SDK 构建、计数和像素结论待目标 CI。 [Microsoft 捕获会话](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture) [原失败工件](https://github.com/sijintech/stk/actions/runs/42895759127/artifacts/13806041518)
+
+Root 核对集成补丁逐字节一致，Linux 构建四个相关目标，像素、证据门和 AX CPU 共 31/31，零跳过。按集成源码抽取 Windows 捕获目标逻辑，以模拟 Win32/WinRT 接口独立编译并通过 7 项，覆盖相同窗口复用、换窗、跨线程关闭、数值句柄复用和初始化失败。暂存密钥扫描零发现。收据在外部 `root-delivery-20261110-146/windows-capture-root`。
+
+Web 图谱在真实本机 Runtime 和 NodeAgent 复现了同名文件串读。已显示图谱来自任务子目录的 `case/Polar.00000002.dat`，探针却返回根目录同名发布文件的 `[0.125, 0.125, 0.125]`，图谱实际源文件的对应值为 `[0.34765625, 0.40625, 0.34765625]`。更换发布清单顺序会改变现行猜测。另确认内联字面步号 3 可实际解析到第 2 步。基线复现 1/1，修复在独立 worktree 进行，优先绑定当前画面的读取节点、实际步号和唯一发布路径。
+
+远端 `a64941b4` Runtime 13/13 全部成功。Desktop 的 Linux 包与安装冒烟成功，整轮仍在运行。本地提交等待上一轮 Desktop 终态。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42908396193) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42908396134)
+
 ## 2026-11-10 22:03 UTC · Web 明确读取 MuPRO HDF5
 
 `db432922` 集成独立候选 `1dd5d2e8`，并保留本地任务页运行环境折叠。Web 的成功 Runtime 任务有唯一 `case/run.h5`、发布摘要和有效大小时，图谱顶部提供「MuPRO HDF5」。明确列出后，用户选择读取器返回的场与确切步号，多分量场再选从 0 开始的分量。列表与帧请求都绑定原任务和整个容器的摘要。原生 shape 和 dtype、网格坐标及未知物理单位在面板中显示。Viewer 接纳实际图层后才更新来源，摘要不符、无效列表、错误步号、失败图层或迟到回执保留当前画面。两次明确读取可在 Hub 操作记录追踪，选项编辑不会发起求值。
