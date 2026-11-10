@@ -3,10 +3,13 @@ title: STK
 template: splash
 hero:
   name: STK
-  text: A desktop workbench for materials simulation — parameter tables, runs, analyses and 3D results
-  tagline: Define a parameter scan in a project table, run it locally or on a Linux Runtime, then compare results with saved analyses and the 3D Viewer. Python and the AI Assistant share the same operations.
+  text: A research workbench for materials simulation
+  tagline: Prepare projects and analyses on your desktop, then inspect tasks and 3D results on the desktop or in a browser. Both clients use the Workbench, Tasks and Results navigation.
   actions:
     - variant: primary
+      text: Workbench guide
+      link: /en/user_guide/
+    - variant: secondary
       text: Linux quickstart
       link: /en/quickstart/
     - variant: secondary

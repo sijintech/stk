@@ -36,6 +36,13 @@ export default defineConfig({
       },
         sidebar: [
         {
+          label: "工作台使用指南",
+          translations: {
+            en: "Workbench guide",
+          },
+          link: "/user_guide/",
+        },
+        {
           label: "Linux 快速上手",
           translations: {
             en: "Linux quickstart",
@@ -103,14 +110,6 @@ export default defineConfig({
           },
           collapsed: true,
           items: [
-              // Each item here is one entry in the navigation menu.
-              // {
-              //   label: "概述",
-              //   translations: {
-              //     en: "index",
-              //   },
-              //   link: "/user_guide/",
-              // },
               {
                   label: "Apps",
                   translations: {
