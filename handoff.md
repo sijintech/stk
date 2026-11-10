@@ -1,5 +1,15 @@
 # STK 当前交接
 
+## 2026-11-10 16:19 UTC · 聚焦工作台收起技术页头
+
+`7282342a` 将编辑器选择、技术标签和区域菜单移出原生聚焦工作台的页头。工作台保留首页与项目，任务保留提交与刷新，结果保留打开、叠加层、全部显示和导出。通过分栏视图恢复专业工具。原生定向回归 50/50，零跳过。
+
+Linux X11/OpenGL，比例 1。固定起点为文件、Viewer、文献/Python 与项目表格四区，Viewer 已加载公开 `example.stkp`。英文 1600×1100 和中文 680×1000 各依次点工作台、任务、结果、工作台、分栏，合计 5 次点击，零键盘、滚轮或缩放。聚焦页头单行显示且操作按钮宽度正常。回到原区域几何与高级控件，结果仍为第 1000 步。两个流程的任务、工作区和项目修订增量均为零。页头操作通过画面与组件回归核对，本轮实点覆盖导航。外部证据目录 `root-delivery-20261110-127`，具名测试 `header-final-native.xml`，窗口收据 `window-proof/window-{en-wide,zh-narrow}-release/window-receipt.json`。macOS 与 Windows 实窗仍待验收。
+
+Claude84 在独立 worktree 继续 Web 会话历史及每会话草稿。Root 审阅时发现原生项目首页的问答提醒已带 `request_id`，入口仍只传页面名。已安排独立候选修复精确返回，原生历史侧栏和跨端来源返回仍待集成。
+
+上一远端头 `3c4f9bf9` 的 Runtime 13/13 作业成功。Desktop 当前 3 个 Linux 作业已通过，macOS 与 Windows CPU 仍运行，本批本地提交待整轮终态。PR #53 与 #54 仍是已核对的原头，前者冲突，后者为旧交接。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42845291750) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42845291916)
+
 ## 2026-11-10 16:10 UTC · 双端左栏、首次启动与只读会话历史
 
 `67a6fd3f` 增加 Hub 只读会话历史。存在时返回原会话及消息，缺失返回 404，旧会话入口和显式发送兼容。Hub 定向 52/52。`82fc9d43` 集成 Claude82/83 的三页 Web 导航。结果和日志捷径一次显示对应内容，晚回执沿原任务更新，保留当前页和 Viewer。Root 构建与 Chromium/Node 全套 22/22。
