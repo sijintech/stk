@@ -248,6 +248,49 @@ struct GuardedOpenViewer {
   }
 };
 
+TEST(ViewerWorkspace, PendingProbeFollowsTheNewlyDisplayedStep)
+{
+  GuardedOpenViewer f;
+  ASSERT_TRUE(f.start());
+  auto &viewer = f.viewer();
+  ASSERT_TRUE(f.open("first"));
+  ASSERT_TRUE(f.wait([&] { return viewer.payload() && !viewer.evaluating(); })) << viewer.eval_error();
+  ASSERT_EQ(viewer.shown_step(), 2);
+  ASSERT_EQ(viewer.step_choices().size(), 3u);
+  ASSERT_TRUE(f.barrier().is_object());
+  f.loop.run_ready();
+
+  PickInfo pick;
+  pick.probe_node = "polar";
+  pick.physical = {1.0, 2.0, 3.0};
+  f.gate.hold();
+  viewer.set_pick(pick);
+  const auto first = f.barrier();
+  ASSERT_TRUE(first.is_object());
+  ASSERT_EQ(first["probe_requests"].size(), 1u);
+  EXPECT_EQ(first["probe_requests"][0]["context"]["result"]["parameters"]["step"]["value"], 2);
+  auto old_reply = f.gate.take();
+  ASSERT_EQ(old_reply.size(), 1u);
+  ASSERT_EQ(viewer.probe().status, ProbeState::Status::Pending);
+
+  const auto camera = viewer.camera_serial();
+  viewer.set_step_index(1);
+  ASSERT_TRUE(f.wait([&] { return viewer.shown_step() == 1 && !viewer.evaluating(); })) << viewer.eval_error();
+  const auto switched = f.barrier();
+  ASSERT_TRUE(switched.is_object());
+  f.loop.run_ready();
+  const auto current = viewer.save_workspace_state()["probe"];
+
+  old_reply.front()();
+  EXPECT_EQ(viewer.save_workspace_state()["probe"], current);
+  EXPECT_EQ(viewer.camera_serial(), camera);
+  ASSERT_EQ(switched["probe_requests"].size(), 2u);
+  EXPECT_EQ(switched["probe_requests"][1]["context"]["result"]["parameters"]["step"]["value"], 1);
+  EXPECT_EQ(switched["probe_requests"][1]["position"], switched["probe_requests"][0]["position"]);
+  EXPECT_EQ(viewer.probe().status, ProbeState::Status::Done);
+  EXPECT_EQ(viewer.probe().sample["values"], Json::array({0.25, -0.5, 0.75}));
+}
+
 Json visible_viewer_state(const ViewerState &viewer)
 {
   auto state = viewer.save_workspace_state();

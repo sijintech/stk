@@ -942,7 +942,8 @@ struct ViewerState::Impl {
       step_request_at = -1.0;
     }
     /* A pick follows the shown frame (the probe reads the same step). */
-    if (probe.status == ProbeState::Status::Done || probe.status == ProbeState::Status::Failed) {
+    if (probe.status == ProbeState::Status::Pending || probe.status == ProbeState::Status::Done ||
+        probe.status == ProbeState::Status::Failed) {
       query_probe(probe.pick);
     }
     changed();
