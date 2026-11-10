@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-10 23:16 UTC · 原生探针使用已显示图谱
+
+`6ee7ae36` 集成 `695025ea`，保留 `7f2ea3fc` 的跨帧 Pending 回执防护。探针固定到已接纳画面的图谱、原参数、绑定和本地证明。预设更改等待或失败时，旧画面的探针继续读取原来源。新图谱或来源真正接替时，旧选点与迟到回执失效。同一图谱的时间步切换继续按原物理坐标查询。恢复工作区需要可验证的已显示图谱和相符的原预设定义，已保存的探针结果仍可查看。仅标签或节点排列变化也可能使恢复后的重新取值不可用。独立审阅核对本机、已收集目录、直连 Runtime、Hub 和旧预设五种协议形状，真实原生数据验证覆盖本机与已收集目录。
+
+独立候选 CPU 55/55、Python 探针 7/7、Linux RelWithDebInfo 软件 OpenGL 原生 3/3，零跳过。最初独立 Debug 的 llvmpipe 着色器断言发生在探针验证前，按发行构建重跑通过。Root 保留现有防护后重新构建，组合套件 61/61，零失败及跳过，含真实 Python 桥的 Vulkan 与 OpenGL 各 6 项，以及 X11、Wayland 实际 Viewer 窗口。暂存扫描零发现。证据在外部 `root-delivery-20261110-147/native-probe-preset` 与 `root-delivery-20261110-148/native-probe-preset-root`。
+
+上一个包含桌面历史入口与跨帧探针防护的原生项目套件终态 968/968，零跳过及失败，944.4 秒。新本地源码的 971 项项目套件已启动。远端 `ee051512` 的 Desktop 仍在运行，Windows 处于全目标构建，Runtime 8/13 作业已成功。公共指南已上线。下一批可选 Cocoa 诊断在独立工作树检验同一视图隐藏前挂起、真实隐藏暂停及重显释放后的行为。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42920785230) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42920785047)
+
 ## 2026-11-10 23:10 UTC · 主线发布与公共指南上线
 
 远端 `main` 从 `a64941b4` 快进至 `ee0515122d2e7a565705e63c98694ad0bece0c2b`，推送后实查完整 SHA 一致。17 个提交范围扫描零发现，所有者的 AOCI 与状态文档工作区改动已保留。发布包含桌面已保存问答、双端 MuPRO 结果读取、Web 状态标签与 Viewer 迟到点击修复。上一轮 Desktop 终态和 482 张 Windows 图像摘要见下一节。
