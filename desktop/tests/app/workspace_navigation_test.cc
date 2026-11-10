@@ -106,6 +106,10 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
   auto *conversation = &home->editor();
   ASSERT_EQ(conversation->type().id, kEditorAI);
   EXPECT_EQ(f.screen.ui()->find("tool_files"), nullptr);
+  EXPECT_EQ(f.screen.ui()->find("editor_type"), nullptr);
+  EXPECT_EQ(f.screen.ui()->find("tabs"), nullptr);
+  EXPECT_EQ(f.screen.ui()->find("area_menu"), nullptr);
+  EXPECT_NE(f.screen.ui()->find("ai_tables"), nullptr);
   const auto *rail = home->find_region("workbench_rail");
   ASSERT_NE(rail, nullptr);
   EXPECT_FALSE(rail->rect().empty());
@@ -124,8 +128,15 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
   EXPECT_EQ(f.screen.maximized(), tasks);
   EXPECT_TRUE(tasks->find_region("workbench_rail")->rect().empty());
   EXPECT_FALSE(tasks->find_region("workbench_strip")->rect().empty());
+  EXPECT_EQ(f.screen.ui()->find("editor_type"), nullptr);
+  EXPECT_EQ(f.screen.ui()->find("area_menu"), nullptr);
+  EXPECT_NE(f.screen.ui()->find("submit"), nullptr);
+  EXPECT_NE(f.screen.ui()->find("refresh"), nullptr);
   click("workbench_results");
   ASSERT_EQ(f.screen.maximized(), &f.area("a2"));
+  EXPECT_EQ(f.screen.ui()->find("editor_type"), nullptr);
+  EXPECT_NE(f.screen.ui()->find("open"), nullptr);
+  EXPECT_NE(f.screen.ui()->find("export"), nullptr);
   EXPECT_EQ(&f.area("a2").editor(), viewer);
   EXPECT_EQ(state.payload(), shown);
   EXPECT_EQ(state.camera_serial(), camera);
@@ -140,6 +151,8 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
   EXPECT_EQ(state.base_payload(), payload);
   EXPECT_EQ(state.camera_serial(), camera);
   EXPECT_NE(f.screen.ui()->find("tool_files"), nullptr);
+  EXPECT_NE(f.screen.ui()->find("editor_type"), nullptr);
+  EXPECT_NE(f.screen.ui()->find("area_menu"), nullptr);
 }
 
 TEST(WorkspaceNavigation, SavedFocusedWorkbenchAndOrdinaryMaximizationRestoreSeparately)

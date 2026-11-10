@@ -13,6 +13,12 @@
 
 namespace stk::app {
 
+static bool shows_workbench_header(const EditorArea &area)
+{
+  const auto *screen = area.screen();
+  return screen && screen->maximized() == &area && area.shell().workbench_is_focused(*screen);
+}
+
 /* -------------------------------------------------------------------- */
 /** \name Regions
  * \{ */
@@ -49,8 +55,9 @@ class EditorRegion final : public wm::Region {
   int size_px(const float ui_scale) const override
   {
     if (kind_ != Kind::Header) { return Region::size_px(ui_scale); }
-    const int content_width = owner_.rect().width() - owner_.find_region("workbench_rail")->size_px(ui_scale);
-    return wm::ui_bar_height_px(ui_scale) * (content_width < 700 * ui_scale ? 2 : 1);
+    const bool compact_split_header = !shows_workbench_header(owner_) &&
+                                      owner_.rect().width() < 700 * ui_scale;
+    return wm::ui_bar_height_px(ui_scale) * (compact_split_header ? 2 : 1);
   }
 
   void build_ui(ui::Context &ui, const wm::DrawContext &ctx) override
@@ -90,8 +97,8 @@ class EditorRegion final : public wm::Region {
 
   bool handle_event(const wm::Event &e, const wm::DrawContext &ctx) override
   {
-    if (kind_ == Kind::Header && e.type == wm::EventType::MouseDown && e.button == wm::MouseButton::Right &&
-        ctx.ui)
+    if (kind_ == Kind::Header && !shows_workbench_header(owner_) && e.type == wm::EventType::MouseDown &&
+        e.button == wm::MouseButton::Right && ctx.ui)
     {
       ctx.ui->open_popup(owner_.area_menu_key());
       tag_redraw();
@@ -433,6 +440,11 @@ std::vector<ui::MenuEntry> EditorArea::area_menu(const wm::DrawContext *draw)
 void EditorArea::build_header(ui::Layout &layout, EditorContext &ctx)
 {
   auto &row = layout.row(false);
+  if (shows_workbench_header(*this)) {
+    editor().draw_header(row, ctx);
+    row.label(""); /* Flexible space. */
+    return;
+  }
   ui::Context &ui = *ctx.ui;
   const ui::Style &st = ui.style();
   const EditorRegistry &reg = shell_.registry();
