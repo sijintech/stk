@@ -26,7 +26,7 @@
 
 | 入口 | 当前事实 | 试点需要的增量 |
 |---|---|---|
-| [`suan/mupro/spec.py`](../../suan/mupro/spec.py)、[`run.py`](../../suan/mupro/run.py) | 已有结构化 TaskSpec、Linux/MPI 启动、程序解析与完整输出核验；许可只配置目录 | 定向预检实际引擎/依赖/许可配置及可运行算例，记录真实启动/退出与失败，不读取许可正文 |
+| [`suan/mupro/spec.py`](../../suan/mupro/spec.py)、[`run.py`](../../suan/mupro/run.py) | 已有结构化 TaskSpec、Linux/MPI 启动、程序解析与完整输出核验；许可只配置目录。`suan mupro check --json` 输出本机前置检查观察 [`stk.mupro-preflight/1`](../specs/mupro-preflight-1.md) | 定向预检实际引擎版本/依赖/许可签出及可运行算例，记录真实启动/退出与失败，不读取许可正文 |
 | [`suan/workflows/muferro.py`](../../suan/workflows/muferro.py) | 既有执行链已补同任务 `case/run.h5` 的摘要、冻结网格及跨步类型核验和登记，结果行记录其 SHA-256 | 收集仍要求旧 DAT 完成验证；继续真实软件与 HDF5-only 输出验收，不另建调度器 |
 | [`suan/connectors/mupro/`](../../suan/connectors/mupro/) | 0.2.0 已发现 `run.h5` 并以 `hdf5:<field>` 打开；DAT/表格保持，HDF5 错误有单独诊断 | 合成/CLI 软件验证不代真实 HDF5 输出、完成证据或目标 OS，不能称整个执行器已完成 |
 | [`muferro_hdf5_view.cc`](../../desktop/engine/lib/stk_app/src/muferro_hdf5_view.cc)、[图节点](../specs/stk-graph-v1.md) | 已发布 `stk.source.mupro_hdf5_fields@1` 列出场与步号；面板以固定 `results/muferro/<run_id>/case/run.h5` 和登记摘要列出、明确选择并打开一帧。DAT 的查看已收集结果不变 | 仅 Linux 合成验收；真实许可输出、macOS/Windows 面板和 Viewer 内步滑块未验证或未实施 |
@@ -69,11 +69,38 @@ Root 审阅 Claude 的 `1150229f` 方案后，选择在桌面桥的产物列表�
 
 ## 节点能力观察（D1 P-1/F-5，拟议）
 
-Claude 以 `a656f879` 为基线核对执行器和读取器入口。下文比较观察值的传递方案。执行、授权及放置沿用当前发布契约。
+Claude 以 `a656f879` 为基线核对执行器和读取器入口；其中执行器预检的事实按 `000bb6ff` 校订，Hub、心跳和 `graph.meta` 各条仍为原基线的核查。
+本机预检观察已实现，见下一小节。节点之间传递观察值、读取依赖投影、桌面节点预检和放置能力仍是拟议，下文比较传递方案。
+执行、授权及放置沿用当前发布契约。
+
+### 已实现的本机预检观察（`000bb6ff`）
+
+`suan mupro check --json` 输出 [`stk.mupro-preflight/1`](../specs/mupro-preflight-1.md)，使用说明见
+[MuPRO Runtime 指南](../runtime-mupro.md#本机预检观察)。它只描述调用进程所在机器的已配置前置条件：
+
+- **运行位置。** 在调用进程内执行，`scope` 固定为 `local_process`。命令不构造 Runtime 客户端，不选择节点，也不授权执行。
+  在桌面机器上得到的结果不是另一台计算节点的就绪状态。
+- **字段。** `producer` 含组件 `suan.mupro` 和已安装 STK 包的 `distribution_version`（不可得时为 null），它不是 MuPRO 版本。
+  另有 `process_id`、采集前后的 `started_at`/`observed_at`，七个按序固定的检查项
+  `env_scripts`、`sdk_prefix`、`program`、`shared_libraries`、`mpi_launcher`、`license_dir`、`example_case` 及其状态，
+  和总结 `summary`。观察对象不含程序/脚本/许可路径、主机名、环境值、原始错误或命令输出。
+- **总结规则。** 任一项 `fail` 即 `checks_failed`（退出 1）；否则任一项 `warn` 或 `skip` 为 `checks_incomplete`；其余为 `checks_passed`。
+  后两者都退出 0。未配置可选环境脚本记为 `not_configured`，单独出现时不使结果变为未完成。
+- **未验证项。** 三种总结都保留 `unverified`：`program_version: unobserved`、`license_checkout: not_checked`、`solver_execution: not_run`。
+  `checks_passed` 只说明这些前置检查通过，不能证明已安装 MuPRO、许可有效、算例可运行或结果科学有效，也不代表所选远端执行目标已就绪。
+- **副作用。** 检查器本身不启动 MuPRO、MPI 启动器、算例或许可签出，但会用 bash source 已配置的受信任环境脚本，并可能对找到的程序运行本地 `ldd`。
+  脚本的作用取决于该受信任配置，检查器不审计其内容。因此这是显式的本机诊断，不是无副作用的被动元数据读取，不能直接放进 `graph.meta` 或心跳。
+- **既有命令。** `python -m suan.mupro check` 的 `{ok, checks}` JSON、含本机路径的诊断信息和退出码不变，`ok` 只表示没有 `fail`。
+  `submit`、`result`、`verify`、任务身份和逐次运行核验也不变。
+
+Root 证据为合成本机证据，不是真实 MuPRO 或节点证据：`root-delivery-20261109-121/preflight-root.xml` 87 项通过、2 项跳过（1 项需真实 muFerro 样例前缀，1 项为 Windows 目录联接），其中含新增 18 项；
+Python 3.11 和 3.14 分别 18/18 通过（`preflight-311.xml`、`preflight-314.xml`）。`installed-receipt.json` 在只装基础依赖、无 NumPy/h5py 的已安装 wheel 中
+得到三种控制台结果：脚本程序为 `checks_incomplete`、原生占位可执行文件为 `checks_passed`，两者退出 0；缺程序为 `checks_failed`，退出 1。回执核对了 `run.py` 和 `cli.py` 两个源模块的摘要，受控夹具中未产生求解器或 MPI 调用。
+占位可执行文件不是 MuPRO，未验证许可或求解。
 
 ### 当前证据
 
-- 节点预检入口是 `python -m suan.mupro check`。CLI 的 `suan mupro` 提供 `submit`、`result` 和 `verify`。预检检查环境脚本、程序、动态库、MPI、许可目录和示例。合成前缀中的两行脚本和空许可目录也能通过当前预检。原始诊断会包含主机路径，节点间传递只应选取固定检查项和状态。[节点预检](../../suan/mupro/run.py) [客户端命令](../../suan/mupro/cli.py)
+- 预检有两个本机入口：既有的 `python -m suan.mupro check` 返回含主机路径的详细诊断；`suan mupro check --json` 只投影固定检查项和状态（见上一小节）。两者检查环境脚本、程序、动态库、MPI、许可目录和示例。合成前缀中的两行脚本作为程序时，`ldd` 无法检查，结果为 `checks_incomplete`；换成非 MuPRO 的原生占位可执行文件并配空许可目录即可得到 `checks_passed`，所以该总结不说明软件身份或许可有效性。目前没有把这份观察传到 Runtime、Hub 或桌面的入口。[节点预检](../../suan/mupro/run.py) [客户端命令](../../suan/mupro/cli.py)
 - Runtime health 的后端和资源是实现清单。Runtime、心跳和 `graph.meta` 的 `features` 都来自组件常量或配置。Hub 的 `public_snapshot` 保留 `features` 字符串并丢弃额外的快照键。`graph.meta` 的 `include` 为闭集。一次新的 Hub `graph.meta` 请求沿用动作路径，带来动作记录。[Runtime health](../../suan/runtime/server.py) [节点能力](../../suan/control/agent.py) [Hub 投影](../../suan/control/federation.py) [动作策略](../../suan/control/policy.py)
 - 连接器 `info()` 与图目录可在缺少 NumPy 和 h5py 时读取，声明与装齐依赖的对照一致。DAT、表格和运行索引在读取边界检查 NumPy，HDF5 另查 h5py。已完成结果的连接器描述仍可运行 DAT 核验并生成核验结论。[连接器](../../suan/connectors/mupro/__init__.py) [HDF5 合同](../specs/mupro-hdf5-1.md)
 - Hub 列表中的 `online` 依据未撤权设备最近 20 秒内的心跳。节点连接断开时，Hub 保留最后快照和时间。精确读取另检查活动连接，因此最近心跳和当次请求可达性是两个观测值。[心跳存储](../../suan/control/store.py) [Hub 精确读取](../../suan/control/app.py)
@@ -91,14 +118,14 @@ Claude 以 `a656f879` 为基线核对执行器和读取器入口。下文比较�
 | 观察值 | 来源与含义 |
 |---|---|
 | 执行器安装 | 节点找到可执行程序时记录组件身份和观察时间。程序路径只供节点本地诊断 |
-| 执行器预检 | 记录固定检查项和状态。真实软件版本、许可签出和实际算例运行需要各自证据 |
+| 执行器预检 | 本机固定检查项和状态已由 `stk.mupro-preflight/1` 提供（`local_process`）。拟议部分是在目标节点上取得并带来源和时效传递。真实软件版本、许可签出和实际算例运行需要各自证据 |
 | 当次放置授权 | 由目标、资源和当次请求经现有授权与复核判断。有限 S2c 使用桌面明确选择的直连或 SSH 目标和人工首次批准 |
 | 最近一次真实运行 | Runtime 终态与同一任务 `stk-mupro.json` 的 `stk-mupro-1` 核验、程序摘要和时间共同形成回执 |
 | DAT 读取 | 在承担读取的进程验证 NumPy 加载 |
 | HDF5 读取 | 在承担读取的进程验证 NumPy 和 h5py 加载，数据按原生格式合同另验 |
 | 当前可达性 | 列表保留最近心跳，当次精确请求单独反映活动连接 |
 
-每条观察记录来源、组件版本和生成时间。执行器或读取器观察的时效独立于传输心跳。离线时可显示带时间的最近值，实际读取和放置仍经过对应的请求检查。投影使用固定枚举、计数、时间和摘要，预检的路径、环境值和原始错误留在节点本地。[首次批准契约](../specs/agent-muferro-run-1.md)
+每条观察记录来源、组件版本和生成时间。执行器或读取器观察的时效独立于传输心跳。离线时可显示带时间的最近值，实际读取和放置仍经过对应的请求检查。投影使用固定枚举、计数、时间和摘要，预检的路径、环境值和原始错误留在节点本地；本机预检观察已按此形状输出。[首次批准契约](../specs/agent-muferro-run-1.md)
 
 ### 传递方案（待选）
 
@@ -106,10 +133,10 @@ Claude 以 `a656f879` 为基线核对执行器和读取器入口。下文比较�
 |---|---|
 | `features` 字符串 | 现有 Hub 投影保留字符串。适合标记观察操作的支持，可变状态还需要来源和时效 |
 | 结构化快照或 health | 可承载独立状态和时间。旧 Hub 会丢弃额外快照键，部署需要版本化投影 |
-| `graph.meta` 现有 `features` 对象 | 可按需观察执行图的进程。旧 Hub 的结果转发和客户端兼容性须实测，现有动作记录成本适合低频诊断 |
+| `graph.meta` 现有 `features` 对象 | 可按需观察执行图的进程。旧 Hub 的结果转发和客户端兼容性须实测，现有动作记录成本适合低频诊断。本机预检会 source 受信任脚本，不能作为被动读取并入 |
 | 现有请求诊断和任务回执 | 继续提供当次读取状态和历史运行证据。节点列表的能力筛选仍待实施 |
 
-先补可重复的节点本地验证，核对合成预检、依赖缺失、旧投影、连接断开和心跳老化。对照应分别记录未报告、过期、断开和明确不可用，检验活动连接上的精确读取。随后可以验证节点本地的固定状态投影。发布入口、Hub 列表和放置策略仍需按各自契约审阅。
+先补可重复的节点本地验证，核对合成预检、依赖缺失、旧投影、连接断开和心跳老化。对照应分别记录未报告、过期、断开和明确不可用，检验活动连接上的精确读取。节点本地的固定状态投影已作为本机 CLI 观察实现；在目标节点上触发它并传回的方式尚未选择。发布入口、Hub 列表和放置策略仍需按各自契约审阅。
 
 #### 现有 `graph.meta` 路径核对（基线 `c8618a4f`）
 
