@@ -541,6 +541,8 @@ class Context {
   Block &block(std::string_view name, Rect region);
   /** An open modal dialog for this frame (call every frame while it should stay open). */
   Layout &modal(std::string_view key, std::string_view title, std::function<void()> on_close, ModalOptions opts = {});
+  /** Focus the visible launcher on the next frame after its modal has closed. */
+  void restore_modal_focus(WidgetId id) { modal_return_focus_ = id; }
   void end_frame();
   const DrawList &draw_list() const { return draw_; }
   /**
@@ -690,6 +692,7 @@ class Context {
   void edit_click(const Widget &w, Vec2 p, bool extend, bool dbl);
   bool edit_key(const Event &e);
   void focus_next(bool backwards);
+  bool focus_visible_widget(WidgetId id);
   bool activate_focused(const Event &e);
   void open_popup_for(const Widget &w);
   void popup_select(int index);
@@ -762,6 +765,7 @@ class Context {
   double hover_since_ = 0.0;
   Vec2 mouse_;
   WidgetId focus_ = 0;
+  WidgetId modal_return_focus_ = 0;
   WidgetId tooltip_forced_ = 0;
   WidgetId tooltip_shown_ = 0;
   DragState drag_;

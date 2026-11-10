@@ -223,20 +223,42 @@ class ViewerEditor final : public Editor {
 
     /* Top-left: source and evaluation status (non-expanding rows: the rest of the region orbits). */
     if (!vs.source_label().empty()) {
+      auto *screen = ctx.area.screen();
+      const bool focused = screen && screen->maximized() == &ctx.area && ctx.area.shell().workbench_is_focused(*screen);
       std::string src = ctx.store.catalog().format(
           "viewer.source", {{"name", vs.source_label()}, {"kind", std::string(ctx.tr(std::string("viewer.source.") +
                                                                                      source_kind_name(vs.source().kind)))}});
-      if (!vs.preset_id().empty()) {
+      if (!focused && !vs.preset_id().empty()) {
         if (const PresetInfo *p = vs.preset(vs.preset_id())) {
           src += "  \xc2\xb7  " + preset_label(ctx, *p);
         }
       }
-      if (!vs.step_param().empty() && !vs.shown_step().is_null()) {
-        src += "  \xc2\xb7  " + ctx.store.catalog().format("viewer.step_short", {{"step", step_text(vs.shown_step())}});
+      if (const auto step = displayed_source_step(vs.source()); !step.empty()) {
+        src += "  \xc2\xb7  " + ctx.store.catalog().format("viewer.step_short", {{"step", step}});
       }
       ui::Layout &row = l.row(false);
       row.alignment(ui::LayoutAlign::Left);
+      if (focused) {
+        const auto label = ctx.tr("viewer.source.open_details");
+        const auto scope = std::pair{screen->visibility_epoch(), ctx.area.activity_epoch()};
+        auto &button = row.button("result_source", label, [this, scope]() {
+          source_details_scope_ = scope;
+          source_detail_line_ = -1;
+        }).width(fit_units(ctx, label)).tip(ctx.tr("viewer.source.details"));
+        if (source_details_scope_ == scope && ctx.ui) {
+          draw_result_source(ctx, *screen, button.id);
+        }
+        else {
+          source_details_scope_.reset();
+        }
+      }
+      else {
+        source_details_scope_.reset();
+      }
       row.label(src).backdrop().width(fit_units(ctx, src)).tip(vs.source().path.empty() ? vs.source_label() : vs.source().path);
+    }
+    else {
+      source_details_scope_.reset();
     }
     if (vs.workspace_suspended()) {
       l.paragraph(ctx.tr("viewer.workspace.suspended"));
@@ -281,6 +303,82 @@ class ViewerEditor final : public Editor {
       row.alignment(ui::LayoutAlign::Center);
       row.label(stats, ui::Align::Center).backdrop().width(fit_units(ctx, stats));
     }
+  }
+
+  std::string displayed_source_step(const ViewerSource &source) const
+  {
+    const auto step = vs_->shown_step();
+    if (step.is_null() || (source.evaluates() && (step == "latest" || step == "first"))) { return {}; }
+    return step_text(step);
+  }
+
+  void draw_result_source(EditorContext &ctx, wm::Screen &screen, const ui::WidgetId anchor)
+  {
+    const auto inspection = vs_->graph_inspection();
+    const auto &shown = inspection->shown_configuration;
+    const auto &source = shown ? shown->source : inspection->source;
+    const auto &style = ctx.ui->style();
+    ui::ModalOptions options;
+    options.width_units = std::clamp((float(screen.rect().width()) - 2 * style.panel_margin) / style.unit,
+                                     10.0f, 27.0f);
+    const float text_width = std::max(1.0f, style.u(options.width_units) - 2 * style.panel_margin -
+                                            2 * style.text_margin - style.scrollbar - 4 * style.pixel);
+    std::vector<std::string> lines;
+    const auto add = [&](std::string_view label, std::string_view value) {
+      if (value.empty()) { return; }
+      std::string text(ctx.tr(label));
+      text += "  \xc2\xb7  ";
+      for (const unsigned char byte : value) {
+        if (byte < 0x20 || byte == 0x7f) {
+          constexpr char digits[] = "0123456789ABCDEF";
+          text += "\\x";
+          text += digits[byte >> 4];
+          text += digits[byte & 15];
+        }
+        else {
+          text += char(byte);
+        }
+      }
+      for (const auto &line : ui::break_lines(text, text_width, ctx.ui->measurer(), style.font)) {
+        lines.push_back(text.substr(line.begin, line.end - line.begin));
+      }
+    };
+    if (source.kind == SourceKind::Task) {
+      add("viewer.source.connection", source.connection);
+      add("conn.node", source.node);
+      add("viewer.source.workspace", source.workspace_id);
+      add("viewer.source.task", source.task_id);
+    }
+    else {
+      const bool label_only = source.kind == SourceKind::Payload && source.path == vs_->source_label();
+      add(label_only ? "viewer.source.payload" : "viewer.source.location", source.path);
+      add("viewer.source.input", source.field_file);
+    }
+    if (shown) {
+      add("props.preset.label", shown->preset_id);
+    }
+    add("viewer.source.frame", displayed_source_step(source));
+
+    const auto close = [this, ui = ctx.ui, anchor, weak = lifetime()]() {
+      if (weak.expired()) { return; }
+      source_details_scope_.reset();
+      ui->restore_modal_focus(anchor);
+    };
+    auto &modal = ctx.ui->modal("viewer_source_details", ctx.tr("viewer.source.details"), close, options);
+    if (!inspection->has_payload) {
+      modal.paragraph(ctx.tr("viewer.source.selected"));
+    }
+    else if (inspection->evaluating) {
+      modal.paragraph(ctx.tr("viewer.source.updating"));
+    }
+    ui::ListSpec list;
+    list.count = int(lines.size());
+    const float max_rows = std::clamp(float(screen.rect().height()) / style.unit - 6.0f, 2.0f, 12.0f);
+    list.rows = std::clamp(float(list.count), 1.0f, max_rows);
+    list.selected = ui::bind(source_detail_line_);
+    list.text = [lines = std::move(lines)](int row) { return lines[size_t(row)]; };
+    modal.virtual_list("fields", std::move(list));
+    modal.row(false).button("close", ctx.tr("ui.close"), close);
   }
 
   void draw_sidebar(ui::Layout &l, EditorContext &ctx) override
@@ -1052,6 +1150,8 @@ class ViewerEditor final : public Editor {
   std::unique_ptr<viewer_gpu::Viewer> gpu_;
   uint64_t payload_serial_ = 0, camera_serial_ = 0;
   bool camera_reset_pending_ = false;
+  std::optional<std::pair<uint64_t, uint64_t>> source_details_scope_;
+  int source_detail_line_ = -1;
   std::optional<viewer::CameraPose> saved_camera_;
   std::optional<viewer::CameraPose> workspace_camera_;
   std::optional<viewer::CameraPreset> pending_preset_;

@@ -116,8 +116,13 @@ std::optional<NativeViewportState> Context::native_viewport_state(WidgetId id) c
 bool Context::focus_widget(WidgetId id)
 {
   if (native_view_interaction_blocked() || edit_.id) { return false; }
+  return focus_visible_widget(id);
+}
+
+bool Context::focus_visible_widget(WidgetId id)
+{
   const Widget *w = find_id(id);
-  if (!w || w->layout_region || !w->focusable()) { return false; }
+  if (!w || w->block->kind() != Block::Kind::Region || w->layout_region || !w->focusable()) { return false; }
   const Rect visible = w->rect.intersect(w->clip).intersect({0, 0, window_.x, window_.y});
   if (visible.w <= 0 || visible.h <= 0) { return false; }
   focus_ = id;
@@ -303,6 +308,16 @@ void Context::end_frame()
   }
   if (focus_ && !find_id(focus_)) {
     focus_ = 0;
+  }
+  if (modal_return_focus_) {
+    const auto target = modal_return_focus_;
+    modal_return_focus_ = 0;
+    if (!edit_.id && !drag_.id && !popup_.owner && std::none_of(blocks_.begin(), blocks_.end(), [](const auto &b) {
+          return b->kind() == Block::Kind::Modal;
+        }))
+    {
+      focus_visible_widget(target);
+    }
   }
   if (hover_ && !find_id(hover_)) {
     hover_ = 0;
@@ -940,7 +955,7 @@ void Context::focus_next(bool backwards)
 bool Context::activate_focused(const Event &e)
 {
   const Widget *w = find_id(focus_);
-  if (!w || !w->enabled) {
+  if (!w || !w->enabled || !in_modal_scope(*w)) {
     return false;
   }
   const bool confirm = e.key == Key::Enter || e.key == Key::Space;
@@ -1373,6 +1388,7 @@ EventResult Context::handle_event(const Event &e)
       if (!edit_.id && e.type != EventType::ImeCommit && !e.text.empty()) {
         /* Typing into a focused field starts editing it. */
         const Widget *w = find_id(focus_);
+        if (w && !in_modal_scope(*w)) { w = nullptr; }
         if (w && w->enabled && w->table && w->table->grid) {
           begin_table_edit(*w, true);
         }
@@ -2058,8 +2074,8 @@ EventResult Context::key_down(const Event &e)
     }
     return {false, false};
   }
-  if (const Widget *focused = find_id(focus_); focused && focused->enabled && focused->table &&
-      focused->table->grid && table_grid_key(*focused, e)) { return {true, true}; }
+  if (const Widget *focused = find_id(focus_); focused && focused->enabled && in_modal_scope(*focused) &&
+      focused->table && focused->table->grid && table_grid_key(*focused, e)) { return {true, true}; }
   if (e.key == Key::Tab && !(e.mods & (MOD_CTRL | MOD_ALT | MOD_SUPER))) {
     focus_next((e.mods & MOD_SHIFT) != 0);
     return {true, true};

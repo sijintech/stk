@@ -14,6 +14,7 @@
 #include "jobs_support.hh"
 #include "stk/app/jobs_state.hh"
 #include "stk/app/viewer_state.hh"
+#include "stk/io/payload.hh"
 #include "stk/platform/file_dialog.hh"
 
 namespace stk::jobstest {
@@ -295,6 +296,34 @@ TEST(JobsLayout, OpeningATaskResultKeepsTheFocusedWorkbench)
   EXPECT_EQ(store.viewer().source().workspace_id, workspace);
   EXPECT_EQ(store.viewer().source().connection, "runtime:lab");
   EXPECT_TRUE(store.viewer().fit_initial_view());
+  const auto source_camera = store.viewer().camera_serial();
+  const auto source_payload = store.viewer().payload_serial();
+  const auto evaluations = store.viewer().evaluations_started();
+  ASSERT_NO_FATAL_FAILURE(navigate("result_source"));
+  const auto *fields = u.find("viewer_source_details/fields");
+  ASSERT_NE(fields, nullptr);
+  ASSERT_TRUE(fields->list);
+  std::string details;
+  for (int row = 0; row < fields->list->count; ++row) {
+    details += fields->list->text(row) + "\n";
+  }
+  EXPECT_NE(details.find("runtime:lab"), std::string::npos);
+  EXPECT_NE(details.find(workspace), std::string::npos);
+  EXPECT_NE(details.find(task), std::string::npos);
+  u.f.drv->key(wm::Key::Space, wm::ModCtrl);
+  EXPECT_EQ(u.f.screen.maximized(), &u.f.area("a2"));
+  u.f.drv->key(wm::Key::Numpad1);
+  EXPECT_TRUE(u.f.area("a2").editor().save_workspace_state().at("pending_preset").is_null());
+  u.f.drv->key(wm::Key::Tab);
+  u.f.drv->key(wm::Key::Esc);
+  EXPECT_EQ(u.find("viewer_source_details/fields"), nullptr);
+  u.f.drv->key(wm::Key::Enter);
+  ASSERT_NE(u.find("viewer_source_details/fields"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(navigate("viewer_source_details/close"));
+  EXPECT_EQ(u.find("viewer_source_details/fields"), nullptr);
+  EXPECT_EQ(store.viewer().camera_serial(), source_camera);
+  EXPECT_EQ(store.viewer().payload_serial(), source_payload);
+  EXPECT_EQ(store.viewer().evaluations_started(), evaluations);
   ASSERT_NO_FATAL_FAILURE(navigate("workbench_tasks"));
   EXPECT_EQ(&u.f.area("a1").editor(), jobs_editor);
   EXPECT_EQ(jobs.selected(), task);
@@ -339,6 +368,42 @@ TEST(JobsLayout, OpeningATaskResultKeepsTheFocusedWorkbench)
   EXPECT_EQ(store.viewer().source().task_id, task);
   EXPECT_FALSE(store.viewer().fit_initial_view());
   EXPECT_EQ(wmtest::read_text(u.dir.str() + "/model/methods.log").find("task.submit\n"), std::string::npos);
+}
+
+TEST(JobsLayout, FocusedResultSourceWrapsAndScrollsLongLocalLabels)
+{
+  AppFixture f("en", 1.0f, 680, 1000);
+  auto &viewer = f.shell->store().viewer();
+  const auto payload = std::make_shared<io::Payload>(io::read_stkp(
+      std::string(STK_REPO_ROOT) + "/desktop/tests/viewer/fixtures/muferro_domains.stkp"));
+  std::string label = "/local/";
+  for (int i = 0; i < 160; ++i) { label += "subdirectory/"; }
+  label += "result.stkp\nTAIL";
+  viewer.open_payload(payload, label);
+  f.shell->open_workbench(f.screen, true);
+  f.drv->frame();
+  auto *ui = f.screen.ui();
+  const auto [x, y] = f.widget_center("result_source");
+  f.drv->click(x, y);
+  f.drv->frame();
+  const auto *fields = ui->find("viewer_source_details/fields");
+  ASSERT_NE(fields, nullptr);
+  ASSERT_TRUE(fields->list);
+  ASSERT_GT(fields->list->count, int(fields->list->rows));
+  EXPECT_NE(fields->list->text(0).find("Payload"), std::string::npos);
+  EXPECT_NE(fields->list->text(fields->list->count - 1).find("\\x0ATAIL"), std::string::npos);
+  const auto fields_id = fields->id;
+  f.drv->key(wm::Key::Tab);
+  EXPECT_EQ(ui->focused(), fields_id);
+  f.drv->key(wm::Key::End);
+  f.drv->frame();
+  EXPECT_GT(ui->scroll_of(fields_id), 0.0f);
+  f.drv->key(wm::Key::Esc);
+  f.drv->frame();
+  EXPECT_EQ(ui->find("viewer_source_details/fields"), nullptr);
+  ASSERT_NE(ui->find("result_source"), nullptr);
+  EXPECT_EQ(ui->focused(), ui->find("result_source")->id);
+  EXPECT_EQ(viewer.base_payload(), payload);
 }
 
 TEST(JobsLayout, AddRuntimeDialogAndThePathFieldFallback)
