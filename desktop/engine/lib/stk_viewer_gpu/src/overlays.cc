@@ -271,7 +271,7 @@ void scalar_bar(const Painter &P, const OverlayItem &o, std::array<double, 2> wi
   }
 }
 
-void legend(const Painter &P, const OverlayItem &o, std::array<double, 2> window)
+void legend(const Painter &P, const OverlayItem &o, std::array<double, 2> window, const bool backdrop)
 {
   const double font = 12.0;
   const int columns = std::max(1, o.columns);
@@ -293,10 +293,16 @@ void legend(const Painter &P, const OverlayItem &o, std::array<double, 2> window
   auto [x, y] = place(o.anchor, offset, box, window);
   const double fx = anchor_fractions(o.anchor).fx;
   const double title_x = fx == 1 ? x + box[0] : x;
+  const double s = P.s;
+  if (backdrop && (rows > 0 || !o.title.empty())) {
+    const double pad = 6;
+    const float shade = P.ink[0] < 0.5f ? 1.0f : 0.08f;
+    const float fill[4] = {shade, shade, shade, 0.86f};
+    P.rect((x - pad) * s, (y - pad) * s, (x + box[0] + pad) * s, (y + box[1] + pad) * s, fill);
+  }
   if (fx == 1) {
     x += box[0] - columns * col_w;
   }
-  const double s = P.s;
   const double top = y + double(per_column) * row_h;
   for (size_t index = 0; index < rows; index++) {
     const size_t column = index / per_column, line = index % per_column;
@@ -441,7 +447,7 @@ void Renderer::draw_overlays(const GpuScene &scene, const FrameParams &params)
       scalar_bar(P, o, window);
     }
     else if (o.kind == "legend") {
-      legend(P, o, window);
+      legend(P, o, window, params.legend_backdrop);
     }
     else if (o.kind == "text") {
       text_overlay(P, o, window);

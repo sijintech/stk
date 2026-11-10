@@ -1049,6 +1049,26 @@ TEST(CrossCheck, MuferroDomainsAgainstVtk)
 /* -------------------------------------------------------------------- */
 /* Viewport API: draw() into a region of the bound framebuffer (as a window region would). */
 
+TEST(Viewport, LegendBackdropAppearsOnlyInTheInteractiveView)
+{
+  const auto payload = load_payload(fixtures_dir() / "muferro_domains.stkp");
+  Viewer base(gpu().fonts());
+  base.set_payload(payload);
+  ViewerOptions options;
+  options.legend_backdrop = true;
+  Viewer interactive(gpu().fonts(), options);
+  interactive.set_payload(payload);
+  gfx::Image normal_frame, backed_frame;
+  std::string error;
+  const RegionRect region{0, 0, 320, 240};
+  ASSERT_TRUE(gfx::render_offscreen(320, 240, [&]() { base.draw(region); }, normal_frame, error)) << error;
+  ASSERT_TRUE(gfx::render_offscreen(320, 240, [&]() { interactive.draw(region); }, backed_frame, error)) << error;
+  EXPECT_GT(differing_fraction(normal_frame, backed_frame, 2), 0.005);
+  const auto expected = render(base, "legend_export_default", size(320, 240));
+  const auto exported = render(interactive, "legend_export_interactive", size(320, 240));
+  EXPECT_EQ(differing_fraction(expected, exported, 0), 0.0);
+}
+
 TEST(Viewport, DrawIntoRegionMatchesExport)
 {
   Viewer v(gpu().fonts());

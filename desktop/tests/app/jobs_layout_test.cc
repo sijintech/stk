@@ -294,6 +294,7 @@ TEST(JobsLayout, OpeningATaskResultKeepsTheFocusedWorkbench)
   EXPECT_EQ(store.viewer().source().task_id, task);
   EXPECT_EQ(store.viewer().source().workspace_id, workspace);
   EXPECT_EQ(store.viewer().source().connection, "runtime:lab");
+  EXPECT_TRUE(store.viewer().fit_initial_view());
   ASSERT_NO_FATAL_FAILURE(navigate("workbench_tasks"));
   EXPECT_EQ(&u.f.area("a1").editor(), jobs_editor);
   EXPECT_EQ(jobs.selected(), task);
@@ -336,6 +337,7 @@ TEST(JobsLayout, OpeningATaskResultKeepsTheFocusedWorkbench)
   EXPECT_EQ(u.f.screen.maximized(), nullptr);
   EXPECT_EQ(&u.f.area("a2").editor(), viewer_editor);
   EXPECT_EQ(store.viewer().source().task_id, task);
+  EXPECT_FALSE(store.viewer().fit_initial_view());
   EXPECT_EQ(wmtest::read_text(u.dir.str() + "/model/methods.log").find("task.submit\n"), std::string::npos);
 }
 

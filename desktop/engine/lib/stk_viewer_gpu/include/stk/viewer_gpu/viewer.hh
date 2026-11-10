@@ -64,6 +64,8 @@ struct ViewerOptions {
   viewer::LodBudget lod;
   double target_frame_ms = 1000.0 / 60.0;
   viewer::NavigationStyle navigation = viewer::NavigationStyle::Blender;
+  /** Give categorical labels contrast in the interactive render target. */
+  bool legend_backdrop = false;
 };
 
 enum class LayerKind : uint8_t { Triangles, SliceImage, Lines, Points, Instances, Volume, Overlay, Unknown };

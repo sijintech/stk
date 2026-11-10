@@ -359,7 +359,8 @@ void Viewer::render(const int width, const int height, const float ui_scale)
   m.last_width = width;
   m.last_height = height;
   m.last_scale = ui_scale;
-  const FrameParams p = m.params(width, height, {0, 0, width, height}, ui_scale, true);
+  FrameParams p = m.params(width, height, {0, 0, width, height}, ui_scale, true);
+  p.legend_backdrop = m.options.legend_backdrop;
   m.last_stats = m.renderer.draw(*m.current, p, m.view_target);
   const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   m.last_frame_ms = ms;

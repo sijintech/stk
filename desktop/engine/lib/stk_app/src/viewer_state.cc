@@ -449,6 +449,7 @@ struct ViewerState::Impl {
   /* Payload. */
   std::shared_ptr<const io::Payload> base, display;
   uint64_t payload_serial = 0, camera_serial = 0;
+  uint64_t initial_fit_serial = 0;
   std::vector<std::shared_ptr<const io::Payload>> prefetched_payloads;
 
   /* Layers. */
@@ -1657,7 +1658,7 @@ void ViewerState::set_colormaps(std::shared_ptr<const std::vector<ui::ColormapIt
   impl_->changed();
 }
 
-bool ViewerState::open(const OpenResultRequest &request)
+bool ViewerState::open(const OpenResultRequest &request, const bool fit_initial_view)
 {
   Impl &m = *impl_;
   if (!request.task_id.empty()) {
@@ -1669,6 +1670,7 @@ bool ViewerState::open(const OpenResultRequest &request)
     m.source.task_id = request.task_id;
     m.label = m.source.label();
     m.camera_serial++;
+    m.initial_fit_serial = fit_initial_view ? m.camera_serial : 0;
     m.preset_id = request.preset;
     if (m.preset_id.empty() && m.have_metadata()) {
       m.preset_id = "muferro-domains";
@@ -2258,6 +2260,11 @@ uint64_t ViewerState::payload_serial() const
 uint64_t ViewerState::camera_serial() const
 {
   return impl_->camera_serial;
+}
+
+bool ViewerState::fit_initial_view() const
+{
+  return impl_->source.kind == SourceKind::Task && impl_->camera_serial == impl_->initial_fit_serial;
 }
 
 void ViewerState::request_camera_reset()

@@ -238,7 +238,7 @@ class ViewerState {
   /* ---- Sources ---- */
 
   /** Jobs "Open in viewer" and File > Open. False (with #open_error) when nothing can be opened. */
-  bool open(const OpenResultRequest &request);
+  bool open(const OpenResultRequest &request, bool fit_initial_view = false);
   /** `parameters` ({name: value}) override the preset defaults of an evaluated source. */
   bool open_path(const std::string &path, const std::string &preset = {}, const io::Json &parameters = io::Json(),
                  const io::Json &source_proof = io::Json());
@@ -332,6 +332,8 @@ class ViewerState {
   uint64_t payload_serial() const;
   /** Bumps when views must reset their camera (new source or preset, explicit reset). */
   uint64_t camera_serial() const;
+  /** Whether this camera serial represents a focused task open requesting initial framing. */
+  bool fit_initial_view() const;
   void request_camera_reset();
   /** Payloads to upload ahead (prefetched neighbour steps); cleared by the call. */
   std::vector<std::shared_ptr<const io::Payload>> take_prefetched();

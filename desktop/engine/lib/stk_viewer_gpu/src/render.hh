@@ -58,6 +58,7 @@ struct FrameParams {
   float pixel_scale = 1.0f;            /* px per logical px: ui scale x magnification */
   viewer::CameraPose camera;
   bool overlays = true;
+  bool legend_backdrop = false;
   bool transparent = false;
   std::string lighting; /* preset override; empty = scene's */
   const std::set<std::string> *hidden = nullptr;

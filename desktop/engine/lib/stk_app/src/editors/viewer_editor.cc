@@ -594,12 +594,35 @@ class ViewerEditor final : public Editor {
 
   /* ---- GPU ---- */
 
+  void fit_opened_task_result(const io::Payload &payload, const viewer::Viewport &viewport)
+  {
+    if (!(viewport.aspect() < 1.0)) { return; }
+    const auto view = payload.manifest.find("view");
+    if (view != payload.manifest.end() && !viewer::view_preset(*view)) { return; }
+
+    // A graph preset can carry a resolved numeric pose. Only adjust the standard square
+    // fit, leaving numeric framing and presets with a different zoom or scale as delivered.
+    auto pose = gpu_->camera();
+    auto square = pose;
+    const auto bounds = gpu_->bounds();
+    if (!viewer::view_all(square, bounds, {1.0, 1.0})) { return; }
+    const double distance = square.distance();
+    if (viewer::length(pose.focal_point - square.focal_point) > distance * 1e-9 ||
+        std::abs(pose.distance() - distance) > distance * 1e-9 ||
+        (pose.parallel && std::abs(pose.parallel_scale - square.parallel_scale) > square.parallel_scale * 1e-9))
+    {
+      return;
+    }
+    if (viewer::view_all(pose, bounds, viewport)) { gpu_->set_camera(pose); }
+  }
+
   void sync(const EditorContext &ctx)
   {
     ViewerState &vs = *vs_;
     if (!gpu_) {
       viewer_gpu::ViewerOptions opts;
       opts.navigation = nav_;
+      opts.legend_backdrop = true;
       gpu_ = std::make_unique<viewer_gpu::Viewer>(*ctx.draw->fonts, opts);
     }
     if (vs.camera_serial() != camera_serial_) {
@@ -619,6 +642,13 @@ class ViewerEditor final : public Editor {
       if (saved_camera_) {
         gpu_->set_camera(*saved_camera_);
         saved_camera_.reset();
+      }
+      else if (const auto *screen = ctx.area.screen(); !workspace_camera_ && !pending_preset_ &&
+               vs.fit_initial_view() && screen && screen->maximized() == &ctx.area &&
+               ctx.area.shell().workbench_is_focused(*screen))
+      {
+        const auto &r = ctx.draw->rect;
+        fit_opened_task_result(*vs.payload(), {double(r.width()), double(r.height())});
       }
     }
     if (workspace_camera_ && vs.payload()) {
