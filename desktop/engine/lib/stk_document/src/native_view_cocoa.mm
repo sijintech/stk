@@ -43,6 +43,7 @@ struct State {
   std::weak_ptr<test::VisiblePauseObservation> test_visible_pause;
   uint64_t test_retain_visible_pause_generation = 0;
   uint64_t test_isolated_pause_navigation = 0;
+  bool test_owns_playback_suspension = false;
 #endif
 };
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
@@ -1115,14 +1116,27 @@ std::shared_ptr<cocoa::State> find_view(wm::NativeWindowHandle parent, std::stri
   return found;
 }
 
-bool matches_hidden_pause(const std::shared_ptr<cocoa::State> &state, const NativeHidePauseTrace &observation)
+bool matches_pause_trace(const std::shared_ptr<cocoa::State> &state, const NativeHidePauseTrace &observation)
 {
   return cocoa::live(state) && state->view && state->result.status == NativeViewStatus::Ready &&
          state->test_close_observation && state->test_close_observation->hide_pause &&
          &*state->test_close_observation->hide_pause == &observation &&
-         !state->visible && state->view.hidden && !cocoa::visible_for_pause_control(state) &&
-         !cocoa::owns_focus(state) && state->media_generation == observation.media_generation &&
          state->result.navigation_generation == observation.navigation_generation;
+}
+
+bool matches_hidden_pause(const std::shared_ptr<cocoa::State> &state, const NativeHidePauseTrace &observation)
+{
+  return matches_pause_trace(state, observation) && !state->visible && state->view.hidden &&
+         !cocoa::visible_for_pause_control(state) && !cocoa::owns_focus(state) &&
+         state->media_generation == observation.media_generation;
+}
+
+bool matches_visible_playback(const std::shared_ptr<cocoa::State> &state,
+                              const NativeHidePauseTrace &observation, bool before_hide)
+{
+  return matches_pause_trace(state, observation) && cocoa::visible_for_pause_control(state) &&
+         (before_hide ? observation.event_count == 0 && state->media_generation + 1 == observation.media_generation :
+                        state->media_generation == observation.media_generation);
 }
 }
 
@@ -1249,6 +1263,64 @@ bool probe_hidden_playback(wm::NativeWindowHandle parent, std::string_view sessi
     }
     cocoa::observe_hide_pause(current, "passive-reply", detail::MediaPauseVerification::Clock::now(), int(playback));
     callback(int(playback));
+  }];
+  return true;
+}
+
+bool visible_playback_target(wm::NativeWindowHandle parent, std::string_view session_id,
+                             const NativeHidePauseTrace &observation, bool before_hide)
+{
+  std::string error;
+  return matches_visible_playback(find_view(parent, session_id, error), observation, before_hide);
+}
+
+bool probe_visible_playback(wm::NativeWindowHandle parent, std::string_view session_id,
+                            const NativeHidePauseTrace &observation, bool before_hide,
+                            std::function<void(std::optional<PlaybackState>)> callback)
+{
+  static_assert(int(PlaybackState::None) == WKMediaPlaybackStateNone &&
+      int(PlaybackState::Playing) == WKMediaPlaybackStatePlaying &&
+      int(PlaybackState::Paused) == WKMediaPlaybackStatePaused &&
+      int(PlaybackState::Suspended) == WKMediaPlaybackStateSuspended);
+  std::string error;
+  const auto state = find_view(parent, session_id, error);
+  if (!callback || !matches_visible_playback(state, observation, before_hide)) { return false; }
+  const auto close = state->test_close_observation;
+  const std::weak_ptr<cocoa::State> weak = state;
+  __weak WKWebView *expected_view = state->view;
+  [state->view requestMediaPlaybackStateWithCompletionHandler:^(WKMediaPlaybackState playback) {
+    const auto current = weak.lock();
+    if (!matches_visible_playback(current, *close->hide_pause, before_hide) || current->view != expected_view) {
+      callback(std::nullopt);
+      return;
+    }
+    callback(static_cast<PlaybackState>(playback));
+  }];
+  return true;
+}
+
+bool set_visible_playback_suspended(wm::NativeWindowHandle parent, std::string_view session_id,
+                                    const NativeHidePauseTrace &observation, bool suspend,
+                                    std::function<void(bool)> callback)
+{
+  std::string error;
+  const auto state = find_view(parent, session_id, error);
+  if (!callback || !matches_visible_playback(state, observation, suspend) ||
+      state->test_owns_playback_suspension == suspend) {
+    return false;
+  }
+  if (!suspend) {
+    const auto pause = cocoa::test_pause_snapshot(state);
+    if (!pause.available || !pause.acknowledged || !pause.verified) { return false; }
+  }
+  const auto close = state->test_close_observation;
+  const std::weak_ptr<cocoa::State> weak = state;
+  __weak WKWebView *expected_view = state->view;
+  state->test_owns_playback_suspension = suspend;
+  [state->view setAllMediaPlaybackSuspended:suspend completionHandler:^{
+    const auto current = weak.lock();
+    callback(matches_visible_playback(current, *close->hide_pause, suspend) && current->view == expected_view &&
+             current->test_owns_playback_suspension == suspend);
   }];
   return true;
 }

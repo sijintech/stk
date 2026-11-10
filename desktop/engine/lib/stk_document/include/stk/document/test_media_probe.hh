@@ -133,6 +133,19 @@ bool probe_hidden_playback(wm::NativeWindowHandle parent, std::string_view sessi
                            const NativeHidePauseTrace &observation,
                            std::function<void(std::optional<int>)> callback);
 
+enum class PlaybackState : int { None, Playing, Paused, Suspended };
+/** UI-thread only. Before the hide the trace's next pause is pending, after reveal it must be current. */
+bool visible_playback_target(wm::NativeWindowHandle parent, std::string_view session_id,
+                             const NativeHidePauseTrace &observation, bool before_hide);
+/** Query the exact visible view independently of the suspension and ordinary hide pause callbacks. */
+bool probe_visible_playback(wm::NativeWindowHandle parent, std::string_view session_id,
+                            const NativeHidePauseTrace &observation, bool before_hide,
+                            std::function<void(std::optional<PlaybackState>)> callback);
+/** Test-owned suspension. YES is accepted once before the hide and NO only after the same view returns. */
+bool set_visible_playback_suspended(wm::NativeWindowHandle parent, std::string_view session_id,
+                                    const NativeHidePauseTrace &observation, bool suspend,
+                                    std::function<void(bool)> callback);
+
 /** UI-thread only: bind an input target to the unique ready session and its native navigation.
  * expected_view is compared with the real WKWebView; no native object is returned or sent over IPC.
  */

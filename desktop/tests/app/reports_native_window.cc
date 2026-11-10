@@ -89,6 +89,7 @@ struct Options {
   bool frame_clock_control = false;
   bool first_toolbar_pause_control = false;
   bool first_toolbar_immediate = false;
+  bool suspend_reveal_control = false;
   bool fresh_pause_diagnostic() const { return fresh_pause != FreshPause::None; }
   bool pause_order_diagnostic() const
   {
@@ -97,7 +98,7 @@ struct Options {
   int reading_cycles() const
   {
     return (pre_seek_hide_control || pause_order_diagnostic() || fresh_pause_diagnostic() ||
-            first_toolbar_pause_control) ? 1 : 20;
+            first_toolbar_pause_control || suspend_reveal_control) ? 1 : 20;
   }
 };
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
@@ -173,7 +174,7 @@ void log_last_media_observation(const Json &result) noexcept
                             "hidden_media_native_close", "frame_clock_verdict",
                             "first_toolbar_pause_delay", "first_toolbar_pause_trace",
                             "first_toolbar_pause_immediate", "first_toolbar_pause_immediate_trace",
-                            "repeat_verified_visible_pause"}) {
+                            "repeat_verified_visible_pause", "suspend_reveal"}) {
       const auto item = result.find(key);
       if (item == result.end() || !item->is_object()) continue;
       // These objects contain only fixed phase names, hashes and numerical probe facts.
@@ -1202,6 +1203,151 @@ class Exercise {
       throw;
     }
     record(); save();
+  }
+  void suspend_reveal_diagnostic(app::EditorArea &area, const std::string &session, uint64_t navigation,
+                                 const std::shared_ptr<document_preview::ResourceSession> &resources,
+                                 const std::function<Media(const char *)> &explicit_play)
+  {
+    using namespace document_preview;
+    using test::PlaybackState;
+    constexpr auto budget = detail::MediaPauseVerification::timeout;
+    constexpr auto hold = std::chrono::milliseconds(750);
+    const auto parent = window_.native_window_handle();
+    const auto started = Clock::now();
+    std::shared_ptr<const test::NativeCloseObservation> close;
+    const auto starting_dom_probe = last_media_probe_;
+    Json evidence = {{"stage", "initial-inline-play"}, {"session_sha256", core::Sha256::hex(session)},
+        {"navigation_generation", navigation},
+        {"native_requests", Json::object()}, {"hold_seconds", std::chrono::duration<double>(hold).count()},
+        {"native_callback_budget_seconds", std::chrono::duration<double>(budget).count()}};
+    const auto record = [&] {
+      evidence["session_active"] = resources->active();
+      if (last_media_probe_ && last_media_probe_ != starting_dom_probe) {
+        const auto &probe = *last_media_probe_;
+        evidence["last_dom_read"] = {{"accepted", probe.accepted},
+            {"dispatch_seconds", media_time(probe.started, probe.dispatched)},
+            {"callback_seconds", media_time(probe.started, probe.callback)},
+            {"finished_seconds", media_time(probe.started, probe.finished)}, {"ok", probe.reply && probe.reply->ok},
+            {"media", probe.reply && probe.reply->ok ? media_json(probe.reply->media) : Json(nullptr)}};
+      }
+      result_["suspend_reveal"] = std::move(evidence);
+      record_native_pause_trace(close.get(), session, "suspend_reveal_hide_pause_trace");
+      record_hidden_native_close(close.get(), session, started);
+      save();
+    };
+    try {
+      const auto playing = explicit_play("suspend-reveal-initial-play");
+      evidence["playing_before_suspend"] = media_json(playing);
+      evidence["stage"] = "bind-visible-navigation";
+      require(playing.navigation_generation == navigation, "Initial Play must advance the original navigation");
+      close = observe_native_close(session, navigation);
+      require(close && close->hide_pause, "Suspension control needs the exact native hide trace");
+      const auto &trace = *close->hide_pause;
+      evidence["initial_media_generation"] = trace.media_generation - 1;
+      evidence["hide_media_generation"] = trace.media_generation;
+      const auto visible_target = [&](bool before_hide) {
+        return resources->active() && close->reason.empty() && !trace.overflow && area.active_tab() == 0 &&
+            test::visible_playback_target(parent, session, trace, before_hide);
+      };
+      const auto poll = [&](Clock::time_point deadline, const auto &predicate) {
+        return reports_native_test::poll_before<Clock>(deadline, predicate,
+            [this](bool wait_for_event) { process(wait_for_event); }, [] {});
+      };
+      struct NativeReply {
+        std::optional<int> value;
+        std::optional<Clock::time_point> when;
+      };
+      const auto request = [&](const char *phase, bool before_hide, const char *field, int expected, auto dispatch) {
+        evidence["stage"] = phase;
+        auto &entry = evidence["native_requests"][phase];
+        const auto requested = Clock::now();
+        const auto reply = std::make_shared<NativeReply>();
+        const bool accepted = dispatch([reply](std::optional<int> value) {
+          reply->value = value; reply->when = Clock::now();
+        });
+        entry = {{"accepted", accepted}, {"expected", expected}, {"requested_seconds", media_seconds(started, requested)}};
+        const auto deadline = requested + budget;
+        if (accepted) { poll(deadline, [&] { return reply->when || !visible_target(before_hide); }); }
+        entry["callback_seconds"] = media_time(requested, reply->when);
+        entry["same_visible_target"] = visible_target(before_hide);
+        entry[field] = reply->value ? Json(*reply->value) : Json(nullptr);
+        require(accepted && reply->when && *reply->when < deadline && reply->value && visible_target(before_hide),
+            std::string("Missing, late or stale Cocoa receipt for ") + phase);
+        require(*reply->value == expected, std::string("Unexpected Cocoa receipt for ") + phase);
+      };
+      const auto state = [&](const char *phase, bool before_hide, PlaybackState expected) {
+        request(phase, before_hide, "raw_playback_state", int(expected), [&](auto reply) {
+          return test::probe_visible_playback(parent, session, trace, before_hide,
+              [reply](std::optional<PlaybackState> value) {
+                reply(value ? std::optional<int>(int(*value)) : std::nullopt);
+              });
+        });
+      };
+      const auto suspend = [&](const char *phase, bool suspend_playback) {
+        request(phase, suspend_playback, "acknowledged", 1, [&](auto reply) {
+          return test::set_visible_playback_suspended(parent, session, trace, suspend_playback,
+              [reply](bool bound) { reply(int(bound)); });
+        });
+      };
+      state("initial-playing", true, PlaybackState::Playing);
+      suspend("suspend", true);
+      state("visible-suspended", true, PlaybackState::Suspended);
+
+      evidence["stage"] = "ordinary-tab-hide";
+      const auto prior_dom = dom_probe_requests_, prior_captures = os_capture_requests_;
+      tab(area, 1);
+      require(trace.event_count && trace.events.front().phase == "dispatch" && trace.events.front().visible,
+          "Ordinary tab hide must dispatch the native pause while still visible");
+      const auto hidden_pause = [&] { return test::hidden_pause_target(parent, session, trace); };
+      const auto deadline = trace.dispatched + budget + std::chrono::milliseconds(250);
+      poll(deadline, [&] {
+        const auto pause = hidden_pause();
+        return !resources->active() || !pause || pause->verified;
+      });
+      const auto pause = hidden_pause();
+      evidence["hidden_pause"] = pause ? native_pause_json(*pause) : Json(nullptr);
+      require(pause && pause->acknowledged && pause->verified && !pause->isolated_actuator && !trace.overflow,
+          "Ordinary hide pause must acknowledge and verify while the exact suspension is held");
+      evidence["stage"] = "hidden-hold";
+      require(!poll(Clock::now() + hold, [&] { return !hidden_pause(); }) && hidden_pause() &&
+          dom_probe_requests_ == prior_dom && os_capture_requests_ == prior_captures,
+          "The hidden hold must retain the exact paused view without DOM reads or captures");
+
+      evidence["stage"] = "reveal-same-navigation";
+      tab(area, 0);
+      const auto *viewport = widget("reports_document_viewport");
+      require(visible(viewport), "The returned report needs a visible viewport");
+      // Leave any header tooltip before measuring the no-input interval.
+      move_pointer({viewport->rect.cx(), viewport->rect.cy()});
+      require(poll(Clock::now() + budget, [&] { return visible_target(false); }),
+          "The same Cocoa view must return before releasing the suspension");
+      suspend("release", false);
+      state("released-paused", false, PlaybackState::Paused);
+      evidence["stage"] = "released-first-dom";
+      const auto paused = media(session, std::chrono::duration<double>(budget).count());
+      evidence["first_revealed_dom"] = media_json(paused);
+      require(visible_target(false) && paused.navigation_generation == playing.navigation_generation &&
+          paused.paused && !paused.ended && !paused.seeking, "Released media must still be paused without Play");
+      evidence["stage"] = "released-no-input-hold";
+      const auto held = held_media(1, "released-no-input-hold", session, paused,
+          std::chrono::duration<double>(hold).count());
+      evidence["held_revealed_dom"] = media_json(held);
+      state("released-hold-paused", false, PlaybackState::Paused);
+
+      evidence["stage"] = "explicit-inline-play";
+      const auto resumed = explicit_play("suspend-reveal-explicit-play");
+      evidence["resumed_dom"] = media_json(resumed);
+      require(visible_target(false) && resumed.navigation_generation == held.navigation_generation &&
+          !resumed.paused && resumed.current_time >= held.current_time + 0.10,
+          "Explicit native Play must advance the released media on the same navigation");
+      state("explicit-playing", false, PlaybackState::Playing);
+      evidence["stage"] = "observed";
+    }
+    catch (...) {
+      try { record(); } catch (...) {} // Preserve the diagnostic failure.
+      throw;
+    }
+    record();
   }
   void hidden_dom_tail(app::EditorArea &area, const std::string &session,
                        const std::shared_ptr<document_preview::ResourceSession> &resources,
@@ -2522,12 +2668,13 @@ raise SystemExit(main())
   require(!fs::exists(trace), "Selecting a report must not prepare/read any content");
   result["project_id"] = project.project()->id; result["report_id"] = kReport;
   result["source_sha256"] = report.at("source_sha256"); result["source_kind"] = options.source;
-  if (!options.visible_pause_control && !options.first_toolbar_pause_control) {
+  if (!options.visible_pause_control && !options.first_toolbar_pause_control && !options.suspend_reveal_control) {
     result["body_text_pixel_criterion"] = pdf ? "not applied: PDF page identities use independent page-embedded RGB stripes" :
         "Three aligned 20-column U+2588/space rows, independently required beside the frozen PNG";
   }
   const int cycles = options.reading_cycles();
-  const size_t required_images = (options.visible_pause_control || options.first_toolbar_pause_control) ? 0 :
+  const size_t required_images = (options.visible_pause_control || options.first_toolbar_pause_control ||
+      options.suspend_reveal_control) ? 0 :
       options.fresh_pause_diagnostic() ? 4 : options.pause_order_diagnostic() ? 1 :
       (video ? (options.pre_seek_hide_control ? 6 : 161) : (pdf ? 160 : 140));
   result["required_images"] = required_images;
@@ -2550,10 +2697,12 @@ raise SystemExit(main())
     result["media_fixture"] = {{"size", media_bytes.size()}, {"sha256", media_sha256},
         {"container", "MP4"}, {"video_codec", "H264 Baseline"}, {"audio_codec", "AAC"},
         {"duration_seconds", 6}, {"live_source_deleted_before_prepare", true}};
-    if (!options.visible_pause_control) {
+    if (!options.visible_pause_control && !options.suspend_reveal_control) {
       result["body_text_pixel_criterion"] = "Pinned MP4 decoded red/blue picture region in independent OS client captures; HTML contains no poster/image/script";
     }
-    result["not_proven_here"] = "Physical hardware input, audio output, arbitrary codec support, IME, physical scanout and browser memory stability; final guarded memory remains the separate after-static spike gate";
+    result["not_proven_here"] = options.suspend_reveal_control ?
+        "This observation samples native playback state and the DOM clock on one pinned MP4. It has no decoded-frame or audio evidence." :
+        "Physical hardware input, audio output, arbitrary codec support, IME, physical scanout and browser memory stability; final guarded memory remains the separate after-static spike gate";
     result["native_media_inputs"] = Json::array(); result["media_holds"] = Json::array();
     result["media_scope_revocations"] = Json::array(); result["media_transitions"] = Json::array();
     auto latest_session = [&] {
@@ -2646,6 +2795,23 @@ raise SystemExit(main())
       ui.held_media(cycle, "initial-no-autoplay", session, initial, 0.50);
       auto bounds = ui.widget("reports_document_viewport")->rect;
 #ifdef __APPLE__
+      if (options.suspend_reveal_control) {
+        ui.suspend_reveal_diagnostic(*area, session, initial.navigation_generation, resources, [&](const char *phase) {
+          const auto *viewport = ui.widget("reports_document_viewport");
+          require(ui.visible(viewport), "Explicit Play needs the visible report viewport");
+          return play(cycle, phase, session, viewport->rect);
+        });
+        require(area->tab(1).save_workspace_state() == draft_state && area->tab(1).has_unsaved_changes() &&
+            shell.store().scripts().history().empty(), "Suspension observation preserves the unexecuted Python draft");
+        require(viewer.save_workspace_state() == viewer_state && viewer.camera_serial() == camera &&
+            viewer.payload_serial() == payload && viewer.evaluations_started() == 0 &&
+            viewer_area->editor().save_workspace_state() == viewer_editor_state, "Suspension observation preserves the Viewer");
+        result["viewer_preserved"] = true;
+        result["python_draft_preserved"] = true;
+        result["completed_cycles"] = cycle;
+        ui.save();
+        return;
+      }
       if (options.visible_pause_control) {
         const auto playing = play(cycle, "visible-pause-control-play", session, bounds);
         ui.visible_pause_diagnostic(session, playing, resources);
@@ -3075,6 +3241,11 @@ int main(int argc, char **argv)
       options.first_toolbar_immediate = arg == "--first-toolbar-pause-immediate-control";
       continue;
     }
+    if (arg == "--suspend-reveal-control") {
+      if (options.suspend_reveal_control) { return 2; }
+      options.suspend_reveal_control = true;
+      continue;
+    }
     if (arg == "--fresh-native-hide-dom-control" || arg == "--fresh-native-visible-dom-control") {
       if (options.fresh_pause_diagnostic()) { return 2; }
       options.fresh_pause = arg == "--fresh-native-visible-dom-control" ? Options::FreshPause::Visible :
@@ -3121,6 +3292,8 @@ int main(int argc, char **argv)
       (options.fresh_pause_diagnostic() && (options.pause_order_diagnostic() || options.pre_seek_hide_control)) ||
       (options.first_toolbar_pause_control && (options.pause_order_diagnostic() || options.pre_seek_hide_control ||
                                                options.fresh_pause_diagnostic())) ||
+      (options.suspend_reveal_control && (options.source != "video" || options.pause_order_diagnostic() ||
+          options.pre_seek_hide_control || options.fresh_pause_diagnostic() || options.first_toolbar_pause_control)) ||
       ((options.pause_order_diagnostic() || options.pre_seek_hide_control || options.fresh_pause_diagnostic() ||
         options.first_toolbar_pause_control) &&
           options.source != "video" && options.source != "html-video") ||
@@ -3129,7 +3302,7 @@ int main(int argc, char **argv)
        && options.source != "video" && options.source != "html-video"
 #endif
       )) {
-    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control|--visible-native-pause-control|--second-visible-native-pause-control|--repeat-verified-visible-native-pause-control|--hide-after-verified-native-pause-control|--hide-without-repeat-native-pause-control|--hide-without-repeat-native-pause-dom-control|--fresh-native-hide-dom-control|--fresh-native-visible-dom-control|--visible-frame-clock-control|--first-toolbar-pause-delay-control|--first-toolbar-pause-immediate-control]\n"); return 2;
+    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control|--visible-native-pause-control|--second-visible-native-pause-control|--repeat-verified-visible-native-pause-control|--hide-after-verified-native-pause-control|--hide-without-repeat-native-pause-control|--hide-without-repeat-native-pause-dom-control|--fresh-native-hide-dom-control|--fresh-native-visible-dom-control|--visible-frame-clock-control|--first-toolbar-pause-delay-control|--first-toolbar-pause-immediate-control|--suspend-reveal-control]\n"); return 2;
   }
   Json result = {{"format", "stk.reports-native-evidence/1"}, {"status", "running"}, {"required_cycles", options.reading_cycles()},
       {"completed_cycles", 0}, {"images", Json::array()}, {"native_scroll_requests", Json::array()},
@@ -3202,6 +3375,12 @@ int main(int argc, char **argv)
     result["production_ui_acceptance"] = false;
     result["not_a_gate"] = "The outcome describes the observed sample. Extra elapsed playback can mask a rollback.";
   }
+  if (options.suspend_reveal_control) {
+    result["scenario"] = "suspend-reveal-control";
+    result["claim"] = "Test-owned Cocoa suspension through the ordinary hide pause, release on the same revealed view, "
+        "and explicit native Play after a quiet hold";
+    result["production_ui_acceptance"] = false;
+  }
   if (options.pre_seek_hide_control) {
     result["scenario"] = options.isolated_pause_control ? "isolated-quiet-pre-seek-hide-control" :
         (options.quiet_hidden_hold ? "quiet-pre-seek-hide-control" : "pre-seek-hide-control");
@@ -3239,6 +3418,10 @@ int main(int argc, char **argv)
     }
     result["status"] = "passed";
     write(directory / "result.json", result.dump(2));
+    if (options.suspend_reveal_control) {
+      std::fprintf(stdout, "PASS: Cocoa suspend reveal diagnostic; %s\n", core::path_to_utf8(directory).c_str());
+      return 0;
+    }
     if (options.frame_clock_control) {
       std::fprintf(stdout, "PASS: Cocoa visible frame clock diagnostic; outcome=%s; cycles=%d; %s\n",
           outcome.c_str(), options.reading_cycles(), core::path_to_utf8(directory).c_str());
