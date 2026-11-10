@@ -149,6 +149,8 @@
 .mode-switch button{border:0;border-radius:0;background:transparent;padding:7px 16px}
 .mode-switch button.active{background:#354660;color:#fff}
 .graph-panel{display:flex;flex-direction:column;min-width:0}
+/* An analysis mode not shown keeps its width and Viewer size (no resize, the camera stays) and takes no height. */
+.mode-pane{display:flex;flex-direction:column;min-width:0}.mode-pane>*{flex-shrink:0}.mode-hidden{visibility:hidden;height:0;overflow:hidden}
 .graph-controls label:first-child{flex:2;min-width:160px}
 .graph-controls label{flex:1;min-width:130px}
 .preset-description{margin:0 0 10px}

@@ -77,7 +77,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const historyShown=wide||historyOpen,overlay=!wide&&historyOpen;
   const historyPanel=useRef<HTMLElement>(null),historyToggle=useRef<HTMLButtonElement>(null),messageList=useRef<HTMLDivElement>(null),composer=useRef<HTMLTextAreaElement>(null);
   const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
-  const [probeText,setProbeText]=useState(''),[graphProbeText,setGraphProbeText]=useState(''),[viewError,setViewError]=useState('');
+  const [probeText,setProbeText]=useState(''),[graphProbeText,setGraphProbeText]=useState(''),[viewError,setViewError]=useState(''),[graphError,setGraphError]=useState('');
   const generation=useRef(0),scopeVersion=useRef(0),activeScope=useRef<TaskScope|null>(null),refreshing=useRef(false),alive=useRef(true);
   const artifactReads=useRef({started:0,applied:0});
   // The displayed record as of the latest change, so a late probe reply can tell whether its scene is still shown.
@@ -91,6 +91,16 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const fileChoice=useRef<HTMLSelectElement>(null),modeChoice=useRef<HTMLDivElement>(null),logPane=useRef<HTMLDetailsElement>(null);
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const selected=devices.find(d=>d.id===node&&!d.revoked);
+  // 图谱 is in view only in 结果, in 图谱 mode, with no compact history over it. Out of view it reads no progress and
+  // drops a scrub not yet sent; work already sent completes in its own scope and is shown on return.
+  const graphActive=tab==='results'&&analysis==='graph'&&!overlay;
+  // 图谱 is mounted when first in view and then kept, hidden, for the node it was opened under: a mode or section switch
+  // keeps its result, camera and probe. Another node drops it while it is out of view, so it only remounts (and reads
+  // its presets) when 图谱 is shown in 结果 again; a changed project or task resets it inside the panel (graphScope).
+  const graphKey=selected?.id||'';
+  const [graphFor,setGraphFor]=useState<string|null>(null);
+  if(graphActive?graphFor!==graphKey:graphFor!==null&&graphFor!==graphKey)setGraphFor(graphActive?graphKey:null);
+  const graphKept=graphActive||graphFor===graphKey;
   const tasks:Json[]=selected?.snapshot?.tasks||[];
   const task=selected&&selection?.node===node?selection.task:'';
   const heartbeat=task&&tasks.find(t=>t.id===task&&t.workspace_id===selection?.workspace);
@@ -103,6 +113,9 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     graphTasks=tasks.some(item=>item.id===task)?tasks.map(item=>item.id===task?row:item):[row,...tasks];
   }
   const shown=taskBound&&displayed?.scope===selection?displayed:null,shownScene=shown?.scene??null;
+  // The scope 图谱 works in: the chosen project, and the selected task with its own project once it is bound. Any change
+  // (another project with no task selected included) starts the panel afresh and drops its late replies.
+  const graphScope=JSON.stringify([workspace,task&&selection?selection.workspace:'',taskBound?task:'']);
   const features:unknown=selected?.snapshot?.features;
   const canRead=Array.isArray(features)&&features.includes('read');
   const canReadArtifacts=canRead&&readKinds?.includes('task.artifacts')===true;
@@ -201,6 +214,8 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   },[sourceOpen]);
   useEffect(()=>{void refresh();const abort=new AbortController();void events(()=>void refresh(),abort.signal);const timer=setInterval(()=>void refresh(),5000);return()=>{abort.abort();clearInterval(timer);};},[refresh]);
   useEffect(()=>{if(node&&!selected)clearNode();},[node,selected,clearNode]);
+  // A graph error or probe reply belongs to the scope it was raised in.
+  useEffect(()=>{setGraphError('');setGraphProbeText('');},[graphKey,graphScope]);
   useEffect(()=>{
     if(!taskBound||!taskOnline||!canReadArtifacts)return;
     const abort=new AbortController();
@@ -329,11 +344,12 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     </dl>:<p className="muted">未选择任务。在「任务」中选择任务后，这里显示它的节点、项目与文件。</p>}
     <div className="source-details-foot"><button type="button" className="quiet" onClick={closeSource}>收起</button></div>
   </div>;
-  const resultNotice=tab==='results'&&analysis==='file'?viewError:'';
+  // Result errors are shown with their own mode in 结果: one raised while that mode is out of view waits for its return.
+  const resultNotice=tab==='results'&&!overlay?(analysis==='file'?viewError:graphError):'';
   const notice=error||resultNotice;
   const resultText=analysis==='graph'?graphProbeText:shown?probeText:'';
   return <div className="app"><header><div className="wordmark">STK <span>科学工作台</span></div><span className={online?'connection':'connection offline'}>{online?'控制服务已连接':'连接中断 · 显示最近状态'}</span><button className="quiet" onClick={disconnect}>断开</button></header>
-    {notice&&<div className="notice" role="alert">{notice}<button onClick={()=>error?setError(''):setViewError('')}>关闭</button></div>}
+    {notice&&<div className="notice" role="alert">{notice}<button onClick={()=>error?setError(''):analysis==='file'?setViewError(''):setGraphError('')}>关闭</button></div>}
     <div className={wide?'workspace with-history':'workspace'}>
     <nav className="section-nav" aria-label="工作区">{SECTIONS.map(([key,label])=><button type="button" className={tab===key?'active':''} aria-current={tab===key?'page':undefined} key={key} onClick={()=>{setTab(key);setHistoryOpen(false);}}>{label}</button>)}
       {!wide&&<button type="button" ref={historyToggle} className={historyOpen?'history-toggle open':'history-toggle'} aria-expanded={historyOpen} aria-controls="conversation-history" aria-label="对话历史" onClick={toggleHistory}>历史</button>}</nav>
@@ -378,8 +394,10 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         <span className="source-file"><span>{sourceFile}</span>{sourceNext&&<span className="source-next" title={sourceNext}>{sourceNext}</span>}</span></p>
         <button type="button" ref={sourceToggle} className="source-toggle" aria-expanded={sourceOpen} aria-controls={sourceOpen?'result-source-details':undefined} onClick={()=>setSourceOpen(open=>!open)}>来源</button></div></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span>
       {sourceOpen&&sourceDetails}</div>
-      <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>{if(analysis!==key){setAnalysis(key);setGraphProbeText('');}}}>{label}</button>)}</div>
-      {analysis==='graph'?<React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={selected?.id||''} node={selected?node:''} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} canReadEvents={canReadEvents&&taskOnline} onError={setError} onLog={setGraphProbeText}/></React.Suspense>:<>
+      <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>setAnalysis(key)}>{label}</button>)}</div>
+      {/* Both analysis modes stay mounted once shown; the inactive one keeps its size but takes no space, focus or pointer. */}
+      {graphKept&&<div className={analysis==='graph'?'mode-pane graph-mode':'mode-pane graph-mode mode-hidden'} inert={analysis!=='graph'}><React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={graphKey} node={selected?node:''} scope={graphScope} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} canReadEvents={canReadEvents&&taskOnline&&graphActive} active={graphActive} onError={setGraphError} onLog={setGraphProbeText}/></React.Suspense></div>}
+      <div className={analysis==='file'?'mode-pane file-mode':'mode-pane file-mode mode-hidden'} inert={analysis!=='file'}>
       <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{setPath(e.target.value);generation.current++;setViewError('');}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(a=>/\.(vti|vtk|npy|dat)$/.test(a.path)).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
       <label>视图<select value={mode} onChange={e=>setMode(e.target.value)}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>
       {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>setAxis(Number(e.target.value))}>{['X','Y','Z'].map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={index} onChange={e=>setIndex(Number(e.target.value))}/></label></>}
@@ -387,7 +405,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       <button disabled={busy||!taskBound||!path} onClick={loadView}>加载视图</button></div>
       <ErrorBoundary resetKey={shownScene}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}><Viewer scene={shownScene} onPick={setProbe}/></React.Suspense></ErrorBoundary>
       {shownScene&&<div className="legend"><span>{shownScene.manifest.value_range[0].toPrecision(5)}</span><i/><span>{shownScene.manifest.value_range[1].toPrecision(5)} {shownScene.manifest.units}</span><small>{shownScene.manifest.display_reduced?'显示网格已简化':'完整显示网格'} · 数值查询使用原始数据</small></div>}
-      <div className="probe"><strong>物理坐标探针</strong>{probe.map((v,i)=><input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={v} onChange={e=>setProbe(probe.map((n,j)=>i===j?Number(e.target.value):n))}/>)}<button disabled={busy||!shown} onClick={probeValue}>查询原始值</button></div></>}
+      <div className="probe"><strong>物理坐标探针</strong>{probe.map((v,i)=><input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={v} onChange={e=>setProbe(probe.map((n,j)=>i===j?Number(e.target.value):n))}/>)}<button disabled={busy||!shown} onClick={probeValue}>查询原始值</button></div></div>
       <details className={logRoom?'logs log-room':'logs'} ref={logPane} open><summary>日志 / 探针结果</summary><pre>{(selected&&(resultText||logs))||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
     </section>
     <aside className={`chat panel surface${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'||overlay}><div className="section-title"><h2>AI 对话</h2><span className="muted conversation-name">{sessionLabel}</span></div>

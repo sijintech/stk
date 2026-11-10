@@ -1,6 +1,6 @@
 // 图谱 (graph) mode: evaluate a preset graph next to the data (action graph.evaluate), draw the returned
 // stk.payload/2, scrub steps with the camera kept, show plots/images/tables, and a task.events progress line.
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {action, api, blob, readNode, type Json} from './api';
 import {cachedBlob, loadPayload, loadStkp, type LoadedPayload} from './payload';
 import {bindingNames, blobSha, coerceParameters, DISPLAYABLE, duration, editorKind, emptyProgress, EVENTS_POLL_MS, EVENTS_TAIL_BYTES, foldEvents,
@@ -154,8 +154,11 @@ function JsonView({out}: {out: any}) {
   return text === null ? <p className="muted">正在读取数据…</p> : <pre>{text}</pre>;
 }
 
-export default function GraphPanel({node, task, tasks, artifacts, canReadEvents, onError, onLog}: {node: string, task: string, tasks: Json[], artifacts: Json[],
-  canReadEvents: boolean,
+// `active` is false while 图谱 is not in view (the file mode, another section or the compact history over 结果): the
+// panel stays mounted with its result and camera. `scope` names the page's project and task scope; a new one starts the
+// panel afresh, even at the same node with no task (local data packages and manually bound tasks included).
+export default function GraphPanel({node, scope, task, tasks, artifacts, canReadEvents, active = true, onError, onLog}: {node: string, scope: string, task: string,
+  tasks: Json[], artifacts: Json[], canReadEvents: boolean, active?: boolean,
   onError: (text: string) => void, onLog: (text: string) => void}) {
   const [presets, setPresets] = useState<Preset[] | null>(null);
   const [presetError, setPresetError] = useState('');
@@ -175,6 +178,8 @@ export default function GraphPanel({node, task, tasks, artifacts, canReadEvents,
   // Bumped whenever a pending evaluation is superseded (new request, preset/source change, local file, unmount).
   const generation = useRef(0);
   const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // The step value from before a scrub whose evaluation is still debounced (not yet sent).
+  const scrubFrom = useRef<{value: unknown} | null>(null);
 
   const preset = presets?.find(p => p.id === presetId);
   const files = useMemo(() => [...new Set((artifacts as Artifact[]).map(a => a?.path).filter(path => typeof path === 'string' && FIELD_FILE.test(path)))].sort(), [artifacts]);
@@ -188,26 +193,35 @@ export default function GraphPanel({node, task, tasks, artifacts, canReadEvents,
   const stepIndex = shownStep === null ? -1 : steps.choices.indexOf(shownStep);
   const resetKey = `${presetId}|${JSON.stringify(bindings)}`;
 
+  const mounted = useRef(false);
   useEffect(() => {
-    let alive = true;
+    mounted.current = true;
+    // Unmounting abandons a pending evaluation: its polling stops at the next check.
+    return () => { mounted.current = false; clearTimeout(debounce.current); generation.current++; };
+  }, []);
+  // The presets are read once, when the panel is first in view: a panel mounted hidden (its module arriving after the
+  // user left 图谱) reads nothing until it is shown.
+  const presetsRead = useRef(false);
+  useEffect(() => {
+    if (!active || presetsRead.current) return;
+    presetsRead.current = true;
     api('graphs/presets').then((list: unknown) => {
-      if (!alive) return;
+      if (!mounted.current) return;
       const items = Array.isArray(list) ? (list as Preset[]).filter(p => p && typeof p.id === 'string') : [];
       setPresets(items);
       setPresetId(id => (items.some(p => p.id === id) ? id : items[0]?.id ?? ''));
-    }).catch(e => { if (alive) { setPresets([]); setPresetError(message(e)); } });
-    // Unmounting abandons a pending evaluation: its polling stops at the next check.
-    return () => { alive = false; clearTimeout(debounce.current); generation.current++; };
-  }, []);
+    }).catch(e => { if (mounted.current) { setPresets([]); setPresetError(message(e)); } });
+  }, [active]);
 
-  // A new preset or data source starts from the preset defaults and a fresh camera.
-  useEffect(() => {
+  // A new preset, data source or scope starts from the preset defaults and a fresh camera. This runs in the commit of
+  // the change, so a reply of the old scope that arrives later (a queued evaluation, a probe, an error) is never shown.
+  useLayoutEffect(() => {
     generation.current++;
-    clearTimeout(debounce.current);
+    clearTimeout(debounce.current); scrubFrom.current = null;
     setValues(initialValues(params));
     setBindings(Object.fromEntries(names.map(n => [n, task])));
     setResult(null); setPayload(null); setProbe(null); setStatus(''); setRunning(false); setLocalName(''); setEvaluated(null);
-  }, [preset, params, names, node, task]);
+  }, [preset, params, names, node, scope, task]);
 
   async function evaluate(overrides: Record<string, unknown> = {}) {
     if (!preset) return;
@@ -264,13 +278,23 @@ export default function GraphPanel({node, task, tasks, artifacts, canReadEvents,
   function scrub(index: number) {
     if (!stepName || index < 0 || index >= steps.choices.length) return;
     const step = steps.choices[index];
+    if (!scrubFrom.current) scrubFrom.current = {value: values[stepName]};
     setValues(v => ({...v, [stepName]: step}));
     clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => void evaluate({[stepName]: step}), 300);
+    debounce.current = setTimeout(() => { scrubFrom.current = null; void evaluate({[stepName]: step}); }, 300);
   }
+  // Leaving 图谱 (for the file mode, another section or the compact history) sends nothing: a scrub not yet sent is
+  // dropped and its step returns to the value before it. An evaluation already sent completes in place, in its own
+  // scope, and is shown on return.
+  useEffect(() => {
+    const from = scrubFrom.current;
+    if (active || !from || !stepName) return;
+    clearTimeout(debounce.current); scrubFrom.current = null;
+    setValues(v => ({...v, [stepName]: from.value}));
+  }, [active, stepName]);
   function latest() {
     if (!stepName) return;
-    clearTimeout(debounce.current);
+    clearTimeout(debounce.current); scrubFrom.current = null;
     setValues(v => ({...v, [stepName]: 'latest'}));
     void evaluate({[stepName]: 'latest'});
   }
@@ -278,8 +302,8 @@ export default function GraphPanel({node, task, tasks, artifacts, canReadEvents,
   // Minimal live progress for the bound running task (task.events, see stk-events-v1.md §5).
   const progressTask = bindings[names[0]] ?? task;
   const taskState = tasks.find(t => t.id === progressTask)?.state;
-  // Polls only while the page is visible and the task runs, every 10 s backing off to 30 s while no new
-  // events arrive, and stops once the Runtime reports the task terminal.
+  // Polls only while 图谱 is in view (canReadEvents), the page is visible and the task runs, every 10 s backing off
+  // to 30 s while no new events arrive, and stops once the Runtime reports the task terminal.
   useEffect(() => {
     setProgress(null);
     if (!canReadEvents || !node || !progressTask || taskState !== 'running') return;
@@ -330,7 +354,7 @@ export default function GraphPanel({node, task, tasks, artifacts, canReadEvents,
       }
     })();
     return () => { stop = true; abort.abort(); wake?.(); document.removeEventListener('visibilitychange', onVisibility); };
-  }, [canReadEvents, node, progressTask, taskState]);
+  }, [canReadEvents, node, scope, progressTask, taskState]);
 
   async function openLocal(file: File | undefined) {
     if (!file) return;
@@ -409,7 +433,7 @@ export default function GraphPanel({node, task, tasks, artifacts, canReadEvents,
       <ul>{issues.map((w, i) => <li key={i}>{issueText(w)}</li>)}</ul></details>}
     <details className="graph-extra"><summary>更多选项</summary>
       <label className="check"><input type="checkbox" checked={includeImages} onChange={e => setIncludeImages(e.target.checked)}/>同时生成离屏渲染 PNG（较慢）</label>
-      <label>打开本地 .stkp 数据包<input type="file" accept=".stkp,application/octet-stream" onChange={e => void openLocal(e.target.files?.[0])}/></label>
+      <label>打开本地 .stkp 数据包<input key={scope} type="file" accept=".stkp,application/octet-stream" onChange={e => void openLocal(e.target.files?.[0])}/></label>
     </details>
   </div>;
 }

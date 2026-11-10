@@ -19,6 +19,11 @@ const device = {id: node, role: 'node', name: '节点甲', online: true, revoked
 const scene = {manifest: {version: 1, field: 'phi', units: 'V', value_range: [0, 1], render_origin: [0, 0, 0], display_reduced: false},
   mesh: {positions: [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0.5]], values: [0, 0.3, 0.6, 1], indices: [0, 1, 2, 1, 3, 2]}};
 const LOG = Array.from({length: 40}, (_, i) => `step ${i + 1} converged`).join('\n') + '\n'; // taller than the pane
+// 图谱 fixtures: one preset with a task binding and a step, answered by graph.evaluate with the payload v2 example
+// (its buffers are served as hub blobs). The result reports the step it was computed for and the choices.
+const EXAMPLE = fileURLToPath(new URL('../../docs/specs/examples/payload-v2/', import.meta.url));
+const PRESET = {id: 'field-view', name: '场视图', bindings: [{name: 'field'}], parameters: [{name: 'step', type: 'step', default: 'latest'}]};
+const STEPS = [0, 500, 1000];
 const types: Record<string, string> = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json'};
 
@@ -74,6 +79,8 @@ class Hub {
   // 任务: `device` is the node the hub lists; `down` makes every hub call fail as an unreachable control service;
   // `review` sends a task.submit to execution review, which GET actions then lists until it is approved or refused.
   device: typeof device = device;
+  // Further nodes the hub lists (no node reads are answered for them).
+  others: Record<string, any>[] = [];
   down = false;
   review = false;
   readonly actionRows: Record<string, any>[] = [];
@@ -83,6 +90,16 @@ class Hub {
   // Payloads of the view.build and view.probe actions, in order: which task and artifact each one asked for.
   readonly builds: Record<string, any>[] = [];
   readonly probes: Record<string, any>[] = [];
+  // 图谱: the presets GET graphs/presets lists (none by default) and the graph.evaluate payloads, in order.
+  presets: unknown[] = [];
+  readonly evaluations: Record<string, any>[] = [];
+  // `queueGraph`: graph.evaluate is queued on the node; GET actions/{id} answers queued until it is cleared, then the
+  // result; `hold('poll')` holds the next poll, which then answers as `queueGraph` is on release. `queuePolls` counts
+  // those polls. `graphChunk` holds the lazy 图谱 module until it resolves.
+  queueGraph = false;
+  queuePolls = 0;
+  private readonly queuedResults = new Map<string, unknown>();
+  graphChunk?: Promise<void>;
   readonly pending = new Map<string, Promise<void>>();
   readonly reached = new Set<string>();
   hold(kind: string) {
@@ -102,6 +119,7 @@ class Hub {
   private async answer(route: Route) {
     const request = route.request(), url = new URL(request.url());
     if (!url.pathname.startsWith('/api/v1/')) {
+      if (this.graphChunk && /^\/assets\/GraphPanel-[^/]+\.js$/.test(url.pathname)) await this.graphChunk;
       const file = join(DIST, url.pathname === '/' ? 'index.html' : url.pathname);
       if (!existsSync(file)) return route.fulfill({status: 404, body: ''});
       return route.fulfill({status: 200, contentType: types[extname(file)] || 'application/octet-stream', body: readFileSync(file)});
@@ -110,7 +128,7 @@ class Hub {
     const json = (body: unknown, status = 200) => route.fulfill({status, contentType: 'application/json', body: JSON.stringify(body)});
     if (this.down) return json({detail: '控制服务不可用'}, 503);
     if (path === 'events') { this.streams.push(route); return; } // open and silent until the hub publishes
-    if (path === 'devices') return json([this.device]);
+    if (path === 'devices') return json([this.device, ...this.others]);
     if (path === 'actions' && request.method() === 'GET') return json(this.actionRows);
     const reviewed = /^actions\/([^/]+)\/review$/.exec(path);
     if (reviewed && request.method() === 'POST') {
@@ -119,9 +137,20 @@ class Hub {
       item.state = request.postDataJSON().approved ? 'succeeded' : 'rejected';
       return json(item);
     }
+    const polled = /^actions\/([^/]+)$/.exec(path);
+    if (polled && request.method() === 'GET' && this.queuedResults.has(polled[1])) {
+      this.queuePolls++;
+      await this.gate('poll');
+      return json(this.queueGraph ? {id: polled[1], state: 'queued'} : {id: polled[1], state: 'succeeded', result: this.queuedResults.get(polled[1])});
+    }
     if (path === 'sessions') return json(this.rows);
     if (path === 'policy') return json({read_kinds: ['task.get', 'task.artifacts', 'task.events']});
-    if (path === 'graphs/presets') return json([]);
+    if (path === 'graphs/presets') return json(this.presets);
+    const stored = /^blobs\/([0-9a-f]{64})$/.exec(path);
+    if (stored) {
+      const file = join(EXAMPLE, `${stored[1]}.bin`);
+      return existsSync(file) ? route.fulfill({status: 200, contentType: 'application/octet-stream', body: readFileSync(file)}) : json({detail: 'no blob'}, 404);
+    }
     const conversation = /^sessions\/([^/]+)(\/history|\/messages)?$/.exec(path);
     if (conversation) {
       const [, id, tail] = conversation;
@@ -169,6 +198,8 @@ class Hub {
         const id = request.postDataJSON().payload?.task_id;
         return json({result: this.device.snapshot.tasks.find(t => t.id === id) ?? row});
       }
+      // The running task's event log: no new events yet.
+      if (kind === 'task.events') return json({result: {events: [], next_offset: 0, size: 0, terminal: false}});
       if (kind === 'task.artifacts') {
         const later = this.later;
         await this.gate(kind);
@@ -180,6 +211,7 @@ class Hub {
       const body = request.postDataJSON();
       if (body.kind === 'view.build') this.builds.push(body.payload);
       if (body.kind === 'view.probe') this.probes.push(body.payload);
+      if (body.kind === 'graph.evaluate') this.evaluations.push(body.payload);
       const viewError = this.viewErrors.get(body.kind);
       await this.gate(body.kind);
       if (viewError) return json({detail: viewError}, 502);
@@ -197,6 +229,13 @@ class Hub {
         const item = {id: body.id, state: 'review', review_reason: '新命令需要执行复核', request: {kind: body.kind, payload: body.payload}};
         this.actionRows.unshift(item);
         return json(item);
+      }
+      if (body.kind === 'graph.evaluate') {
+        const asked = body.payload.parameters?.step, step = typeof asked === 'number' ? asked : STEPS[STEPS.length - 1];
+        const result = {outputs: {main: {manifest: JSON.parse(readFileSync(join(EXAMPLE, 'manifest.json'), 'utf8'))}},
+          parameters: {step: {value: step, choices: STEPS}}};
+        if (this.queueGraph) { this.queuedResults.set(body.id, result); return json({id: body.id, state: 'queued'}); }
+        return json({id: body.id, state: 'succeeded', result});
       }
       if (body.kind === 'task.logs') return json(this.logsFail ? {id: body.id, state: 'failed', error: '日志暂不可读'} :
         {id: body.id, state: 'succeeded', result: {data: Buffer.from(LOG).toString('base64')}});
@@ -2303,3 +2342,838 @@ test('the compact history scrolls a restored selection into view on keyboard ope
   expect(hub.messages).toHaveLength(0);
   expect(errors).toEqual([]);
 });
+
+// 结果 analysis modes: once shown, the file Viewer and the 图谱 panel both stay mounted; the mode not shown keeps its
+// Viewer size and camera but takes no space, focus or pointer. 图谱 is first mounted (and reads its presets) when it
+// is first opened, and only for the node it was opened under. A switch sends nothing; a changed task, project or node
+// still drops what either mode shows.
+const filePane = (page: Page) => page.locator('section.analysis .mode-pane.file-mode');
+const graphPane = (page: Page) => page.locator('section.analysis .mode-pane.graph-mode');
+const modeTab = (page: Page, name: '结果文件' | '图谱') => page.getByRole('tab', {name, exact: true});
+// The vtk.js canvas of a mode's Viewer (a 图谱 payload also draws its legends on canvases of their own).
+const vtkCanvas = (pane: Locator) => pane.locator('.viewport > canvas, .viewport > .vtk-host > canvas');
+const marker = (pane: Locator) => vtkCanvas(pane).evaluate(el => (el as any).__marker ?? null);
+const step = (page: Page) => graphPane(page).locator('.scrubber strong');
+const node2 = 'e'.repeat(32);
+// As freeze, with room for a loaded machine: pauseAt cannot go back to a time the page clock has already passed.
+async function pause(page: Page) {
+  await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1000);
+  await page.waitForTimeout(300);
+}
+// Viewer pixels of one mode at a fixed scroll offset of 结果.
+async function paneShot(page: Page, pane: Locator, name: string) {
+  await page.locator('section.analysis').evaluate(el => { el.scrollTop = 0; });
+  return pane.locator('.viewport').screenshot({path: test.info().outputPath(`${name}.png`)});
+}
+async function drag(page: Page, pane: Locator) {
+  const box = (await pane.locator('.viewport').boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 - 60, box.y + box.height / 2 + 40, {steps: 8});
+  await page.mouse.up();
+}
+// Every hub request except the periodic refresh (devices, actions list, sessions, policy, event stream) and the
+// selected task's own 5 s task.get, which 任务 runs whatever the 结果 mode is.
+function traffic(page: Page) {
+  const seen: string[] = [];
+  const listener = (request: Request) => {
+    const url = new URL(request.url());
+    if (!url.pathname.startsWith('/api/v1/')) return;
+    const path = url.pathname.slice('/api/v1/'.length).replaceAll(node, '{node}');
+    if (request.method() === 'GET' && /^(devices|actions|sessions|policy|events)$/.test(path)) return;
+    if (path === 'nodes/{node}/read' && request.postDataJSON()?.kind === 'task.get') return;
+    seen.push(request.method() === 'POST' ? `POST ${path} ${request.postDataJSON()?.kind ?? ''}`.trim() : `GET ${path.startsWith('blobs/') ? 'blobs/…' : path}`);
+  };
+  page.on('request', listener);
+  return {seen, take: () => seen.splice(0), stop: () => page.off('request', listener)};
+}
+// The shown mode is visible and takes input; the other, when mounted, is hidden, inert and 0 px high, while its
+// Viewer keeps a real size (no resize, so a scene accepted while hidden is framed as if shown).
+async function expectMode(page: Page, mode: '结果文件' | '图谱') {
+  const [shown, hidden] = mode === '结果文件' ? [filePane(page), graphPane(page)] : [graphPane(page), filePane(page)];
+  await expect(modeTab(page, mode)).toHaveAttribute('aria-selected', 'true');
+  await expect(shown).toBeVisible();
+  expect(await shown.evaluate(el => (el as HTMLElement).inert)).toBe(false);
+  if (!await hidden.count()) return;
+  await expect(hidden).toBeHidden();
+  expect(await hidden.evaluate(el => [(el as HTMLElement).inert, el.getBoundingClientRect().height])).toEqual([true, 0]);
+  const size = await hidden.locator('.viewport').evaluate(el => [el.clientWidth, el.clientHeight]);
+  expect(Math.min(...size)).toBeGreaterThan(100);
+}
+// From the shown mode tab, the keyboard never reaches the hidden mode.
+async function tabWalk(page: Page, mode: '结果文件' | '图谱') {
+  await modeTab(page, mode).focus();
+  const hidden = mode === '结果文件' ? '.graph-mode' : '.file-mode';
+  const reached: boolean[] = [];
+  for (let i = 0; i < 12; i++) {
+    await page.keyboard.press('Tab');
+    reached.push(await page.evaluate(selector => !!document.activeElement?.closest(`section.analysis ${selector}`), hidden));
+  }
+  return reached.some(Boolean);
+}
+async function computeGraph(page: Page, hub: Hub) {
+  const count = hub.evaluations.length;
+  await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+  await expect(vtkCanvas(graphPane(page))).toHaveCount(1);
+  await expect(step(page)).toHaveText('1000');
+  expect(hub.evaluations).toHaveLength(count + 1);
+}
+
+for (const viewport of viewports) {
+  test.describe(`${viewport.name} 结果 modes`, () => {
+    test.use({viewport: {width: viewport.width, height: viewport.height}});
+
+    test('结果文件 → 图谱 → 结果文件 and back keep each Viewer, camera, probe and source; switching sends nothing', async ({page}) => {
+      const hub = new Hub();
+      hub.presets = [PRESET];
+      const sent = traffic(page);
+      const errors = await setup(page, hub);
+      // 图谱 is lazy: nothing of it is mounted or read before it is first opened.
+      expect(sent.seen.filter(s => /graph/.test(s))).toEqual([]);
+      await expect(graphPane(page)).toHaveCount(0);
+      await go(page, '结果');
+      await filePane(page).getByRole('button', {name: '查询原始值'}).click();
+      await expect(probeLog(page)).toContainText('"values"');
+      await expect(footer(page)).toContainText('就绪');
+      const fileLog = await probeLog(page).textContent();
+      const fileSource = [await source(page).textContent(), await source(page).getAttribute('title')];
+      const fileShot = await paneShot(page, filePane(page), `${viewport.name}-file-before`);
+      const fileLayout = {scroll: await page.locator('section.analysis').evaluate(el => el.scrollHeight), log: await logLayout(page)};
+      sent.take();
+      const r = route(page, `${viewport.name}-result-modes`);
+      await r.click(modeTab(page, '图谱'), '图谱 (first opening)');
+      await expectMode(page, '图谱');
+      await expect(graphPane(page).getByLabel('图谱预设')).toHaveValue('field-view');
+      await expect.poll(() => [...sent.seen]).toEqual(['GET graphs/presets']);
+      expect(await marker(filePane(page))).toBe('same-canvas');
+      // An explicit 计算图谱; then the graph camera is moved and a probe position typed.
+      await computeGraph(page, hub);
+      await page.waitForTimeout(300);
+      await drag(page, graphPane(page));
+      await graphPane(page).getByLabel('探针X').fill('1.5');
+      await vtkCanvas(graphPane(page)).evaluate(el => { (el as any).__marker = 'same-graph'; });
+      await expect(footer(page)).toContainText('就绪');
+      await pause(page);
+      const graphShot = await paneShot(page, graphPane(page), `${viewport.name}-graph-before`);
+      const graphSource = [await source(page).textContent(), await source(page).getAttribute('title')];
+      expect(graphSource[0]).toBe('节点甲 · 项目一 · 解析场验证，图谱数据源在下方绑定');
+      expect(await tabWalk(page, '图谱')).toBe(false);
+      sent.take();
+      // 图谱 → 结果文件: the same canvas, camera pixels, probe, file, title, log and source; nothing moved.
+      await r.click(modeTab(page, '结果文件'), '结果文件');
+      await expectMode(page, '结果文件');
+      expect(await marker(filePane(page))).toBe('same-canvas');
+      expect((await paneShot(page, filePane(page), `${viewport.name}-file-returned`)).equals(fileShot)).toBe(true);
+      expect(await filePane(page).getByLabel('探针X').inputValue()).toBe('0.25');
+      expect(await page.getByLabel('结果文件').inputValue()).toBe('scalar-0.vti');
+      expect(await title(page).textContent()).toBe('phi');
+      expect(await probeLog(page).textContent()).toBe(fileLog);
+      expect([await source(page).textContent(), await source(page).getAttribute('title')]).toEqual(fileSource);
+      expect({scroll: await page.locator('section.analysis').evaluate(el => el.scrollHeight), log: await logLayout(page)}).toEqual(fileLayout);
+      expect(await marker(graphPane(page))).toBe('same-graph');
+      expect(await tabWalk(page, '结果文件')).toBe(false);
+      // 结果文件 → 图谱: the same graph canvas, camera pixels, probe position and step.
+      await r.click(modeTab(page, '图谱'), '图谱 (return)');
+      await expectMode(page, '图谱');
+      expect(await marker(graphPane(page))).toBe('same-graph');
+      expect((await paneShot(page, graphPane(page), `${viewport.name}-graph-returned`)).equals(graphShot)).toBe(true);
+      expect(await graphPane(page).getByLabel('探针X').inputValue()).toBe('1.5');
+      await expect(step(page)).toHaveText('1000');
+      expect([await source(page).textContent(), await source(page).getAttribute('title')]).toEqual(graphSource);
+      // Section navigation keeps the mode and both Viewers too.
+      await r.click(nav(page).getByRole('button', {name: '任务', exact: true}), '任务');
+      await r.click(nav(page).getByRole('button', {name: '结果', exact: true}), '结果');
+      await expectMode(page, '图谱');
+      expect(await marker(graphPane(page))).toBe('same-graph');
+      await r.click(modeTab(page, '结果文件'), '结果文件 (again)');
+      expect(await marker(filePane(page))).toBe('same-canvas');
+      expect((await paneShot(page, filePane(page), `${viewport.name}-file-again`)).equals(fileShot)).toBe(true);
+      // Nothing follows later either (timers run on for a minute).
+      await page.clock.runFor(60000);
+      await page.waitForTimeout(300);
+      expect(sent.seen).toEqual([]);
+      expect(await page.getByLabel('对话内容').inputValue()).toBe('未发送的草稿：分析 phi 场');
+      expect(await page.getByLabel('TaskSpec').inputValue()).toBe('{"argv":["python3","draft.py"],"outputs":[]}');
+      expect([hub.builds.length, hub.probes.length, hub.evaluations.length, hub.replies]).toEqual([1, 1, 1, 0]);
+      expect(r.record.clicks).toBe(6);
+      r.save();
+      sent.stop();
+      expect(errors).toEqual([]);
+    });
+
+    test('来源 details stay exact for each mode across switches', async ({page}) => {
+      const hub = new Hub();
+      hub.presets = [PRESET];
+      const errors = await setup(page, hub);
+      await go(page, '结果');
+      const rows = async () => { await sourceToggle(page).click(); const value = await detailRows(page); await page.keyboard.press('Escape');
+        await expect(sourcePanel(page)).toHaveCount(0); return value; };
+      const fileRows = [['节点', `节点甲${node}`], ['项目', `项目一${ws}`], ['任务', `解析场验证${task}`], ['显示的文件', 'scalar-0.vti']];
+      const graphRows = [...fileRows.slice(0, 3), ['数据源', '在下方图谱面板中绑定']];
+      expect(await rows()).toEqual(fileRows);
+      await modeTab(page, '图谱').click();
+      await computeGraph(page, hub);
+      expect(await rows()).toEqual(graphRows);
+      await modeTab(page, '结果文件').click();
+      expect(await rows()).toEqual(fileRows);
+      await modeTab(page, '图谱').click();
+      expect(await rows()).toEqual(graphRows);
+      expect(errors).toEqual([]);
+    });
+
+    test('work already sent completes in its hidden mode; a scrub not yet sent is dropped by the switch', async ({page}) => {
+      const hub = new Hub();
+      hub.presets = [PRESET];
+      hub.later = true;
+      const sent = traffic(page);
+      const errors = await setup(page, hub);
+      await go(page, '结果');
+      // A held 加载视图 finishes while 图谱 is shown and is there, framed as if built in view, on return.
+      await page.getByLabel('结果文件').selectOption('scalar-1.vti');
+      hub.field = 'psi';
+      const build = hub.hold('view.build');
+      await filePane(page).getByRole('button', {name: '加载视图'}).click();
+      await expect.poll(() => hub.reached.has('view.build')).toBe(true);
+      await modeTab(page, '图谱').click();
+      await expectMode(page, '图谱');
+      build();
+      await expect(footer(page)).toContainText('就绪');
+      await expect(title(page)).toHaveText('图谱视图');
+      await expect(filePane(page).locator('.legend')).toBeAttached();
+      await modeTab(page, '结果文件').click();
+      await expectMode(page, '结果文件');
+      await expect(title(page)).toHaveText('psi');
+      await expect(source(page)).toHaveText(shown('显示 scalar-1.vti'));
+      await page.waitForTimeout(300);
+      const hiddenBuilt = await paneShot(page, filePane(page), `${viewport.name}-built-hidden`);
+      await filePane(page).getByRole('button', {name: '加载视图'}).click();
+      await expect.poll(() => hub.builds.length).toBe(3);
+      await expect(footer(page)).toContainText('就绪');
+      await page.waitForTimeout(300);
+      expect((await paneShot(page, filePane(page), `${viewport.name}-built-shown`)).equals(hiddenBuilt)).toBe(true);
+      // A held 计算图谱 finishes while 结果文件 is shown and is there on return.
+      await modeTab(page, '图谱').click();
+      const evaluation = hub.hold('graph.evaluate');
+      await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+      await expect.poll(() => hub.reached.has('graph.evaluate')).toBe(true);
+      await modeTab(page, '结果文件').click();
+      sent.take();
+      evaluation();
+      await expect(vtkCanvas(graphPane(page))).toHaveCount(1);
+      await expect(graphPane(page).locator('.status-line')).toHaveCount(0);
+      await expectMode(page, '结果文件');
+      await modeTab(page, '图谱').click();
+      await expect(step(page)).toHaveText('1000');
+      // Only the evaluation's own render data was read; then a scrub, debounced, is dropped by leaving 图谱.
+      await pause(page);
+      expect(sent.take().filter(s => s !== 'GET blobs/…')).toEqual([]);
+      await graphPane(page).getByRole('button', {name: '上一步'}).click();
+      await expect(step(page)).toHaveText('500');
+      await modeTab(page, '结果文件').click();
+      await page.clock.runFor(1000);
+      await modeTab(page, '图谱').click();
+      await expect(step(page)).toHaveText('1000');
+      await page.clock.runFor(1000);
+      expect(hub.evaluations).toHaveLength(1);
+      expect(sent.take()).toEqual([]);
+      // A scrub left in view is sent once, after its pause.
+      await graphPane(page).getByRole('button', {name: '上一步'}).click();
+      await page.clock.runFor(400);
+      await expect.poll(() => hub.evaluations.length).toBe(2);
+      expect(hub.evaluations[1].parameters).toEqual({step: 500});
+      await expect(step(page)).toHaveText('500');
+      writeFileSync(test.info().outputPath('in-flight-requests.json'), JSON.stringify({builds: hub.builds, evaluations: hub.evaluations}, null, 2));
+      sent.stop();
+      expect(errors).toEqual([]);
+    });
+
+    test('a 计算图谱 still running when the task or node changes in the hidden 图谱 is dropped', async ({page}) => {
+      const hub = new Hub();
+      hub.presets = [PRESET];
+      hub.device = {...device, snapshot: {...device.snapshot, tasks: [row, row2]}};
+      hub.others = [{...device, id: node2, name: '节点乙', snapshot: {...device.snapshot, tasks: [], workspaces: []}}];
+      const errors = await setup(page, hub, {scene: false});
+      const choose = async (name: RegExp) => { await go(page, '任务'); await page.locator('aside.tasks .task-list').getByRole('button', {name}).click(); };
+      const dropped = async () => {
+        await expect(vtkCanvas(graphPane(page))).toHaveCount(0);
+        await expect(graphPane(page).getByRole('button', {name: '计算图谱'})).toBeEnabled();
+        await expect(graphPane(page).locator('.status-line')).toHaveCount(0);
+      };
+      // Held, then the task changes while 结果文件 is shown; the late result is not shown for either task.
+      await go(page, '结果');
+      await modeTab(page, '图谱').click();
+      let release = hub.hold('graph.evaluate');
+      await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+      await expect.poll(() => hub.reached.has('graph.evaluate')).toBe(true);
+      await expect(graphPane(page).getByRole('button', {name: '计算中…'})).toBeDisabled();
+      await modeTab(page, '结果文件').click();
+      await choose(/对照任务/);
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      release();
+      await page.waitForTimeout(500);
+      await go(page, '结果');
+      await expect(source(page)).toHaveText('节点甲 · 项目一 · 对照任务，尚未加载结果文件');
+      await modeTab(page, '图谱').click();
+      await dropped();
+      await choose(/解析场验证/);
+      await go(page, '结果');
+      await dropped();
+      // Held, then another node while 结果文件 is shown: the panel is dropped; back on the first node nothing returns.
+      hub.reached.clear();
+      release = hub.hold('graph.evaluate');
+      await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+      await expect.poll(() => hub.reached.has('graph.evaluate')).toBe(true);
+      await modeTab(page, '结果文件').click();
+      await go(page, '任务');
+      await page.getByLabel('执行节点').selectOption(node2);
+      await expect(graphPane(page)).toHaveCount(0);
+      release();
+      await page.waitForTimeout(500);
+      await page.getByLabel('执行节点').selectOption(node);
+      await project(page).selectOption(ws);
+      await choose(/解析场验证/);
+      await go(page, '结果');
+      await expect(graphPane(page)).toHaveCount(0);
+      await modeTab(page, '图谱').click();
+      await expect(graphPane(page).getByLabel('图谱预设')).toHaveValue('field-view');
+      await dropped();
+      expect(hub.evaluations).toHaveLength(2);
+      expect(errors).toEqual([]);
+    });
+
+    test('a running task\'s progress is read only while 图谱 is shown', async ({page}) => {
+      const hub = new Hub();
+      hub.presets = [PRESET];
+      hub.device = {...device, snapshot: {...device.snapshot, tasks: [{...row, state: 'running'}]}};
+      const sent = traffic(page);
+      const errors = await setup(page, hub, {scene: false});
+      const polls = () => sent.seen.filter(s => s === 'POST nodes/{node}/read task.events').length;
+      await go(page, '结果');
+      await page.waitForTimeout(500);
+      expect(polls()).toBe(0);
+      // (The clock is paused only once the panel is shown: a paused clock also holds the Suspense reveal.)
+      await modeTab(page, '图谱').click();
+      await expect(graphPane(page).getByLabel('图谱预设')).toHaveValue('field-view');
+      await expect.poll(polls).toBe(1);
+      await pause(page);
+      await page.clock.runFor(60000);
+      // (Each count waits for the requests the run timers started to be reported.)
+      await page.waitForTimeout(500);
+      const shown = polls();
+      expect(shown).toBeGreaterThan(1);
+      // Hidden, 图谱 stops reading; shown again, it reads at once and goes on.
+      await modeTab(page, '结果文件').click();
+      await page.clock.runFor(120000);
+      await page.waitForTimeout(500);
+      expect(polls()).toBe(shown);
+      await modeTab(page, '图谱').click();
+      await expect.poll(polls).toBe(shown + 1);
+      expect(hub.evaluations).toHaveLength(0);
+      sent.stop();
+      expect(errors).toEqual([]);
+    });
+
+    test('a changed task, project or node drops both modes\' results; nothing old returns and 图谱 is read only when opened', async ({page}) => {
+      const hub = new Hub();
+      hub.presets = [PRESET];
+      hub.device = {...device, snapshot: {...device.snapshot, tasks: [row, row2]}};
+      hub.others = [{...device, id: node2, name: '节点乙', snapshot: {...device.snapshot, tasks: [], workspaces: []}}];
+      const sent = traffic(page);
+      const errors = await setup(page, hub);
+      const firstTask = () => page.locator('aside.tasks .task-list').getByRole('button', {name: /解析场验证/});
+      const empty = async () => {
+        await expect(vtkCanvas(filePane(page))).toHaveCount(0);
+        await expect(filePane(page).locator('.legend')).toHaveCount(0);
+        if (await graphPane(page).count()) await expect(vtkCanvas(graphPane(page))).toHaveCount(0);
+      };
+      const both = async () => {
+        await go(page, '结果');
+        if (!await vtkCanvas(filePane(page)).count()) {
+          await page.getByLabel('结果文件').selectOption('scalar-0.vti');
+          await filePane(page).getByRole('button', {name: '加载视图'}).click();
+          await expect(vtkCanvas(filePane(page))).toHaveCount(1);
+        }
+        await modeTab(page, '图谱').click();
+        await computeGraph(page, hub);
+        await modeTab(page, '结果文件').click();
+        await expectMode(page, '结果文件');
+        await expect(footer(page)).toContainText('就绪');
+      };
+      await both();
+      const graphReads = () => sent.seen.filter(s => s === 'GET graphs/presets').length;
+      expect(graphReads()).toBe(1);
+      // Another task while 图谱 is hidden: neither mode shows the old result, then or after choosing the first again.
+      await go(page, '任务');
+      await page.locator('aside.tasks .task-list').getByRole('button', {name: /对照任务/}).click();
+      await go(page, '结果');
+      await expect(source(page)).toHaveText('节点甲 · 项目一 · 对照任务，尚未加载结果文件');
+      await empty();
+      await modeTab(page, '图谱').click();
+      await empty();
+      await expect(graphPane(page).locator('.graph-controls select').nth(1)).toHaveValue(task2);
+      await modeTab(page, '结果文件').click();
+      await go(page, '任务');
+      await firstTask().click();
+      await go(page, '结果');
+      await expect(source(page)).toHaveText(shown('尚未加载结果文件'));
+      await empty();
+      await modeTab(page, '图谱').click();
+      await empty();
+      expect(graphReads()).toBe(1);
+      // Another project (and back), with both results shown again first.
+      await modeTab(page, '结果文件').click();
+      await both();
+      await go(page, '任务');
+      await project(page).selectOption('');
+      await project(page).selectOption(ws);
+      await firstTask().click();
+      await go(page, '结果');
+      await empty();
+      await modeTab(page, '图谱').click();
+      await empty();
+      expect(graphReads()).toBe(1);
+      // Another node drops the hidden 图谱 panel; coming back to the first node does not mount it again hidden.
+      await modeTab(page, '结果文件').click();
+      await both();
+      await go(page, '任务');
+      await page.getByLabel('执行节点').selectOption(node2);
+      await expect(graphPane(page)).toHaveCount(0);
+      await page.getByLabel('执行节点').selectOption(node);
+      await project(page).selectOption(ws);
+      await firstTask().click();
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await go(page, '结果');
+      await expectMode(page, '结果文件');
+      await empty();
+      await expect(graphPane(page)).toHaveCount(0);
+      await page.waitForTimeout(300);
+      expect(graphReads()).toBe(1);
+      // Opening 图谱 again mounts it fresh and reads its presets once.
+      await modeTab(page, '图谱').click();
+      await expectMode(page, '图谱');
+      await expect(graphPane(page).getByLabel('图谱预设')).toHaveValue('field-view');
+      await empty();
+      expect(graphReads()).toBe(2);
+      expect(hub.evaluations).toHaveLength(3);
+      expect(sent.seen.filter(s => s.startsWith('POST') && !s.startsWith('POST nodes/{node}/read'))).toEqual([
+        'POST actions view.build', 'POST actions graph.evaluate', 'POST actions view.build', 'POST actions graph.evaluate',
+        'POST actions view.build', 'POST actions graph.evaluate']);
+      writeFileSync(test.info().outputPath('scope-requests.json'), JSON.stringify(sent.seen, null, 2));
+      sent.stop();
+      expect(errors).toEqual([]);
+    });
+  });
+}
+
+// 图谱 scope and visibility. The panel works in the page's project and task scope, also at one node with no task
+// selected (a local data package, a manually bound task), and is in view only in 结果, in 图谱 mode, with no compact
+// history over it: out of view it reads no progress, drops a scrub not yet sent and reads no presets.
+const ws2 = 'e'.repeat(32);
+const twoProjects = {...device, snapshot: {...device.snapshot, workspaces: [{id: ws, name: '项目一'}, {id: ws2, name: '项目二'}]}};
+const STKP = join(EXAMPLE, 'example.stkp'); // the public synthetic payload v2 package
+const binding = (page: Page) => graphPane(page).getByLabel('数据源 field');
+const localNote = (page: Page) => graphPane(page).locator('p.muted', {hasText: /^本地数据包 /});
+const presetReads = (seen: string[]) => seen.filter(s => s === 'GET graphs/presets').length;
+async function showGraph(page: Page) {
+  await go(page, '结果');
+  await modeTab(page, '图谱').click();
+  await expectMode(page, '图谱');
+  await expect(graphPane(page).getByLabel('图谱预设')).toHaveValue('field-view');
+}
+async function openPackage(page: Page) {
+  await graphPane(page).locator('details.graph-extra > summary').click();
+  await graphPane(page).locator('input[type=file]').setInputFiles(STKP);
+  await expect(vtkCanvas(graphPane(page))).toHaveCount(1);
+  await expect(localNote(page)).toHaveText('本地数据包 example.stkp · 无法查询原始值');
+}
+// Nothing of an earlier scope is in the panel: no canvas, package, status line or running evaluation.
+async function graphEmpty(page: Page) {
+  await expect(vtkCanvas(graphPane(page))).toHaveCount(0);
+  await expect(localNote(page)).toHaveCount(0);
+  await expect(graphPane(page).locator('.status-line')).toHaveCount(0);
+  await expect(graphPane(page).getByRole('button', {name: '计算图谱'})).toBeEnabled();
+}
+// Pixels that differ between two screenshots of the same size, and the largest channel difference. Two renders of
+// the payload v2 volume differ slightly inside the volume even in view; a framing change moves edges by far more.
+async function pixelDiff(page: Page, a: Buffer, b: Buffer) {
+  return page.evaluate(async ([a, b]) => {
+    const load = async (data: string) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${data}`;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width; canvas.height = image.height;
+      const context = canvas.getContext('2d')!;
+      context.drawImage(image, 0, 0);
+      return context.getImageData(0, 0, canvas.width, canvas.height);
+    };
+    const [x, y] = [await load(a), await load(b)];
+    if (x.width !== y.width || x.height !== y.height) return {pixels: -1, max: 255};
+    let pixels = 0, max = 0;
+    for (let i = 0; i < x.data.length; i += 4) {
+      const d = Math.max(...[0, 1, 2].map(k => Math.abs(x.data[i + k] - y.data[i + k])));
+      if (d) { pixels++; max = Math.max(max, d); }
+    }
+    return {pixels, max};
+  }, [a.toString('base64'), b.toString('base64')] as const);
+}
+async function chooseProject(page: Page, id: string) {
+  await go(page, '任务');
+  await project(page).selectOption(id);
+}
+
+for (const viewport of viewports) {
+  test.describe(`${viewport.name} 图谱 scope and visibility`, () => {
+    test.use({viewport: {width: viewport.width, height: viewport.height}});
+
+    test('with no task selected at one node, a queued evaluation completing after a project change shows nothing', async ({page}) => {
+      const hub = new Hub();
+      hub.presets = [PRESET];
+      hub.device = twoProjects;
+      hub.queueGraph = true;
+      const sent = traffic(page);
+      const errors = await start(page, hub);
+      await go(page, '任务');
+      await page.getByLabel('执行节点').selectOption(node);
+      await project(page).selectOption(ws);
+      // In 项目一, no task selected: a task bound by hand in 图谱 and computed; the node queues it.
+      await showGraph(page);
+      await expect(source(page)).toHaveText('未选择任务，图谱数据源在下方绑定');
+      await binding(page).selectOption(task);
+      await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+      await expect.poll(() => hub.queuePolls).toBeGreaterThan(0);
+      await expect(graphPane(page).getByRole('button', {name: '计算中…'})).toBeDisabled();
+      // 结果文件 is shown and a poll is in flight when the project changes in 任务; that poll then reports success.
+      await modeTab(page, '结果文件').click();
+      const poll = hub.hold('poll');
+      await expect.poll(() => hub.reached.has('poll')).toBe(true);
+      await chooseProject(page, ws2);
+      hub.queueGraph = false;
+      poll();
+      await page.waitForTimeout(500);
+      const polls = hub.queuePolls;
+      await page.waitForTimeout(1500);
+      expect(hub.queuePolls).toBe(polls);
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      await go(page, '结果');
+      await expectMode(page, '结果文件');
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      await modeTab(page, '图谱').click();
+      await graphEmpty(page);
+      await expect(binding(page)).toHaveValue('');
+      // Only the old evaluation's own polls were made: no render data was read for it.
+      expect(sent.seen.filter(s => s === 'GET blobs/…')).toEqual([]);
+      expect(presetReads(sent.seen)).toBe(1);
+      expect(hub.evaluations).toEqual([expect.objectContaining({preset: 'field-view', bindings: {field: {task_id: task}}})]);
+      expect(sent.seen.filter(s => s.startsWith('POST') && !s.startsWith('POST nodes/{node}/read'))).toEqual(['POST actions graph.evaluate']);
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-queued-project-fence.png`)});
+      writeFileSync(test.info().outputPath('queued-project-fence-requests.json'), JSON.stringify(sent.seen, null, 2));
+      sent.stop();
+      expect(errors).toEqual([]);
+    });
+
+    test('with no task selected at one node, a local package is kept across navigation and stays with its project', async ({page}) => {
+      const hub = new Hub();
+      hub.presets = [PRESET];
+      hub.device = twoProjects;
+      const sent = traffic(page);
+      const errors = await start(page, hub);
+      await go(page, '任务');
+      await page.getByLabel('执行节点').selectOption(node);
+      await project(page).selectOption(ws2);
+      await showGraph(page);
+      await openPackage(page);
+      await vtkCanvas(graphPane(page)).evaluate(el => { (el as any).__marker = 'local-package'; });
+      // A mode switch and section navigation keep the package, its canvas and its note.
+      await modeTab(page, '结果文件').click();
+      await go(page, '任务');
+      await go(page, '工作台');
+      await go(page, '结果');
+      await modeTab(page, '图谱').click();
+      expect(await marker(graphPane(page))).toBe('local-package');
+      await expect(localNote(page)).toHaveText('本地数据包 example.stkp · 无法查询原始值');
+      // Another project while 结果文件 is shown: the package is not shown there, nor after coming back to 项目二.
+      const packageInput = graphPane(page).locator('input[type=file]');
+      await modeTab(page, '结果文件').click();
+      await chooseProject(page, ws);
+      await go(page, '结果');
+      await modeTab(page, '图谱').click();
+      await graphEmpty(page);
+      await expect(packageInput).toHaveValue('');
+      await modeTab(page, '结果文件').click();
+      await chooseProject(page, ws2);
+      await go(page, '结果');
+      await modeTab(page, '图谱').click();
+      await graphEmpty(page);
+      await expect(packageInput).toHaveValue('');
+      await packageInput.setInputFiles(STKP);
+      await expect(localNote(page)).toHaveText('本地数据包 example.stkp · 无法查询原始值');
+      expect(presetReads(sent.seen)).toBe(1);
+      expect(sent.seen.filter(s => s.startsWith('POST') && !s.startsWith('POST nodes/{node}/read'))).toEqual([]);
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-package-project-fence.png`)});
+      sent.stop();
+      expect(errors).toEqual([]);
+    });
+
+    test('a late 图谱 error stays with its project; one raised while 图谱 is hidden waits for 图谱', async ({page}) => {
+      const hub = new Hub();
+      hub.presets = [PRESET];
+      hub.device = twoProjects;
+      hub.viewErrors.set('graph.evaluate', '节点拒绝：图谱数据不可读');
+      const errors = await start(page, hub);
+      await go(page, '任务');
+      await page.getByLabel('执行节点').selectOption(node);
+      await project(page).selectOption(ws);
+      await showGraph(page);
+      await binding(page).selectOption(task);
+      let release = hub.hold('graph.evaluate');
+      await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+      await expect.poll(() => hub.reached.has('graph.evaluate')).toBe(true);
+      await modeTab(page, '结果文件').click();
+      await chooseProject(page, ws2);
+      release();
+      await page.waitForTimeout(500);
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      await go(page, '结果');
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      await modeTab(page, '图谱').click();
+      await graphEmpty(page);
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      // The same failure in the current project while 结果文件 is shown: not over 结果文件, but on 图谱's return.
+      hub.reached.clear();
+      await binding(page).selectOption(task);
+      release = hub.hold('graph.evaluate');
+      await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+      await expect.poll(() => hub.reached.has('graph.evaluate')).toBe(true);
+      await modeTab(page, '结果文件').click();
+      release();
+      await expect(graphPane(page).locator('.graph-controls button.primary')).toHaveText('计算图谱');
+      await page.waitForTimeout(300);
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      await go(page, '任务');
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      await go(page, '结果');
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      await modeTab(page, '图谱').click();
+      await expect(page.getByRole('alert')).toContainText('节点拒绝：图谱数据不可读');
+      await page.getByRole('alert').getByRole('button', {name: '关闭'}).click();
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      if (viewport.name === 'narrow') {
+        hub.reached.clear();
+        release = hub.hold('graph.evaluate');
+        await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+        await expect.poll(() => hub.reached.has('graph.evaluate')).toBe(true);
+        await historyToggle(page).click();
+        await expect(historyToggle(page)).toHaveAttribute('aria-expanded', 'true');
+        release();
+        await expect(graphPane(page).locator('.graph-controls button.primary')).toHaveText('计算图谱');
+        await expect(page.getByRole('alert')).toHaveCount(0);
+        await page.keyboard.press('Escape');
+        await expect(historyToggle(page)).toHaveAttribute('aria-expanded', 'false');
+        await expect(page.getByRole('alert')).toContainText('节点拒绝：图谱数据不可读');
+      }
+      expect(hub.evaluations).toHaveLength(viewport.name === 'narrow' ? 3 : 2);
+      expect(errors.filter(e => !/502/.test(e))).toEqual([]);
+    });
+
+    test('a task ID listed in two projects is two scopes: the other one shows nothing of the first', async ({page}) => {
+      // A synthetic snapshot: the Runtime keys tasks by ID per node, so this only checks the scope identity.
+      const hub = new Hub();
+      hub.presets = [PRESET];
+      hub.device = {...twoProjects, snapshot: {...twoProjects.snapshot, tasks: [row, {...row, workspace_id: ws2, name: '复用编号任务'}]}};
+      const errors = await start(page, hub);
+      await go(page, '任务');
+      await page.getByLabel('执行节点').selectOption(node);
+      await taskRow(page, '解析场验证').click();
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await showGraph(page);
+      await expect(binding(page)).toHaveValue(task);
+      await computeGraph(page, hub);
+      const release = hub.hold('graph.evaluate');
+      await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+      await expect.poll(() => hub.reached.has('graph.evaluate')).toBe(true);
+      await modeTab(page, '结果文件').click();
+      await go(page, '任务');
+      await taskRow(page, '复用编号任务').click();
+      await expect(page.locator('aside.tasks .task-scope')).toHaveText('所选任务 · 节点甲 · 项目二');
+      release();
+      await page.waitForTimeout(500);
+      await go(page, '结果');
+      await expect(source(page)).toHaveText('节点甲 · 项目二 · 复用编号任务，尚未加载结果文件');
+      await modeTab(page, '图谱').click();
+      await graphEmpty(page);
+      await expect(binding(page)).toHaveValue(task);
+      expect(hub.evaluations).toHaveLength(2);
+      expect(errors).toEqual([]);
+    });
+
+    test('out of 结果, 图谱 reads no progress and drops a scrub not yet sent; both resume on return', async ({page}) => {
+      const hub = new Hub();
+      hub.presets = [PRESET];
+      hub.device = {...device, snapshot: {...device.snapshot, tasks: [{...row, state: 'running'}]}};
+      const sent = traffic(page);
+      const errors = await setup(page, hub, {scene: false});
+      const polls = () => sent.seen.filter(s => s === 'POST nodes/{node}/read task.events').length;
+      await showGraph(page);
+      await expect.poll(polls).toBe(1);
+      await computeGraph(page, hub);
+      await pause(page);
+      await page.clock.runFor(60000);
+      await page.waitForTimeout(500);
+      const away = async (leave: () => Promise<void>, back: () => Promise<void>) => {
+        const before = polls();
+        expect(before).toBeGreaterThan(1);
+        await leave();
+        await page.clock.runFor(120000);
+        await page.waitForTimeout(500);
+        expect(polls()).toBe(before);
+        await back();
+        await expectMode(page, '图谱');
+        await expect.poll(polls).toBe(before + 1);
+        await page.clock.runFor(60000);
+        await page.waitForTimeout(500);
+      };
+      // Leaving for 任务 or 工作台 stops the reads; 结果 reads at once and goes on.
+      await away(() => go(page, '任务'), () => go(page, '结果'));
+      await away(() => go(page, '工作台'), () => go(page, '结果'));
+      if (isNarrow(page)) await away(async () => { await historyToggle(page).click(); await expect(historyPanel(page)).toBeVisible(); },
+        async () => { await page.keyboard.press('Escape'); await expect(historyPanel(page)).toBeHidden(); });
+      // A scrub not yet sent is dropped by leaving 结果 (and by the compact history); its step goes back.
+      const leaves: [string, () => Promise<void>, () => Promise<void>][] = [
+        ['任务', () => go(page, '任务'), () => go(page, '结果')], ['工作台', () => go(page, '工作台'), () => go(page, '结果')]];
+      if (isNarrow(page)) leaves.push(['历史', () => historyToggle(page).click(), () => page.keyboard.press('Escape')]);
+      for (const [, leave, back] of leaves) {
+        await graphPane(page).getByRole('button', {name: '上一步'}).click();
+        await expect(step(page)).toHaveText('500');
+        await leave();
+        await page.clock.runFor(1000);
+        await back();
+        await expect(step(page)).toHaveText('1000');
+        await page.clock.runFor(1000);
+        await page.waitForTimeout(300);
+        expect(hub.evaluations).toHaveLength(1);
+      }
+      // A scrub left in view is sent once.
+      await graphPane(page).getByRole('button', {name: '上一步'}).click();
+      await page.clock.runFor(400);
+      await expect.poll(() => hub.evaluations.length).toBe(2);
+      expect(hub.evaluations[1].parameters).toEqual({step: 500});
+      writeFileSync(test.info().outputPath('away-requests.json'), JSON.stringify(sent.seen, null, 2));
+      sent.stop();
+      expect(errors).toEqual([]);
+    });
+
+    test('a 计算图谱 sent before leaving 结果 completes there and is shown on return, framed as if computed in view', async ({page}) => {
+      const hub = new Hub();
+      hub.presets = [PRESET];
+      hub.device = {...device, snapshot: {...device.snapshot, tasks: [row, row2]}};
+      const errors = await setup(page, hub, {scene: false});
+      await showGraph(page);
+      await computeGraph(page, hub);
+      await expect(footer(page)).toContainText('就绪');
+      await page.waitForTimeout(300);
+      const inView = await paneShot(page, graphPane(page), `${viewport.name}-computed-in-view`);
+      // Another task and back gives a fresh panel; then a held 计算图谱 completes while 任务 is shown.
+      await go(page, '任务');
+      await taskRow(page, '对照任务').click();
+      await taskRow(page, '解析场验证').click();
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await go(page, '结果');
+      await graphEmpty(page);
+      const release = hub.hold('graph.evaluate');
+      await graphPane(page).getByRole('button', {name: '计算图谱'}).click();
+      await expect.poll(() => hub.reached.has('graph.evaluate')).toBe(true);
+      await go(page, '任务');
+      release();
+      await expect(vtkCanvas(graphPane(page))).toHaveCount(1);
+      await expect(graphPane(page).locator('.status-line')).toHaveCount(0);
+      await expectActive(page, '任务');
+      await page.waitForTimeout(300);
+      await go(page, '结果');
+      await expectMode(page, '图谱');
+      await expect(step(page)).toHaveText('1000');
+      await page.waitForTimeout(300);
+      const hidden = await paneShot(page, graphPane(page), `${viewport.name}-computed-hidden`);
+      // Control: the same evaluation computed in view again, in a fresh panel.
+      await go(page, '任务');
+      await taskRow(page, '对照任务').click();
+      await taskRow(page, '解析场验证').click();
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await go(page, '结果');
+      await graphEmpty(page);
+      await computeGraph(page, hub);
+      await expect(footer(page)).toContainText('就绪');
+      await page.waitForTimeout(300);
+      const again = await paneShot(page, graphPane(page), `${viewport.name}-computed-in-view-again`);
+      const diffs = {hiddenVsInView: await pixelDiff(page, inView, hidden), inViewVsInViewAgain: await pixelDiff(page, inView, again)};
+      writeFileSync(test.info().outputPath('pixel-diffs.json'), JSON.stringify(diffs, null, 2));
+      expect(diffs.hiddenVsInView.pixels).toBeGreaterThanOrEqual(0);
+      expect(diffs.hiddenVsInView.max).toBeLessThanOrEqual(24);
+      expect(diffs.inViewVsInViewAgain.max).toBeLessThanOrEqual(24);
+      expect(hub.evaluations).toHaveLength(3);
+      expect(errors).toEqual([]);
+    });
+
+    test('a node chosen while 结果 is hidden reads no presets until 图谱 is shown in 结果 again', async ({page}) => {
+      const hub = new Hub();
+      hub.presets = [PRESET];
+      hub.others = [{...device, id: node2, name: '节点乙', snapshot: {...device.snapshot, tasks: [], workspaces: []}}];
+      const sent = traffic(page);
+      const errors = await setup(page, hub, {scene: false});
+      await showGraph(page);
+      expect(presetReads(sent.seen)).toBe(1);
+      // 图谱 stays the chosen mode; the node changes in 任务, twice, and the first task is chosen again.
+      await go(page, '任务');
+      await page.getByLabel('执行节点').selectOption(node2);
+      await expect(graphPane(page)).toHaveCount(0);
+      await page.waitForTimeout(500);
+      await page.getByLabel('执行节点').selectOption(node);
+      await project(page).selectOption(ws);
+      await taskRow(page, '解析场验证').click();
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await page.waitForTimeout(500);
+      expect(presetReads(sent.seen)).toBe(1);
+      await expect(graphPane(page)).toHaveCount(0);
+      await go(page, '工作台');
+      await page.waitForTimeout(300);
+      expect(presetReads(sent.seen)).toBe(1);
+      // Shown in 结果 again (one click, the mode is still 图谱): mounted fresh and its presets read once.
+      await go(page, '结果');
+      await expectMode(page, '图谱');
+      await expect(graphPane(page).getByLabel('图谱预设')).toHaveValue('field-view');
+      await page.waitForTimeout(300);
+      expect(presetReads(sent.seen)).toBe(2);
+      expect(hub.evaluations).toHaveLength(0);
+      sent.stop();
+      expect(errors).toEqual([]);
+    });
+
+    for (const leave of ['结果文件', '任务'] as const) {
+      test(`a 图谱 module arriving after ${leave} was chosen reads its presets only once 图谱 is shown`, async ({page}) => {
+        const hub = new Hub();
+        hub.presets = [PRESET];
+        let release!: () => void;
+        hub.graphChunk = new Promise<void>(resolve => { release = resolve; });
+        const sent = traffic(page);
+        const errors = await setup(page, hub, {scene: false});
+        await go(page, '结果');
+        await modeTab(page, '图谱').click();
+        await expect(graphPane(page)).toContainText('正在加载图谱模块…');
+        if (leave === '结果文件') await modeTab(page, '结果文件').click(); else await go(page, '任务');
+        release();
+        // The retained Suspense mounts the panel hidden; it reads nothing.
+        await expect(graphPane(page).locator('.graph-panel')).toHaveCount(1);
+        await page.waitForTimeout(500);
+        expect(presetReads(sent.seen)).toBe(0);
+        await expect(graphPane(page).getByLabel('图谱预设', {exact: true})).toHaveValue('');
+        if (leave === '结果文件') await modeTab(page, '图谱').click(); else await go(page, '结果');
+        await expectMode(page, '图谱');
+        await expect(graphPane(page).getByLabel('图谱预设')).toHaveValue('field-view');
+        await page.waitForTimeout(300);
+        expect(presetReads(sent.seen)).toBe(1);
+        sent.stop();
+        expect(errors).toEqual([]);
+      });
+    }
+  });
+}
