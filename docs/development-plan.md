@@ -1,5 +1,17 @@
 # STK 开发计划
 
+## 2026-11-10 19:33 UTC · 原生任务返回与首次结果
+
+`3afb443d` 在原生聚焦工作台为同一区域的任务页与结果页分别保存外层滚动。返回时核对Viewer 当前来源的任务、运行连接、节点、工作区、选中代次和目标编辑器。入口仍可见时把焦点归还给它。切换期间选中别的任务会保留新选择。新增回归在原实现复现返回偏移从 40 px 归零及焦点落在导航，修订后 Jobs 55/55、UI 131/131、窗口 88/88，零跳过。
+
+Linux X11 英文 1600×720 与中文 680×720，缩放 1。固定起点为同一个保存区域的聚焦任务页，已选合成 Runtime 任务，表单展开且有草稿，外层已滚动 40 px。通过公开载荷预热元数据，从启动到起点各 4 次点击、一次输入、Return 和一次外层滚轮。测量段各 1 次打开第 7 步结果、1 次返回。队列区域像素和归一化草稿字形一致。Tab 离开入口、Shift+Tab 回到入口，两端焦点像素变化可复验。只观察到明确打开与已有邻步预取，没有切页引发的新求值、Runtime 写入或模型调用。收据在外部目录 `root-delivery-20261110-136/tasks-return-window/window-*-shared-warm/verified-receipt.json`。受测二进制 SHA256 为 `30a006dddc9a000e6fdbf728248f94aed7014abb2e031362056af21f044a1163`。
+
+`3cdfb7b4` 统一有无预加载元数据时的任务默认预设。冷启动回归在原实现发出 `energy-plot` 并返回空步号。修订后两条路径均按现有任务默认规则打开 `muferro-domains`，精确绑定原任务。Viewer 32/32，零跳过。
+
+冷启动以同一保存布局复验两种窗口。起点前没有打开样例，也没有读取预设、目录或色图。准备为 3 次点击、一次输入、Return 和一次外层滚轮。各 1 次点击打开并显示第 7 步、1 次返回。保留 40 px 偏移、队列与草稿。Tab 和 Shift+Tab 证实焦点恢复。正常邻步预取之外，返回无新求值、模型调用或写入。原始收据在外部目录 `root-delivery-20261110-136/tasks-return-cold-window/window-*-cold/window-receipt.json`，二进制 SHA256 为 `9c4e3b18f2c68bc5269f86a704b9f820d5fc61777adfa26f3b0318d5667328cd`。
+
+远端 `bacdc753` 已发布。该源码头的 Linux 打包与干净环境安装通过，macOS 已通过依赖安装并进入构建。其余 Desktop 与 Runtime 作业未达终态，这两项原生改动仍在本地 `main`。Claude90 的独立候选 `fc42e14b` Web 测试 113/113。审阅发现同节点无所选任务时的项目切换隔离，以及离开结果页和窄窗历史覆盖后的后台读取和待发送拖动问题。Claude91 已排队在独立 worktree 从该候选继续，Root 将完成复验和集成。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42883444412) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42883444505)
+
 ## 2026-11-10 19:15 UTC · 上一远端 Desktop CI 终态
 
 远端 `693e7ea4` 的 Desktop CI 于 19:13:06 UTC 结束，6 个作业全部到终态。Linux Desktop 2195/2195、两项 Linux 打包、Windows CPU 1505/1505 与 Windows 原生内容均通过。Windows 原生 6/6、零跳过，PDF 完成 20/20 轮与 160/160 张截图，第 20 轮重新准备第一页的像素证据已上传。PDF 最长捕获启动 112 ms，两个视频均通过。上一轮 PDF 捕获超时本次未复现。唯一失败是 macOS 依赖安装时下载 fmt 补丁返回 HTTP 429，该作业的构建、CPU、Metal 和原生验收均跳过。同一源码头的 Runtime 13/13、Secret scan 与 Pages 均通过。下一批待发布源码含 `a9cefe9e` 的 Windows 捕获诊断与 `37e22f6a` 之前已记录的双端界面交付。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42870791136) · [Windows 原生作业](https://github.com/sijintech/stk/actions/runs/42870791136/job/130049729774) · [macOS 作业](https://github.com/sijintech/stk/actions/runs/42870791136/job/130021209994) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42870793242)
