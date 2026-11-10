@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-10 00:02 UTC · 文献命中单击打开与 Python 面板回归
+
+`26644456` 将文献命中至引用页缩为一次明确点击；真实 X11 双布局均验证默认入口 8→6，命中至页图 3→1。`17685b5a` 补原生 Python 面板的受约束打开回归。 [运行验收](runtime-validation.md)
+
+已推送远端 `ba03ac8d`，包含 `6333178e` Viewer 保护与 `83302698` Runtime 旧断言修正。截至 2026-11-10T00:00:46+00:00，新 Desktop `42722834184` 仍运行，两个 Linux 打包作业成功；Runtime `42722834173` 已有 10/13 作业成功，其余矩阵仍运行，暂无失败。Secret scan 和文档部署已成功。上述新文献与面板回归提交仅在本地，等待 `ba03ac8d` 的整个 Desktop 终态后再推送。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42722834184) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42722834173)
+
+实际 Claude74 已从冻结 `17685b5a` 在独立 `claude/literature-guide-74` 编写文献桌面使用指南，仅新指南文件；待 root 审阅。root 继续负责公共实现、验收、集成和推送。PR #53/#54 仍为 c9f13994/2dd3e4ee，旧冲突差异未合入；原路线和 MuPRO 实际许可/科学参数等剩余条件继续保留。
+
 ## 2026-11-09 23:44 UTC · 前一 Desktop 终态与 Cocoa 帧号回执
 
 远端 `5cb7cdb9` Desktop `42712877920` 于 23:39:58 UTC 终态 failure，6 个作业全部结束，5 个成功。Linux 主测 2162/2162，两个打包作业成功；Windows CPU 1481/1481，独立原生 6/6 且每项 20/20 轮、零跳过。macOS CPU 1540/1540、Metal 254/254，主原生 4/6。整轮终态满足本批推送前提。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42712877920) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42712877920/artifacts/13720252143)
