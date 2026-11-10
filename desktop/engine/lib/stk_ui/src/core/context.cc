@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <utility>
 
 #include "layout_engine.hh"
 #include "stk/ui/ui.hh"
@@ -15,7 +16,12 @@ static constexpr double INF = std::numeric_limits<double>::infinity();
 
 float Block::scroll() const
 {
-  return ctx_->scroll_of(id_);
+  return ctx_->scroll_of(scroll_id());
+}
+
+void Block::set_scroll_scope(std::string_view scope)
+{
+  scroll_scope_ = scope.empty() ? 0 : utf8::hash_combine(id_, utf8::fnv1a(scope));
 }
 
 Context::Context(ContextConfig config) : config_(std::move(config))
@@ -228,6 +234,11 @@ Layout &Context::modal(std::string_view key, std::string_view title, std::functi
   return b.layout();
 }
 
+void Context::restore_focus_next_frame(std::string key, std::function<bool()> current)
+{
+  next_frame_focus_ = PendingFocus{std::move(key), std::move(current)};
+}
+
 static void set_clip(Block &b, const Rect &clip)
 {
   for (Widget &w : const_cast<std::deque<Widget> &>(b.widgets())) {
@@ -254,7 +265,7 @@ void Context::layout_block(Block &b)
         h = LayoutEngine::resolve(*this, root, r.x + m, r.y + std::round(0.5f * m), w);
         b.content_h_ = h + m;
       }
-      float &scroll = scroll_[b.id_];
+      float &scroll = scroll_[b.scroll_id()];
       scroll = std::clamp(scroll, 0.0f, std::max(0.0f, b.content_h_ - r.h));
       if (scroll != 0.0f) {
         h = LayoutEngine::resolve(*this, root, r.x + m, r.y + std::round(0.5f * m) - std::round(scroll), w);
@@ -309,14 +320,16 @@ void Context::end_frame()
   if (focus_ && !find_id(focus_)) {
     focus_ = 0;
   }
-  if (modal_return_focus_) {
-    const auto target = modal_return_focus_;
-    modal_return_focus_ = 0;
+  if (const auto focus = std::exchange(next_frame_focus_, std::nullopt)) {
     if (!edit_.id && !drag_.id && !popup_.owner && std::none_of(blocks_.begin(), blocks_.end(), [](const auto &b) {
           return b->kind() == Block::Kind::Modal;
         }))
     {
-      focus_visible_widget(target);
+      if (const auto *target = find(focus->key); target && target->key == focus->key &&
+          (!focus->current || focus->current()))
+      {
+        focus_visible_widget(target->id);
+      }
     }
   }
   if (hover_ && !find_id(hover_)) {
@@ -1980,7 +1993,7 @@ EventResult Context::wheel(const Event &e)
   if (blk && blk->kind() == Block::Kind::Region) {
     const float ms = std::max(0.0f, blk->content_height() - blk->rect().h);
     if (ms > 0.0f) {
-      set_scroll(blk->id_, scroll_of(blk->id_) - e.wheel_y * 2 * style_.unit, ms);
+      set_scroll(blk->scroll_id(), blk->scroll() - e.wheel_y * 2 * style_.unit, ms);
       return {true, true};
     }
   }

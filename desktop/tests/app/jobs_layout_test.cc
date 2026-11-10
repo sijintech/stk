@@ -370,6 +370,79 @@ TEST(JobsLayout, OpeningATaskResultKeepsTheFocusedWorkbench)
   EXPECT_EQ(wmtest::read_text(u.dir.str() + "/model/methods.log").find("task.submit\n"), std::string::npos);
 }
 
+TEST(JobsLayout, FocusedTaskResultReturnKeepsSameAreaScrollAndLauncher)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  UiOnFake u;
+  auto &jobs = u.jobs();
+  auto &shared = u.f.area("a1");
+  auto &other = u.f.area("a2");
+  ASSERT_TRUE(shared.add_tab(app::kEditorViewer, false));
+  for (int i = 0; i < other.tab_count(); ++i) {
+    if (other.tab(i).type().id == app::kEditorViewer) {
+      ASSERT_TRUE(other.set_tab_type(i, app::kEditorFiles));
+    }
+  }
+  u.f.drv->ctx.rect.ymax = 540;
+  ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+  jobs.select_connection("runtime:lab");
+  ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty(); }));
+  const std::string task(32, 'c');
+  jobs.apply_snapshot(io::Json::array({{{"id", task}, {"workspace_id", jobs.workspace()},
+                                        {"name", "Result task"}, {"state", "succeeded"}}}), 100.0);
+  jobs.select_task(task);
+  jobs.form().name = "Keep the draft";
+  u.f.shell->open_workbench(u.f.screen);
+  u.f.drv->frame();
+  u.click("workbench_tasks");
+  ASSERT_EQ(u.f.screen.maximized(), &shared);
+  auto *original = &shared.editor();
+  ASSERT_EQ(original->type().id, app::kEditorJobs);
+  const std::string body = "a1/main/focused_jobs/";
+  u.click(body + "submit");
+  const auto [x, y] = u.f.widget_center(body + "environment");
+  wm::Event wheel;
+  wheel.type = wm::EventType::Wheel;
+  wheel.x = x;
+  wheel.y = y;
+  wheel.wheel_y = -1;
+  u.f.drv->send(wheel);
+  const std::string launcher_key = body + "tasks/open_viewer";
+  const auto *launcher = u.find(launcher_key);
+  ASSERT_NE(launcher, nullptr);
+  const float scroll = launcher->block->scroll();
+  ASSERT_GT(scroll, 0.0f);
+
+  u.click(launcher_key);
+  ASSERT_EQ(u.f.screen.maximized(), &shared);
+  ASSERT_EQ(shared.editor().type().id, app::kEditorViewer);
+  EXPECT_EQ(u.f.shell->store().viewer().source().task_id, task);
+  u.click("workbench_tasks");
+  ASSERT_EQ(u.f.screen.maximized(), &shared);
+  ASSERT_EQ(&shared.editor(), original);
+  launcher = u.find(launcher_key);
+  ASSERT_NE(launcher, nullptr);
+  EXPECT_EQ(launcher->block->scroll(), scroll);
+  EXPECT_EQ(u.f.screen.ui()->focused(), launcher->id);
+  EXPECT_EQ(jobs.selected(), task);
+  EXPECT_EQ(jobs.form().name, "Keep the draft");
+  EXPECT_FALSE(jobs.submission());
+
+  u.click(launcher_key);
+  ASSERT_EQ(shared.editor().type().id, app::kEditorViewer);
+  const std::string newer_task(32, 'd');
+  jobs.apply_snapshot(io::Json::array({{{"id", newer_task}, {"workspace_id", jobs.workspace()},
+                                        {"name", "Other task"}, {"state", "succeeded"}}}), 101.0);
+  jobs.select_task(newer_task);
+  u.click("workbench_tasks");
+  EXPECT_EQ(jobs.selected(), newer_task);
+  launcher = u.find(launcher_key);
+  ASSERT_NE(launcher, nullptr);
+  EXPECT_NE(u.f.screen.ui()->focused(), launcher->id);
+}
+
 TEST(JobsLayout, FocusedResultSourceWrapsAndScrollsLongLocalLabels)
 {
   AppFixture f("en", 1.0f, 680, 1000);

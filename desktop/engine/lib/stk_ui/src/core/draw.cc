@@ -94,7 +94,7 @@ void Context::draw_block(const Block &b)
       draw_layout(*b.root_, b);
       if (b.content_height() > b.rect().h) {
         const bool hot = mouse_.x >= b.rect().x1() - st.scrollbar - 2 * st.pixel && b.rect().contains(mouse_);
-        draw_scrollbar(b.rect(), b.content_height(), b.rect().h, scroll_of(b.id_), hot);
+        draw_scrollbar(b.rect(), b.content_height(), b.rect().h, b.scroll(), hot);
       }
       draw_.clip_pop();
       break;

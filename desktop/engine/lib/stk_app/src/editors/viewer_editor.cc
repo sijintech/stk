@@ -246,7 +246,7 @@ class ViewerEditor final : public Editor {
           source_detail_line_ = -1;
         }).width(fit_units(ctx, label)).tip(ctx.tr("viewer.source.details"));
         if (source_details_scope_ == scope && ctx.ui) {
-          draw_result_source(ctx, *screen, button.id);
+          draw_result_source(ctx, *screen, button.key);
         }
         else {
           source_details_scope_.reset();
@@ -312,7 +312,7 @@ class ViewerEditor final : public Editor {
     return step_text(step);
   }
 
-  void draw_result_source(EditorContext &ctx, wm::Screen &screen, const ui::WidgetId anchor)
+  void draw_result_source(EditorContext &ctx, wm::Screen &screen, const std::string &anchor)
   {
     const auto inspection = vs_->graph_inspection();
     const auto &shown = inspection->shown_configuration;
@@ -362,7 +362,7 @@ class ViewerEditor final : public Editor {
     const auto close = [this, ui = ctx.ui, anchor, weak = lifetime()]() {
       if (weak.expired()) { return; }
       source_details_scope_.reset();
-      ui->restore_modal_focus(anchor);
+      ui->restore_focus_next_frame(anchor);
     };
     auto &modal = ctx.ui->modal("viewer_source_details", ctx.tr("viewer.source.details"), close, options);
     if (!inspection->has_payload) {

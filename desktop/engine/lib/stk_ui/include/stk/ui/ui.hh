@@ -443,6 +443,8 @@ class Block {
   Context &ctx() const { return *ctx_; }
   const std::deque<Widget> &widgets() const { return widgets_; }
   float content_height() const { return content_h_; }
+  /** Keep separate outer scroll positions without changing the widget keys in this region. */
+  void set_scroll_scope(std::string_view scope);
   float scroll() const;
   /** Frame of overlay blocks (modal dialog, popup, tooltip); == rect for regions. */
   const Rect &frame() const { return frame_; }
@@ -466,6 +468,8 @@ class Block {
   std::string name_;
   std::string title_;
   WidgetId id_ = 0;
+  WidgetId scroll_id() const { return scroll_scope_ ? scroll_scope_ : id_; }
+  WidgetId scroll_scope_ = 0;
   Rect rect_;
   Rect frame_;
   std::deque<Layout> layouts_;
@@ -541,8 +545,8 @@ class Context {
   Block &block(std::string_view name, Rect region);
   /** An open modal dialog for this frame (call every frame while it should stay open). */
   Layout &modal(std::string_view key, std::string_view title, std::function<void()> on_close, ModalOptions opts = {});
-  /** Focus the visible launcher on the next frame after its modal has closed. */
-  void restore_modal_focus(WidgetId id) { modal_return_focus_ = id; }
+  /** Restore focus on the next layout when the exact widget is visible and the request is current. */
+  void restore_focus_next_frame(std::string key, std::function<bool()> current = {});
   void end_frame();
   const DrawList &draw_list() const { return draw_; }
   /**
@@ -765,7 +769,11 @@ class Context {
   double hover_since_ = 0.0;
   Vec2 mouse_;
   WidgetId focus_ = 0;
-  WidgetId modal_return_focus_ = 0;
+  struct PendingFocus {
+    std::string key;
+    std::function<bool()> current;
+  };
+  std::optional<PendingFocus> next_frame_focus_;
   WidgetId tooltip_forced_ = 0;
   WidgetId tooltip_shown_ = 0;
   DragState drag_;

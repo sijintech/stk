@@ -844,6 +844,20 @@ std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, 
     if (!current()) { return; }
     s->defer([this, s, editor_id, current, request] {
       if (!current()) { return; }
+      std::function<bool()> return_to_task;
+      if (const auto *from = dynamic_cast<const EditorArea *>(s->maximized());
+          editor_id && std::string_view(editor_id) == kEditorJobs && from &&
+          from->editor().type().id == kEditorViewer && workbench_is_focused(*s))
+      {
+        const auto &shown = store_.viewer().source();
+        auto selected = store_.jobs().selected_result_request();
+        if (shown.kind == SourceKind::Task && selected &&
+            shown.connection == selected->connection && shown.node == selected->node &&
+            shown.workspace_id == selected->workspace_id && shown.task_id == selected->task_id)
+        {
+          return_to_task = std::move(selected->still_current);
+        }
+      }
       const auto result = editor_id ? activate_editor(s, editor_id, true) : restore_split_layout(s);
       if (result && editor_id) {
         focused_workbenches_[s] = s->visibility_epoch();
@@ -851,6 +865,15 @@ std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, 
           // The latest explicit open supersedes any result already queued in the split view.
           store_.take_open_result();
           store_.viewer().open(*request, /*fit_initial_view=*/true);
+        }
+        auto *tasks = dynamic_cast<EditorArea *>(s->maximized());
+        if (return_to_task && s->ui() && tasks) {
+          s->ui()->restore_focus_next_frame(tasks->id() + "/main/focused_jobs/tasks/open_viewer",
+              [s, tasks, epoch = s->visibility_epoch(), activity = tasks->activity_epoch(),
+               editor = tasks->editor().lifetime(), selected = std::move(return_to_task)] {
+                return !editor.expired() && s->visibility_epoch() == epoch && s->maximized() == tasks &&
+                       tasks->activity_epoch() == activity && selected();
+              });
         }
       }
       if (!result && store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
