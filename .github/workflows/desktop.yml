@@ -567,13 +567,13 @@ jobs:
           python3 desktop/tests/check_required_tests.py build/ctest-native-frame-clock.xml 'reports_visible_frame_clock_video_metal' 'reports_visible_frame_clock_html-video_metal' || status=$?
           exit "$status"
 
-      - name: Native WKWebView fixed passive delay before the visible pause on the original clip
+      - name: Native WKWebView passive delay before the first Reports toolbar pause
         if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
         continue-on-error: true
         run: |
           status=0
-          ctest --test-dir build --output-on-failure -R '^reports_fresh_native_visible_dom_delay_(video|html-video)_metal$' --timeout 180 --output-junit "$PWD/build/ctest-native-fresh-visible-dom-delay.xml" || status=$?
-          python3 desktop/tests/check_required_tests.py build/ctest-native-fresh-visible-dom-delay.xml 'reports_fresh_native_visible_dom_delay_video_metal' 'reports_fresh_native_visible_dom_delay_html-video_metal' || status=$?
+          ctest --test-dir build --output-on-failure -R '^reports_first_toolbar_pause_delay_(video|html-video)_metal$' --timeout 180 --output-junit "$PWD/build/ctest-native-first-toolbar-pause-delay.xml" || status=$?
+          python3 desktop/tests/check_required_tests.py build/ctest-native-first-toolbar-pause-delay.xml 'reports_first_toolbar_pause_delay_video_metal' 'reports_first_toolbar_pause_delay_html-video_metal' || status=$?
           exit "$status"
 
       - name: Upload rendered frames
@@ -604,7 +604,7 @@ jobs:
             build/ctest-native-fresh-hide-dom.xml
             build/ctest-native-fresh-visible-dom.xml
             build/ctest-native-frame-clock.xml
-            build/ctest-native-fresh-visible-dom-delay.xml
+            build/ctest-native-first-toolbar-pause-delay.xml
             build/spike/document_preview/native-evidence/**
             build/tests/app/reports-native-markdown/**
             build/tests/app/reports-native-html/**
@@ -633,8 +633,8 @@ jobs:
             build/tests/app/reports-fresh-native-visible-dom-html-video/**
             build/tests/app/reports-visible-frame-clock-video/**
             build/tests/app/reports-visible-frame-clock-html-video/**
-            build/tests/app/reports-fresh-native-visible-dom-delay-video/**
-            build/tests/app/reports-fresh-native-visible-dom-delay-html-video/**
+            build/tests/app/reports-first-toolbar-pause-delay-video/**
+            build/tests/app/reports-first-toolbar-pause-delay-html-video/**
             build/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
           retention-days: 14
