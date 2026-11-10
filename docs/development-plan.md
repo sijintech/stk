@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-10 23:10 UTC · 主线发布与公共指南上线
+
+远端 `main` 从 `a64941b4` 快进至 `ee0515122d2e7a565705e63c98694ad0bece0c2b`，推送后实查完整 SHA 一致。17 个提交范围扫描零发现，所有者的 AOCI 与状态文档工作区改动已保留。发布包含桌面已保存问答、双端 MuPRO 结果读取、Web 状态标签与 Viewer 迟到点击修复。上一轮 Desktop 终态和 482 张 Windows 图像摘要见下一节。
+
+新头 Secret scan 与 Pages 均通过。对公共中英文指南实际 HTTP 200，核对已保存问答和 MuPRO HDF5 章节，响应摘要在外部 `root-delivery-20261110-148/pages-live`。新头 Desktop 与 Runtime 正在运行。Windows 捕获目标复用首次进入正式目标平台，macOS 两个视频隐藏阶段仍待修。 [中文工作台指南](https://stk.pages.dev/user_guide/) [英文工作台指南](https://stk.pages.dev/en/user_guide/) [Pages](https://github.com/sijintech/stk/actions/runs/42920785458) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42920785230) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42920785047)
+
 ## 2026-11-10 23:07 UTC · Desktop 上一轮终态、Web 任务状态与 Viewer 点击
 
 远端 `a64941b4` 的 Desktop `42908396134` 于 23:00:45 UTC 结束，5/6 作业成功。Linux 主回归 2205/2205、打包及新环境冒烟均过，Windows CPU 1510/1510。Windows 原生 6/6，零跳过，1344.66 秒。正式 Windows 工件 `13811017650` 有 1888 个文件，完整 ZIP SHA-256 和 PDF/视频的 482 张验收图像摘要已核对。PDF 20/20、160 张图像，第 20 轮 `reprepared-page1` 两次匹配，已接受图像最长捕获启动 93 ms。MP4、HTML 视频各 20/20、各 161 张。该轮使用原捕获实现，待发布的复用目标另在新 Windows CI 取证。macOS CPU 1570/1570、Metal 254/254，必测原生 4/6，两个视频的隐藏阶段失败，详细时间及对照见前一节。相同代码头 Runtime 13/13。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42908396134) [Windows 工件](https://github.com/sijintech/stk/actions/runs/42908396134/artifacts/13811017650) [macOS 工件](https://github.com/sijintech/stk/actions/runs/42908396134/artifacts/13809562358) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42908396193)
