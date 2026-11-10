@@ -21,6 +21,7 @@ GHOST，绘制用 Blender 的 GPU 模块（Linux 上 OpenGL 或 Vulkan，macOS �
 - **查看器（Viewer）、属性（Properties）、探针（Probe）**：打开渲染数据包、结果目录或运行目录，用节点图
   预设（如 `muferro-domains`）在数据旁求值，GPU 显示、拾取并查询原始值，导出 PNG 与逐步序列。
 - **传输、日志、桥日志**：上传下载进度与续传、程序日志、桥的 stderr 与重启。
+- **文献（Literature）**：管理本地 PDF 文献库，复核导入与检索模型、检索并单击打开精确引用页，见[文献指南](literature-desktop.md)。
 - **AI 助手**：在同一页检查捕获数据、准备和明确发送保存的问题、查看请求状态与普通文字回复；
   首版本机及跨平台 CI 已通过。
 

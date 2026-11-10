@@ -87,6 +87,8 @@ PNG／序列导出）在 Linux（X11、Wayland；OpenGL、Vulkan）上通过真�
 [桌面程序指南](docs/desktop.md)，验收见 [验收记录](docs/runtime-validation.md)，开发与打包见
 [`desktop/README.md`](desktop/README.md)。
 
+本地 PDF 导入、检索模型复核、检索与单击打开引用页，见[桌面文献指南](docs/literature-desktop.md)。
+
 后续方向与阶段验收见[开发计划](docs/development-plan.md)：AI 助手、分层节点编辑器和通用多维表格
 共用 SQLite 项目模型。产品约定见[项目工作台设计](docs/design/project-workbench.md)，
 技术提案见[项目数据模型](docs/design/project-model.md)；已交付基础与后续目标以开发计划中的状态为准。
