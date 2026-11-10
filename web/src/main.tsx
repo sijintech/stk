@@ -364,11 +364,13 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // File mode uses the selected task and displayed artifact. Graph mode uses the accepted scene or output cards,
   // whose calculation can bind different tasks than the one selected in the queue.
   const taskName=observed?.name||(heartbeat||null)?.name||task.slice(0,8);
+  const completedTask=taskBound&&selection&&(observed?.state??(heartbeat||null)?.state)==='succeeded'?
+    {name:taskName,workspace:selection.workspace}:null;
   const graphKind=shownGraphSource?.kind==='local'?'本地数据包':shownGraphSource?.display==='scene'?'显示的三维结果':
     shownGraphSource?.display==='outputs'?'显示的图谱输出':'尚未显示图谱结果';
   const graphBinding=shownGraphSource?.kind==='evaluation'&&shownGraphSource.bindings.length===1?shownGraphSource.bindings[0]:null;
   const graphSummary=shownGraphSource?.kind==='local'?shownGraphSource.file:shownGraphSource?.kind==='evaluation'?
-    [shownGraphSource.presetName||shownGraphSource.presetId,graphBinding?(graphBinding.taskName||graphBinding.task.slice(0,8)):
+    [shownGraphSource.hdf5?'MuPRO HDF5':shownGraphSource.presetName||shownGraphSource.presetId,graphBinding?(graphBinding.taskName||graphBinding.task.slice(0,8)):
       shownGraphSource.bindings.length>1?`${shownGraphSource.bindings.length} 个计算绑定`:'',
       shownGraphSource.step===null?'':`第 ${shownGraphSource.step} 步`].filter(Boolean).join(' · '):'选择数据源并计算图谱';
   const sourceTask=analysis==='graph'?graphKind:task&&selection?(taskBound?`${nodeName} · ${workspaceName(selection.workspace)} · ${taskName}`:`${nodeName} · ${workspaceName(selection.workspace)} · 正在确认任务`):'未选择任务';
@@ -387,7 +389,12 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     <div><dt>本地数据包</dt><dd><SourceValue value={shownGraphSource.file} selectable/></dd></div>
   </dl>:shownGraphSource?.kind==='evaluation'?<dl>
     <div><dt>显示内容</dt><dd>{graphKind}</dd></div>
-    <div><dt>图谱预设</dt><dd>{shownGraphSource.presetName&&<SourceValue value={shownGraphSource.presetName}/>}<SourceValue value={shownGraphSource.presetId} selectable/></dd></div>
+    {shownGraphSource.hdf5?<><div><dt>原生读取器</dt><dd><SourceValue value="mupro.hdf5@1" selectable/></dd></div>
+      <div><dt>发布文件</dt><dd><SourceValue value={shownGraphSource.hdf5.artifact.path} selectable/></dd></div>
+      <div><dt>发布 SHA-256</dt><dd><SourceValue value={shownGraphSource.hdf5.artifact.sha256} selectable/></dd></div>
+      <div><dt>场选择器</dt><dd><SourceValue value={shownGraphSource.hdf5.frame.selector} selectable/></dd></div>
+      <div><dt>分量索引</dt><dd>{shownGraphSource.hdf5.component??'标量'}</dd></div></>:
+      <div><dt>图谱预设</dt><dd>{shownGraphSource.presetName&&<SourceValue value={shownGraphSource.presetName}/>}<SourceValue value={shownGraphSource.presetId} selectable/></dd></div>}
     {shownGraphSource.output&&<div><dt>输出</dt><dd><SourceValue value={shownGraphSource.output} selectable/></dd></div>}
     <div><dt>节点</dt><dd><SourceValue value={nodeName}/><SourceValue value={shownGraphSource.node} selectable/></dd></div>
     {shownGraphSource.bindings.map(binding=><React.Fragment key={binding.name}>
@@ -460,7 +467,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       {sourceOpen&&sourceDetails}</div>
       <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>setAnalysis(key)}>{label}</button>)}</div>
       {/* Both analysis modes stay mounted once shown; the inactive one keeps its size but takes no space, focus or pointer. */}
-      {graphKept&&<div className={analysis==='graph'?'mode-pane graph-mode':'mode-pane graph-mode mode-hidden'} inert={analysis!=='graph'}><React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={graphKey} node={selected?node:''} scope={graphScope} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} canReadEvents={canReadEvents&&taskOnline&&graphActive} active={graphActive} onError={setGraphError} onLog={setGraphProbeText} onSource={setGraphSource}/></React.Suspense></div>}
+      {graphKept&&<div className={analysis==='graph'?'mode-pane graph-mode':'mode-pane graph-mode mode-hidden'} inert={analysis!=='graph'}><React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={graphKey} node={selected?node:''} scope={graphScope} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} completedTask={completedTask} canReadEvents={canReadEvents&&taskOnline&&graphActive} active={graphActive} onError={setGraphError} onLog={setGraphProbeText} onSource={setGraphSource}/></React.Suspense></div>}
       <div className={analysis==='file'?'mode-pane file-mode':'mode-pane file-mode mode-hidden'} inert={analysis!=='file'}>
       <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{setPath(e.target.value);generation.current++;setViewError('');}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(a=>/\.(vti|vtk|npy|dat)$/.test(a.path)).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
       <label>视图<select value={mode} onChange={e=>setMode(e.target.value)}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>

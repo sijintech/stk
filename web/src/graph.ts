@@ -8,7 +8,7 @@ export interface GraphNode {id: string, type: string, params?: Record<string, an
 export interface GraphDocument {schema?: string, name?: string, nodes?: GraphNode[], outputs?: Record<string, string>, parameters?: GraphParameter[]}
 export interface Preset {id: string, name?: string, description?: string, graph?: GraphDocument, bindings?: {name: string, description?: string}[],
   parameters?: GraphParameter[]}
-export interface GraphResult {schema?: string, graph_sha256?: string, graph_hash?: string, outputs?: Record<string, any>,
+export interface GraphResult {schema?: string, profile?: string, graph_sha256?: string, graph_hash?: string, outputs?: Record<string, any>,
   parameters?: Record<string, {value?: unknown, choices?: unknown[]}>, timings?: Record<string, number>, cache?: {hits?: number, misses?: number},
   warnings?: unknown[], errors?: unknown[]}
 export interface Artifact {path: string, size?: number, sha256?: string}

@@ -24,6 +24,12 @@ const LOG = Array.from({length: 40}, (_, i) => `step ${i + 1} converged`).join('
 const EXAMPLE = fileURLToPath(new URL('../../docs/specs/examples/payload-v2/', import.meta.url));
 const PRESET = {id: 'field-view', name: '场视图', bindings: [{name: 'field'}], parameters: [{name: 'step', type: 'step', default: 'latest'}]};
 const STEPS = [0, 500, 1000];
+const HDF5_ARTIFACT = {path: 'case/run.h5', size: 8192, sha256: 'd'.repeat(64)};
+const HDF5_FIELDS = [
+  {selector: '/t00000002/Polar', step: 2, name: 'Polar', shape: [4, 3, 2, 3], dtype: 'float32'},
+  {selector: '/t00000002/Scalar', step: 2, name: 'Scalar', shape: [4, 3, 2, 1], dtype: 'float32'},
+  {selector: '/t00000004/Polar', step: 4, name: 'Polar', shape: [4, 3, 2, 3], dtype: 'float32'},
+];
 const types: Record<string, string> = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json'};
 
@@ -75,6 +81,8 @@ class Hub {
   later = false;
   // When set, task.artifacts lists exactly these paths instead of scalar-0.vti (and scalar-1.vti once `later`).
   artifactPaths?: string[];
+  readonly hdf5Artifacts = new Map<string, typeof HDF5_ARTIFACT>();
+  hdf5Fault?: 'wrong-digest' | 'invalid_data' | 'wrong-step';
   field = 'phi';
   // 任务: `device` is the node the hub lists; `down` makes every hub call fail as an unreachable control service;
   // `review` sends a task.submit to execution review, which GET actions then lists until it is approved or refused.
@@ -211,6 +219,8 @@ class Hub {
       if (kind === 'task.artifacts') {
         const later = this.later;
         await this.gate(kind);
+        const hdf5 = this.hdf5Artifacts.get(request.postDataJSON().payload?.task_id);
+        if (hdf5) return json({result: [hdf5, {path: 'case/Polar.00000002.dat', size: 1024}]});
         if (this.artifactPaths) return json({result: this.artifactPaths.map(path => ({path, size: 10}))});
         return json({result: [{path: 'scalar-0.vti', size: 10}, ...(later ? [{path: 'scalar-1.vti', size: 10}] : [])]});
       }
@@ -239,6 +249,23 @@ class Hub {
         return json(item);
       }
       if (body.kind === 'graph.evaluate') {
+        const hdf5 = body.payload.graph?.nodes?.[0], type = hdf5?.type;
+        if (type === 'stk.source.mupro_hdf5_fields@1' || type === 'stk.source.mupro_hdf5@1') {
+          const fields = type === 'stk.source.mupro_hdf5_fields@1';
+          const artifact = this.hdf5Artifacts.get(body.payload.bindings?.run?.task_id);
+          const fault = this.hdf5Fault;
+          await this.gateOnce(fields ? 'hdf5 fields' : 'hdf5 open');
+          if (!artifact || artifact.sha256 !== hdf5.params.expected_sha256 || fault === 'invalid_data') {
+            return json({id: body.id, state: 'failed', error: 'invalid_data: expected SHA-256'});
+          }
+          const manifest = JSON.parse(readFileSync(join(EXAMPLE, 'manifest.json'), 'utf8'));
+          manifest.length_unit = 'grid_index';
+          manifest.source.time = {step: fault === 'wrong-step' ? 4 : Number(hdf5.params.selector?.slice(2, 10)), time: null};
+          const outputs = fields ? {fields: {type: 'value', value: {...artifact,
+            sha256: fault === 'wrong-digest' ? 'e'.repeat(64) : artifact.sha256, reader: 'mupro.hdf5@1', fields: HDF5_FIELDS}}} :
+            {view: {type: 'payload', manifest}};
+          return json({id: body.id, state: 'succeeded', result: {schema: 'stk.graph-result/1', profile: 'web', outputs}});
+        }
         const asked = body.payload.parameters?.step, step = typeof asked === 'number' ? asked : STEPS[STEPS.length - 1];
         const manifest = this.graphReply === 'bad-payload' ? {schema: 'stk.payload/2'} :
           JSON.parse(readFileSync(join(EXAMPLE, 'manifest.json'), 'utf8'));
@@ -3593,6 +3620,169 @@ const graphTaskB = {...row, id: task2, workspace_id: ws2, name: '图谱来源乙
 const graphTwoScopes = {...twoProjects, snapshot: {...twoProjects.snapshot, tasks: [row, graphTaskB]}};
 const graphSourceA = '显示的三维结果，场视图 · 解析场验证 · 第 1000 步';
 const graphSourceB = '显示的三维结果，场视图 · 图谱来源乙 · 第 1000 步';
+const muproPanel = (page: Page) => graphPane(page).locator('details').filter({has: page.locator('summary', {hasText: /^MuPRO HDF5$/})});
+const muproList = (page: Page) => muproPanel(page).getByRole('button', {name: '列出 HDF5 帧', exact: true});
+const muproFrame = (page: Page) => muproPanel(page).getByRole('combobox', {name: 'HDF5 场与步号', exact: true});
+const muproComponent = (page: Page) => muproPanel(page).getByRole('spinbutton', {name: 'HDF5 分量索引', exact: true});
+const muproOpen = (page: Page) => muproPanel(page).getByRole('button', {name: '打开所选 HDF5 帧', exact: true});
+const muproSource = '显示的三维结果，MuPRO HDF5 · 解析场验证 · 第 2 步';
+
+for (const viewport of viewports) {
+  test(`${viewport.name} MuPRO HDF5 route is reachable from Results scroll zero without scrolling`, async ({page}) => {
+    await page.setViewportSize({width: viewport.width, height: viewport.height});
+    const hub = new Hub();
+    hub.presets = [PRESET];
+    hub.hdf5Artifacts.set(task, HDF5_ARTIFACT);
+    await setup(page, hub, {scene: false});
+    await showGraph(page);
+    const outer = page.locator('section.analysis');
+    await outer.evaluate(el => {el.scrollTop = 0;});
+    const offsets: {phase: string, outer: number, window: number}[] = [];
+    const at = async (phase: string) => offsets.push({phase, outer: await outer.evaluate(el => el.scrollTop), window: await page.evaluate(() => scrollY)});
+    const r = route(page, `${viewport.name}-hdf5-top`);
+    const summary = muproPanel(page).locator('summary');
+    await at('fixed-start');
+    await expect(summary).toBeInViewport({ratio: 1});
+    await r.click(summary, 'MuPRO HDF5');
+    await at('expanded');
+    await expect(muproList(page)).toBeInViewport({ratio: 1});
+    await r.click(muproList(page), '列出 HDF5 帧');
+    await expect(muproFrame(page)).toBeVisible();
+    await at('listed');
+    await expect(muproFrame(page)).toBeInViewport({ratio: 1});
+    await r.select(muproFrame(page), '/t00000002/Polar', 'Polar · 第 2 步');
+    await expect(muproComponent(page)).toBeInViewport({ratio: 1});
+    await r.click(muproComponent(page), '分量索引');
+    await muproComponent(page).fill('1');
+    await at('component-selected');
+    await expect(muproOpen(page)).toBeInViewport({ratio: 1});
+    await r.click(muproOpen(page), '打开所选 HDF5 帧');
+    await expect(source(page)).toHaveText(muproSource);
+    await at('accepted');
+    expect(offsets.every(row => row.outer === 0 && row.window === 0)).toBe(true);
+    expect(r.record).toMatchObject({clicks: 4, selects: 1});
+    expect(hub.evaluations).toHaveLength(2);
+    r.save();
+    writeFileSync(test.info().outputPath('hdf5-top-offsets.json'), JSON.stringify({viewport, offsets, numericInputs: 1, wheelEvents: 0}, null, 2));
+    await page.screenshot({path: test.info().outputPath('hdf5-top-complete.png')});
+  });
+
+  test(`${viewport.name} MuPRO HDF5 lists pinned fields and opens only an explicit exact frame`, async ({page}) => {
+    await page.setViewportSize({width: viewport.width, height: viewport.height});
+    const hub = new Hub();
+    hub.presets = [PRESET];
+    hub.hdf5Artifacts.set(task, HDF5_ARTIFACT);
+    const errors = await setup(page, hub, {scene: false});
+    await showGraph(page);
+    await computeGraph(page, hub);
+    await expect(source(page)).toHaveText(graphSourceA);
+    const canvas = vtkCanvas(graphPane(page));
+    await canvas.evaluate(el => { (el as any).__hdf5SameCanvas = true; });
+    const sent = posts(page);
+    await muproPanel(page).locator('summary').click();
+    expect(sent.seen).toEqual([]);
+
+    hub.hdf5Fault = 'wrong-digest';
+    await muproList(page).click();
+    await expect(muproPanel(page).getByRole('alert')).toContainText('字段列表与发布文件不符');
+    await expect(muproFrame(page)).toHaveCount(0);
+    await expect(source(page)).toHaveText(graphSourceA);
+
+    hub.hdf5Fault = undefined;
+    await muproList(page).click();
+    await expect(muproFrame(page)).toHaveValue('');
+    await expect(muproFrame(page).locator('option')).toHaveText(['选择场与步号', 'Polar · 第 2 步', 'Scalar · 第 2 步', 'Polar · 第 4 步']);
+    await expect(muproOpen(page)).toBeDisabled();
+    await muproFrame(page).selectOption('/t00000002/Polar');
+    await expect(muproPanel(page)).toContainText('float32 · 原生形状 4 × 3 × 2 × 3');
+    await expect(muproComponent(page)).toHaveValue('');
+    await expect(muproOpen(page)).toBeDisabled();
+    await muproComponent(page).fill('3');
+    await expect(muproOpen(page)).toBeDisabled();
+    await muproComponent(page).fill('1');
+    await expect(muproOpen(page)).toBeEnabled();
+    expect(hub.evaluations).toHaveLength(3);
+    expect(hub.evaluations[2]).toEqual({
+      graph: {schema: 'stk.graph/1', catalog: {stk: 1}, nodes: [{id: 'fields', type: 'stk.source.mupro_hdf5_fields@1',
+        params: {binding: 'run', path: HDF5_ARTIFACT.path, expected_sha256: HDF5_ARTIFACT.sha256}}], outputs: {fields: 'fields.out'}},
+      bindings: {run: {task_id: task}}, profile: 'web', outputs: ['fields'], budget: {max_output_bytes: 256 * 1024},
+    });
+
+    for (const [fault, error] of [['invalid_data', 'expected SHA-256'], ['wrong-step', '步号或网格单位']] as const) {
+      hub.hdf5Fault = fault;
+      await muproOpen(page).click();
+      await expect(muproPanel(page).getByRole('alert')).toContainText(error);
+      await expect(source(page)).toHaveText(graphSourceA);
+    }
+    hub.hdf5Fault = undefined;
+    await muproOpen(page).click();
+    await expect(source(page)).toHaveText(muproSource);
+    expect(hub.evaluations.at(-1)).toMatchObject({profile: 'web', bindings: {run: {task_id: task}}, outputs: ['view'], graph: {
+      nodes: [
+        {type: 'stk.source.mupro_hdf5@1', params: {binding: 'run', path: HDF5_ARTIFACT.path,
+          expected_sha256: HDF5_ARTIFACT.sha256, selector: '/t00000002/Polar'}},
+        {type: 'stk.render.volume@1', params: {field: {name: 'Polar', component: 1}, encoding: 'f32'}},
+        {type: 'stk.view.scene@1'},
+      ],
+    }});
+    await expect(graphPane(page).getByRole('button', {name: '查询原始值'})).toHaveCount(0);
+    await expect(graphPane(page).getByRole('slider', {name: '时间步'})).toHaveCount(0);
+    expect(await canvas.evaluate(el => (el as any).__hdf5SameCanvas)).toBe(true);
+    await sourceToggle(page).click();
+    expect(await detailRows(page)).toEqual([
+      ['显示内容', '显示的三维结果'], ['原生读取器', 'mupro.hdf5@1'], ['发布文件', HDF5_ARTIFACT.path],
+      ['发布 SHA-256', HDF5_ARTIFACT.sha256], ['场选择器', '/t00000002/Polar'], ['分量索引', '1'],
+      ['输出', 'view'], ['节点', '节点甲' + node], ['计算绑定 run', '解析场验证' + task],
+      ['运行工作区 run', '项目一' + ws], ['已显示时间步', '2'],
+    ]);
+    await sourcePanel(page).getByRole('button', {name: '收起'}).click();
+
+    await muproFrame(page).selectOption('/t00000002/Scalar');
+    await expect(muproComponent(page)).toHaveCount(0);
+    await expect(muproOpen(page)).toBeEnabled();
+    await muproOpen(page).click();
+    await sourceToggle(page).click();
+    await expect(sourcePanel(page)).toContainText('/t00000002/Scalar');
+    expect(hub.evaluations.at(-1).graph.nodes[1].params.field).toEqual({name: 'Scalar', component: null});
+    await sourcePanel(page).getByRole('button', {name: '收起'}).click();
+    await computeGraph(page, hub);
+    await expect(source(page)).toHaveText(graphSourceA);
+    expect(hub.evaluations.at(-1).preset).toBe(PRESET.id);
+    sent.stop();
+    expect(sent.seen.filter(call => !call.endsWith('task.get')).every(call => call === '/api/v1/actions graph.evaluate')).toBe(true);
+    expect(hub.messages).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+}
+
+test('MuPRO HDF5 replies from a former task cannot populate or replace the current graph', async ({page}) => {
+  const hub = new Hub();
+  hub.presets = [PRESET];
+  hub.device = graphTwoScopes;
+  hub.hdf5Artifacts.set(task, HDF5_ARTIFACT);
+  await setup(page, hub, {scene: false});
+  await showGraph(page);
+  await muproPanel(page).locator('summary').click();
+  await muproList(page).click();
+  await muproFrame(page).selectOption('/t00000002/Scalar');
+  const release = hub.holdNext('hdf5 open');
+  await muproOpen(page).click();
+  await expect.poll(() => hub.reached.has('hdf5 open')).toBe(true);
+
+  await go(page, '任务');
+  await chooseProject(page, ws2);
+  await page.getByRole('button', {name: /图谱来源乙/}).click();
+  await showGraph(page);
+  await expect(muproPanel(page)).toHaveCount(0);
+  await computeGraph(page, hub);
+  await expect(source(page)).toHaveText(graphSourceB);
+  const finished = page.waitForResponse(r => r.request().postDataJSON()?.payload?.graph?.nodes?.[0]?.type === 'stk.source.mupro_hdf5@1');
+  release();
+  await finished;
+  await expect(source(page)).toHaveText(graphSourceB);
+  await expect(muproPanel(page)).toHaveCount(0);
+  expect(hub.evaluations.map(request => request.bindings.run?.task_id ?? request.bindings.field?.task_id)).toEqual([task, task, task2]);
+});
 
 for (const viewport of viewports) {
   test(`${viewport.name} source opens the displayed graph binding, even when Tasks selects a different workspace`, async ({page}) => {

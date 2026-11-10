@@ -9,6 +9,7 @@ import {bindingNames, blobSha, coerceParameters, DISPLAYABLE, duration, editorKi
   type ProbeContext, type ProgressState, type TableData} from './graph';
 import ErrorBoundary from './ErrorBoundary';
 import type {PickInfo} from './PayloadViewer';
+import {muProArtifact, muProFrames, muProManifest, muProRequest, type MuProArtifact, type MuProFrame, type MuProSource} from './muproHdf5';
 
 const Viewer = React.lazy(() => import('./Viewer'));
 const fetchBlob = (sha: string, signal?: AbortSignal) => blob(sha, signal);
@@ -25,11 +26,81 @@ const issueText = (w: unknown) => (typeof w === 'string' ? w : w && typeof w ===
 
 type EvaluationSource = {
   kind: 'evaluation', scope: string, node: string, display: 'scene' | 'outputs',
-  presetId: string, presetName?: string, output?: string, step: number | null,
+  output?: string, step: number | null,
   bindings: {name: string, task: string, taskName?: string, workspace?: string}[],
-};
+} & ({presetId: string, presetName?: string, hdf5?: never} | {hdf5: MuProSource, presetId?: never, presetName?: never});
 export type GraphSource = EvaluationSource | {kind: 'local', scope: string, node: string, file: string};
-type GraphView = {payload: LoadedPayload, source: GraphSource, key: string, probe?: ProbeContext};
+type GraphView = {payload: LoadedPayload, source: GraphSource, key: string, probe?: ProbeContext, signal?: AbortSignal};
+type CompletedTask = {name: string, workspace: string};
+
+async function evaluateGraph(node: string, request: Json, isCurrent: () => boolean,
+                             onStatus: (text: string) => void, signal?: AbortSignal): Promise<GraphResult | null> {
+  const started = Date.now();
+  const first = await action(node, 'graph.evaluate', request, () => { if (isCurrent()) onStatus(REVIEW_TEXT); },
+    {timeoutMs: signal ? 0 : 20000, remember: !signal, keepQueued: true, active: isCurrent});
+  const item = await waitForAction(first, {poll: () => api(`actions/${first.id}`, 'GET', undefined, signal), isCurrent, sleep,
+    onPending: pending => onStatus(pending.state === 'review' ? REVIEW_TEXT
+      : `图谱计算排队中（已等待 ${duration((Date.now() - started) / 1000)}），完成后自动显示；无需重复提交。`)});
+  if (!item || !isCurrent()) return null;
+  if (item.state === 'failed') throw new Error(item.error || '图谱计算失败');
+  if (item.state === 'rejected') throw new Error('图谱计算未获批准');
+  if (item.state !== 'succeeded' || !item.result || typeof item.result !== 'object') throw new Error('图谱计算没有返回结果，可在操作列表中查看');
+  return item.result as GraphResult;
+}
+
+function MuProHdf5Control({node, task, artifact, onOpen}: {node: string, task: string, artifact: MuProArtifact,
+  onOpen: (source: MuProSource, signal: AbortSignal, onStatus: (text: string) => void) => Promise<void>}) {
+  const [frames, setFrames] = useState<MuProFrame[] | null>(null);
+  const [selector, setSelector] = useState('');
+  const [componentText, setComponent] = useState('');
+  const [status, setStatus] = useState('');
+  const [error, setError] = useState('');
+  const request = useRef<AbortController | null>(null);
+  const pending = useRef(false);
+  useLayoutEffect(() => () => request.current?.abort(), []);
+  const frame = frames?.find(item => item.selector === selector);
+  const count = frame?.shape[3] ?? 0;
+  const component = Number(componentText);
+  const canOpen = !!frame && (count === 1 || (componentText !== '' && Number.isSafeInteger(component) && component >= 0 && component < count));
+
+  async function run(open: boolean) {
+    if (pending.current || (open && (!frame || !canOpen))) return;
+    pending.current = true;
+    request.current?.abort();
+    const abort = new AbortController();
+    request.current = abort;
+    const isCurrent = () => !abort.signal.aborted;
+    setError('');
+    setStatus(open ? '正在打开 HDF5 帧…' : '正在读取 HDF5 字段…');
+    try {
+      if (open && frame) {
+        await onOpen({artifact, frame, component: count === 1 ? null : component}, abort.signal, setStatus);
+      } else {
+        setFrames(null); setSelector(''); setComponent('');
+        const result = await evaluateGraph(node, muProRequest(task, artifact), isCurrent, setStatus, abort.signal);
+        if (result && isCurrent()) setFrames(muProFrames(result, artifact));
+      }
+    } catch (e) { if (isCurrent()) setError(message(e)); }
+    finally { if (isCurrent()) { pending.current = false; setStatus(''); } }
+  }
+
+  return <details className="graph-extra"><summary>MuPRO HDF5</summary>
+    <p className="muted">读取当前任务发布的 {artifact.path}。请明确选择场和步号。</p>
+    <button type="button" disabled={!!status} onClick={() => void run(false)}>列出 HDF5 帧</button>
+    {frames?.length === 0 && <p className="muted">该文件中没有可识别的 MuPRO HDF5 场。</p>}
+    {!!frames?.length && <div className="view-controls graph-controls">
+      <label>HDF5 场与步号<select value={selector} disabled={!!status} onChange={e => {setSelector(e.target.value); setComponent('');}}>
+        <option value="">选择场与步号</option>{frames.map(item => <option key={item.selector} value={item.selector}>{item.name} · 第 {item.step} 步</option>)}
+      </select></label>
+      {count > 1 && <label>HDF5 分量索引<input aria-label="HDF5 分量索引" type="number" min={0} max={count - 1} step={1} value={componentText} disabled={!!status}
+        onChange={e => setComponent(e.target.value)}/><small>从 0 到 {count - 1}</small></label>}
+      <button type="button" className="primary" disabled={!!status || !canOpen} onClick={() => void run(true)}>打开所选 HDF5 帧</button>
+    </div>}
+    {frame && <p className="muted">{frame.dtype} · 原生形状 {frame.shape.join(' × ')}。空间单位为网格索引，物理时间与场单位未指定。</p>}
+    {status && <p className="muted" role="status">{status}</p>}
+    {error && <p className="muted" role="alert">{error}</p>}
+  </details>;
+}
 
 function ParamEditor({param, value, onChange, options}: {param: GraphParameter, value: unknown, onChange: (value: unknown) => void, options?: string[]}) {
   const label = `${param.label || param.name}${unitLabel(param.unit)}`;
@@ -165,8 +236,8 @@ function JsonView({out}: {out: any}) {
 // `active` is false while 图谱 is not in view (the file mode, another section or the compact history over 结果): the
 // panel stays mounted with its result and camera. `scope` names the page's project and task scope; a new one starts the
 // panel afresh, even at the same node with no task (local data packages and manually bound tasks included).
-export default function GraphPanel({node, scope, task, tasks, artifacts, canReadEvents, active = true, onError, onLog, onSource}: {node: string, scope: string, task: string,
-  tasks: Json[], artifacts: Json[], canReadEvents: boolean, active?: boolean,
+export default function GraphPanel({node, scope, task, tasks, artifacts, completedTask, canReadEvents, active = true, onError, onLog, onSource}: {node: string, scope: string, task: string,
+  tasks: Json[], artifacts: Json[], completedTask: CompletedTask | null, canReadEvents: boolean, active?: boolean,
   onError: (text: string) => void, onLog: (text: string) => void, onSource: (source: GraphSource | null) => void}) {
   const [presets, setPresets] = useState<Preset[] | null>(null);
   const [presetError, setPresetError] = useState('');
@@ -201,6 +272,8 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
   const shownStep = typeof requested === 'number' || (typeof requested === 'string' && /^\d+$/.test(requested)) ? Number(requested) : steps.value;
   const stepIndex = shownStep === null ? -1 : steps.choices.indexOf(shownStep);
   const localName = shownView?.source.kind === 'local' ? shownView.source.file : '';
+  const hdf5 = completedTask && node && task ? muProArtifact(artifacts as Artifact[]) : null;
+  const shownHdf5 = shownView?.source.kind === 'evaluation' && !!shownView.source.hdf5;
   // Output cards may arrive without a new scene. In that case the displayed canvas keeps its own source.
   const source = shownView?.source ?? outputsSource;
   useLayoutEffect(() => { onSource(source); }, [source, onSource]);
@@ -210,12 +283,20 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
     setView(next);
   }
 
+  function canShow(payload: LoadedPayload) {
+    const offered = offeredView.current;
+    return offered?.payload === payload && (offered === displayedView.current || !offered.signal?.aborted);
+  }
+
   function sceneShown(payload: LoadedPayload) {
     const next = offeredView.current, previous = displayedView.current;
-    if (next?.payload !== payload || next === previous) return;
+    if (!next || !canShow(payload) || next === previous) return;
     displayedView.current = next;
     setShownView(next);
     if (previous?.key !== next.key) setProbe(null);
+    if (next.source.kind === 'evaluation' && next.source.hdf5) {
+      setResult(null); setOutputsSource(null);
+    }
     onLog('');
   }
 
@@ -284,19 +365,11 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
     if (outputs) request.outputs = outputs;
     setRunning(true);
     setStatus('正在数据所在节点计算图谱…');
-    const started = Date.now();
     try {
       // A graph.evaluate may queue behind other evaluations on the node or wait for review: keep polling
       // (with backoff) until it finishes or is superseded, instead of giving up after a fixed time.
-      const first = await action(node, 'graph.evaluate', request, () => { if (isCurrent()) setStatus(REVIEW_TEXT); }, {timeoutMs: 20000, keepQueued: true, active: isCurrent});
-      const item = await waitForAction(first, {poll: () => api(`actions/${first.id}`), isCurrent, sleep,
-        onPending: pending => setStatus(pending.state === 'review' ? REVIEW_TEXT
-          : `图谱计算排队中（已等待 ${duration((Date.now() - started) / 1000)}），完成后自动显示；无需重复提交。`)});
-      if (!item || !isCurrent()) return;
-      if (item.state === 'failed') throw new Error(item.error || '图谱计算失败');
-      if (item.state === 'rejected') throw new Error('图谱计算未获批准');
-      if (item.state !== 'succeeded' || !item.result || typeof item.result !== 'object') throw new Error('图谱计算没有返回结果，可在操作列表中查看');
-      const graphResult = item.result as GraphResult;
+      const graphResult = await evaluateGraph(node, request, isCurrent, setStatus);
+      if (!graphResult || !isCurrent()) return;
       const views = payloadOutputs(graphResult);
       let loaded: LoadedPayload | null = null, payloadError = '';
       if (views.length) {
@@ -332,6 +405,31 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
     } finally {
       if (isCurrent()) setRunning(false);
     }
+  }
+
+  async function openHdf5(hdf5Source: MuProSource, signal: AbortSignal, onStatus: (text: string) => void) {
+    if (!completedTask || signal.aborted) return;
+    const current = ++generation.current;
+    const isCurrent = () => generation.current === current && !signal.aborted;
+    clearTimeout(debounce.current);
+    const from = scrubFrom.current;
+    if (from && stepName) setValues(v => ({...v, [stepName]: from.value}));
+    scrubFrom.current = null;
+    offerView(displayedView.current);
+    setRunning(false); setStatus('');
+    try {
+      const graphResult = await evaluateGraph(node, muProRequest(task, hdf5Source.artifact, hdf5Source), isCurrent, onStatus, signal);
+      if (!graphResult || !isCurrent()) return;
+      onStatus('正在读取 HDF5 渲染数据…');
+      const payload = await loadPayload(muProManifest(graphResult, hdf5Source.frame), {fetchBlob});
+      if (!isCurrent()) return;
+      if (!payload.layers.some(layer => layer.type === 'volume' && layer.visible !== false)) {
+        throw new Error('HDF5 渲染数据没有可显示的体数据。');
+      }
+      offerView({payload, signal, key: JSON.stringify(['mupro.hdf5@1', task, hdf5Source.artifact.sha256, hdf5Source.frame.name, hdf5Source.component]),
+        source: {kind: 'evaluation', scope, node, display: 'scene', output: 'view', step: hdf5Source.frame.step, hdf5: hdf5Source,
+          bindings: [{name: 'run', task, taskName: completedTask.name, workspace: completedTask.workspace}]}});
+    } catch (e) { if (isCurrent()) throw e; }
   }
 
   function scrub(index: number) {
@@ -455,6 +553,7 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
   const timings = Object.values(result?.timings ?? {}).filter(Number.isFinite).reduce((a, b) => a + b, 0);
   const editable = params.filter(p => p.name !== stepName || !steps.choices.length);
   return <div className="graph-panel">
+    {hdf5 && presets !== null && <MuProHdf5Control key={JSON.stringify([scope, task, hdf5.sha256, hdf5.size])} node={node} task={task} artifact={hdf5} onOpen={openHdf5}/>}
     <div className="view-controls graph-controls">
       <label>图谱预设<select aria-label="图谱预设" value={presetId} onChange={e => setPresetId(e.target.value)}>
         {!presets?.length && <option value="">{presets ? '暂无预设' : '正在读取预设…'}</option>}
@@ -467,7 +566,7 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
     {preset?.description && <p className="muted preset-description">{preset.description}</p>}
     {editable.length > 0 && <div className="graph-params">{editable.map(p => <ParamEditor key={p.name} param={p} value={values[p.name]}
       options={p.type === 'string' && p.name === 'path' ? files : undefined} onChange={v => setValues(vs => ({...vs, [p.name]: v}))}/>)}</div>}
-    {stepName && steps.choices.length > 0 && !localName && <div className="scrubber">
+    {stepName && steps.choices.length > 0 && !localName && !shownHdf5 && <div className="scrubber">
       <span>时间步</span>
       <button className="quiet" aria-label="上一步" disabled={stepIndex <= 0} onClick={() => scrub(stepIndex - 1)}>‹</button>
       <input type="range" aria-label="时间步" min={0} max={steps.choices.length - 1} value={Math.max(0, stepIndex)} onChange={e => scrub(Number(e.target.value))}/>
@@ -475,11 +574,11 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, canRead
       <strong>{shownStep ?? '—'}</strong><small className="muted">{stepIndex + 1} / {steps.choices.length}</small>
       <button className="quiet" disabled={running} onClick={latest}>最新</button>
     </div>}
-    {progress && <p className="progress-line"><span className="running">● 运行中</span> {progressText(progress)}{newerFrame && <button className="quiet" onClick={latest}>查看最新帧</button>}</p>}
+    {progress && <p className="progress-line"><span className="running">● 运行中</span> {progressText(progress)}{newerFrame && !shownHdf5 && <button className="quiet" onClick={latest}>查看最新帧</button>}</p>}
     {status && <p className="muted status-line">{status}</p>}
     {view
       ? <ErrorBoundary resetKey={view.payload}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}>
-        <Viewer scene={view.payload} resetKey={view.key} canShow={payload => offeredView.current?.payload === payload}
+        <Viewer scene={view.payload} resetKey={view.key} canShow={canShow}
           onShown={sceneShown} onPick={(position, info) => setProbe({position, info})}/></React.Suspense></ErrorBoundary>
       : <div className="viewport"><div className="empty"><span className="orbit">◇</span><h2>用节点图描述要看的结果</h2><p>选择预设并绑定任务。计算在数据所在的节点完成，这里只接收渲染数据。</p></div></div>}
     {localName && <p className="muted">本地数据包 {localName} · 无法查询原始值</p>}
