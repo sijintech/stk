@@ -1751,6 +1751,83 @@ for (const viewport of viewports) {
       expect(unexpected(errors, 502, 404)).toEqual([]);
     });
 
+    test('history restores each conversation reading position', async ({page}) => {
+      const hub = new Hub();
+      conversations(hub);
+      hub.rows.push({id: X, name: '晶格变化记录', created: ++clock});
+      const longThread = (prefix: string) => Array.from({length: 60}, (_, i) =>
+        say(`${prefix}-${i}`, i % 2 === 0 ? 'user' : 'assistant', `${prefix} 段落 ${i}`));
+      const first = longThread('A'), third = longThread('C');
+      hub.saved.set(A, first);
+      hub.saved.set(X, third);
+      await hub.install(page);
+      const sent = posts(page);
+      await page.goto(ORIGIN + '/');
+      await expectActive(page, '工作台');
+
+      const log = page.getByRole('log', {name: '对话记录'});
+      const position = () => log.evaluate(el => el.scrollTop);
+      const scroll = (top: number) => log.evaluate((el, value) => {el.scrollTop = value;}, top);
+      await choose(page, /相场参数讨论/);
+      await shows(page, first.map(m => m.content));
+      expect(await position()).toBe(0);
+      await draft(page).fill('A 的草稿');
+      await scroll(560);
+      expect(await position()).toBe(560);
+      await choose(page, /相场参数讨论/);
+      expect(await position()).toBe(560);
+      await go(page, '任务');
+      await go(page, '结果');
+      await go(page, '工作台');
+      expect(await position()).toBe(560);
+
+      await choose(page, /铁电回线分析/);
+      await shows(page, ['B 的问题']);
+      expect(await position()).toBe(0);
+      await choose(page, /相场参数讨论/);
+      await shows(page, first.map(m => m.content));
+      await expect(draft(page)).toHaveValue('A 的草稿');
+      expect(await position()).toBe(560);
+      if (isNarrow(page)) await expect(log).toBeFocused();
+
+      await go(page, '任务');
+      await choose(page, /晶格变化记录/);
+      await shows(page, third.map(m => m.content));
+      expect(await position()).toBe(0);
+      await scroll(880);
+      expect(await position()).toBe(880);
+      // The cached A transcript gets its position immediately. Leaving aborts its read and restores C instead.
+      const release = hub.holdNext(`history ${A}`);
+      await choose(page, /相场参数讨论/);
+      await expect.poll(() => hub.reached.has(`history ${A}`)).toBe(true);
+      expect(await position()).toBe(560);
+      const cancelled = page.waitForEvent('requestfailed', request => new URL(request.url()).pathname === `/api/v1/sessions/${A}/history`);
+      await choose(page, /晶格变化记录/);
+      release();
+      await cancelled;
+      await shows(page, third.map(m => m.content));
+      expect(await position()).toBe(880);
+
+      if (isNarrow(page)) await historyToggle(page).click();
+      await historyPanel(page).getByRole('button', {name: '新对话', exact: true}).click();
+      expect(await position()).toBe(0);
+      await expect(draft(page)).toBeFocused();
+      await expect(draft(page)).toHaveValue('');
+
+      await page.getByRole('button', {name: '断开', exact: true}).click();
+      await page.getByText('使用已有设备凭据', {exact: true}).click();
+      await page.getByLabel('设备凭据', {exact: true}).fill('abcdefghijklmnopqrstu');
+      await page.getByRole('button', {name: '连接', exact: true}).click();
+      await expectActive(page, '工作台');
+      await choose(page, /相场参数讨论/);
+      await shows(page, first.map(m => m.content));
+      expect(await position()).toBe(0);
+      await expect(draft(page)).toHaveValue('');
+      expect(hub.calls).toEqual([A, A, B, A, X, A, X, A].map(id => `history ${id}`));
+      expect(sent.seen).toEqual([]);
+      sent.stop();
+    });
+
     test('each conversation keeps its draft through the Tasks shortcuts and 结果', async ({page}) => {
       const hub = new Hub();
       conversations(hub);

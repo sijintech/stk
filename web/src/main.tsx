@@ -76,6 +76,12 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // overlay: the compact history is open over the active section, which then takes no input until it closes.
   const historyShown=wide||historyOpen,overlay=!wide&&historyOpen;
   const historyPanel=useRef<HTMLElement>(null),historyToggle=useRef<HTMLButtonElement>(null),messageList=useRef<HTMLDivElement>(null),composer=useRef<HTMLTextAreaElement>(null);
+  const transcriptOffsets=useRef(new Map<string,number>());
+  // A visited transcript is cached for the life of this workbench. Restore its position only when the session
+  // changes. A history reply or a switch between workbench sections does not reapply the offset.
+  useLayoutEffect(()=>{
+    if(messageList.current)messageList.current.scrollTop=transcriptOffsets.current.get(conv.session)??0;
+  },[conv.session]);
   const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
   const [probeText,setProbeText]=useState(''),[graphProbeText,setGraphProbeText]=useState(''),[viewError,setViewError]=useState(''),[graphError,setGraphError]=useState('');
   // The Tasks shortcut that opened 结果 and the task scope it was pressed in. The next navigation forgets it; only
@@ -301,9 +307,10 @@ function Workbench({disconnect}:{disconnect:()=>void}){
        box.top>=area.top&&box.bottom<=area.bottom&&box.left>=area.left&&box.right<=area.right)launcher.focus({preventScroll:true});
   }
   // Choosing a conversation (or a new one) is one explicit action: it opens 工作台 with that conversation's own
-  // transcript and draft, and changes nothing in 任务 or 结果. On a compact page the history closes again.
+  // transcript, reading position and draft. On a compact page the history closes again.
   function openConversation(id:string|null){
     returnFocus.current=null;
+    if(id!==conv.session&&messageList.current)transcriptOffsets.current.set(conv.session,messageList.current.scrollTop);
     flushSync(()=>{setTab('workbench');setHistoryOpen(false);if(id)conv.select(id);else conv.startNew();});
     if(!id)composer.current?.focus({preventScroll:true});
     else if(!wide)messageList.current?.focus({preventScroll:true});
