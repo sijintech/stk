@@ -189,6 +189,32 @@ def test_chat_fake_model_policy_session_restore(tmp_path):
         assert len(c.get(f"/api/v1/sessions/{session}", headers=AUTH).json()["messages"]) == 2
 
 
+def test_session_history_is_read_only_and_keeps_legacy_creation(tmp_path):
+    with TestClient(create_app(tmp_path, OWNER)) as c:
+        session, legacy = "a" * 32, "b" * 32
+        route = f"/api/v1/sessions/{session}"
+        history = route + "/history"
+        assert c.get(history).status_code == 401
+        assert c.get("/api/v1/sessions/invalid/history", headers=AUTH).status_code == 400
+        assert c.get(history, headers=AUTH).status_code == 404
+        assert c.get("/api/v1/sessions", headers=AUTH).json() == []
+
+        legacy_route = f"/api/v1/sessions/{legacy}"
+        empty = {"id": legacy, "messages": []}
+        assert c.get(legacy_route, headers=AUTH).json() == empty
+        assert c.get(legacy_route + "/history", headers=AUTH).json() == empty
+
+        sent = c.post(route + "/messages", headers=AUTH, json={"id": "c" * 32, "content": "Read-only history"})
+        assert sent.status_code == 200
+        before = c.get("/api/v1/sessions", headers=AUTH).json()
+        events = c.app.state.store.events()
+        saved = c.get(history, headers=AUTH)
+        assert saved.status_code == 200
+        assert saved.json() == sent.json()
+        assert c.get("/api/v1/sessions", headers=AUTH).json() == before
+        assert c.app.state.store.events() == events
+
+
 def test_remote_agent_requires_tls():
     assert endpoint("https://control.example", True) == "wss://control.example/api/v1/nodes/connect"
     for url in ["http://remote.example", "https://user:secret@example.com", "https://example.com/?token=secret"]:

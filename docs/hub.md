@@ -192,6 +192,11 @@ M1 新增的路由（均需 `Authorization: Bearer …`）：
 | `GET /api/v1/graphs/catalog` | 客户端 | 节点目录 `stk.catalog/1` |
 | `GET /api/v1/graphs/presets` | 客户端 | 预设列表 `[{id, name, description, graph, bindings: [{name, description}], parameters}]` |
 
+工作台会话接口沿用客户端权限。打开历史可使用 `GET /api/v1/sessions` 取得目录，再用
+`GET /api/v1/sessions/{id}/history` 读取 `{id, messages}`。后者只读取已保存会话，缺失返回
+404，ID 格式非法返回 400。新草稿可以留在客户端，明确发送时通过
+`POST /api/v1/sessions/{id}/messages` 保存。旧 `GET /api/v1/sessions/{id}` 保留创建空会话的兼容行为。
+
 WP11 新增的路由（均需 `Authorization: Bearer …`；无凭据 401，凭据无效或已吊销 401，身份不符 403）：
 
 | 方法与路径 | 身份 | 用途 |

@@ -360,6 +360,16 @@ class ControlStore:
             rows = db.execute("SELECT * FROM messages WHERE session_id=? ORDER BY created", (identity,)).fetchall()
         return {"id": identity, "messages": [dict(r) for r in rows]}
 
+    def session_history(self, identity):
+        """Read an existing session and its messages in one SQLite snapshot."""
+        with self.db() as db:
+            rows = db.execute(
+                "SELECT m.* FROM sessions s LEFT JOIN messages m ON m.session_id=s.id "
+                "WHERE s.id=? ORDER BY m.created", (identity,)).fetchall()
+        if not rows:
+            return None
+        return {"id": identity, "messages": [dict(r) for r in rows if r["id"] is not None]}
+
     def message(self, identity, session_id, role, content):
         with self.db() as db:
             old = db.execute("SELECT session_id,role,content FROM messages WHERE id=?", (identity,)).fetchone()

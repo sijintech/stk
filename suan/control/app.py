@@ -597,11 +597,22 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
         with store.db() as db:
             return [dict(r) for r in db.execute("SELECT * FROM sessions ORDER BY created DESC")]
 
-    @app.get("/api/v1/sessions/{session_id}", dependencies=[Depends(client)])
-    def get_session(session_id: str):
+    def validate_session_id(session_id: str):
         if not re.fullmatch(r"[a-f0-9]{32}", session_id):
             raise HTTPException(400, "Invalid session ID")
+
+    @app.get("/api/v1/sessions/{session_id}", dependencies=[Depends(client)])
+    def get_session(session_id: str):
+        validate_session_id(session_id)
         return store.session(session_id)
+
+    @app.get("/api/v1/sessions/{session_id}/history", dependencies=[Depends(client)])
+    def session_history(session_id: str):
+        validate_session_id(session_id)
+        history = store.session_history(session_id)
+        if history is None:
+            raise HTTPException(404, "Session not found")
+        return history
 
     @app.post("/api/v1/sessions/{session_id}/messages")
     async def message(session_id: str, body: Chat, who=Depends(client)):
