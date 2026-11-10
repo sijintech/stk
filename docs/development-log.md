@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-10 16:43 UTC · 上一远端头 Desktop 终态
+
+远端 `3c4f9bf9` 的 Desktop 于 16:43:32 UTC 整轮结束，6 个作业均到终态。Linux 三个作业、Windows CPU 与 Windows 原生通过，macOS 原生必验失败。macOS CPU 1548/1548、Metal 254/254。原生必验 4/6，MP4 与 HTML 均在首次可见暂停低于 0.05 秒下限。两份 270–290 ms 被动延迟对照均在观察窗口内取得稳定暂停。Runtime 13/13 已通过。本次终态满足推送前提，随后推送截至 `4442342e` 的已验证批次及本记录。新头的桌面平台验证以其自身 CI 为准。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42845291750) · [Runtime CI](https://github.com/sijintech/stk/actions/runs/42845291916) · [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42845291750/artifacts/13783327194)
+
 ## 2026-11-10 16:38 UTC · 聚焦会话详情与精确问答返回
 
 `a8d80a9a` 将原生聚焦工作台的数据范围与模型设置收在按需展开面板。问答和输入框优先显示。空项目入口使用按文字内容计算的按钮宽度。`6e18a3b1` 集成候选 `1338781b`，从项目首页的问答提醒读取对应请求，保留未发送草稿与新问题的数据范围。“已查看”由独立按钮处理。Root 原生集成回归 53/53，零跳过。
