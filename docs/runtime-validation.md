@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-10 15:42 UTC · 统一工作台首片验证
+
+本地 `058b1555` 复用 AI、Jobs 和 Viewer。点工作台进入聚焦导航，依次显示工作台、任务、结果。分栏视图恢复原区域树。普通最大化和读取已保存布局沿用原入口。工作台导航已在原生顶部验证，左侧项目与会话导航、默认布局和按需详情仍为双端下一片。
+
+原生工作区及模块回归 27/27，零跳过。新增检查实际结果载荷、Viewer 和会话编辑器复用、相机重置代次和原分栏。Linux X11/OpenGL 在 1600×1100 英文和 1000×1200 中文、比例 1 的固定文件/Viewer/文献/项目表格布局下，各点工作台、任务、结果、工作台、分栏视图，共 5 次，零滚轮和键盘。公开 `example.stkp` 回到 Viewer，任务数 0，项目修订 0。前一抓屏驱动继承终端输入并吞掉后续命令，已用隔离 stdin 的驱动重验两组。截图和输入收据在 `root-delivery-20261109-124/window-{en,zh}-focus-final`，具名 XML 在 `root-delivery-20261110-125/unified-native-final.xml`。
+
+`3c4f9bf9` 已推送。对应 [Desktop](https://github.com/sijintech/stk/actions/runs/42845291750) 和 [Runtime](https://github.com/sijintech/stk/actions/runs/42845291916) 已启动。本地导航提交等待该 Desktop 整轮终态。
+
 ## 2026-11-10 15:30 UTC · 原生执行预检、CI 夹具与统一工作台方向
 
 `9216d7cb` 在项目的材料仿真中增加默认折叠的执行环境检查。一次明确点击保存请求，再向所选 Runtime 提交单 CPU 诊断。面板可见时读取原任务，重开从本机记录恢复。晚回执按项目、连接、编辑器与父子面板代次核对。指南由实际 Claude80 的 `ae5a82e0` 经 root 审阅集成。 [桌面指南](mupro-desktop-preflight.md)
