@@ -1,5 +1,17 @@
 # 开发交接记录
 
+## 2026-11-10 23:07 UTC · Desktop 上一轮终态、Web 任务状态与 Viewer 点击
+
+远端 `a64941b4` 的 Desktop `42908396134` 于 23:00:45 UTC 结束，5/6 作业成功。Linux 主回归 2205/2205、打包及新环境冒烟均过，Windows CPU 1510/1510。Windows 原生 6/6，零跳过，1344.66 秒。正式 Windows 工件 `13811017650` 有 1888 个文件，完整 ZIP SHA-256 和 PDF/视频的 482 张验收图像摘要已核对。PDF 20/20、160 张图像，第 20 轮 `reprepared-page1` 两次匹配，已接受图像最长捕获启动 93 ms。MP4、HTML 视频各 20/20、各 161 张。该轮使用原捕获实现，待发布的复用目标另在新 Windows CI 取证。macOS CPU 1570/1570、Metal 254/254，必测原生 4/6，两个视频的隐藏阶段失败，详细时间及对照见前一节。相同代码头 Runtime 13/13。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42908396134) [Windows 工件](https://github.com/sijintech/stk/actions/runs/42908396134/artifacts/13811017650) [macOS 工件](https://github.com/sijintech/stk/actions/runs/42908396134/artifacts/13809562358) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42908396193)
+
+`ff015622` 按逐字节相同的补丁集成 `d9456044`。Web 队列、精确状态和图谱任务选项使用桌面的八种中文状态。已请求取消的未终态任务显示「正在取消」，终态显示实际结果。快照、不可达、待核实与精确 Runtime 的原规则保持。未知的新状态在队列保留原值。模拟 Hub 宽窄屏基线确证八种旧枚举，候选定向 5/5。独立与 Root Chromium 各 189/189，零跳过及重试，生产构建通过。
+
+Root 使用实际 Web 产物、真实本机 Hub、NodeAgent 和 Runtime。中文 Chromium 1440×900、390×844，固定起点为节点、工作区已选且队列含一个完成与一个等待任务。两端选择各任务均 1 点击，队列及 Runtime 精确详情分别显示「成功」「排队中」，保留原状态样式。两端都只有已有 `task.get` 和 `task.artifacts` 读取，零动作或模型请求，Runtime 任务终态未被 UI 改写。收据在外部 `root-delivery-20261110-148/web-task-status-root/real-browser`。
+
+`28690dcf` 在真正取 GPU 像素前校对已绘制载荷代次和 Viewer 当前载荷。固定起点为真实 MuFerro 图谱已绘制并回到默认取景，1 次点击进入队列，已排在前面的回调接纳替换载荷。X11 原实现把迟到点击应用到新结果并把探针置为不可用。新版 X11 与 Wayland 在新结果保持空探针。再打开原运行并点击一次，均从真实 Python 桥读回数值，Probe 编辑器显示原始值。Root 构建通过，两端实际 Viewer 窗口及启动共 4/4，零跳过。暂存扫描通过。收据在外部 `root-delivery-20261110-148/gpu-pick`。切换预设期间探针绑定已接纳图谱的独立候选继续验证。
+
+本节确认上一 Desktop 整轮终态。发布前本地原生 968 项项目套件已开始，终态另记。两条现存旧 PR 仍为原提交，#53 的传输行为已在主线通过不同回执语义处理，#54 会引入旧版大写交接文件。两者本轮均未合入。
+
 ## 2026-11-10 22:53 UTC · 桌面历史直达、跨帧探针与 Cocoa 对照
 
 `e4f74494` 按逐字节相同的补丁集成 `08ec9dca`。从聚焦界面的宽窗左栏和窄窗「历史」直接打开已保存问答的完整分页与归档筛选。第一次需要时只读一页，打开已缓存列表可复用。选择条目才读取问答。原 AI 编辑器实例、草稿和 Viewer 状态保留，项目重开重置浏览界面。公共指南和统一工作台设计已补入口。
