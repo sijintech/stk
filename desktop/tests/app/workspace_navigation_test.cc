@@ -867,6 +867,61 @@ TEST_F(SavedConversationNavigationPython, RecentQuestionsOpenFromTasksAndResults
   EXPECT_EQ(discussion.exchange_id(), kSecond);
 }
 
+TEST_F(SavedConversationNavigationPython, OpenCompactHistoryIsolatesViewerInputUntilDismissed)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_table());
+  ASSERT_NO_FATAL_FAILURE(save_question(kFirst, "Saved question"));
+  auto &viewer = f.shell->store().viewer();
+  const std::string path = std::string(STK_REPO_ROOT) + "/desktop/tests/viewer/fixtures/muferro_domains.stkp";
+  const auto original = std::make_shared<io::Payload>(io::read_stkp(path));
+  viewer.open_payload(original, "Already open");
+  f.drv->ctx.rect.xmax = 680;
+  f.shell->open_workbench(f.screen, true);
+  f.screen.run_deferred();
+  auto &area = f.area("a2");
+  ASSERT_EQ(f.screen.maximized(), &area);
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    const auto *questions = project().discussion().recent_requests();
+    return questions && !questions->empty() && widget("workbench_history");
+  }, 30));
+
+  const auto launcher = widget("workbench_history")->id;
+  const auto [hx, hy] = f.widget_center("workbench_history");
+  ASSERT_TRUE(f.drv->click(hx, hy));
+  ASSERT_TRUE(f.screen.ui()->popup_open());
+  const auto &rect = area.find_region("main")->rect();
+  const int x = rect.xmin + 32;
+  const int y = (rect.ymin + rect.ymax) / 2;
+  f.drv->move(x, y);
+  ASSERT_TRUE(area.editor().save_workspace_state().at("pending_preset").is_null());
+  EXPECT_TRUE(f.drv->key(wm::Key::Numpad1));
+  EXPECT_TRUE(area.editor().save_workspace_state().at("pending_preset").is_null());
+
+  wm::Event drop;
+  drop.type = wm::EventType::DragEnter;
+  drop.x = x;
+  drop.y = y;
+  EXPECT_FALSE(f.drv->send(drop));
+  drop.type = wm::EventType::DragOver;
+  EXPECT_FALSE(f.drv->send(drop));
+  drop.type = wm::EventType::Drop;
+  drop.paths = {path};
+  EXPECT_FALSE(f.drv->send(drop));
+  EXPECT_EQ(viewer.base_payload().get(), original.get());
+
+  EXPECT_TRUE(f.drv->key(wm::Key::DownArrow));
+  EXPECT_TRUE(f.screen.ui()->popup_open());
+  ASSERT_TRUE(f.drv->key(wm::Key::Esc));
+  EXPECT_FALSE(f.screen.ui()->popup_open());
+  EXPECT_EQ(f.screen.ui()->focused(), launcher);
+  EXPECT_TRUE(f.drv->key(wm::Key::Numpad1));
+  EXPECT_FALSE(area.editor().save_workspace_state().at("pending_preset").is_null());
+  EXPECT_TRUE(f.drv->send(drop));
+  EXPECT_NE(viewer.base_payload().get(), original.get());
+  viewer.close();
+}
+
 TEST_F(SavedConversationNavigationPython, AgentHistorySeparatesIdentitiesAndKeepsBothDrafts)
 {
   ASSERT_NO_FATAL_FAILURE(prepare_table());

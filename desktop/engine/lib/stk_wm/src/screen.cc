@@ -1411,16 +1411,17 @@ bool Screen::send_region(Region *region, const Event &event, const DrawContext &
   return region->handle_event(event, region_ctx(ctx, *region));
 }
 
-static bool has_modal(const ui::Context *context)
+static bool has_input_overlay(const ui::Context *context)
 {
-  return context && std::any_of(context->blocks().begin(), context->blocks().end(), [](const auto &b) {
-    return b->kind() == ui::Block::Kind::Modal;
-  });
+  return context && (context->popup_open() ||
+                     std::any_of(context->blocks().begin(), context->blocks().end(), [](const auto &b) {
+                       return b->kind() == ui::Block::Kind::Modal;
+                     }));
 }
 
 bool Screen::ui_busy() const
 {
-  return ui_ && (ui_->popup_open() || ui_->active() != 0 || has_modal(ui_.get()));
+  return ui_ && (ui_->active() != 0 || has_input_overlay(ui_.get()));
 }
 
 bool Screen::ui_widget_at(const int x, const int y) const
@@ -1520,13 +1521,13 @@ bool Screen::dispatch_event(const Event &event, const DrawContext &ctx)
       return false;
     case EventType::DragEnter:
     case EventType::DragOver:
-      if (has_modal(ui_.get())) { return false; }
+      if (has_input_overlay(ui_.get())) { return false; }
       hover_ = region_at(event.x, event.y);
       return area_at(event.x, event.y) != nullptr;
     case EventType::DragLeave:
       return false;
     case EventType::Drop: {
-      if (has_modal(ui_.get())) { return false; }
+      if (has_input_overlay(ui_.get())) { return false; }
       Area *a = area_at(event.x, event.y);
       if (a && a->on_drop(event)) {
         a->tag_redraw();
@@ -1698,7 +1699,7 @@ bool Screen::dispatch_pointer(const Event &e, const DrawContext &ctx)
   if (ui_) {
     const bool to_ui = !hover_ || !hover_->ui_pass_through || busy || ui_widget_at(e.x, e.y);
     if (to_ui) {
-      if (send_ui(e) || has_modal(ui_.get())) {
+      if (send_ui(e) || has_input_overlay(ui_.get())) {
         if (down) {
           invalidate_layout();
           capture_ = Capture::Ui;
@@ -1732,8 +1733,8 @@ bool Screen::dispatch_pointer(const Event &e, const DrawContext &ctx)
 
 bool Screen::dispatch_keyboard(const Event &e, const DrawContext &ctx)
 {
-  // Modal input cannot reach the underlying editor, even for keys with no UI translation.
-  if (send_ui(e) || has_modal(ui_.get())) {
+  // Menus and dialogs own input, including keys with no UI translation.
+  if (send_ui(e) || has_input_overlay(ui_.get())) {
     return true;
   }
   Region *target = hover_ ? hover_ : focus_;
