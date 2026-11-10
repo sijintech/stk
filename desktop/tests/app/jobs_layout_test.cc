@@ -13,6 +13,7 @@
 #include "../bridge/fake_jobs.hh"
 #include "jobs_support.hh"
 #include "stk/app/jobs_state.hh"
+#include "stk/app/viewer_state.hh"
 #include "stk/platform/file_dialog.hh"
 
 namespace stk::jobstest {
@@ -253,6 +254,89 @@ TEST(JobsLayout, FocusedTasksShowTheQueueAndRequireOpeningTheDraftToSubmit)
   EXPECT_EQ(wmtest::read_text(u.dir.str() + "/model/methods.log").find("task.submit\n"), std::string::npos);
   u.click(base + "submit/submit_form");
   ASSERT_TRUE(u.pump([&] { return jobs.submission() && jobs.submission()->state == app::SubmitState::Done; }));
+}
+
+TEST(JobsLayout, OpeningATaskResultKeepsTheFocusedWorkbench)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  UiOnFake u;
+  auto &jobs = u.jobs();
+  auto &store = u.f.shell->store();
+  ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+  jobs.select_connection("runtime:lab");
+  ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty(); }));
+  const std::string task(32, 'c');
+  const auto workspace = jobs.workspace();
+  jobs.apply_snapshot(io::Json::array({{{"id", task}, {"workspace_id", workspace},
+                                        {"name", "Result task"}, {"state", "succeeded"}}}), 100.0);
+  jobs.select_task(task);
+  u.f.shell->open_workbench(u.f.screen);
+  u.f.screen.run_deferred();
+  const auto navigate = [&](const std::string &key) {
+    ASSERT_NE(u.find(key), nullptr);
+    u.click(key);
+    u.f.screen.run_deferred();
+    u.f.drv->frame();
+  };
+  ASSERT_NO_FATAL_FAILURE(navigate("workbench_tasks"));
+  auto *jobs_editor = &u.f.area("a1").editor();
+  auto *viewer_editor = &u.f.area("a2").editor();
+  const std::string base = "a1/main/focused_jobs/";
+  u.click(base + "submit");
+  u.type(base + "submit/name", "Keep the draft");
+
+  ASSERT_NO_FATAL_FAILURE(navigate(base + "tasks/open_viewer"));
+  ASSERT_EQ(u.f.screen.maximized(), &u.f.area("a2"));
+  EXPECT_TRUE(u.f.shell->workbench_is_focused(u.f.screen));
+  EXPECT_EQ(&u.f.area("a2").editor(), viewer_editor);
+  EXPECT_EQ(store.viewer().source().task_id, task);
+  EXPECT_EQ(store.viewer().source().workspace_id, workspace);
+  EXPECT_EQ(store.viewer().source().connection, "runtime:lab");
+  ASSERT_NO_FATAL_FAILURE(navigate("workbench_tasks"));
+  EXPECT_EQ(&u.f.area("a1").editor(), jobs_editor);
+  EXPECT_EQ(jobs.selected(), task);
+  ASSERT_NE(u.find(base + "submit/name"), nullptr);
+  EXPECT_EQ(u.find(base + "submit/name")->string.value(), "Keep the draft");
+  EXPECT_FALSE(jobs.submission());
+
+  // A selection that changes before the deferred open must leave the current view intact.
+  const auto task_action = u.find(base + "tasks/open_viewer")->on_click;
+  task_action();
+  jobs.select_task("");
+  jobs.select_task(task);
+  const auto source_version = store.viewer().version();
+  u.f.screen.run_deferred();
+  EXPECT_EQ(u.f.screen.maximized(), &u.f.area("a1"));
+  EXPECT_EQ(store.viewer().version(), source_version);
+
+  const auto stale_page_action = u.find(base + "tasks/open_viewer")->on_click;
+  ASSERT_NO_FATAL_FAILURE(navigate("workbench_home"));
+  ASSERT_NO_FATAL_FAILURE(navigate("workbench_tasks"));
+  stale_page_action();
+  u.f.screen.run_deferred();
+  EXPECT_EQ(u.f.screen.maximized(), &u.f.area("a1"));
+  EXPECT_EQ(store.viewer().version(), source_version);
+
+  // An older request from the split view must not replace the focused result afterwards.
+  const auto focused_action = u.find(base + "tasks/open_viewer")->on_click;
+  app::OpenResultRequest queued;
+  queued.task_id = std::string(32, 'd');
+  store.request_open_result(std::move(queued));
+  focused_action();
+  u.f.screen.run_deferred();
+  u.f.drv->frame();
+  EXPECT_FALSE(store.has_open_result());
+  EXPECT_EQ(u.f.screen.maximized(), &u.f.area("a2"));
+  EXPECT_EQ(store.viewer().source().task_id, task);
+
+  ASSERT_NO_FATAL_FAILURE(navigate("workbench_split"));
+  ASSERT_NO_FATAL_FAILURE(navigate("a1/main/tasks/open_viewer"));
+  EXPECT_EQ(u.f.screen.maximized(), nullptr);
+  EXPECT_EQ(&u.f.area("a2").editor(), viewer_editor);
+  EXPECT_EQ(store.viewer().source().task_id, task);
+  EXPECT_EQ(wmtest::read_text(u.dir.str() + "/model/methods.log").find("task.submit\n"), std::string::npos);
 }
 
 TEST(JobsLayout, AddRuntimeDialogAndThePathFieldFallback)

@@ -10,6 +10,7 @@
 #include <filesystem>
 
 #include "stk/app/editor_area.hh"
+#include "stk/app/jobs_state.hh"
 #include "stk/app/project_agent.hh"
 #include "stk/app/project_attention.hh"
 #include "stk/app/project_discussion.hh"
@@ -816,23 +817,42 @@ bool AppShell::workbench_is_focused(const wm::Screen &screen) const
   return focused_workbench_section(screen) >= 0;
 }
 
-std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, const char *editor_id)
+std::function<void()> AppShell::focused_task_result_action(wm::Screen &screen)
+{
+  const auto *origin = dynamic_cast<const EditorArea *>(screen.maximized());
+  if (!origin || origin->editor().type().id != kEditorJobs || !workbench_is_focused(screen)) { return {}; }
+  auto request = store_.jobs().selected_result_request();
+  if (!request) { return {}; }
+  return workbench_navigation_action(screen, kEditorViewer, std::move(request));
+}
+
+std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, const char *editor_id,
+                                                          std::optional<OpenResultRequest> request)
 {
   const auto epoch = screen.visibility_epoch();
   const auto *origin = dynamic_cast<const EditorArea *>(screen.maximized());
   const auto activity = origin ? origin->activity_epoch() : 0;
   const auto editor = origin ? origin->editor().lifetime() : std::weak_ptr<void>{};
   const auto weak = lifetime();
-  auto current = [this, weak, s = &screen, epoch, origin, activity, editor] {
+  const auto source_current = request ? request->still_current : std::function<bool()>{};
+  auto current = [this, weak, s = &screen, epoch, origin, activity, editor, source_current] {
     return !weak.expired() && has_screen(s) && s->visibility_epoch() == epoch &&
-           (!origin || (!editor.expired() && s->maximized() == origin && origin->activity_epoch() == activity));
+           (!origin || (!editor.expired() && s->maximized() == origin && origin->activity_epoch() == activity)) &&
+           (!source_current || source_current());
   };
-  return [this, s = &screen, editor_id, current] {
+  return [this, s = &screen, editor_id, current, request = std::move(request)] {
     if (!current()) { return; }
-    s->defer([this, s, editor_id, current] {
+    s->defer([this, s, editor_id, current, request] {
       if (!current()) { return; }
       const auto result = editor_id ? activate_editor(s, editor_id, true) : restore_split_layout(s);
-      if (result && editor_id) { focused_workbenches_[s] = s->visibility_epoch(); }
+      if (result && editor_id) {
+        focused_workbenches_[s] = s->visibility_epoch();
+        if (request) {
+          // The latest explicit open supersedes any result already queued in the split view.
+          store_.take_open_result();
+          store_.viewer().open(*request);
+        }
+      }
       if (!result && store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
     });
   };

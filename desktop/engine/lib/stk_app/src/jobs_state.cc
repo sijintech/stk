@@ -2546,17 +2546,39 @@ void JobsState::open_local(const std::string &local_path)
   }
 }
 
-void JobsState::open_in_viewer()
+bool JobsState::can_open_selected_result() const
 {
-  if (selected_.empty() || (hub() && (task_observation_ == TaskObservation::Denied || node_revoked()))) {
-    return;
-  }
+  return !workspace_.empty() && !selected_.empty() &&
+         !(hub() && (task_observation_ == TaskObservation::Denied || node_revoked()));
+}
+
+std::optional<OpenResultRequest> JobsState::selected_result_request() const
+{
+  if (!can_open_selected_result()) { return std::nullopt; }
   OpenResultRequest req;
   req.connection = active_;
   req.node = hub() ? node_ : std::string();
   req.workspace_id = workspace_;
   req.task_id = selected_;
-  store_.request_open_result(std::move(req));
+  req.still_current = [weak = std::weak_ptr<Alive>(alive_), detail = detail_epoch_, ready = ready_epoch_,
+                       connection = req.connection, node = req.node, workspace = req.workspace_id,
+                       task = req.task_id]() {
+    const auto owner = weak.lock();
+    if (!owner) { return false; }
+    const auto &jobs = *owner->self;
+    const auto target = jobs.target();
+    return jobs.detail_epoch_ == detail && jobs.ready_epoch_ == ready && target.connection == connection &&
+           target.node == node && jobs.workspace_ == workspace && jobs.selected_ == task &&
+           jobs.can_open_selected_result();
+  };
+  return req;
+}
+
+void JobsState::open_in_viewer()
+{
+  auto request = selected_result_request();
+  if (!request) { return; }
+  store_.request_open_result(std::move(*request));
   set_status(store_.catalog().format("jobs.status.open_viewer", {{"id", selected_.substr(0, 12)}}));
 }
 

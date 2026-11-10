@@ -117,6 +117,32 @@ TEST_F(JobsFake, SelectedHubTaskKeepsLastKnownFactOutsideHeartbeatWindow)
   EXPECT_EQ(j.selected_task()->name, "original task");
 }
 
+TEST_F(JobsFake, TaskResultRequestExpiresDuringWorkspaceCreation)
+{
+  FakeJobs f;
+  auto &jobs = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  const std::string task(32, 'c');
+  jobs.select_task(task);
+  const auto request = jobs.selected_result_request();
+  ASSERT_TRUE(request);
+  ASSERT_TRUE(request->still_current());
+
+  bool checked = false;
+  jobs.create_workspace("Next workspace", [&](const auto &error) {
+    EXPECT_FALSE(error);
+    // Observe the creation callback after it clears the old scope, before its list reply.
+    f.loop.executor()([&] {
+      EXPECT_TRUE(jobs.workspace().empty());
+      EXPECT_EQ(jobs.selected(), task);
+      EXPECT_FALSE(request->still_current());
+      EXPECT_FALSE(jobs.can_open_selected_result());
+      checked = true;
+    });
+  });
+  ASSERT_TRUE(f.pump([&] { return checked; }));
+}
+
 TEST_F(JobsFake, ExactHubObservationRecoversOriginalTaskAndClearsDeniedFacts)
 {
   using app::TaskObservation;

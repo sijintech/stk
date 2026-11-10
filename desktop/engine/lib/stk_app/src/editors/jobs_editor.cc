@@ -747,8 +747,12 @@ class JobsEditor final : public Editor {
        })
         .disable(!jobs.can_cancel_selected_task())
         .tip(ctx.tr("jobs.task.cancel.tip"));
-    row.button("open_viewer", ctx.tr("jobs.task.open_viewer"), [&jobs]() { jobs.open_in_viewer(); })
-        .disable(jobs.selected().empty() || jobs.selected_task_observation() == TaskObservation::Denied)
+    const bool focused = focused_tasks(ctx);
+    auto open_result = focused ? ctx.area.shell().focused_task_result_action(*ctx.area.screen()) :
+                                 std::function<void()>([&jobs]() { jobs.open_in_viewer(); });
+    const bool can_open = focused ? bool(open_result) : jobs.can_open_selected_result();
+    row.button("open_viewer", ctx.tr("jobs.task.open_viewer"), std::move(open_result))
+        .disable(!can_open)
         .tip(ctx.tr("jobs.task.open_viewer.tip"));
 
     ui::TableSpec t;

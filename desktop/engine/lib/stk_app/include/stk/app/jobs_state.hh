@@ -31,6 +31,7 @@
 #include <string>
 #include <vector>
 
+#include "stk/app/app_store.hh"
 #include "stk/app/jobs_spec.hh"
 #include "stk/bridge/client.hh"
 #include "stk/ui/log_buffer.hh"
@@ -44,8 +45,6 @@ class FileDialog;
 }
 
 namespace stk::app {
-
-class AppStore;
 
 /** A Runtime task record (TaskRecord, or a hub node snapshot entry without its spec). */
 struct TaskRow {
@@ -414,6 +413,9 @@ class JobsState {
   void open_local(const std::string &local_path);
   /** Asks the Viewer to show the selected task (AppStore::request_open_result). */
   void open_in_viewer();
+  bool can_open_selected_result() const;
+  /** Capture the selected task's result source and recheck its scope before opening it. */
+  std::optional<OpenResultRequest> selected_result_request() const;
 
   /* ---- Model updates (bridge callbacks; public for tests and goldens) ---- */
 

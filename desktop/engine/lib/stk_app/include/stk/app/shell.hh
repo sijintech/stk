@@ -16,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -126,6 +127,8 @@ class AppShell {
   /** Enter the focused workbench in the conversation or the Viewer, without rebuilding editors. */
   void open_workbench(wm::Screen &screen, bool show_result = false);
   bool workbench_is_focused(const wm::Screen &screen) const;
+  /** Open the selected task in focused Results from this window's focused Tasks page. */
+  std::function<void()> focused_task_result_action(wm::Screen &screen);
 
   /** Screen, language, UI scale and window geometry as a layout file. */
   wm::LayoutFile capture_layout(const wm::Screen &screen, const wm::Window *window) const;
@@ -226,7 +229,8 @@ class AppShell {
   friend class StatusBar;
   void attach_workbench_navigation(EditorArea &area);
   int focused_workbench_section(const wm::Screen &screen) const;
-  std::function<void()> workbench_navigation_action(wm::Screen &screen, const char *editor_id);
+  std::function<void()> workbench_navigation_action(wm::Screen &screen, const char *editor_id,
+                                                    std::optional<OpenResultRequest> request = {});
   bool handle_shortcut(wm::Screen &screen, const wm::Event &event);
   std::vector<ui::MenuEntry> file_menu(wm::Screen &screen);
   std::vector<ui::MenuEntry> view_menu(wm::Screen &screen);
