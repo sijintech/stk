@@ -32,6 +32,7 @@ type EvaluationSource = {
   bindings: {name: string, task: string, taskName?: string, workspace?: string}[],
 } & ({presetId: string, presetName?: string, hdf5?: never} | {hdf5: MuProSource, presetId?: never, presetName?: never});
 export type GraphSource = EvaluationSource | {kind: 'local', scope: string, node: string, file: string};
+export type ProbeReading = {order: number, text: string};
 type GraphView = {payload: LoadedPayload, source: GraphSource, key: string, probe?: ProbeContext, signal?: AbortSignal, voxelKey?: number};
 type CompletedTask = {name: string, workspace: string};
 
@@ -304,9 +305,10 @@ function JsonView({out}: {out: any}) {
 // `active` is false while 图谱 is not in view (the file mode, another section or the compact history over 结果): the
 // panel stays mounted with its result and camera. `scope` names the page's project and task scope; a new one starts the
 // panel afresh, even at the same node with no task (local data packages and manually bound tasks included).
-export default function GraphPanel({node, scope, task, tasks, artifacts, completedTask, canReadEvents, canReadArtifacts, active = true, onError, onLog, onSource}: {node: string, scope: string, task: string,
+export default function GraphPanel({node, scope, task, tasks, artifacts, completedTask, canReadEvents, canReadArtifacts, active = true, onError, beginReading, onProbe, onSource}: {node: string, scope: string, task: string,
   tasks: Json[], artifacts: Json[], completedTask: CompletedTask | null, canReadEvents: boolean, canReadArtifacts: boolean, active?: boolean,
-  onError: (text: string) => void, onLog: (text: string) => void, onSource: (source: GraphSource | null) => void}) {
+  onError: (text: string) => void, beginReading: () => number, onProbe: (reading: ProbeReading | null) => void,
+  onSource: (source: GraphSource | null) => void}) {
   const [presets, setPresets] = useState<Preset[] | null>(null);
   const [presetError, setPresetError] = useState('');
   const [presetId, setPresetId] = useState('');
@@ -374,7 +376,7 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
     if (next.source.kind === 'evaluation' && next.source.hdf5) {
       setResult(null); setOutputsSource(null);
     }
-    onLog('');
+    onProbe(null);
   }
 
   const mounted = useRef(false);
@@ -411,8 +413,8 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
     setValues(initialValues(params));
     setBindings(Object.fromEntries(names.map(n => [n, task])));
     offerView(null); displayedView.current = null; setShownView(null); setOutputsSource(null);
-    setResult(null); setProbe(null); setStatus(''); setRunning(false); onLog('');
-  }, [preset, params, names, node, scope, task, onLog, cancelProbe]);
+    setResult(null); setProbe(null); setStatus(''); setRunning(false); onProbe(null);
+  }, [preset, params, names, node, scope, task, onProbe, cancelProbe]);
 
   function changeBinding(name: string, taskId: string) {
     if (bindings[name] === taskId) return;
@@ -619,6 +621,7 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
     if (!active || !probe || !displayed?.probe || probeRequest.current) return;
     const target = resolveProbeTarget(preset?.graph, probe.info?.probe, displayed.probe);
     if ('error' in target) { onError(target.error); return; }
+    const order = beginReading();
     const abort = new AbortController();
     probeRequest.current = abort;
     const current = generation.current;
@@ -648,7 +651,7 @@ export default function GraphPanel({node, scope, task, tasks, artifacts, complet
       }, {active: isCurrent});
       if (!isCurrent()) return;
       review = item.state === 'review';
-      if (item.result) onLog(JSON.stringify({layer: probe.info?.layerName, path, ...item.result}, null, 2));
+      if (item.result) onProbe({order, text: JSON.stringify({layer: probe.info?.layerName, path, ...item.result}, null, 2)});
     } catch (e) { if (isCurrent()) onError(message(e)); }
     finally {
       if (isCurrent()) {

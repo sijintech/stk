@@ -112,7 +112,10 @@ class Hub {
   private unlisted: (() => void)[] = [];
   listCreated() { for (const list of this.unlisted.splice(0)) list(); }
   readonly actionRows: Record<string, any>[] = [];
-  logsFail = false;
+  // task.logs: fails for every stream or one; `logTexts` keys `${task_id} ${stream}`; `logPayloads` records each payload.
+  logsFail: boolean | 'stdout' | 'stderr' = false;
+  readonly logTexts = new Map<string, string>();
+  readonly logPayloads: Record<string, any>[] = [];
   readonly viewErrors = new Map<string, string>();
   reportedViewSource?: {task_id: string; path: string} | 'omit';
   // Payloads of the view.build and view.probe actions, in order: which task and artifact each one asked for.
@@ -351,8 +354,14 @@ class Hub {
         if (this.queueGraph) { this.queuedResults.set(body.id, result); return json({id: body.id, state: 'queued'}); }
         return json({id: body.id, state: 'succeeded', result});
       }
-      if (body.kind === 'task.logs') return json(this.logsFail ? {id: body.id, state: 'failed', error: '日志暂不可读'} :
-        {id: body.id, state: 'succeeded', result: {data: Buffer.from(LOG).toString('base64')}});
+      if (body.kind === 'task.logs') {
+        // As the node reads it: the stream defaults to stdout; text is per task and stream (LOG for any stdout not set).
+        this.logPayloads.push(body.payload);
+        const stream = body.payload.stream ?? 'stdout', fail = this.logsFail === true || this.logsFail === stream;
+        const text = this.logTexts.get(`${body.payload.task_id} ${stream}`) ?? (stream === 'stdout' ? LOG : '');
+        return json(fail ? {id: body.id, state: 'failed', error: '日志暂不可读'} :
+          {id: body.id, state: 'succeeded', result: {data: Buffer.from(text).toString('base64')}});
+      }
     }
     return json({detail: `unmocked ${path}`}, 500);
   }
@@ -3715,6 +3724,202 @@ async function expectKept(page: Page, ready: Awaited<ReturnType<typeof prepare>>
   expect(pixels.map((shot, i) => shot.equals(ready.pixels[i]))).toEqual([true, true]);
 }
 
+// Task log streams: 读取日志 opens the selected task's standard output in 结果 and the open pane switches explicitly
+// to 标准错误 and back with the same task.logs action. Synthetic failed task: empty stdout, diagnosis on stderr only.
+const STDERR = 'Traceback (most recent call last):\n  File "analysis.py", line 7, in <module>\nValueError: 网格尺寸必须为正\n';
+const failedTasks = {...device, snapshot: {...device.snapshot, tasks: [{...row, state: 'failed'}, row2]}};
+const logPane = (page: Page) => page.locator('section.analysis details.logs');
+const logStreams = (page: Page) => logPane(page).getByRole('group', {name: '日志流'});
+const logStream = (page: Page, name: '标准输出' | '标准错误') => logStreams(page).getByRole('button', {name, exact: true});
+async function expectStream(page: Page, name: '标准输出' | '标准错误', text: string) {
+  await expect(logPane(page).locator('pre')).toHaveText(text);
+  await expect(logStream(page, name)).toHaveAttribute('aria-pressed', 'true');
+  await expect(logStream(page, name === '标准输出' ? '标准错误' : '标准输出')).toHaveAttribute('aria-pressed', 'false');
+}
+const NO_LOG = '选择任务读取日志，或在三维视图中选取一个位置。';
+
+for (const viewport of viewports) {
+  test.describe(`${viewport.name} task log streams`, () => {
+    test.use({viewport: {width: viewport.width, height: viewport.height}});
+
+    test('a failed task\'s 标准错误 is one click from 读取日志 and keeps the Viewer, drafts and return focus', async ({page}) => {
+      const hub = new Hub();
+      hub.device = failedTasks;
+      hub.logTexts.set(`${task} stdout`, '');
+      hub.logTexts.set(`${task} stderr`, STDERR);
+      const errors = await setup(page, hub);
+      // Fixed start: 任务 with the failed task selected; 结果 has a moved Viewer and no stream switch yet.
+      await go(page, '结果');
+      await expect(logStreams(page)).toHaveCount(0);
+      await pause(page);
+      const viewer = await paneShot(page, filePane(page), 'viewer-before');
+      await go(page, '任务');
+      await expect(shortcut(page, '读取日志')).toBeInViewport({ratio: 1});
+      const before = await state(page);
+      const sent = posts(page);
+      const r = measured(page, `${viewport.name}-stderr`);
+      await r.activate(shortcut(page, '读取日志'), 'pointer', '读取日志');
+      await expectActive(page, '结果');
+      await expect(logPane(page).locator('summary')).toBeFocused();
+      await expect(footer(page)).toContainText('就绪');
+      // The empty stdout is named as such, not shown as the no-log hint.
+      await expectStream(page, '标准输出', '标准输出暂无内容。');
+      await expect(logStream(page, '标准错误')).toBeInViewport({ratio: 1});
+      await r.activate(logStream(page, '标准错误'), 'pointer', '标准错误');
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准错误', STDERR);
+      expect(hub.logPayloads).toEqual([{task_id: task}, {task_id: task, stream: 'stderr'}]);
+      expect(r.record).toMatchObject({clicks: 2, keys: 0});
+      r.save();
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-stderr.png`)});
+      // 任务 straight from 结果 gives the focus back to 读取日志; nothing else in 任务 or 结果 changed.
+      await railButton(page, '任务').click();
+      await expect(shortcut(page, '读取日志')).toBeFocused();
+      expect(await state(page)).toEqual(before);
+      // Section switches and choosing the selected task again read no log, and the accepted stderr stays.
+      for (const section of ['结果', '工作台', '任务', '结果', '任务']) await go(page, section);
+      await taskRow(page, '解析场验证').click();
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await go(page, '结果');
+      await expectStream(page, '标准错误', STDERR);
+      await page.waitForTimeout(300);
+      expect(hub.logPayloads).toHaveLength(2);
+      // The shortcut re-reads the stream accepted for this task; 标准输出 goes back with the original payload.
+      await go(page, '任务');
+      await shortcut(page, '读取日志').click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准错误', STDERR);
+      await logStream(page, '标准输出').click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', '标准输出暂无内容。');
+      expect(hub.logPayloads.slice(2)).toEqual([{task_id: task, stream: 'stderr'}, {task_id: task}]);
+      // A probe result covering the log marks no stream as shown.
+      await page.getByRole('button', {name: '查询原始值'}).click();
+      await expect(logPane(page).locator('pre')).toContainText('"values"');
+      for (const name of ['标准输出', '标准错误'] as const) await expect(logStream(page, name)).toHaveAttribute('aria-pressed', 'false');
+      await expect(footer(page)).toContainText('就绪');
+      sent.stop();
+      expect(writes(sent.seen)).toEqual([...Array(4).fill('/api/v1/actions task.logs'), '/api/v1/actions view.probe']);
+      expect([hub.evaluations, hub.builds.length, hub.calls, hub.replies]).toEqual([[], 1, [], 0]);
+      expect(await state(page)).toEqual(before);
+      expect((await paneShot(page, filePane(page), 'viewer-after')).equals(viewer)).toBe(true);
+      expect(errors).toEqual([]);
+    });
+
+    test('a failed or expired stream read keeps the accepted log; another task starts again at 标准输出', async ({page}) => {
+      const hub = new Hub();
+      hub.device = failedTasks;
+      hub.logTexts.set(`${task} stderr`, STDERR);
+      hub.logTexts.set(`${task2} stdout`, '对照任务输出\n');
+      hub.logTexts.set(`${task2} stderr`, '对照任务错误\n');
+      const errors = await setup(page, hub, {scene: false});
+      const alert = page.getByRole('alert');
+      await shortcut(page, '读取日志').click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', LOG);
+      // The 40-line log scrolls inside the pane under its stream switch, which stays in view.
+      await logPane(page).evaluate(el => { el.scrollTop = el.scrollHeight; });
+      const [pane, switcher] = [(await logPane(page).boundingBox())!, (await logStreams(page).boundingBox())!];
+      expect(switcher.y).toBeGreaterThanOrEqual(pane.y);
+      await expect(logStream(page, '标准错误')).toBeInViewport({ratio: 1});
+      // A failed 标准错误 read reports its error and keeps the confirmed stdout with its label; the shortcut re-reads stdout.
+      hub.logsFail = 'stderr';
+      await logStream(page, '标准错误').click();
+      await expect(alert).toContainText('日志暂不可读');
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', LOG);
+      await alert.getByRole('button', {name: '关闭'}).click();
+      hub.logsFail = false;
+      await go(page, '任务');
+      await shortcut(page, '读取日志').click();
+      await expect(footer(page)).toContainText('就绪');
+      await logStream(page, '标准错误').click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准错误', STDERR);
+      expect(hub.logPayloads).toEqual([{task_id: task}, {task_id: task, stream: 'stderr'}, {task_id: task}, {task_id: task, stream: 'stderr'}]);
+      // Held 标准错误 re-reads, then 对照任务 chosen before they answer: neither the late text nor a late error is
+      // adopted, and 任务 stays.
+      for (const late of ['text', 'error'] as const) {
+        const release = hub.hold('task.logs');
+        hub.reached.clear();
+        await go(page, '结果');
+        await logStream(page, '标准错误').click();
+        await expect.poll(() => hub.reached.has('task.logs')).toBe(true);
+        await go(page, '任务');
+        await taskRow(page, '对照任务').click();
+        await expect(status(page)).toContainText('已读取 Runtime 状态');
+        hub.logsFail = late === 'error' ? 'stderr' : false;
+        release();
+        await expect(footer(page)).toContainText('就绪');
+        await page.waitForTimeout(300);
+        await expect(alert).toHaveCount(0);
+        await expectActive(page, '任务');
+        if (late === 'text') {
+          // Back to the first task to hold the second read there.
+          await taskRow(page, '解析场验证').click();
+          await expect(status(page)).toContainText('已读取 Runtime 状态');
+          await shortcut(page, '读取日志').click();
+          await expect(footer(page)).toContainText('就绪');
+          await expectStream(page, '标准输出', LOG);
+          await go(page, '任务');
+        }
+      }
+      hub.logsFail = false;
+      await go(page, '结果');
+      await expect(logPane(page).locator('pre')).toHaveText(NO_LOG);
+      await expect(logStreams(page)).toHaveCount(0);
+      await expect(alert).toHaveCount(0);
+      // 对照任务's own shortcut reads its standard output with the original payload, not the first task's stream.
+      await go(page, '任务');
+      await shortcut(page, '读取日志').click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', '对照任务输出\n');
+      // Back to the first task (a new selection): no log and no stream switch until 读取日志, which starts at stdout.
+      await go(page, '任务');
+      await taskRow(page, '解析场验证').click();
+      await expect(status(page)).toContainText('已读取 Runtime 状态');
+      await go(page, '结果');
+      await expect(logPane(page).locator('pre')).toHaveText(NO_LOG);
+      await expect(logStreams(page)).toHaveCount(0);
+      await go(page, '任务');
+      await shortcut(page, '读取日志').click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', LOG);
+      expect(hub.logPayloads.slice(4)).toEqual([{task_id: task, stream: 'stderr'}, {task_id: task}, {task_id: task, stream: 'stderr'},
+        {task_id: task2}, {task_id: task}]);
+      expect(errors).toEqual([]);
+    });
+
+    test('a held 标准错误 read keeps the keyboard on its stream button', async ({page}) => {
+      const hub = new Hub();
+      hub.device = failedTasks;
+      hub.logTexts.set(`${task} stderr`, STDERR);
+      await setup(page, hub, {scene: false});
+      await shortcut(page, '读取日志').click();
+      await expectStream(page, '标准输出', LOG);
+      const release = hub.hold('task.logs');
+      hub.reached.clear();
+      const requests = posts(page);
+      const stderr = logStream(page, '标准错误');
+      await stderr.focus();
+      try {
+        await page.keyboard.press('Enter');
+        await expect.poll(() => hub.reached.has('task.logs')).toBe(true);
+        await expect(stderr).toBeDisabled();
+        await expect(stderr).toBeFocused();
+        await page.keyboard.press('Enter');
+      } finally {
+        release();
+      }
+      await expectStream(page, '标准错误', STDERR);
+      await expect(stderr).toBeFocused();
+      requests.stop();
+      expect(requests.seen.filter(call => call.endsWith('task.logs'))).toEqual(['/api/v1/actions task.logs']);
+      expect(hub.logPayloads).toEqual([{task_id: task}, {task_id: task, stream: 'stderr'}]);
+    });
+  });
+}
+
 for (const viewport of viewports) {
   test.describe(`${viewport.name} 任务 return focus`, () => {
     test.use({viewport: {width: viewport.width, height: viewport.height}});
@@ -4310,6 +4515,54 @@ const datPreset = {...PRESET, graph: {nodes: [
 ]}};
 const datName = 'Polar.00001000.dat', datPath = `case/${datName}`;
 for (const viewport of viewports) {
+  test(`${viewport.name} task logs and graph probes keep the newer reading on screen`, async ({page}) => {
+    await page.setViewportSize({width: viewport.width, height: viewport.height});
+    const hub = new Hub();
+    hub.device = graphTwoScopes;
+    hub.presets = [datPreset];
+    hub.artifactPathsByTask.set(task2, [datPath]);
+    hub.logTexts.set(`${task} stderr`, STDERR);
+    await setup(page, hub, {scene: false});
+    await shortcut(page, '读取日志').click();
+    await expectStream(page, '标准输出', LOG);
+    await showGraph(page);
+    await binding(page).selectOption(task2);
+    await computeGraph(page, hub);
+    await pickGraphDomain(page);
+
+    const release = hub.hold('task.logs');
+    hub.reached.clear();
+    try {
+      await logStream(page, '标准错误').click();
+      await expect.poll(() => hub.reached.has('task.logs')).toBe(true);
+      await rawGraphProbe(page).click();
+      await expect(probeLog(page)).toContainText(datPath);
+    } finally {
+      release();
+    }
+    await expect(footer(page)).toContainText('就绪');
+    await expect(probeLog(page)).toContainText(datPath);
+    await modeTab(page, '结果文件').click();
+    await expectStream(page, '标准错误', STDERR);
+    await modeTab(page, '图谱').click();
+    await expect(probeLog(page)).toContainText(datPath);
+
+    // An older probe that arrives after the accepted log does not take over the panel either.
+    const releaseProbe = hub.hold('view.probe');
+    hub.reached.clear();
+    try {
+      await rawGraphProbe(page).click();
+      await expect.poll(() => hub.reached.has('view.probe')).toBe(true);
+      await logStream(page, '标准输出').click();
+      await expectStream(page, '标准输出', LOG);
+    } finally {
+      releaseProbe();
+    }
+    await expect(rawGraphProbe(page)).toBeEnabled();
+    expect(hub.probes).toHaveLength(2);
+    await expectStream(page, '标准输出', LOG);
+  });
+
   test(`${viewport.name} DAT probe resolves the shown binding's published frame only on explicit query`, async ({page}) => {
     await page.setViewportSize({width: viewport.width, height: viewport.height});
     const hub = new Hub();

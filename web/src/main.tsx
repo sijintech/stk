@@ -4,7 +4,7 @@ import {createRoot} from 'react-dom/client';
 import {action,api,ApiError,events,hasToken,Json,readNode,setToken} from './api';
 import {conversationTitle,type Entry,useConversations} from './conversations';
 import ErrorBoundary from './ErrorBoundary';
-import type {GraphSource} from './GraphPanel';
+import type {GraphSource,ProbeReading} from './GraphPanel';
 import TaskObservation from './TaskObservation';
 import {isTerminalTaskState,taskStateLabel,type TaskFact,type TaskScope} from './taskFacts';
 import './style.css';
@@ -17,6 +17,10 @@ type ObservedTask = {scope:TaskScope;name:string;state:string;cancelRequested:bo
 // The scene 结果 shows in file mode, bound to the task scope and artifact path of the view.build that produced it.
 // Choosing another file only edits the choice: the canvas and its source stay until a new build succeeds.
 type Displayed = {scope:TaskScope;path:string;scene:Json};
+// The task log 结果 shows: the text of one stream as accepted for the task scope it was read in.
+type LogStream='stdout'|'stderr';
+type TaskLog = {scope:TaskScope;stream:LogStream;order:number;text:string};
+const LOG_STREAMS:readonly (readonly [LogStream,string])[]=[['stdout','标准输出'],['stderr','标准错误']];
 // A published file the 结果文件 list offers.
 const viewable=(artifact:Json)=>/\.(vti|vtk|npy|dat)$/.test(artifact.path);
 // Persistent sections: 工作台 is the conversation home. All three stay mounted; only the active one is shown.
@@ -90,26 +94,29 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   useLayoutEffect(()=>{
     if(messageList.current)messageList.current.scrollTop=transcriptOffsets.current.get(conv.session)??0;
   },[conv.session]);
-  const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
+  const [name,setName]=useState('科学项目'),[log,setLog]=useState<TaskLog|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
   const [environmentDisclosure,setEnvironmentDisclosure]=useState<EnvironmentDisclosure>('setup');
   const environment=useRef<HTMLDetailsElement>(null);
   const [newTaskDisclosure,setNewTaskDisclosure]=useState<NewTaskDisclosure>('default');
   const newTaskOpen=newTaskDisclosure==='open';
-  const [probeText,setProbeText]=useState(''),[graphProbeText,setGraphProbeText]=useState(''),[viewError,setViewError]=useState(''),[graphError,setGraphError]=useState('');
+  const [fileProbe,setFileProbe]=useState<ProbeReading|null>(null),[graphProbe,setGraphProbe]=useState<ProbeReading|null>(null);
+  const [viewError,setViewError]=useState(''),[graphError,setGraphError]=useState('');
   const [graphSource,setGraphSource]=useState<GraphSource|null>(null);
   // The Tasks shortcut that opened 结果 and the task scope it was pressed in. The next navigation forgets it; only
   // 任务 straight from 结果 gives it the focus back, and only while that exact scope is selected (a reselected task is a
   // new scope) and the shortcut is still there, enabled and wholly in view in 任务, which keeps its scroll offsets.
   const returnFocus=useRef<{scope:TaskScope;launcher:HTMLButtonElement}|null>(null);
   const generation=useRef(0),scopeVersion=useRef(0),activeScope=useRef<TaskScope|null>(null),refreshing=useRef(false),alive=useRef(true);
-  const artifactReads=useRef({started:0,applied:0});
+  const artifactReads=useRef({started:0,applied:0}),logReads=useRef(0);
   // The explicit Tasks shortcut may choose the sole file from its accepted reply for a successful task.
   // Leaving 结果, opening history over it, switching mode, editing the file choice or changing tasks drops the pick.
   const defaultPick=useRef<{scope:TaskScope}|null>(null),fileEdited=useRef(false);
   const completedTaskScopeNow=useRef<TaskScope|null>(null);
   // The displayed record as of the latest change, so a late probe reply can tell whether its scene is still shown.
   const displayedNow=useRef<Displayed|null>(null);
-  const show=useCallback((next:Displayed|null)=>{displayedNow.current=next;setDisplayed(next);setProbeText('');setViewError('');},[]);
+  const readingOrder=useRef(0);
+  const beginReading=useCallback(()=>++readingOrder.current,[]);
+  const show=useCallback((next:Displayed|null)=>{displayedNow.current=next;setDisplayed(next);setFileProbe(null);setViewError('');},[]);
   const [logRoom,setLogRoom]=useState(false);
   // 来源 details: opened and closed only in the page, over 结果 rather than in its flow, so nothing below moves.
   const [sourceOpen,setSourceOpen]=useState(false);
@@ -175,7 +182,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     !tasks.length?'节点快照中暂无任务。':!queue.length?`${workspaceName(workspace)} 中暂无任务，可在下方「新建任务」中提交。`:'';
   const clearTask=useCallback(()=>{
     generation.current++;scopeVersion.current++;activeScope.current=null;defaultPick.current=null;fileEdited.current=false;
-    setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);show(null);setLogs('');setGraphProbeText('');setGraphSource(null);setLogRoom(false);
+    setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);show(null);setLog(null);setGraphProbe(null);setGraphSource(null);setLogRoom(false);
   },[show]);
   const clearNode=useCallback(()=>{clearTask();setNode('');setWorkspace('');},[clearTask]);
   const nodeGone=useCallback((scope:TaskScope)=>{if(activeScope.current===scope)clearNode();},[clearNode]);
@@ -272,7 +279,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   useEffect(()=>{void refresh();const abort=new AbortController();void events(()=>void refresh(),abort.signal);const timer=setInterval(()=>void refresh(),5000);return()=>{abort.abort();clearInterval(timer);};},[refresh]);
   useEffect(()=>{if(node&&!selected)clearNode();},[node,selected,clearNode]);
   // A graph error or probe reply belongs to the scope it was raised in.
-  useEffect(()=>{setGraphError('');setGraphProbeText('');},[graphKey,graphScope]);
+  useEffect(()=>{setGraphError('');setGraphProbe(null);},[graphKey,graphScope]);
   useEffect(()=>{
     if(!taskBound||!taskOnline||!canReadArtifacts)return;
     const abort=new AbortController();
@@ -331,7 +338,22 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       show({scope,path:source,scene:item.result});setLevel(level);
     },active);
   }
-  async function readLogs(){const version=scopeVersion.current;const item=await invoke('task.logs',{task_id:task});if(item.result&&scopeVersion.current===version){const bytes=Uint8Array.from(atob(item.result.data),c=>c.charCodeAt(0));setLogs(new TextDecoder().decode(bytes));setProbeText('');setGraphProbeText('');}}
+  // One explicit read of one stream with the published task.logs action. Standard output keeps the original payload
+  // (the node's default stream); standard error names its stream. The text is accepted only for this instance, the
+  // task scope (node, project and task) it was asked in and the latest read, labelled with the stream it asked for.
+  // An expired reply or error leaves the accepted log, the section and the focus as they are.
+  async function readLogs(stream:LogStream){
+    const scope=activeScope.current;if(!scope)return;
+    const version=scopeVersion.current,current=++logReads.current,order=beginReading();
+    const active=()=>alive.current&&activeScope.current===scope&&scopeVersion.current===version&&logReads.current===current;
+    try{
+      const item=await invoke('task.logs',stream==='stdout'?{task_id:scope.task}:{task_id:scope.task,stream},scope.node);
+      if(!item.result||!active())return;
+      if(typeof item.result.data!=='string')throw new Error('日志回执格式无效。');
+      const bytes=Uint8Array.from(atob(item.result.data),c=>c.charCodeAt(0));
+      setLog({scope,stream,order,text:new TextDecoder().decode(bytes)});
+    }catch(error){if(active()||lostAccess(error))throw error;}
+  }
   // An explicit 结果 / 读取日志 click in Tasks opens 结果 at once and brings the target into view; the read itself
   // keeps its own scope checks and never navigates on completion. The analysis mode and Viewer are left as they are.
   // 读取日志 also gives the open log pane its full bounded height (logRoom, until the task scope changes), so the
@@ -392,10 +414,11 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // The reply is kept only while that scene is still the one shown (a new scene or another task discards it).
   function probeValue(){
     const source=displayedNow.current;if(!source||source!==shown)return;
+    const order=beginReading();
     const active=()=>alive.current&&displayedNow.current===source&&activeScope.current===source.scope;
     void run(async()=>{
       const result=await invoke('view.probe',{task_id:source.scope.task,path:source.path,position:probe},source.scope.node,active);
-      if(result.result&&active())setProbeText(JSON.stringify(result.result,null,2));
+      if(result.result&&active())setFileProbe({order,text:JSON.stringify(result.result,null,2)});
     },active);
   }
   // File mode uses the selected task and displayed artifact. Graph mode uses the accepted scene or output cards,
@@ -452,7 +475,13 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // Result errors are shown with their own mode in 结果: one raised while that mode is out of view waits for its return.
   const resultNotice=tab==='results'&&!overlay?(analysis==='file'?viewError:graphError):'';
   const notice=error||resultNotice;
-  const resultText=analysis==='graph'?graphProbeText:shown?probeText:'';
+  // Use the latest accepted reading for this mode, ordered by the user action even if the replies arrive out of order.
+  const taskLog=log&&log.scope===selection?log:null;
+  const probeReading=analysis==='graph'?graphProbe:shown?fileProbe:null;
+  const resultText=probeReading&&(!taskLog||probeReading.order>taskLog.order)?probeReading.text:'';
+  const logShown=resultText?null:taskLog;
+  const logText=taskLog?taskLog.text||`${LOG_STREAMS.find(([key])=>key===taskLog.stream)![1]}暂无内容。`:'';
+  const streamSwitch=taskBound&&logRoom;
   return <div className="app"><header><div className="wordmark">STK <span>科学工作台</span></div><span className={online?'connection':'connection offline'}>{online?'控制服务已连接':'连接中断 · 显示最近状态'}</span><button className="quiet" onClick={disconnect}>断开</button></header>
     {notice&&<div className="notice" role="alert">{notice}<button onClick={()=>error?setError(''):analysis==='file'?setViewError(''):setGraphError('')}>关闭</button></div>}
     <div className="workspace">
@@ -480,7 +509,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       {task&&selection&&<TaskObservation key={`${node}/${selection.workspace}/${task}`} scope={selection}
         heartbeat={heartbeat} online={taskOnline} supported={canReadTask} refresh={taskRefresh}
         onObservation={observeTask} onAccessLost={disconnect} onNodeGone={nodeGone}/>}
-      {taskBound&&<div className="inline"><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{openResults('logs',e.currentTarget);void run(readLogs);}}>读取日志</button><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{const pick=openResults('files',e.currentTarget);void run(()=>files(pick));}}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
+      {taskBound&&<div className="inline"><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{const stream=taskLog?.stream??'stdout';openResults('logs',e.currentTarget);void run(()=>readLogs(stream));}}>读取日志</button><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{const pick=openResults('files',e.currentTarget);void run(()=>files(pick));}}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
       {actions.filter(a=>a.state==='review').map(a=><article className="review" key={a.id}><strong>等待执行复核</strong><p>{a.review_reason}</p><pre>{JSON.stringify(a.request.payload,null,2)}</pre>{[true,false].map(approved=><button key={String(approved)} disabled={busy} onClick={()=>void run(async()=>{await api(`actions/${a.id}/review`,'POST',{approved});})}>{approved?'批准执行':'拒绝'}</button>)}</article>)}
       <details className="setting" ref={environment} open={environmentOpen}><summary onClick={event=>{
         event.preventDefault();setEnvironmentDisclosure(environmentOpen?'closed':'open');
@@ -515,7 +544,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       {sourceOpen&&sourceDetails}</div>
       <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>{if(key!==analysis)defaultPick.current=null;setAnalysis(key);}}>{label}</button>)}</div>
       {/* Both analysis modes stay mounted once shown; the inactive one keeps its size but takes no space, focus or pointer. */}
-      {graphKept&&<div className={analysis==='graph'?'mode-pane graph-mode':'mode-pane graph-mode mode-hidden'} inert={analysis!=='graph'}><React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={graphKey} node={selected?node:''} scope={graphScope} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} completedTask={completedTask} canReadArtifacts={canReadArtifacts} canReadEvents={canReadEvents&&taskOnline&&graphActive} active={graphActive} onError={setGraphError} onLog={setGraphProbeText} onSource={setGraphSource}/></React.Suspense></div>}
+      {graphKept&&<div className={analysis==='graph'?'mode-pane graph-mode':'mode-pane graph-mode mode-hidden'} inert={analysis!=='graph'}><React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={graphKey} node={selected?node:''} scope={graphScope} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} completedTask={completedTask} canReadArtifacts={canReadArtifacts} canReadEvents={canReadEvents&&taskOnline&&graphActive} active={graphActive} onError={setGraphError} beginReading={beginReading} onProbe={setGraphProbe} onSource={setGraphSource}/></React.Suspense></div>}
       <div className={analysis==='file'?'mode-pane file-mode':'mode-pane file-mode mode-hidden'} inert={analysis!=='file'}>
       <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{fileEdited.current=true;defaultPick.current=null;setPath(e.target.value);generation.current++;setViewError('');}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(viewable).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
       <label>视图<select value={mode} onChange={e=>setMode(e.target.value)}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>
@@ -525,7 +554,11 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       <ErrorBoundary resetKey={shownScene}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}><Viewer scene={shownScene} onPick={setProbe}/></React.Suspense></ErrorBoundary>
       {shownScene&&<div className="legend"><span>{shownScene.manifest.value_range[0].toPrecision(5)}</span><i/><span>{shownScene.manifest.value_range[1].toPrecision(5)} {shownScene.manifest.units}</span><small>{shownScene.manifest.display_reduced?'显示网格已简化':'完整显示网格'} · 数值查询使用原始数据</small></div>}
       <div className="probe"><strong>物理坐标探针</strong>{probe.map((v,i)=><input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={v} onChange={e=>setProbe(probe.map((n,j)=>i===j?Number(e.target.value):n))}/>)}<button disabled={busy||!shown} onClick={probeValue}>查询原始值</button></div></div>
-      <details className={logRoom?'logs log-room':'logs'} ref={logPane} open><summary>日志 / 探针结果</summary><pre>{(selected&&(resultText||logs))||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
+      <details className={logRoom?'logs log-room':'logs'} ref={logPane} open><summary>日志 / 探针结果</summary>
+        {streamSwitch&&<div className="log-streams" role="group" aria-label="日志流">{LOG_STREAMS.map(([key,label])=><button type="button" key={key}
+          className={logShown?.stream===key?'active':''} aria-pressed={logShown?.stream===key} aria-disabled={busy}
+          onKeyDown={ignoreRepeat} onClick={()=>{if(!busy)void run(()=>readLogs(key));}}>{label}</button>)}</div>}
+        <pre>{(selected&&(resultText||logText))||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
     </section>
     <aside className={`chat surface${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'||overlay}>
       <h2 className="conversation-name" title={sessionLabel}>{sessionLabel}</h2>
