@@ -1231,6 +1231,8 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
   ASSERT_NO_FATAL_FAILURE(prepare_table());
   {
     std::ofstream answer(dir.path() / "saved_answer");
+    for (int word = 0; word < 32; ++word) { answer << "Conversation wrapping "; }
+    answer << '\n';
     for (int line = 0; line < 90; ++line) { answer << "Saved reply row " << line << '\n'; }
   }
   ASSERT_NO_FATAL_FAILURE(save_question(kFirst, "Read this saved question", true));
@@ -1264,6 +1266,31 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
     const auto *view = widget("ai_transcript");
     return view ? f.screen.ui()->scroll_of(view->id) : -1.0f;
   };
+  const auto expect_column = [&] {
+    const auto *transcript = widget("ai_transcript");
+    const auto *input = widget(draft);
+    const auto *prepare = widget("ai_prepare");
+    ASSERT_NE(transcript, nullptr);
+    ASSERT_NE(input, nullptr);
+    ASSERT_NE(prepare, nullptr);
+    const auto &block = input->block->rect();
+    const auto &ui = *f.screen.ui();
+    const auto &style = ui.style();
+    const float scrollbar = input->block->content_height() > block.h ? style.scrollbar : 0.0f;
+    const float available = block.w - 2 * style.panel_margin;
+    const float cap = 880.0f * style.scale;
+    EXPECT_NEAR(input->rect.w, std::min(available, cap) - scrollbar, 2.0f);
+    EXPECT_LE(input->rect.w, cap);
+    EXPECT_NEAR(input->rect.cx(), block.cx() - scrollbar * 0.5f, 1.0f);
+    EXPECT_EQ(transcript->rect.x, input->rect.x);
+    EXPECT_EQ(transcript->rect.w, input->rect.w);
+    EXPECT_EQ(prepare->rect.x1(), input->rect.x1());
+    EXPECT_LT(prepare->rect.w, input->rect.w * 0.5f);
+    ASSERT_NE(transcript->log, nullptr);
+    for (size_t line = 0; line < transcript->log->line_count(); ++line) {
+      EXPECT_LE(ui.measurer().width(transcript->log->line(line), style.mono), transcript->rect.w - 2 * style.text_margin);
+    }
+  };
 
   f.drv->ctx.rect.xmax = 1600;
   f.drv->ctx.rect.ymax = 900;
@@ -1274,6 +1301,8 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
     return discussion.recent_requests() && !discussion.busy() && !discussion.exchange_busy() &&
            discussion.exchange_id() == kFirst && widget(draft) && widget("ai_transcript");
   }, 30)) << discussion.exchange_error();
+  ASSERT_NO_FATAL_FAILURE(expect_column());
+  EXPECT_LT(widget("ai_transcript")->rect.y, widget(draft)->rect.y);
   auto *conversation = f.screen.maximized();
   const auto selected = discussion.exchange_request();
   const float tail = reading_position();
@@ -1295,7 +1324,9 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
   ASSERT_NO_FATAL_FAILURE(click("workbench_write_question"));
   ASSERT_EQ(f.screen.maximized(), conversation);
   ASSERT_NE(widget(draft), nullptr);
+  ASSERT_NO_FATAL_FAILURE(expect_column());
   EXPECT_EQ(f.screen.ui()->focused(), widget(draft)->id);
+  EXPECT_LT(widget(draft)->rect.y, widget("ai_transcript")->rect.y);
   EXPECT_EQ(widget(draft)->rect.intersect(widget(draft)->clip), widget(draft)->rect);
   EXPECT_EQ(reading_position(), reading);
   EXPECT_EQ(discussion.exchange_request(), selected);
@@ -1328,7 +1359,9 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
   ASSERT_NO_FATAL_FAILURE(click(compose_entry));
   ASSERT_EQ(f.screen.maximized(), conversation);
   ASSERT_NE(widget(draft), nullptr);
+  ASSERT_NO_FATAL_FAILURE(expect_column());
   EXPECT_EQ(f.screen.ui()->focused(), widget(draft)->id);
+  EXPECT_LT(widget(draft)->rect.y, widget("ai_transcript")->rect.y);
   EXPECT_EQ(widget(draft)->rect.intersect(widget(draft)->clip), widget(draft)->rect);
   EXPECT_EQ(widget(draft)->string.value(), "Unsent question a");
   ASSERT_TRUE(f.drv->key(wm::Key::B, wm::ModNone, "b"));
@@ -1377,6 +1410,11 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
   }, 30)) << discussion.exchange_error();
   EXPECT_LT(widget("ai_transcript")->rect.y, widget(draft)->rect.y);
   EXPECT_EQ(reading_position(), reading);
+  EXPECT_EQ(widget(draft)->string.value(), "Unsent question ab");
+
+  f.drv->ctx.ui_scale = 1.25f;
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(expect_column());
   EXPECT_EQ(widget(draft)->string.value(), "Unsent question ab");
 }
 

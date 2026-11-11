@@ -38,6 +38,21 @@ namespace stk::app {
 namespace {
 using io::Json;
 
+constexpr float kConversationWidth = 880.0f;
+
+ui::Layout &focused_conversation_column(ui::Layout &layout)
+{
+  const auto &style = layout.ctx().style();
+  const float usable = layout.block().rect().w - 2.0f * style.panel_margin;
+  const float gutter = std::ceil(std::max(0.0f, usable - kConversationWidth * style.scale) / 2.0f);
+  if (gutter == 0.0f) { return layout; }
+  auto &row = layout.row(true);
+  row.separator(gutter / style.unit);
+  auto &column = row.column();
+  row.separator(gutter / style.unit);
+  return column;
+}
+
 double clock_seconds()
 {
   return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -296,21 +311,22 @@ class AIEditor final : public Editor {
     }
     model_has_text_ = !draft.model.empty();
     poll(ctx, discussion);
+    auto &body = focused ? focused_conversation_column(layout) : layout;
     const bool compose_first = focused && compose_handle_ == opening;
     if (compose_first) {
       const auto visibility = std::exchange(compose_focus_visibility_, std::nullopt);
       const bool focus = visibility && *visibility == screen->visibility_epoch();
-      layout.block().set_scroll_scope("ai_question_composer", focus);
-      const auto &input = question_composer(layout, ctx, state, draft, key);
+      body.block().set_scroll_scope("ai_question_composer", focus);
+      const auto &input = question_composer(body, ctx, state, draft, key, true);
       if (focus && ctx.ui) { ctx.ui->restore_focus_next_frame(input.key); }
     }
-    layout.paragraph(ctx.tr("ai.intro"));
-    if (!state.error().empty()) { layout.paragraph(state.error()); }
-    if (!discussion.error().empty()) { layout.paragraph(discussion.error()); }
-    if (!discussion.exchange_error().empty()) { layout.paragraph(discussion.exchange_error()); }
+    body.paragraph(ctx.tr("ai.intro"));
+    if (!state.error().empty()) { body.paragraph(state.error()); }
+    if (!discussion.error().empty()) { body.paragraph(discussion.error()); }
+    if (!discussion.exchange_error().empty()) { body.paragraph(discussion.exchange_error()); }
     if (!proposal_navigation_error_.empty() &&
         proposal_navigation_request_ == io::get_string(discussion.exchange_request(), "id")) {
-      layout.paragraph(proposal_navigation_error_);
+      body.paragraph(proposal_navigation_error_);
     }
     const float width = ctx.draw ? float(ctx.draw->rect.width()) : 1280.0f;
     const float scale = ctx.ui ? ctx.ui->style().unit / 20.0f : 1.0f;
@@ -325,13 +341,13 @@ class AIEditor final : public Editor {
     else {
       bool settings_open = false;
       const auto panel_key = focused ? "ai_workbench_context_settings" : "ai_context_settings";
-      if (auto *panel = layout.panel(panel_key, ctx.tr("ai.context_settings"), !focused && discussion.context().empty())) {
+      if (auto *panel = body.panel(panel_key, ctx.tr("ai.context_settings"), !focused && discussion.context().empty())) {
         settings_open = true;
         source(*panel, ctx, state, true);
         if (!picker_.active()) { configuration(*panel, ctx, state, draft); }
       }
-      else if (focused && discussion.context().empty()) { layout.paragraph(ctx.tr("ai.no_context")); }
-      conversation(layout, ctx, state, draft, key, false, settings_open, focused, compose_first);
+      else if (focused && discussion.context().empty()) { body.paragraph(ctx.tr("ai.no_context")); }
+      conversation(body, ctx, state, draft, key, false, settings_open, focused, compose_first);
     }
   }
 
@@ -1068,11 +1084,14 @@ class AIEditor final : public Editor {
                                discussion.error().empty();
     const bool parameter_request = request.contains("prompt_version") && structured_proposal(request.at("prompt_version"));
     const bool sweep_request = io::get_string(request, "prompt_version") == "stk.parameter-sweep/1";
-    const float unit = ctx.ui ? ctx.ui->style().unit : 20.0f;
+    const auto &style = layout.ctx().style();
+    const float unit = style.unit;
     const float width = ctx.draw ? float(ctx.draw->rect.width()) : 1280.0f;
     // Reserve region padding, the split gutter and the log scrollbar. Use the same
     // font as LogView; line breaks affect display only, never the saved reply.
-    const float wrap_width = std::max(unit, width * (wide ? 0.68f : 1.0f) - 4 * unit);
+    const float conversation_width = focused ? std::min(layout.block().rect().w, kConversationWidth * style.scale) :
+        width * (wide ? 0.68f : 1.0f);
+    const float wrap_width = std::max(unit, conversation_width - 4 * unit);
     const std::string content = question.dump() + reply.dump() + progress.dump() + std::to_string(wrap_width) +
         std::to_string(unit) + std::string(ctx.tr("ai.you"));
     if (shown_exchange_ != content) {
@@ -1156,7 +1175,7 @@ class AIEditor final : public Editor {
     if (parameter_request && status == "completed") { proposal_actions(layout, ctx, state, handle, id, enabled); }
     if (!compose_first) {
       layout.separator();
-      question_composer(layout, ctx, state, draft, key);
+      question_composer(layout, ctx, state, draft, key, focused);
     }
     if (auto *details = layout.panel("ai_scope_detail", ctx.tr("ai.scope_detail"), false)) {
       hint(*details, ctx, "ai.single_turn");
@@ -1174,7 +1193,7 @@ class AIEditor final : public Editor {
   }
 
   ui::Widget &question_composer(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft,
-                                const std::string &key)
+                                const std::string &key, const bool focused)
   {
     auto &discussion = state.discussion();
     const bool enabled = !state.busy() && !discussion.busy();
@@ -1199,7 +1218,8 @@ class AIEditor final : public Editor {
     }
     const bool choose_automatically = automatic(ctx, draft);
     const auto ranked = choose_automatically ? route(ctx, state, draft) : Json();
-    layout.button("ai_prepare", ctx.tr("ai.prepare"), [this, &discussion, &state, handle, key, context_id, adapter, choose_automatically, ranked] {
+    auto &actions = focused ? layout.row().alignment(ui::LayoutAlign::Right) : layout;
+    actions.button("ai_prepare", ctx.tr("ai.prepare"), [this, &discussion, &state, handle, key, context_id, adapter, choose_automatically, ranked] {
       if (!state.project() || state.project()->handle != handle || active_draft_ != key || picker_.active()) { return; }
       const auto &current = drafts_.at(key);
       const auto prompt = prompt_version(current.intent);
