@@ -356,8 +356,8 @@ class ViewerEditor final : public Editor {
     else {
       const bool label_only = source.kind == SourceKind::Payload && source.path == vs_->source_label();
       add(label_only ? "viewer.source.payload" : "viewer.source.location", source.path);
-      add("viewer.source.input", source.field_file);
     }
+    add("viewer.source.input", source.field_file);
     if (shown) {
       add("props.preset.label", shown->preset_id);
     }

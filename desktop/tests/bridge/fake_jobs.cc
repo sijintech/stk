@@ -30,6 +30,10 @@
  * next_offset}] sent as given, `error?` {code, message, retryable, final} as subscription.error
  * (non-final: `resume?` waits for DIR/<resume>, then `after` chunks), `end?` sends logs.end; with
  * `id`, DIR/logs-<id>-error and DIR/logs-<id>-done mark the stages sent.
+ * DIR/artifacts-plan.json `{task_id: [entry, ...]}` scripts task.artifacts of those tasks (also
+ * ones not in the model): each read takes the first entry, the last one stays. An entry answers
+ * `artifacts` (default []) or `error` {code, message, retryable}, after `hold?` (DIR/<hold>); with
+ * `id`, DIR/artifacts-<id>-held and DIR/artifacts-<id>-replied mark the stages.
  */
 
 #include <algorithm>
@@ -562,6 +566,38 @@ Json take_logs_plan()
   plan.erase(plan.begin());
   std::ofstream(path + ".next") << plan.dump();
   fs::rename(path + ".next", path);
+  return entry;
+}
+
+/** The next scripted task.artifacts reply of `task_id` from DIR/artifacts-plan.json (see handle());
+ * the last entry of a task stays for later reads. Null when the task has none. */
+Json take_artifacts_plan(const std::string &task_id)
+{
+  std::lock_guard lock(g_logs_plan_m);
+  const std::string path = g_opt.dir + "/artifacts-plan.json";
+  std::ifstream in(path);
+  if (!in) {
+    return nullptr;
+  }
+  const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  in.close();
+  Json plan;
+  try {
+    plan = stk::io::parse_json(text);
+  }
+  catch (...) {
+    return nullptr;
+  }
+  if (!plan.is_object() || !plan.contains(task_id) || !plan[task_id].is_array() || plan[task_id].empty()) {
+    return nullptr;
+  }
+  Json &entries = plan[task_id];
+  Json entry = entries[0];
+  if (entries.size() > 1) {
+    entries.erase(entries.begin());
+    std::ofstream(path + ".next") << plan.dump();
+    fs::rename(path + ".next", path);
+  }
   return entry;
 }
 
@@ -1245,6 +1281,38 @@ bool handle(const Json &id, const std::string &method, const Json &p)
     task["cancel_requested"] = true;
     respond(id, {{"task", task}});
     return true;
+  }
+  if (method == "task.artifacts") {
+    if (Json entry = take_artifacts_plan(p.value("task_id", std::string())); !entry.is_null()) {
+      auto reply = [id, entry]() {
+        if (entry.contains("error")) {
+          const Json &e = entry["error"];
+          error(id, e.value("code", std::string("unavailable")), e.value("message", std::string("Refused")), nullptr,
+                e.value("retryable", false));
+        }
+        else {
+          respond(id, {{"artifacts", entry.value("artifacts", Json::array())}});
+        }
+        if (entry.contains("id")) {
+          std::ofstream(g_opt.dir + "/artifacts-" + entry["id"].get<std::string>() + "-replied") << "replied\n";
+        }
+      };
+      if (entry.contains("hold")) {
+        if (entry.contains("id")) {
+          std::ofstream(g_opt.dir + "/artifacts-" + entry["id"].get<std::string>() + "-held") << "held\n";
+        }
+        g_threads.emplace_back([reply, hold = entry["hold"].get<std::string>()]() {
+          wait_for_file(hold);
+          if (!g_stop.load()) {
+            reply();
+          }
+        });
+      }
+      else {
+        reply();
+      }
+      return true;
+    }
   }
   if (method == "task.get" || method == "task.cancel" || method == "task.artifacts") {
     Json *t = find_by_id(g_model["tasks"], p.value("task_id", std::string()));

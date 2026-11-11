@@ -301,6 +301,9 @@ class JobsEditor final : public Editor {
     else if (!jobs.ready()) {
       text = std::string(ctx.tr("jobs.status.bridge_wait"));
     }
+    else if (focused_tasks(ctx) && jobs.resolving_task_result()) {
+      text = std::string(ctx.tr("jobs.op.artifacts"));
+    }
     else if (!jobs.status().text.empty()) {
       text = jobs.status().text;
     }

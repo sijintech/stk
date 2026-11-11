@@ -504,9 +504,13 @@ TEST(JobsLayout, OpeningATaskResultKeepsTheFocusedWorkbench)
   ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty(); }));
   const std::string task(32, 'c');
   const auto workspace = jobs.workspace();
+  const io::Json note{{"path", "notes.txt"}, {"size", 3}, {"sha256", std::string(64, 'a')}};
+  const io::Json artifact_plan{{task, io::Json::array({{{"artifacts", io::Json::array({note})}}})}};
+  ASSERT_TRUE(wmtest::write_text(u.dir.str() + "/model/artifacts-plan.json", artifact_plan.dump()));
   jobs.apply_snapshot(io::Json::array({{{"id", task}, {"workspace_id", workspace},
                                         {"name", "Result task"}, {"state", "succeeded"}}}), 100.0);
   jobs.select_task(task);
+  ASSERT_TRUE(u.pump([&] { return jobs.artifacts().size() == 1; }));
   u.f.shell->open_workbench(u.f.screen);
   u.f.screen.run_deferred();
   const auto navigate = [&](const std::string &key) {
@@ -583,6 +587,28 @@ TEST(JobsLayout, OpeningATaskResultKeepsTheFocusedWorkbench)
   EXPECT_EQ(u.f.screen.maximized(), &u.f.area("a1"));
   EXPECT_EQ(store.viewer().version(), source_version);
 
+  // A Viewer source opened after the task shortcut was activated wins the deferred dispatch.
+  ASSERT_TRUE(u.pump([&] { return jobs.artifacts().size() == 1; }));
+  u.find(base + "tasks/open_viewer")->on_click();
+  const auto later_payload = std::make_shared<io::Payload>(
+      io::read_stkp(std::string(STK_DESKTOP_DIR) + "/tests/viewer/fixtures/muferro_domains.stkp"));
+  store.viewer().open_payload(later_payload, "Newer Viewer source");
+  u.f.screen.run_deferred();
+  EXPECT_EQ(u.f.screen.maximized(), &u.f.area("a1"));
+  EXPECT_EQ(store.viewer().base_payload(), later_payload);
+
+  // A newer queued Viewer request wins even before the shared Viewer has adopted it.
+  u.find(base + "tasks/open_viewer")->on_click();
+  app::OpenResultRequest later_queue;
+  later_queue.task_id = std::string(32, 'e');
+  store.request_open_result(std::move(later_queue));
+  u.f.screen.run_deferred();
+  EXPECT_EQ(u.f.screen.maximized(), &u.f.area("a1"));
+  ASSERT_TRUE(store.has_open_result());
+  const auto preserved = store.take_open_result();
+  ASSERT_TRUE(preserved);
+  EXPECT_EQ(preserved->task_id, std::string(32, 'e'));
+
   // An older request from the split view must not replace the focused result afterwards.
   const auto focused_action = u.find(base + "tasks/open_viewer")->on_click;
   app::OpenResultRequest queued;
@@ -650,6 +676,7 @@ TEST(JobsLayout, FocusedTaskResultReturnKeepsSameAreaScrollAndLauncher)
   ASSERT_GT(scroll, 0.0f);
 
   u.click(launcher_key);
+  ASSERT_TRUE(u.pump([&] { return shared.editor().type().id == app::kEditorViewer; }));
   ASSERT_EQ(u.f.screen.maximized(), &shared);
   ASSERT_EQ(shared.editor().type().id, app::kEditorViewer);
   EXPECT_EQ(u.f.shell->store().viewer().source().task_id, task);
@@ -665,6 +692,7 @@ TEST(JobsLayout, FocusedTaskResultReturnKeepsSameAreaScrollAndLauncher)
   EXPECT_FALSE(jobs.submission());
 
   u.click(launcher_key);
+  ASSERT_TRUE(u.pump([&] { return shared.editor().type().id == app::kEditorViewer; }));
   ASSERT_EQ(shared.editor().type().id, app::kEditorViewer);
   const std::string newer_task(32, 'd');
   jobs.apply_snapshot(io::Json::array({{{"id", newer_task}, {"workspace_id", jobs.workspace()},
@@ -719,6 +747,7 @@ TEST(JobsLayout, TaskResultReturnsToItsLauncherWhenAnotherJobsEditorIsActive)
   const auto *launcher = u.find(launcher_key);
   ASSERT_NE(launcher, nullptr);
   u.click(launcher_key);
+  ASSERT_TRUE(u.pump([&] { return origin.editor().type().id == app::kEditorViewer; }));
   ASSERT_EQ(u.f.screen.maximized(), &origin);
   ASSERT_EQ(origin.editor().type().id, app::kEditorViewer);
   u.click("workbench_tasks");

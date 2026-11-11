@@ -437,6 +437,26 @@ class JobsState {
   bool can_open_selected_result() const;
   /** Capture the selected task's result source and recheck its scope before opening it. */
   std::optional<OpenResultRequest> selected_result_request() const;
+  /**
+   * For one explicit "Open in viewer": when the selected succeeded task's accepted artifact list
+   * (task.artifacts) holds exactly one viewable file and it is a VTI, `request` gets that file's
+   * task_artifact_path / task_artifact_sha256 and the "slice" preset; otherwise it is returned
+   * unchanged (normal MuFerro runs, mixed or plugin results, other states, failed reads, old
+   * Runtimes, ambiguous, duplicate or digest-less lists).
+   *
+   * `complete` runs at most once. It runs synchronously, with `request` unchanged, when the request
+   * is not a plain task request for the current selection (local paths, a preset or an artifact
+   * already set, another scope, `still_current` false) or the task has not succeeded, and with the
+   * choice when a list read in the succeeded state is accepted and no newer read is in flight.
+   * Otherwise it waits for the current same-task read issued in the succeeded state, or sends one
+   * task.artifacts, and runs from its reply (unchanged on an ordinary read error). Authorization failure ends
+   * the open. A reply arriving after the connection, node,
+   * workspace, task selection (also A→B→A), bridge process or ready generation changed is
+   * dropped and `complete` never runs. A later call replaces an unfinished one, which is dropped.
+   * Nothing else is read, downloaded, submitted or evaluated.
+   */
+  void resolve_selected_result(OpenResultRequest request, std::function<void(OpenResultRequest)> complete);
+  bool resolving_task_result() const { return result_resolution_.has_value(); }
 
   /* ---- Model updates (bridge callbacks; public for tests and goldens) ---- */
 
@@ -559,6 +579,20 @@ class JobsState {
   bool selected_hub_exact_ = false;
   uint64_t selected_task_read_ = 0;
   std::string artifacts_for_state_; /**< the task state artifacts were listed in */
+  /** Only the latest task.artifacts read of a detail applies; an older (e.g. empty) reply is dropped. */
+  uint64_t artifacts_read_ = 0;
+  bool artifacts_in_flight_ = false;
+  /** The detail epoch and task state of the read whose reply artifacts_ holds (none: not accepted). */
+  std::optional<std::pair<uint64_t, std::string>> artifacts_accepted_;
+  /** One explicit resolve_selected_result waiting for the latest artifact read. */
+  struct ResultResolution {
+    OpenResultRequest request;
+    std::function<void(OpenResultRequest)> complete;
+    uint64_t detail = 0, scope = 0, connection = 0, ready = 0, bridge = 0, store_bridge = 0;
+  };
+  std::optional<ResultResolution> result_resolution_;
+  bool resolution_current(const ResultResolution &resolution) const;
+  void settle_result_resolution(bool listed);
 
   /* Detail. */
   ui::LogBuffer log_all_{10000}, log_out_{10000}, log_err_{10000};

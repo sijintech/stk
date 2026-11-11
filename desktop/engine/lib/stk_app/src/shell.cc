@@ -950,11 +950,27 @@ std::function<void()> AppShell::focused_task_result_action(wm::Screen &screen)
   if (!origin || origin->editor().type().id != kEditorJobs || !workbench_is_focused(screen)) { return {}; }
   auto request = store_.jobs().selected_result_request();
   if (!request) { return {}; }
-  return workbench_navigation_action(screen, kEditorViewer, std::move(request));
+  const auto current = [this, s = &screen, origin, weak = lifetime(), editor = origin->editor().lifetime(),
+                        visibility = screen.visibility_epoch(), activity = origin->activity_epoch(),
+                        bridge = store_.bridge_epoch(), selected = request->still_current] {
+    return !weak.expired() && !editor.expired() && has_screen(s) && s->maximized() == origin &&
+           s->visibility_epoch() == visibility && origin->activity_epoch() == activity &&
+           store_.bridge_epoch() == bridge && (!selected || selected());
+  };
+  return [this, s = &screen, current, request = std::move(*request)] {
+    if (!current()) { return; }
+    const auto viewer_current = [this, viewer = store_.viewer().opening_revision(), queued = store_.open_result_epoch()] {
+      return store_.viewer().opening_revision() == viewer && store_.open_result_epoch() == queued;
+    };
+    store_.jobs().resolve_selected_result(request, [this, s, current, viewer_current](OpenResultRequest resolved) {
+      if (current()) { workbench_navigation_action(*s, kEditorViewer, std::move(resolved), viewer_current)(); }
+    });
+  };
 }
 
 std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, const char *editor_id,
-                                                          std::optional<OpenResultRequest> request)
+                                                          std::optional<OpenResultRequest> request,
+                                                          std::function<bool()> viewer_current)
 {
   const auto epoch = screen.visibility_epoch();
   const auto *origin = dynamic_cast<const EditorArea *>(screen.maximized());
@@ -962,10 +978,11 @@ std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, 
   const auto editor = origin ? origin->editor().lifetime() : std::weak_ptr<void>{};
   const auto weak = lifetime();
   const auto source_current = request ? request->still_current : std::function<bool()>{};
-  auto current = [this, weak, s = &screen, epoch, origin, activity, editor, source_current] {
+  auto current = [this, weak, s = &screen, epoch, origin, activity, editor, source_current,
+                  viewer_current = std::move(viewer_current)] {
     return !weak.expired() && has_screen(s) && s->visibility_epoch() == epoch &&
            (!origin || (!editor.expired() && s->maximized() == origin && origin->activity_epoch() == activity)) &&
-           (!source_current || source_current());
+           (!source_current || source_current()) && (!viewer_current || viewer_current());
   };
   return [this, s = &screen, editor_id, origin, editor, current, request = std::move(request)] {
     if (!current()) { return; }
@@ -984,7 +1001,8 @@ std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, 
           if (s->visibility_epoch() == back.visibility && from->activity_epoch() == back.viewer_activity &&
               from->editor().lifetime().lock() == back.viewer.lock() && opened.still_current() &&
               shown.kind == SourceKind::Task && shown.connection == opened.connection && shown.node == opened.node &&
-              shown.workspace_id == opened.workspace_id && shown.task_id == opened.task_id) {
+              shown.workspace_id == opened.workspace_id && shown.task_id == opened.task_id &&
+              shown.field_file == opened.task_artifact_path) {
             auto *area = dynamic_cast<EditorArea *>(s->find_area(back.area));
             const int tab = area ? area_tab(*area, back.launcher) : -1;
             if (tab >= 0) {

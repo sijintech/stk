@@ -289,6 +289,7 @@ void AppStore::changed()
 void AppStore::request_open_result(OpenResultRequest request)
 {
   pending_open_ = std::move(request);
+  ++open_result_epoch_;
   changed();
 }
 

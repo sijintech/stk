@@ -200,6 +200,10 @@ void AppShell::perform_viewer_request(wm::Screen &screen, const std::string &ope
     const Json parameters = params.value("parameters", Json::object());
     check_parameters(viewer.preset(viewer.preset_id()), parameters);
     require(parameters.empty() || viewer.source().evaluates(), "The current Viewer source has no graph parameters");
+    const auto &source = viewer.source();
+    if (source.kind == SourceKind::Task && !source.field_file.empty() && parameters.contains("path")) {
+      require(parameters.at("path") == source.field_file, "Open another task artifact to change the field file");
+    }
     for (const auto *key : {"auto_evaluate", "overlays", "prefetch", "loop"}) {
       if (params.contains(key)) { require(params[key].is_boolean(), std::string(key) + " must be boolean"); }
     }

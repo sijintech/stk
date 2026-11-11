@@ -58,6 +58,8 @@ struct OpenResultRequest {
   std::function<bool()> still_current;
   /** The Jobs connection, node and workspace that authorized an already displayed result. */
   std::function<bool()> still_same_scope;
+  /** A single published task field selected by the focused Jobs shortcut. */
+  std::string task_artifact_path, task_artifact_sha256;
 };
 
 /** State of the Python bridge child process (driven by stk_bridge from WP8 on). */
@@ -183,6 +185,8 @@ class AppStore {
   {
     return pending_open_.has_value();
   }
+  /** Each new queued Viewer intent supersedes earlier deferred opens. */
+  uint64_t open_result_epoch() const { return open_result_epoch_; }
 
   /** The result shown by the Viewer, Properties and Probe editors (WP10; created on first use). */
   ViewerState &viewer();
@@ -220,6 +224,7 @@ class AppStore {
   bridge::Client *bridge_client_ = nullptr;
   uint64_t bridge_epoch_ = 0;
   std::optional<OpenResultRequest> pending_open_;
+  uint64_t open_result_epoch_ = 0;
   std::unique_ptr<ViewerState> viewer_;
   std::unique_ptr<JobsState> jobs_;
   std::unique_ptr<ProjectState> project_;

@@ -60,6 +60,44 @@ void open_task(FakeViewer &f, const std::string &connection)
 
 }  // namespace
 
+TEST(ViewerFake, ColdTaskArtifactOpensAndRevisitsTheExactPublishedField)
+{
+  FakeViewer f;
+  f.vs->prefetch_neighbours = false;
+  auto request = task_source("runtime:source");
+  request.workspace_id = "selected-workspace";
+  request.preset = "slice";
+  request.task_artifact_path = "case/signed.vti";
+  request.task_artifact_sha256 = std::string(64, 'a');
+  request.still_same_scope = [] { return true; };
+
+  ASSERT_FALSE(f.vs->presets_loaded());
+  ASSERT_TRUE(f.vs->open(request));
+  ASSERT_TRUE(f.pump_until([&] { return f.vs->last_eval().has_value(); })) << f.vs->eval_error();
+  ASSERT_EQ(f.vs->evaluations_started(), 1);
+  EXPECT_EQ(f.vs->source().field_file, request.task_artifact_path);
+  EXPECT_EQ(f.vs->preset_id(), "slice");
+  EXPECT_EQ(f.vs->schema().property("path"), nullptr);
+  EXPECT_EQ(f.vs->parameters().at("path"), request.task_artifact_path);
+  const auto evaluations = f.stats().at("evaluate_requests");
+  ASSERT_EQ(evaluations.size(), 1u);
+  EXPECT_EQ(evaluations[0].at("request").at("bindings").at("data").at("task_id"), request.task_id);
+  EXPECT_EQ(evaluations[0].at("request").at("parameters").at("path"), request.task_artifact_path);
+
+  f.vs->set_parameter("path", ui::FormValue::string("another.vti"));
+  EXPECT_EQ(f.vs->parameters().at("path"), request.task_artifact_path);
+  EXPECT_TRUE(f.vs->can_revisit_task_result(request));
+  auto different = request;
+  different.task_artifact_path = "another.vti";
+  EXPECT_FALSE(f.vs->can_revisit_task_result(different));
+  different = request;
+  different.task_artifact_sha256 = std::string(64, 'b');
+  EXPECT_FALSE(f.vs->can_revisit_task_result(different));
+  different = request;
+  different.still_same_scope = [] { return false; };
+  EXPECT_FALSE(f.vs->can_revisit_task_result(different));
+}
+
 TEST(ViewerFake, ColdTaskOpenUsesTheSameDefaultPresetAsWarmTaskOpen)
 {
   FakeViewer f;

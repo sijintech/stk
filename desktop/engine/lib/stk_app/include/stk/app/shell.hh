@@ -244,7 +244,8 @@ class AppShell {
   void attach_workbench_navigation(EditorArea &area);
   int focused_workbench_section(const wm::Screen &screen) const;
   std::function<void()> workbench_navigation_action(wm::Screen &screen, const char *editor_id,
-                                                    std::optional<OpenResultRequest> request = {});
+                                                    std::optional<OpenResultRequest> request = {},
+                                                    std::function<bool()> viewer_current = {});
   bool handle_shortcut(wm::Screen &screen, const wm::Event &event);
   std::vector<ui::MenuEntry> file_menu(wm::Screen &screen);
   std::vector<ui::MenuEntry> view_menu(wm::Screen &screen);

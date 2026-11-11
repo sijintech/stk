@@ -394,6 +394,7 @@ struct ViewerState::Impl {
   /* Source. */
   ViewerSource source;
   std::function<bool()> task_scope_current;
+  std::string task_artifact_sha256;
   std::string label, open_error;
   bool waiting_for_metadata = false;
   bool workspace_suspended = false;
@@ -738,6 +739,9 @@ struct ViewerState::Impl {
         }
       }
     }
+    if (source.kind == SourceKind::Task && !source.field_file.empty()) {
+      std::erase_if(schema.properties, [](const ui::SchemaNode &property) { return property.name == "path"; });
+    }
     form = ui::FormModel{};
     form_quiet = true;
     for (const auto &[k, v] : old) {
@@ -766,6 +770,7 @@ struct ViewerState::Impl {
   Json parameters() const
   {
     Json out = Json::object();
+    if (source.kind == SourceKind::Task && !source.field_file.empty()) { out["path"] = source.field_file; }
     if (schema.properties.empty()) {
       return out;
     }
@@ -1755,7 +1760,9 @@ bool ViewerState::open(const OpenResultRequest &request, const bool fit_initial_
     m.source.node = request.node;
     m.source.workspace_id = request.workspace_id;
     m.source.task_id = request.task_id;
+    m.source.field_file = request.task_artifact_path;
     m.task_scope_current = request.still_same_scope;
+    m.task_artifact_sha256 = request.task_artifact_sha256;
     m.label = m.source.label();
     m.camera_serial++;
     m.initial_fit_serial = fit_initial_view ? m.camera_serial : 0;
@@ -1787,7 +1794,8 @@ bool ViewerState::open(const OpenResultRequest &request, const bool fit_initial_
 bool ViewerState::can_revisit_task_result(const OpenResultRequest &request) const
 {
   const auto &m = *impl_;
-  if (request.task_id.empty() || !request.preset.empty() || !request.local_paths.empty() ||
+  if (request.task_id.empty() || (!request.preset.empty() && request.task_artifact_path.empty()) ||
+      !request.local_paths.empty() || m.task_artifact_sha256 != request.task_artifact_sha256 ||
       !request.still_same_scope || opening_ || m.workspace_suspended || m.frozen_workspace_result ||
       !m.base || !m.result || !m.shown_configuration || !m.task_scope_current) {
     return false;
@@ -1795,7 +1803,8 @@ bool ViewerState::can_revisit_task_result(const OpenResultRequest &request) cons
   const auto &shown = *m.shown_configuration;
   return shown.source.kind == SourceKind::Task && shown.source.connection == request.connection &&
          shown.source.node == request.node && shown.source.workspace_id == request.workspace_id &&
-         shown.source.task_id == request.task_id && same_viewer_source(m.source, shown.source) &&
+         shown.source.task_id == request.task_id && shown.source.field_file == request.task_artifact_path &&
+         same_viewer_source(m.source, shown.source) &&
          m.task_scope_current() && request.still_same_scope() &&
          verify_shown_graph(shown.graph, *m.result).value_or(false);
 }
@@ -1989,6 +1998,7 @@ void ViewerState::close()
   m.probe_future.cancel();
   m.source = ViewerSource{};
   m.task_scope_current = {};
+  m.task_artifact_sha256.clear();
   m.label.clear();
   m.open_error.clear();
   m.eval_error.clear();
@@ -2120,6 +2130,7 @@ void ViewerState::set_auto_evaluate(const bool enabled)
 
 void ViewerState::set_parameter(const std::string &name, ui::FormValue value)
 {
+  if (name == "path" && impl_->source.kind == SourceKind::Task && !impl_->source.field_file.empty()) { return; }
   impl_->form.set(name, std::move(value));
 }
 

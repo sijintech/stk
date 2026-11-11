@@ -15,6 +15,7 @@
 #include "stk/core/sha256.hh"
 #include "stk/io/png.hh"
 #include "stk/platform/file_dialog.hh"
+#include "stk/ui/utf8.hh"
 
 namespace stk::app {
 
@@ -102,6 +103,69 @@ bool ends_with_ci(const std::string &s, std::string_view suffix)
     }
   }
   return true;
+}
+
+/** The graph preset that shows one field file of a binding (suan/graph/presets/slice.json). */
+constexpr char kSoleVtiPreset[] = "slice";
+
+/** A published artifact path in canonical relative POSIX form, accepted verbatim by the graph's
+ * check_relative_path: no absolute path, drive letter, backslash, control character, or empty,
+ * "." or ".." segment (also no leading, trailing or doubled slash). */
+bool canonical_artifact_path(const std::string &path)
+{
+  if (!core::is_safe_relative_path(path) || ui::utf8::count(path) > 1024 || path.back() == '/' || path == "." ||
+      path.starts_with("./") || path.ends_with("/.") || path.find("//") != std::string::npos ||
+      path.find("/./") != std::string::npos) {
+    return false;
+  }
+  return std::none_of(path.begin(), path.end(), [](unsigned char byte) { return byte < 0x20 || byte == 0x7f; });
+}
+
+std::string fold_case(std::string s)
+{
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+  return s;
+}
+
+/** Logs and notes a result may carry beside its data; anything else may be a result. */
+bool note_artifact(const std::string &path)
+{
+  return ends_with_ci(path, ".log") || ends_with_ci(path, ".txt") || ends_with_ci(path, ".md");
+}
+
+/**
+ * The one VTI of a published artifact list whose other entries are only logs or notes. Every
+ * other file counts as a possible result (DAT, NPY, VTK, VTKHDF, HDF5, payloads, result JSON,
+ * images, plugin formats), so mixed lists keep their existing route. Refuses the whole list when
+ * any entry has a non-canonical path or digest, a negative size, or a path that repeats another
+ * (also by case) or names a directory of another entry.
+ */
+std::optional<bridge::FileEntry> sole_task_vti(const std::vector<bridge::FileEntry> &files)
+{
+  std::set<std::string> folded;
+  const bridge::FileEntry *candidate = nullptr;
+  size_t candidates = 0;
+  for (const bridge::FileEntry &file : files) {
+    if (!canonical_artifact_path(file.path) || !core::is_sha256_hex(file.sha256) || file.size < 0 ||
+        !folded.insert(fold_case(file.path)).second) {
+      return std::nullopt;
+    }
+    if (!note_artifact(file.path)) {
+      candidate = &file;
+      candidates++;
+    }
+  }
+  for (const std::string &path : folded) {
+    const std::string dir = path + "/";
+    const auto inside = folded.lower_bound(dir);
+    if (inside != folded.end() && inside->compare(0, dir.size(), dir) == 0) {
+      return std::nullopt;
+    }
+  }
+  if (candidates != 1 || !ends_with_ci(candidate->path, ".vti") || candidate->size == 0) {
+    return std::nullopt;
+  }
+  return *candidate;
 }
 
 /** Retryable in the sense of the retry policy: the same request may succeed later. */
@@ -406,6 +470,10 @@ void JobsState::attach(bridge::Client *client)
       row.verify = ArtifactRow::Verify::None;
     }
   }
+  result_resolution_.reset();
+  artifacts_in_flight_ = false;
+  artifacts_accepted_.reset();
+  artifacts_for_state_.clear();
   state_listener_.reset();
   transfer_listener_.reset();
   watch_.unsubscribe();
@@ -440,8 +508,16 @@ void JobsState::on_state(const bridge::BridgeState state)
   }
   if (bridge_state_ == bridge::BridgeState::Ready) {
     ++ready_epoch_;
+    // Keep the visible list as history, but wait for the current process before using it to open a file.
+    ++artifacts_read_;
+    artifacts_in_flight_ = false;
+    artifacts_accepted_.reset();
+    artifacts_for_state_.clear();
   }
   bridge_state_ = state;
+  if (state != bridge::BridgeState::Ready) {
+    result_resolution_.reset(); /* Its read may never be answered by this bridge process. */
+  }
   if (state != bridge::BridgeState::Ready && hub() && !selected_.empty() &&
       task_observation_ != TaskObservation::Denied) {
     ++selected_task_read_;
@@ -1991,6 +2067,9 @@ void JobsState::clear_task_detail()
   events_ = {};
   artifacts_.clear();
   artifacts_for_state_.clear();
+  artifacts_accepted_.reset();
+  artifacts_in_flight_ = false;
+  result_resolution_.reset();
   release_preview();
 }
 
@@ -2369,20 +2448,108 @@ void JobsState::refresh_artifacts()
   }
   const TaskRow *t = selected_task();
   artifacts_for_state_ = t ? t->state : std::string();
-  const uint64_t epoch = detail_epoch_;
-  on(client_->task_artifacts(target(), selected_),
-     [this, epoch](const bridge::Result<std::vector<bridge::FileEntry>> &r) {
-       if (epoch != detail_epoch_) {
+  auto future = client_->task_artifacts(target(), selected_);
+  if (!future.valid()) {
+    return;
+  }
+  const uint64_t epoch = detail_epoch_, read = ++artifacts_read_;
+  artifacts_in_flight_ = true;
+  on(std::move(future), [this, epoch, read, state = artifacts_for_state_]
+                        (const bridge::Result<std::vector<bridge::FileEntry>> &r) {
+       /* A newer read of the same task (e.g. once it finished) outranks this one's older list. */
+       if (epoch != detail_epoch_ || read != artifacts_read_) {
          return;
        }
+       artifacts_in_flight_ = false;
        if (!r) {
+         artifacts_accepted_.reset();
          if (r.error().code != ErrorCode::NotFound) {
            fail(std::string(store_.tr("jobs.op.artifacts")), r.error());
          }
+         if (r.error().code == ErrorCode::Unauthorized) {
+           result_resolution_.reset();
+           changed();
+           return;
+         }
+         settle_result_resolution(false);
          return;
        }
        apply_artifacts(r.value());
+       artifacts_accepted_.emplace(epoch, state);
+       settle_result_resolution(true);
      });
+}
+
+bool JobsState::resolution_current(const ResultResolution &p) const
+{
+  const auto scope = target();
+  const TaskRow *task = selected_task();
+  return p.detail == detail_epoch_ && p.scope == epoch_ && p.connection == conn_epoch_ && p.ready == ready_epoch_ &&
+         p.bridge == bridge_epoch_ && p.store_bridge == store_.bridge_epoch() && ready() &&
+         p.request.connection == scope.connection && p.request.node == scope.node &&
+         p.request.workspace_id == workspace_ && p.request.task_id == selected_ && can_open_selected_result() &&
+         task && task->workspace_id == p.request.workspace_id && task->state == "succeeded" &&
+         (!p.request.still_current || p.request.still_current());
+}
+
+void JobsState::settle_result_resolution(const bool listed)
+{
+  if (!result_resolution_) {
+    return;
+  }
+  ResultResolution p = std::move(*result_resolution_);
+  result_resolution_.reset();
+  changed();
+  if (!resolution_current(p)) {
+    return; /* Late for this selection, scope or bridge: dropped, the user stays where they are. */
+  }
+  if (listed && artifacts_accepted_ && artifacts_accepted_->second == "succeeded") {
+    std::vector<bridge::FileEntry> files;
+    for (const ArtifactRow &row : artifacts_) {
+      files.push_back(row.file);
+    }
+    if (const auto vti = sole_task_vti(files)) {
+      p.request.preset = kSoleVtiPreset;
+      p.request.task_artifact_path = vti->path;
+      p.request.task_artifact_sha256 = vti->sha256;
+    }
+  }
+  p.complete(std::move(p.request));
+}
+
+void JobsState::resolve_selected_result(OpenResultRequest request, std::function<void(OpenResultRequest)> complete)
+{
+  if (!complete) {
+    return;
+  }
+  result_resolution_.reset(); /* This explicit action replaces an unfinished one. */
+  ResultResolution p{std::move(request), std::move(complete), detail_epoch_, epoch_, conn_epoch_, ready_epoch_,
+                     bridge_epoch_, store_.bridge_epoch()};
+  const bool plain_task = !p.request.task_id.empty() && p.request.local_paths.empty() && p.request.preset.empty() &&
+                          p.request.task_artifact_path.empty() && p.request.task_artifact_sha256.empty();
+  const auto hello = client_ ? client_->hello_info() : std::nullopt;
+  if (!plain_task || !hello || !hello->has_method("task.artifacts") || !resolution_current(p)) {
+    p.complete(std::move(p.request));
+    return;
+  }
+  const bool accepted = artifacts_accepted_ && artifacts_accepted_->first == detail_epoch_;
+  if (!artifacts_in_flight_ && accepted && artifacts_accepted_->second == "succeeded") {
+    result_resolution_ = std::move(p);
+    settle_result_resolution(true);
+    return;
+  }
+  result_resolution_ = std::move(p);
+  /* Wait for the current read when it was issued for the finished task; else list it once now. */
+  if (!artifacts_in_flight_ || artifacts_for_state_ != "succeeded") {
+    const uint64_t before = artifacts_read_;
+    refresh_artifacts();
+    if (artifacts_read_ == before && result_resolution_) {
+      ResultResolution unread = std::move(*result_resolution_);
+      result_resolution_.reset();
+      unread.complete(std::move(unread.request));
+    }
+  }
+  if (result_resolution_) { changed(); }
 }
 
 void JobsState::apply_artifacts(const std::vector<bridge::FileEntry> &files)

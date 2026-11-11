@@ -1601,5 +1601,518 @@ TEST_F(JobsFake, SwitchingConnectionDropsStaleResults)
   EXPECT_EQ(task_named(j, "x"), nullptr);
 }
 
+/* ---- Opening a task's sole published VTI (DIR/artifacts-plan.json of the fake) ---- */
+
+const std::string kVtiTask = "55555555555555555555555555555555";
+const std::string kOtherVtiTask = "66666666666666666666666666666666";
+const std::string kDigestA(64, 'a');
+
+Json artifact(const std::string &path, const std::string &sha256 = kDigestA, int64_t size = 4096)
+{
+  Json a = Json::object();
+  a["path"] = path;
+  a["size"] = size;
+  a["sha256"] = sha256;
+  a["media_type"] = "application/octet-stream";
+  return a;
+}
+
+/** One scripted task.artifacts reply: `files`, after DIR/<hold> when set; `id` marks its stages. */
+Json listing(const std::vector<Json> &files, const std::string &hold = {}, const std::string &id = {})
+{
+  Json list = Json::array();
+  for (const Json &file : files) {
+    list.push_back(file);
+  }
+  Json entry = Json::object();
+  entry["artifacts"] = std::move(list);
+  if (!hold.empty()) {
+    entry["hold"] = hold;
+  }
+  if (!id.empty()) {
+    entry["id"] = id;
+  }
+  return entry;
+}
+
+Json refusal(const std::string &code, bool retryable)
+{
+  Json error = Json::object();
+  error["code"] = code;
+  error["message"] = "Synthetic listing refusal";
+  error["retryable"] = retryable;
+  Json entry = Json::object();
+  entry["error"] = std::move(error);
+  return entry;
+}
+
+void write_artifacts_plan(const FakeJobs &f, const std::map<std::string, std::vector<Json>> &plan)
+{
+  Json out = Json::object();
+  for (const auto &[task, entries] : plan) {
+    Json list = Json::array();
+    for (const Json &entry : entries) {
+      list.push_back(entry);
+    }
+    out[task] = std::move(list);
+  }
+  const std::string path = f.jobs_dir() + "/artifacts-plan.json";
+  std::ofstream(path + ".tmp") << out.dump();
+  std::filesystem::rename(path + ".tmp", path);
+}
+
+bool marked(const FakeJobs &f, const std::string &name)
+{
+  return std::filesystem::exists(f.jobs_dir() + "/artifacts-" + name);
+}
+
+/** Lists synthetic tasks in `state` and selects the first (its own task.artifacts read follows,
+ * or none when it is already selected and not newly terminal). */
+void select_listed_task(FakeJobs &f, const std::vector<std::string> &tasks, const std::string &state = "succeeded")
+{
+  JobsState &j = f.jobs();
+  Json rows = Json::array();
+  for (const std::string &id : tasks) {
+    Json row = Json::object();
+    row["id"] = id;
+    row["name"] = "合成场 " + id.substr(0, 4);
+    row["state"] = state;
+    row["workspace_id"] = j.workspace();
+    row["updated_at"] = "2026-11-11T08:00:00+00:00";
+    rows.push_back(std::move(row));
+  }
+  j.apply_snapshot(rows, 100.0);
+  j.select_task(tasks.front());
+}
+
+/** Waits until the fake has received `count` task.artifacts reads and their replies were handled. */
+void await_artifact_reads(FakeJobs &f, size_t count)
+{
+  ASSERT_TRUE(f.pump([&] { return method_count(f, "task.artifacts") >= count; }));
+  drain(f);
+  EXPECT_EQ(method_count(f, "task.artifacts"), count);
+}
+
+/** Requests an explicit open must never send (it reads only the task's artifact list). */
+std::map<std::string, size_t> open_side_effects(const FakeJobs &f)
+{
+  std::map<std::string, size_t> out;
+  for (const char *m : {"task.get", "task.submit", "task.cancel", "download.start", "upload.start", "workspace.create"}) {
+    out[m] = method_count(f, m);
+  }
+  return out;
+}
+
+struct Resolved {
+  int calls = 0;
+  std::optional<app::OpenResultRequest> request;
+};
+
+void resolve_request(JobsState &j, app::OpenResultRequest request, Resolved &out)
+{
+  j.resolve_selected_result(std::move(request), [&out](app::OpenResultRequest r) {
+    out.calls++;
+    out.request = std::move(r);
+  });
+}
+
+void resolve(JobsState &j, Resolved &out)
+{
+  auto request = j.selected_result_request();
+  ASSERT_TRUE(request);
+  resolve_request(j, std::move(*request), out);
+}
+
+void expect_original(const Resolved &r, const std::string &task, const std::string &why)
+{
+  ASSERT_EQ(r.calls, 1) << why;
+  ASSERT_TRUE(r.request) << why;
+  EXPECT_EQ(r.request->task_id, task) << why;
+  EXPECT_TRUE(r.request->preset.empty()) << why;
+  EXPECT_TRUE(r.request->task_artifact_path.empty()) << why;
+  EXPECT_TRUE(r.request->task_artifact_sha256.empty()) << why;
+  EXPECT_TRUE(r.request->local_paths.empty()) << why;
+}
+
+void expect_sole_vti(const Resolved &r, const std::string &task, const std::string &path, const std::string &sha)
+{
+  ASSERT_EQ(r.calls, 1);
+  ASSERT_TRUE(r.request);
+  EXPECT_EQ(r.request->task_id, task);
+  EXPECT_EQ(r.request->connection, "runtime:lab");
+  EXPECT_EQ(r.request->workspace_id, "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0");
+  EXPECT_EQ(r.request->preset, "slice");
+  EXPECT_EQ(r.request->task_artifact_path, path);
+  EXPECT_EQ(r.request->task_artifact_sha256, sha);
+  EXPECT_TRUE(r.request->local_paths.empty());
+  ASSERT_TRUE(r.request->still_current);
+  EXPECT_TRUE(r.request->still_current());
+  ASSERT_TRUE(r.request->still_same_scope);
+  EXPECT_TRUE(r.request->still_same_scope());
+}
+
+TEST_F(JobsFake, SoleVtiOfTheAcceptedListOpensThatExactFileWithTheSlicePreset)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  /* One published VTI beside a log and notes. */
+  write_artifacts_plan(f, {{kVtiTask, {listing({artifact("out/field-0.vti"), artifact("run.log"),
+                                                artifact("README.md"), artifact("out/notes.txt")})}}});
+  select_listed_task(f, {kVtiTask});
+  await_artifact_reads(f, 1);
+  ASSERT_EQ(j.artifacts().size(), 4u);
+  const auto before = open_side_effects(f);
+
+  Resolved r;
+  resolve(j, r); /* The accepted list answers at once: no second read. */
+  expect_sole_vti(r, kVtiTask, "out/field-0.vti", kDigestA);
+  f.settle(0.2);
+  EXPECT_EQ(method_count(f, "task.artifacts"), 1u);
+  EXPECT_EQ(open_side_effects(f), before);
+  ASSERT_NE(j.selected_task(), nullptr);
+  EXPECT_EQ(j.selected_task()->state, "succeeded");
+}
+
+TEST_F(JobsFake, MixedRefusedAndUnsucceededListsKeepTheOriginalRequest)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  const std::string vti = "field.vti";
+  const std::vector<std::pair<std::string, std::vector<Json>>> cases = {
+      {"vti+dat", {artifact(vti), artifact("Polar.00000100.dat")}},
+      {"vti+vtk", {artifact(vti), artifact("field.vtk")}},
+      {"vti+npy", {artifact(vti), artifact("field.npy")}},
+      {"vti+vtkhdf", {artifact(vti), artifact("field.vtkhdf")}},
+      {"vti+stkp", {artifact(vti), artifact("view.stkp")}},
+      {"vti+result json", {artifact(vti), artifact("result.json")}},
+      {"vti+mupro h5", {artifact(vti), artifact("case/run.h5")}},
+      {"vti+png", {artifact(vti), artifact("result.png")}},
+      {"vti+unknown plugin file", {artifact(vti), artifact("case/output.xyz")}},
+      {"two vti", {artifact("a.vti"), artifact("b.vti")}},
+      {"muferro dat", {artifact("Polar.00000000.dat"), artifact("Polar.00000100.dat"), artifact("run.log")}},
+      {"single vtk", {artifact("field.vtk")}},
+      {"notes only", {artifact("run.log")}},
+      {"empty", {}},
+      {"duplicate", {artifact(vti), artifact(vti)}},
+      {"case duplicate", {artifact(vti), artifact("Field.VTI")}},
+      {"missing digest", {artifact(vti, "")}},
+      {"short digest", {artifact(vti, std::string(63, 'a'))}},
+      {"uppercase digest", {artifact(vti, std::string(64, 'A'))}},
+      {"graph path too long", {artifact(std::string(1021, 'x') + ".vti")}},
+      {"non-hex digest", {artifact(vti, std::string(63, 'a') + "g")}},
+      {"note without digest", {artifact(vti), artifact("run.log", "")}},
+      {"negative size", {artifact(vti), artifact("run.log", kDigestA, -1)}},
+      {"empty file", {artifact(vti, kDigestA, 0)}},
+      {"parent segment", {artifact("../field.vti")}},
+      {"absolute", {artifact("/tmp/field.vti")}},
+      {"drive", {artifact("C:field.vti")}},
+      {"backslash", {artifact("out\\field.vti")}},
+      {"dot segment", {artifact("./field.vti")}},
+      {"double slash", {artifact("out//field.vti")}},
+      {"trailing slash", {artifact("out/field.vti/")}},
+      {"control character", {artifact("out/\nfield.vti")}},
+      {"file and directory", {artifact(vti), artifact(vti + "/notes.txt")}},
+  };
+  std::map<std::string, std::vector<Json>> plan;
+  std::vector<std::string> ids;
+  for (size_t i = 0; i < cases.size(); i++) {
+    char id[33];
+    snprintf(id, sizeof(id), "7%031zx", i);
+    ids.push_back(id);
+    plan[id] = {listing(cases[i].second)};
+  }
+  plan[kVtiTask] = {listing({artifact(vti)})};
+  write_artifacts_plan(f, plan);
+  std::vector<std::string> listed = ids;
+  listed.push_back(kVtiTask);
+  select_listed_task(f, listed);
+  size_t reads = 0;
+  await_artifact_reads(f, ++reads);
+  for (size_t i = 0; i < cases.size(); i++) {
+    if (i > 0) {
+      j.select_task(ids[i]);
+      await_artifact_reads(f, ++reads);
+    }
+    Resolved r;
+    resolve(j, r);
+    expect_original(r, ids[i], cases[i].first);
+    EXPECT_EQ(method_count(f, "task.artifacts"), reads) << cases[i].first;
+  }
+
+  /* The same sole VTI of a task that did not succeed: the click reads nothing, original route. */
+  for (const char *state : {"failed", "cancelled", "running", "unknown"}) {
+    j.select_task("");
+    select_listed_task(f, {kVtiTask}, state);
+    await_artifact_reads(f, ++reads);
+    Resolved r;
+    resolve(j, r);
+    expect_original(r, kVtiTask, state);
+    f.settle(0.1);
+    EXPECT_EQ(method_count(f, "task.artifacts"), reads) << state;
+  }
+
+  /* Once it succeeded, its finished list is read again and the sole VTI opens. */
+  select_listed_task(f, {kVtiTask});
+  await_artifact_reads(f, ++reads);
+  Resolved sole;
+  resolve(j, sole);
+  expect_sole_vti(sole, kVtiTask, vti, kDigestA);
+
+  /* Requests that are not a plain task open of the current selection pass through unchanged. */
+  auto preset = j.selected_result_request();
+  ASSERT_TRUE(preset);
+  preset->preset = "muferro-domains";
+  Resolved chosen;
+  resolve_request(j, std::move(*preset), chosen);
+  ASSERT_EQ(chosen.calls, 1);
+  EXPECT_EQ(chosen.request->preset, "muferro-domains");
+  EXPECT_TRUE(chosen.request->task_artifact_path.empty());
+  auto other = j.selected_result_request();
+  ASSERT_TRUE(other);
+  other->task_id = kOtherVtiTask;
+  Resolved another;
+  resolve_request(j, std::move(*other), another);
+  expect_original(another, kOtherVtiTask, "another task");
+  auto local = j.selected_result_request();
+  ASSERT_TRUE(local);
+  local->task_id.clear();
+  local->local_paths = {"/tmp/field.vti"};
+  Resolved opened;
+  resolve_request(j, std::move(*local), opened);
+  ASSERT_EQ(opened.calls, 1);
+  EXPECT_EQ(opened.request->local_paths, std::vector<std::string>{"/tmp/field.vti"});
+  EXPECT_TRUE(opened.request->preset.empty());
+  EXPECT_EQ(method_count(f, "task.artifacts"), reads);
+}
+
+TEST_F(JobsFake, ClickBeforeTheListArrivesWaitsForThatReadOnce)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  write_artifacts_plan(f, {{kVtiTask, {listing({artifact("out/field.vti"), artifact("run.log")}, "vti-release", "vti")}}});
+  select_listed_task(f, {kVtiTask, kOtherVtiTask});
+  ASSERT_TRUE(f.pump([&] { return marked(f, "vti-held"); }));
+  const auto before = open_side_effects(f);
+
+  Resolved first, second;
+  resolve(j, first);
+  resolve(j, second); /* A second click replaces the first and sends nothing either. */
+  f.settle(0.2);
+  EXPECT_EQ(first.calls, 0);
+  EXPECT_EQ(second.calls, 0);
+  EXPECT_EQ(method_count(f, "task.artifacts"), 1u);
+
+  touch(f, "vti-release");
+  ASSERT_TRUE(f.pump([&] { return second.calls > 0; }));
+  expect_sole_vti(second, kVtiTask, "out/field.vti", kDigestA);
+  f.settle(0.2);
+  EXPECT_EQ(first.calls, 0);
+  EXPECT_EQ(second.calls, 1);
+  EXPECT_EQ(method_count(f, "task.artifacts"), 1u);
+  EXPECT_EQ(open_side_effects(f), before);
+
+  /* A failed read leaves no accepted list: one explicit click lists once more, then opens the VTI. */
+  const std::string digest_b(64, 'b');
+  write_artifacts_plan(f, {{kOtherVtiTask, {refusal("unavailable", true), listing({artifact("field.vti", digest_b)})}}});
+  j.select_task(kOtherVtiTask);
+  await_artifact_reads(f, 2);
+  EXPECT_TRUE(j.artifacts().empty());
+  Resolved retried;
+  resolve(j, retried);
+  EXPECT_EQ(retried.calls, 0);
+  ASSERT_TRUE(f.pump([&] { return retried.calls > 0; }));
+  expect_sole_vti(retried, kOtherVtiTask, "field.vti", digest_b);
+  EXPECT_EQ(method_count(f, "task.artifacts"), 3u);
+
+  /* A read that keeps failing returns the original request after its single reply. */
+  write_artifacts_plan(f, {{kVtiTask, {refusal("remote_error", false)}}});
+  j.select_task(kVtiTask);
+  await_artifact_reads(f, 4);
+  Resolved failed;
+  resolve(j, failed);
+  EXPECT_EQ(failed.calls, 0);
+  ASSERT_TRUE(f.pump([&] { return failed.calls > 0; }));
+  expect_original(failed, kVtiTask, "failed read");
+  f.settle(0.2);
+  EXPECT_EQ(failed.calls, 1);
+  EXPECT_EQ(method_count(f, "task.artifacts"), 5u);
+  EXPECT_EQ(open_side_effects(f), before);
+}
+
+TEST_F(JobsFake, StaleEmptyListOfTheRunningTaskCannotAnswerTheFinishedTasksOpen)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  write_artifacts_plan(f, {{kVtiTask, {listing({}, "old-release", "old"),
+                                       listing({artifact("field.vti")}, "new-release", "new")}}});
+  select_listed_task(f, {kVtiTask}, "running");
+  ASSERT_TRUE(f.pump([&] { return marked(f, "old-held"); }));
+  /* The task finished: its list is read again while the running state's read is still out. */
+  select_listed_task(f, {kVtiTask}, "succeeded");
+  ASSERT_TRUE(f.pump([&] { return marked(f, "new-held"); }));
+  Resolved r;
+  resolve(j, r);
+  EXPECT_EQ(method_count(f, "task.artifacts"), 2u);
+
+  touch(f, "old-release");
+  ASSERT_TRUE(f.pump([&] { return marked(f, "old-replied"); }));
+  drain(f);
+  EXPECT_EQ(r.calls, 0);
+  EXPECT_TRUE(j.artifacts().empty());
+
+  touch(f, "new-release");
+  ASSERT_TRUE(f.pump([&] { return r.calls > 0; }));
+  expect_sole_vti(r, kVtiTask, "field.vti", kDigestA);
+  ASSERT_EQ(j.artifacts().size(), 1u);
+  EXPECT_EQ(method_count(f, "task.artifacts"), 2u);
+}
+
+TEST_F(JobsFake, HeldListIsNotAdoptedAfterTheSelectionOrScopeChanged)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  const std::string digest_c(64, 'c');
+  write_artifacts_plan(f, {{kVtiTask, {listing({artifact("old.vti")}, "a-release", "a"),
+                                       listing({artifact("new.vti", digest_c)})}}});
+  select_listed_task(f, {kVtiTask, kOtherVtiTask});
+  ASSERT_TRUE(f.pump([&] { return marked(f, "a-held"); }));
+  /* Without the request's own source fence: JobsState alone must drop the late reply. */
+  auto request = j.selected_result_request();
+  ASSERT_TRUE(request);
+  request->still_current = nullptr;
+  Resolved r;
+  resolve_request(j, std::move(*request), r);
+  /* A -> B -> A while the first list is held: the click belonged to the first selection. */
+  j.select_task(kOtherVtiTask);
+  j.select_task(kVtiTask);
+  await_artifact_reads(f, 3);
+  ASSERT_EQ(j.artifacts().size(), 1u);
+  EXPECT_EQ(j.artifacts()[0].file.path, "new.vti");
+  touch(f, "a-release");
+  ASSERT_TRUE(f.pump([&] { return marked(f, "a-replied"); }));
+  drain(f);
+  f.settle(0.2);
+  EXPECT_EQ(r.calls, 0);
+  ASSERT_EQ(j.artifacts().size(), 1u);
+  EXPECT_EQ(j.artifacts()[0].file.path, "new.vti");
+
+  /* A new click on the reselected task uses its own accepted list. */
+  Resolved again;
+  resolve(j, again);
+  expect_sole_vti(again, kVtiTask, "new.vti", digest_c);
+
+  /* A workspace round trip while a click waits: the late list is dropped as well. */
+  write_artifacts_plan(f, {{kOtherVtiTask, {listing({artifact("b.vti")}, "b-release", "b")}}});
+  j.select_task(kOtherVtiTask);
+  ASSERT_TRUE(f.pump([&] { return marked(f, "b-held"); }));
+  auto scoped_request = j.selected_result_request();
+  ASSERT_TRUE(scoped_request);
+  scoped_request->still_current = nullptr;
+  Resolved scoped;
+  resolve_request(j, std::move(*scoped_request), scoped);
+  const std::string workspace = j.workspace();
+  j.select_workspace("");
+  j.select_workspace(workspace);
+  select_listed_task(f, {kOtherVtiTask});
+  touch(f, "b-release");
+  ASSERT_TRUE(f.pump([&] { return marked(f, "b-replied"); }));
+  drain(f);
+  f.settle(0.2);
+  EXPECT_EQ(scoped.calls, 0);
+}
+
+TEST_F(JobsFake, ClickWaitingAcrossABridgeRestartIsDropped)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  write_artifacts_plan(f, {{kVtiTask, {listing({artifact("field.vti")}, "r-release", "r")}}});
+  select_listed_task(f, {kVtiTask});
+  ASSERT_TRUE(f.pump([&] { return marked(f, "r-held"); }));
+  auto request = j.selected_result_request();
+  ASSERT_TRUE(request);
+  request->still_current = nullptr;
+  Resolved r;
+  resolve_request(j, std::move(*request), r);
+
+  std::filesystem::remove(f.jobs_dir() + "/artifacts-r-held");
+  const int64_t pid = f.client->bridge_pid();
+  bridge::test::kill_hard(pid);
+  /* The client re-sends the idempotent read to the new bridge process, which holds it again. */
+  ASSERT_TRUE(f.pump([&] { return j.ready() && f.client->bridge_pid() != pid && marked(f, "r-held"); }, 6));
+  /* The replayed watch lists the fake's own (empty) model; list the same finished task again so
+   * only the bridge generation separates the waiting click from the reply. */
+  ASSERT_TRUE(f.pump([&] { return j.tasks().empty(); }, 6));
+  select_listed_task(f, {kVtiTask});
+  ASSERT_EQ(j.selected(), kVtiTask);
+  ASSERT_NE(j.selected_task(), nullptr);
+  touch(f, "r-release");
+  ASSERT_TRUE(f.pump([&] { return j.artifacts().size() == 1; }));
+  drain(f);
+  f.settle(0.2);
+  EXPECT_EQ(r.calls, 0);
+
+  /* The same task's list, accepted from the new process, answers a new click at once. */
+  const size_t reads = method_count(f, "task.artifacts");
+  Resolved again;
+  resolve(j, again);
+  expect_sole_vti(again, kVtiTask, "field.vti", kDigestA);
+  EXPECT_EQ(method_count(f, "task.artifacts"), reads);
+}
+
+
+TEST_F(JobsFake, TaskResultRequiresCurrentBridgeArtifactListAfterRestart)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  write_artifacts_plan(f, {{kVtiTask, {listing({artifact("before.vti")})}}});
+  select_listed_task(f, {kVtiTask});
+  await_artifact_reads(f, 1);
+  Resolved first;
+  resolve(j, first);
+  expect_sole_vti(first, kVtiTask, "before.vti", kDigestA);
+
+  write_artifacts_plan(f, {{kVtiTask, {listing({artifact("after.vti")}, "release-restart-result", "restart-result")}}});
+  const auto pid = f.client->bridge_pid();
+  bridge::test::kill_hard(pid);
+  ASSERT_TRUE(f.pump([&] { return j.ready() && f.client->bridge_pid() != pid; }));
+  select_listed_task(f, {kVtiTask});
+  ASSERT_EQ(j.selected(), kVtiTask);
+  ASSERT_EQ(j.artifacts().size(), 1u);
+  EXPECT_EQ(j.artifacts().front().file.path, "before.vti");
+  Resolved next;
+  resolve(j, next);
+  EXPECT_EQ(next.calls, 0);
+  EXPECT_TRUE(j.resolving_task_result());
+  ASSERT_TRUE(f.pump([&] { return marked(f, "restart-result-held"); }));
+  EXPECT_EQ(next.calls, 0);
+  touch(f, "release-restart-result");
+  ASSERT_TRUE(f.pump([&] { return next.calls == 1; }));
+  expect_sole_vti(next, kVtiTask, "after.vti", kDigestA);
+  EXPECT_FALSE(j.resolving_task_result());
+}
+
+TEST_F(JobsFake, TaskResultDoesNotOpenAfterArtifactAuthorizationFailure)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  write_artifacts_plan(f, {{kVtiTask, {refusal("unauthorized", false)}}});
+  select_listed_task(f, {kVtiTask});
+  Resolved result;
+  resolve(j, result);
+  ASSERT_TRUE(j.resolving_task_result());
+  await_artifact_reads(f, 1);
+  EXPECT_FALSE(j.resolving_task_result());
+  EXPECT_EQ(result.calls, 0);
+  EXPECT_NE(j.status().text.find("Synthetic listing refusal"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace stk::jobstest
