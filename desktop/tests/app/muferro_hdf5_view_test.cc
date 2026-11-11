@@ -357,7 +357,9 @@ TEST(MuferroHdf5ViewTest, VoxelRequestPinsTheCollectedContainerAndOnlyTheDisplay
   EXPECT_EQ(proof.at("project_root"), project.str());
   EXPECT_EQ(proof.at("case_path"), "results/muferro/" + kRun);
   EXPECT_EQ(proof.at("files"), Json::array({{{"path", kPath}, {"sha256", kSha}}}));
-  EXPECT_EQ(request.local_bindings.at("run"), stk::core::path_to_utf8(project.root() / "results/muferro" / kRun));
+  const auto expected_run = project.root() / "results" / "muferro" / kRun;
+  EXPECT_EQ(stk::core::path_from_utf8(request.local_bindings.at("run")).lexically_normal(),
+            expected_run.lexically_normal());
   EXPECT_THROW(stk::app::muferro_hdf5_voxel_request("voxel", source, {4, 0, 0}), std::invalid_argument);
   EXPECT_THROW(stk::app::muferro_hdf5_voxel_request("voxel", source, {-1, 0, 0}), std::invalid_argument);
 }
