@@ -6486,7 +6486,7 @@ async function footerTrail(page: Page) {
   });
   return () => page.evaluate(() => [...(window as any).__footerTrail] as string[]);
 }
-const STAGES = ['列出结果文件…', '正在加载视图…'];
+const STAGES = ['列出结果文件…', '正在加载视图…'], STAGE_TEXT = /^(列出结果文件|正在加载视图)…$/;
 const staged = (trail: string[]) => trail.filter(text => STAGES.includes(text));
 const lastRow = async (page: Page) => (await detailRows(page)).at(-1);
 // Nothing beyond the list read and the one build: no graph, probe, conversation, model, create or task write.
@@ -6625,6 +6625,9 @@ for (const viewport of viewports) {
       ['a build whose digest is not the published one', hub => { hub.reportedViewDigest = digestOf('another file'); },
         '正在加载视图…', 'scalar-0.vti', '返回的数据摘要与发布文件不符', []],
     ];
+    // These two fail the click itself, which ends its busy period at once; the others end the stage with their notice
+    // or choice, before the refresh that follows them.
+    const thrown = new Set(['a failed legacy list action', 'a list with a null entry']);
     for (const [what, configure, stage, file, alert, statuses] of ends) {
       test(`${what} ends the dedicated stage and keeps the manual route`, async ({page}) => {
         const hub = new Hub();
@@ -6644,7 +6647,7 @@ for (const viewport of viewports) {
         await settled(page);
         const seen = await trail();
         expect(staged(seen)).toEqual([stage]);
-        expect(seen.at(-1)).toBe('就绪');
+        expect(seen.slice(-2)).toEqual([thrown.has(what) ? stage : '正在处理请求…', '就绪']);
         await expect(fileList(page)).toHaveValue(file);
         await expect(page.locator('section.analysis .viewport canvas')).toHaveCount(0);
         if (file) {
@@ -6676,6 +6679,7 @@ for (const viewport of viewports) {
         const denied = page.waitForResponse(res => res.url().endsWith('/api/v1/policy'));
         hub.publish();
         await denied;
+        await expect.poll(() => footerStatus(page)).not.toMatch(STAGE_TEXT);
       }, '结果'],
     ];
     if (viewport.name === 'narrow') awayFromList.push(['opening the history over 结果 and closing it', async page => {
@@ -6744,7 +6748,7 @@ for (const viewport of viewports) {
         const denied = page.waitForResponse(res => res.url().endsWith('/api/v1/policy'));
         hub.publish();
         await denied;
-        expect(STAGES).not.toContain(await footerStatus(page));
+        await expect.poll(() => footerStatus(page)).not.toMatch(STAGE_TEXT);
         hub.readKinds = ['task.get', 'task.artifacts', 'task.events'];
         const restored = page.waitForResponse(res => res.url().endsWith('/api/v1/policy'));
         hub.publish();
