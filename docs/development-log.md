@@ -1,5 +1,17 @@
 # 开发交接记录
 
+## 2026-11-11 00:29 UTC · 共用会话列与键盘阅读
+
+`d70c2a2e` 和 `9bddb062` 分别按逐字节相同的补丁集成独立原生 `c1325d46`、Web `5fb8d9e5`。聚焦项目问答和 Web 会话使用居中单列，宽窗上限 880 逻辑像素，窄窗使用可用宽度。常规会话正文独立滚动，输入在下方，主要按钮按所需宽度靠右。桌面「写问题」仍将原草稿放到页首并聚焦，准备与发送为显式操作。普通分栏、完整已保存问答浏览和结构化 Agent 沿各自现有布局。`b1ae4598` 更新统一工作台设计。
+
+`39738985` 使已显示正文可从 Web 输入框按 Shift+Tab 返回。旧组合产物的宽窄用例均因正文未获得焦点失败。Root 新产物从输入框按 Shift+Tab 进入正文，再用 PageDown 和 End 滚动。Tab 回到输入框，往返任务页共两次点击，草稿和阅读位置相同。独立 Web 全量 198/198，Root 生产构建和完整 Web 200/200，零失败、跳过和重试。Root 用真实本机 Hub 的 60 段公开合成历史复验中文 1440×900 与 390×844，分别一次和两次点击打开历史。宽列 880 px，窄区 390 px，发送按钮均宽 66 px。测量范围内一个历史 GET，零 POST 和模型调用，历史摘要一致。证据在外部 `root-delivery-20261111-150/web-keyboard-transcript`。
+
+独立与 Root 原生构建通过，定向各 37/37，零失败及跳过。固定起点为任务页、项目已选第 8 条已保存问答且有草稿。真实 X11 英文 1600×1000 从左栏一次点击，中文 680×900 通过「历史」两次点击。均可直接输入并在返回后查看原问答，零滚轮，数据库摘要不变，只有返回原问答时一次进度读取。整合与独立二进制的输入区域像素一致。宽窗正文与输入占 880 px，窄窗占可用 664 px，原生另验证 UI 缩放 1.25。证据在外部 `root-delivery-20261111-150/native-centered-root` 和 `root-delivery-20261110-150/native-conversation-layout`。
+
+上节 Windows WGC `creates=1 reuses=430 retired=true` 仅属 PDF 用例，覆盖该用例的 431 次捕获调用。已核对所取的 JUnit、日志、报告与两张关键 PNG，旧版失败的第 5 轮本次 12 ms 取得匹配帧。完整收据在外部 `root-delivery-20261110-149/windows-lease-ci/windows-native-receipt.json`。 [Windows 工件](https://github.com/sijintech/stk/actions/runs/42920785230/artifacts/13815826674)
+
+Claude CLI 当前未登录，独立 `stk-claude/claude/web-task-result-return-focus-92` 的原改动保留。为登录恢复后准备了文献来源入口设计卡 `root-delivery-20261111-150/claude-workbench-literature-task.txt`，写入范围限一份设计文档。本批两端会话模块由独立 Codex worktree 交付，Root 审阅、集成和发布。两次集成、键盘修复与文档的暂存扫描均无发现。
+
 ## 2026-11-11 00:26 UTC · 上一轮 Desktop 终态与 Windows 捕获复用
 
 远端 `ee0515122d2e7a565705e63c98694ad0bece0c2b` 的 Desktop `42920785230` 于 00:20:43 UTC 结束，5/6 作业成功。Linux 主回归 2211/2211，Linux 打包、新环境冒烟、Windows CPU 1516/1516 与 Windows 原生 6/6 通过。Windows 原生共 1315.37 秒，PDF、MP4、HTML 视频各完成 20/20 轮，分别有 160、161、161 张验收图。官方工件的逐成员 CRC 已核对，原生日志记录一个 WGC 捕获目标创建、430 次复用和结束回收。PDF 已接受图像的最长捕获启动为 72 ms。完整 Windows ZIP 下载出现 EOF，当前结论来自已核对的正式报告与日志成员。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42920785230) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42920785230/artifacts/13815826674)
