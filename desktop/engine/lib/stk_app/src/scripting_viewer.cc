@@ -150,10 +150,11 @@ void AppShell::perform_viewer_request(wm::Screen &screen, const std::string &ope
     require(std::filesystem::path(core::path_from_utf8(path)).is_absolute(), "path must be absolute");
     if (params.contains("focus")) { require(params["focus"].is_boolean(), "focus must be boolean"); }
     const std::string preset_id = params.contains("preset") ? required_string(params, "preset") : std::string();
-    if (!preset_id.empty() && !viewer.presets_loaded()) {
+    const bool waiting_for_preset = !preset_id.empty() && !viewer.presets_loaded();
+    if (waiting_for_preset && !collected_current) {
       complete(Error::make(ErrorCode::Busy, "Viewer presets are still loading; inspect viewer.presets()")); return;
     }
-    require(preset_id.empty() || viewer.preset(preset_id), "Unknown Viewer preset: " + preset_id);
+    require(preset_id.empty() || waiting_for_preset || viewer.preset(preset_id), "Unknown Viewer preset: " + preset_id);
     const Json parameters = params.value("parameters", Json::object());
     check_parameters(preset_id.empty() ? nullptr : viewer.preset(preset_id), parameters);
     std::string why;

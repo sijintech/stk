@@ -4795,6 +4795,9 @@ TEST_F(DatViewSimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndR
   auto &scripts = f.shell->store().scripts();
   auto &jobs = f.shell->store().jobs();
   auto &viewer = f.shell->store().viewer();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
   auto python_done = [&] {
     ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy() && !state().busy(); }, 60));
     std::string output;
@@ -4819,9 +4822,6 @@ TEST_F(DatViewSimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndR
   std::string source;
   { std::ifstream file(core::path_from_utf8(dir.str() + "/simulation-runtime/source.txt")); std::getline(file, source); }
   ASSERT_FALSE(source.empty());
-  auto &area = f.area("a2");
-  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
-  f.screen.set_maximized(&area);
   f.drv->frame();
   const auto [x, y] = f.widget_center("a2/main/project_simulation");
   f.drv->click(x, y);
@@ -4899,7 +4899,7 @@ TEST_F(DatViewSimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndR
   ASSERT_TRUE(state().load_runs());
   settled();
   ASSERT_EQ(state().run_id(), run);
-  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); viewer.pump(); return viewer.presets_loaded() && scripts.desktop_ready(); }, 30));
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return scripts.desktop_ready(); }, 30));
   const auto click_view = [&](wm::Screen &screen, wmtest::ScreenDriver &driver) {
     ASSERT_TRUE(loop.pump_until([&] {
       screen.run_deferred(); driver.frame();
@@ -4923,11 +4923,25 @@ TEST_F(DatViewSimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndR
     }
     FAIL() << "View collected results is not visible";
   };
+  // Opening a saved DAT result also works before the Viewer has ever loaded its presets.
+  ASSERT_FALSE(viewer.presets_loaded());
+  const auto history_size = scripts.history().size();
+  ASSERT_NO_FATAL_FAILURE(click_view(f.screen, *f.drv));
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred(); viewer.pump();
+    return !scripts.busy() && !viewer.evaluating();
+  }, 60));
+  ASSERT_EQ(viewer.opening_status().value("state", ""), "succeeded") << scripts.status().dump() << viewer.eval_error();
+  ASSERT_EQ(viewer.preset_id(), "muferro-collected-domains");
+  ASSERT_EQ(viewer.shown_step(), 2);
+  area.set_active_tab(0);
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+
   const auto old_payload = std::make_shared<io::Payload>(io::read_stkp(std::string(STK_REPO_ROOT) +
       "/desktop/tests/viewer/fixtures/muferro_domains.stkp"));
   viewer.prefetch_neighbours = false;
   viewer.open_payload(old_payload, "Previously displayed result");
-  const auto history_size = scripts.history().size();
   ASSERT_TRUE(wmtest::write_text(dir.str() + "/hold-dat-view", "hold"));
   ASSERT_NO_FATAL_FAILURE(click_view(f.screen, *f.drv));
   ASSERT_TRUE(loop.pump_until([&] { return std::filesystem::exists(dir.path() / "held-dat-view"); }, 15));

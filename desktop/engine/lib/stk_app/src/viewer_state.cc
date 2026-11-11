@@ -652,6 +652,7 @@ struct ViewerState::Impl {
       }
       if (waiting_for_metadata) {
         waiting_for_metadata = false;
+        if (opening_current && !opening_current()) { changed(); return; }
         select_open_preset();
         build_form(false);
         start_eval("open");
@@ -1092,6 +1093,11 @@ struct ViewerState::Impl {
     }
     if (!have_metadata() || preset_id.empty()) {
       waiting_for_metadata = true;
+      return;
+    }
+    if (opening_current && !preset(preset_id)) {
+      eval_error = "Unknown Viewer preset: " + preset_id;
+      changed();
       return;
     }
     if (!source.field_file.empty()) {
