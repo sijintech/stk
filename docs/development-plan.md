@@ -1,5 +1,15 @@
 # STK 开发计划
 
+## 2026-11-11 07:09 UTC · 上一主线 Desktop 终态与 VTI 组合试验
+
+发布头 `8a9da1313fd4c4cef3f01e17afef9d1285feb7d8` 的 Desktop `42970731524` 于 07:07:36 UTC 整轮结束，5/6 作业通过。Linux 主回归 2243/2243，打包及干净环境冒烟通过。Windows CPU 1537/1537，含 15 个 MuFerro HDF5 用例，原生 20 轮作业通过。macOS CPU 1597/1597、Metal 254/254，必测原生 4/6，MP4 与 HTML 视频仍在隐藏时位置下限失败。普通静默 1/2、隔离静默 0/2，独立挂起与重显 1/1。Runtime 13/13，Secret scan 与 Pages 通过。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42970731524) [Windows 原生作业](https://github.com/sijintech/stk/actions/runs/42970731524/job/130370432580) [macOS 工件](https://github.com/sijintech/stk/actions/runs/42970731524/artifacts/13836306034)
+
+macOS 隔离 MP4 的同一代次记录显示，重显后约 1.7 ms 显示、12.4 ms 原生释放确认，68.9 ms 的原生状态已是 Playing，79.3 ms 的 DOM 回执为未暂停，90.8 ms 触发暂停断言。退出前无 Paused 或 None 的释放证明，原生门仍处于关闭。普通 HTML 曾从 Playing 转为 Paused 并通过保持。普通 MP4 和隔离 HTML 在隐藏前的明确暂停阶段已失败，本轮没有隔离 HTML 的释放时序证据。平台汇总在 `root-delivery-20261111-160/published-platform-ci-8a9da131`。
+
+原生唯一 VTI 的冻结组合试验完成实际 X11 英文宽窗及中文窄窗的六条路线。Runtime 清单已到时，两窗一次点击打开 `scalar-0.vti` 的有符号切片，返回及重访各一次点击，画布相同且全程仅一次求值。真实清单扣在生产 Bridge 回执时，两窗一次点击等待原清单，释放后精确打开该切片，无重复清单请求。另两次在回执前切到工作台，释放后保留当前页面，零图求值。源文件重哈希、切片正负范围和实际 Runtime 任务及产物均已核对。试验二进制 SHA256 `d452fcfe9662817fca11d80f89a8d9ccbdc75b03911218867977a667c2e25608`。证据 `root-delivery-20261111-162/native-vti-window` 的 `window-ready-trial-*` 与 `held-trial-comparison.json`。
+
+Root 审阅补充 Bridge 重启时清除旧清单选取资格、匹配工作区、遵循图节点路径长度及 Runtime 小写摘要要求，并在等待时显示现有「列出结果文件」状态。初次组合的三条布局回归仍假定同步切页，现已按实际清单等待修订。调整后第一轮原生定向 79/79。新增同 Client 重启回归正在复验，Claude 103 仍在独立工作树收尾。唯一 VTI 产品改动尚未进入 main。已验收的任务返回、Web 日志续读与补充回归可以发布。
+
 ## 2026-11-11 06:53 UTC · 原生任务 VTI 的 Viewer 候选
 
 Root 独立工作树 `stk-root-native-task-artifact-162` 的 `133a1880bbab64a1246b42dc056269043ba21f4b` 已通过定向 Viewer 22/22。冷启动按确切任务绑定和相对文件路径发一次切片请求，来源显示该文件。属性与 Python 配置保留文件绑定，整次配置在修改设置前核对路径。重访需任务范围、确切路径、发布摘要和已验证画面匹配。保留手动调整过的同文件显示。摘要用于重访匹配，实际下载沿用 Runtime 发布清单校验。独立扫描无发现，证据 `root-delivery-20261111-162/native-vti-viewer/viewer-final.xml`。
