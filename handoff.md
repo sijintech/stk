@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-11 07:19 UTC · 原生任务一次打开唯一发布的 VTI
+
+本地 main 产品提交 `35ff2d1d866cad4b2f0449dc6e793c9e7b315d11` 集成 Claude 独立 worktree `claude/workbench-native-task-artifact-103` 的清单解析 `2b5341dd4b4942ebc3c02e91cecc1ab547e5177a`。Root 接上 Viewer 的固定产物绑定、打开时的页面及意图检查、Bridge 重启清单失效和对应回归。成功任务清单只含一个合格 VTI 及可忽略的日志或说明文件时，「在查看器中打开」直接显示切片。多个或其它类型结果使用既有任务入口。Web 仍从任务捷径预选唯一文件，再由用户明确加载。
+
+Main 构建桌面、Jobs 与 Viewer 目标成功。聚焦 Jobs / Viewer 回归 87/87，含选中任务及连接变化、重启和拒绝授权。隔离组合的同源目标也为 87/87。最新 main X11 二进制 SHA256 `70f345f39ed58b9e076b332bd78e9b00e2ab3034418ee99e96912b7ef3416e06`。英文 1600×1100 与中文 680×1000 从已选成功任务、已到清单、冷 Viewer、未提交表单起步。打开、返回原任务、重访分别 1、1、1 点击。回到 Tasks 后仍显示原草稿。两端尺寸下实际读取 `scalar-0.vti`，SHA256 与发布清单一致，显示 `32×28` 的 `manufactured` 切片及范围 −3.4…19，「来源」列出实际文件。重访画布相同，全程一次清单和一次图求值，零模型调用、零任务提交，Runtime 任务与产物不变。截图及回执在本机 `root-delivery-20261111-162/native-vti-window/window-main-ready-{en,zh}`。
+
+同一份桌面产品源码的审阅构建 `ab89627a` 另做四条真实清单在途路线。两种窗口均只使用原请求，显示相应语言的「列出结果文件」。等待后继续只需原先一次点击。释放回执前切到工作台时保持工作台，零图求值，手动查看 Results 仍为空。对照见同目录 `held-reviewed-comparison.json`。样本是可复现的合成 VTI，MuPRO 许可环境中的真实算例验收仍待补齐。上一远端 Desktop `42970731524` 已终态 5/6，macOS MP4 与 HTML 隐藏恢复两例仍失败。
+
 ## 2026-11-11 07:09 UTC · 上一主线 Desktop 终态与 VTI 组合试验
 
 发布头 `8a9da1313fd4c4cef3f01e17afef9d1285feb7d8` 的 Desktop `42970731524` 于 07:07:36 UTC 整轮结束，5/6 作业通过。Linux 主回归 2243/2243，打包及干净环境冒烟通过。Windows CPU 1537/1537，含 15 个 MuFerro HDF5 用例，原生 20 轮作业通过。macOS CPU 1597/1597、Metal 254/254，必测原生 4/6，MP4 与 HTML 视频仍在隐藏时位置下限失败。普通静默 1/2、隔离静默 0/2，独立挂起与重显 1/1。Runtime 13/13，Secret scan 与 Pages 通过。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42970731524) [Windows 原生作业](https://github.com/sijintech/stk/actions/runs/42970731524/job/130370432580) [macOS 工件](https://github.com/sijintech/stk/actions/runs/42970731524/artifacts/13836306034)
