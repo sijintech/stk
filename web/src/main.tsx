@@ -17,6 +17,8 @@ type ObservedTask = {scope:TaskScope;name:string;state:string;cancelRequested:bo
 // The scene 结果 shows in file mode, bound to the task scope and artifact path of the view.build that produced it.
 // Choosing another file only edits the choice: the canvas and its source stay until a new build succeeds.
 type Displayed = {scope:TaskScope;path:string;scene:Json};
+// A published file the 结果文件 list offers.
+const viewable=(artifact:Json)=>/\.(vti|vtk|npy|dat)$/.test(artifact.path);
 // Persistent sections: 工作台 is the conversation home. All three stay mounted; only the active one is shown.
 type Section='workbench'|'tasks'|'results';
 type EnvironmentDisclosure='setup'|'auto-closed'|'open'|'closed';
@@ -101,6 +103,10 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const returnFocus=useRef<{scope:TaskScope;launcher:HTMLButtonElement}|null>(null);
   const generation=useRef(0),scopeVersion=useRef(0),activeScope=useRef<TaskScope|null>(null),refreshing=useRef(false),alive=useRef(true);
   const artifactReads=useRef({started:0,applied:0});
+  // The explicit Tasks shortcut may choose the sole file from its accepted reply for a successful task.
+  // Leaving 结果, opening history over it, switching mode, editing the file choice or changing tasks drops the pick.
+  const defaultPick=useRef<{scope:TaskScope}|null>(null),fileEdited=useRef(false);
+  const completedTaskScopeNow=useRef<TaskScope|null>(null);
   // The displayed record as of the latest change, so a late probe reply can tell whether its scene is still shown.
   const displayedNow=useRef<Displayed|null>(null);
   const show=useCallback((next:Displayed|null)=>{displayedNow.current=next;setDisplayed(next);setProbeText('');setViewError('');},[]);
@@ -127,6 +133,8 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const heartbeat=task&&tasks.find(t=>t.id===task&&t.workspace_id===selection?.workspace);
   const observed=observedTask?.scope===selection?observedTask:null;
   const taskBound=!!task&&(!!heartbeat||observed?.verifiedIdentity===true);
+  const completedTaskScope=taskBound&&(observed?.state??(heartbeat||null)?.state)==='succeeded'?selection:null;
+  completedTaskScopeNow.current=completedTaskScope;
   const exactTerminal=observed?.exactTerminal===true;
   let graphTasks=tasks;
   if(taskBound&&observed){
@@ -166,7 +174,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       !nodes.length?'控制服务中暂无执行节点。节点配对后，这里显示它的任务队列。':'在下方「运行环境」中选择执行节点和项目，这里显示任务队列。'):
     !tasks.length?'节点快照中暂无任务。':!queue.length?`${workspaceName(workspace)} 中暂无任务，可在下方「新建任务」中提交。`:'';
   const clearTask=useCallback(()=>{
-    generation.current++;scopeVersion.current++;activeScope.current=null;
+    generation.current++;scopeVersion.current++;activeScope.current=null;defaultPick.current=null;fileEdited.current=false;
     setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);show(null);setLogs('');setGraphProbeText('');setGraphSource(null);setLogRoom(false);
   },[show]);
   const clearNode=useCallback(()=>{clearTask();setNode('');setWorkspace('');},[clearTask]);
@@ -181,10 +189,11 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       return {scope,name:fact.name,state:fact.state,cancelRequested:fact.cancelRequested,verifiedIdentity,exactTerminal};
     });
   },[]);
-  const acceptArtifacts=useCallback((version:number,request:number,result:unknown)=>{
-    if(!alive.current||scopeVersion.current!==version||request<=artifactReads.current.applied||!Array.isArray(result))return;
+  const acceptArtifacts=useCallback((version:number,request:number,result:unknown):result is Json[]=>{
+    if(!alive.current||scopeVersion.current!==version||request<=artifactReads.current.applied||!Array.isArray(result))return false;
     artifactReads.current.applied=request;
     setArtifacts(result);
+    return true;
   },[]);
   function selectWorkspace(id:string){clearTask();setWorkspace(id);}
   // 新建 in 运行环境: the receipt's workspace is chosen only while this instance and the node and selection the create
@@ -224,7 +233,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     const focus=document.activeElement,inside=!!historyPanel.current?.contains(focus);
     keepHistoryFocus.current=!query.matches&&!!focus&&focus===historyToggle.current;
     const opensOverlay=query.matches&&inside;
-    if(opensOverlay)returnFocus.current=null;
+    if(opensOverlay){returnFocus.current=null;defaultPick.current=null;}
     setWide(!query.matches);setHistoryOpen(opensOverlay);
   };change();query.addEventListener('change',change);return()=>query.removeEventListener('change',change);},[]);
   useEffect(()=>{if(wide&&keepHistoryFocus.current){keepHistoryFocus.current=false;focusHistory();}},[wide]);
@@ -285,12 +294,16 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   }
   const invoke=(kind:string,payload:Json,target=node,active?:()=>boolean)=>action(target,kind,payload,
     ()=> (active?setViewError:setError)('操作等待复核，请在任务面板查看完整参数。'),{active});
-  async function files(){
+  async function files(pick:{scope:TaskScope}|null){
     const version=scopeVersion.current;
     const request=++artifactReads.current.started;
     const result=canReadArtifacts?await readNode(node,'task.artifacts',{task_id:task}):
       (await invoke('task.artifacts',{task_id:task})).result;
-    acceptArtifacts(version,request,result);
+    if(!acceptArtifacts(version,request,result)||!pick||defaultPick.current!==pick)return;
+    defaultPick.current=null;
+    const choices=result.filter(viewable);
+    if(choices.length===1&&completedTaskScopeNow.current===pick.scope&&activeScope.current===pick.scope&&
+       !fileEdited.current&&!displayedNow.current)setPath(choices[0].path);
   }
   function selectTask(id:string,workspaceId:string){
     if(!workspaceId||!/^[0-9a-f]{32}$/.test(id))return;
@@ -325,17 +338,22 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // text that arrives later scrolls inside the pane and moves nothing in 结果, whichever page the user is on then.
   function openResults(target:'files'|'logs',launcher:HTMLButtonElement){
     returnFocus.current=activeScope.current&&{scope:activeScope.current,launcher};
+    const scope=activeScope.current;
+    defaultPick.current=target==='files'&&scope&&completedTaskScope===scope&&analysis==='file'&&
+      !path&&!displayedNow.current&&!fileEdited.current?{scope}:null;
+    const pick=defaultPick.current;
     flushSync(()=>{setTab('results');if(target==='logs')setLogRoom(true);});
     const pane=logPane.current;
     if(target==='logs'&&pane)pane.open=true;
     const element=target==='logs'?pane?.querySelector('summary'):analysis==='file'?fileChoice.current:modeChoice.current?.querySelector<HTMLElement>('[aria-selected="true"]');
     (target==='logs'?pane:element)?.scrollIntoView({block:'nearest'});element?.focus({preventScroll:true});
+    return pick;
   }
   // A held Enter repeats on the shortcut that just got the focus back; only a fresh press opens 结果 again.
   const ignoreRepeat=(e:React.KeyboardEvent)=>{if(e.repeat&&e.key==='Enter')e.preventDefault();};
   function openSection(key:Section){
     const back=key==='tasks'&&tab==='results'&&!overlay?returnFocus.current:null;
-    returnFocus.current=null;
+    returnFocus.current=null;defaultPick.current=null;
     if(!back||activeScope.current!==back.scope){setTab(key);setHistoryOpen(false);return;}
     flushSync(()=>setTab(key));
     const {launcher}=back,box=launcher.getBoundingClientRect(),area=launcher.closest('.surface')?.getBoundingClientRect();
@@ -345,7 +363,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // Choosing a conversation (or a new one) is one explicit action: it opens 工作台 with that conversation's own
   // transcript, reading position and draft. Focus follows keyboard activation and the closing compact history.
   function openConversation(id:string|null,keyboardActivation=false){
-    returnFocus.current=null;
+    returnFocus.current=null;defaultPick.current=null;
     if(id!==conv.session&&messageList.current)transcriptOffsets.current.set(conv.session,messageList.current.scrollTop);
     flushSync(()=>{setTab('workbench');setHistoryOpen(false);if(id)conv.select(id);else conv.startNew();});
     if(!id)composer.current?.focus({preventScroll:true});
@@ -360,7 +378,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   function closeHistory(){setHistoryOpen(false);historyToggle.current?.focus({preventScroll:true});}
   function toggleHistory(){
     if(historyOpen){setHistoryOpen(false);return;}
-    returnFocus.current=null;
+    returnFocus.current=null;defaultPick.current=null;
     flushSync(()=>{setSourceOpen(false);setHistoryOpen(true);});
     focusHistory();
   }
@@ -383,8 +401,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // File mode uses the selected task and displayed artifact. Graph mode uses the accepted scene or output cards,
   // whose calculation can bind different tasks than the one selected in the queue.
   const taskName=observed?.name||(heartbeat||null)?.name||task.slice(0,8);
-  const completedTask=taskBound&&selection&&(observed?.state??(heartbeat||null)?.state)==='succeeded'?
-    {name:taskName,workspace:selection.workspace}:null;
+  const completedTask=completedTaskScope?{name:taskName,workspace:completedTaskScope.workspace}:null;
   const graphKind=shownGraphSource?.kind==='local'?'本地数据包':shownGraphSource?.display==='scene'?'显示的三维结果':
     shownGraphSource?.display==='outputs'?'显示的图谱输出':'尚未显示图谱结果';
   const graphBinding=shownGraphSource?.kind==='evaluation'&&shownGraphSource.bindings.length===1?shownGraphSource.bindings[0]:null;
@@ -463,7 +480,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       {task&&selection&&<TaskObservation key={`${node}/${selection.workspace}/${task}`} scope={selection}
         heartbeat={heartbeat} online={taskOnline} supported={canReadTask} refresh={taskRefresh}
         onObservation={observeTask} onAccessLost={disconnect} onNodeGone={nodeGone}/>}
-      {taskBound&&<div className="inline"><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{openResults('logs',e.currentTarget);void run(readLogs);}}>读取日志</button><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{openResults('files',e.currentTarget);void run(files);}}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
+      {taskBound&&<div className="inline"><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{openResults('logs',e.currentTarget);void run(readLogs);}}>读取日志</button><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{const pick=openResults('files',e.currentTarget);void run(()=>files(pick));}}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
       {actions.filter(a=>a.state==='review').map(a=><article className="review" key={a.id}><strong>等待执行复核</strong><p>{a.review_reason}</p><pre>{JSON.stringify(a.request.payload,null,2)}</pre>{[true,false].map(approved=><button key={String(approved)} disabled={busy} onClick={()=>void run(async()=>{await api(`actions/${a.id}/review`,'POST',{approved});})}>{approved?'批准执行':'拒绝'}</button>)}</article>)}
       <details className="setting" ref={environment} open={environmentOpen}><summary onClick={event=>{
         event.preventDefault();setEnvironmentDisclosure(environmentOpen?'closed':'open');
@@ -496,11 +513,11 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         <span className="source-file"><span>{sourceFile}</span>{sourceNext&&<span className="source-next" title={sourceNext}>{sourceNext}</span>}</span></p>
         <button type="button" ref={sourceToggle} className="source-toggle" aria-expanded={sourceOpen} aria-controls={sourceOpen?'result-source-details':undefined} onClick={()=>setSourceOpen(open=>!open)}>来源</button></div></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span>
       {sourceOpen&&sourceDetails}</div>
-      <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>setAnalysis(key)}>{label}</button>)}</div>
+      <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>{if(key!==analysis)defaultPick.current=null;setAnalysis(key);}}>{label}</button>)}</div>
       {/* Both analysis modes stay mounted once shown; the inactive one keeps its size but takes no space, focus or pointer. */}
       {graphKept&&<div className={analysis==='graph'?'mode-pane graph-mode':'mode-pane graph-mode mode-hidden'} inert={analysis!=='graph'}><React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={graphKey} node={selected?node:''} scope={graphScope} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} completedTask={completedTask} canReadArtifacts={canReadArtifacts} canReadEvents={canReadEvents&&taskOnline&&graphActive} active={graphActive} onError={setGraphError} onLog={setGraphProbeText} onSource={setGraphSource}/></React.Suspense></div>}
       <div className={analysis==='file'?'mode-pane file-mode':'mode-pane file-mode mode-hidden'} inert={analysis!=='file'}>
-      <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{setPath(e.target.value);generation.current++;setViewError('');}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(a=>/\.(vti|vtk|npy|dat)$/.test(a.path)).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
+      <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{fileEdited.current=true;defaultPick.current=null;setPath(e.target.value);generation.current++;setViewError('');}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(viewable).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
       <label>视图<select value={mode} onChange={e=>setMode(e.target.value)}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>
       {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>setAxis(Number(e.target.value))}>{['X','Y','Z'].map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={index} onChange={e=>setIndex(Number(e.target.value))}/></label></>}
       {mode==='iso'&&<label>等值<input type="number" value={level} onChange={e=>setLevel(Number(e.target.value))}/></label>}
