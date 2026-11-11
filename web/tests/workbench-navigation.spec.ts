@@ -4321,6 +4321,31 @@ for (const viewport of viewports) {
       expect(hub.logPayloads).toEqual([{task_id: task}, {task_id: task, stream: 'stderr'}]);
       expect(errors).toEqual([]);
     });
+
+    test('继续读取 below a scrolled first block keeps the pane and 结果 where the user left them', async ({page}) => {
+      const hub = new Hub();
+      hub.device = runningTasks;
+      hub.logChunk = 400; // the first block of the 40-line log is taller than the pane
+      const errors = await setup(page, hub, {scene: false});
+      await shortcut(page, '读取日志').click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', LOG.slice(0, 400));
+      await logPane(page).evaluate(el => { el.scrollTop = 90; });
+      const before = await logPane(page).evaluate(el => ({pane: el.scrollTop, room: el.scrollHeight > el.clientHeight}));
+      expect(before).toEqual({pane: 90, room: true});
+      const layout = await logLayout(page);
+      await expect(logMore(page)).toBeInViewport({ratio: 1});
+      const r = measured(page, `${viewport.name}-continue-scrolled`);
+      await r.activate(logMore(page), 'pointer', '继续读取');
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', LOG);
+      expect(await logPane(page).evaluate(el => el.scrollTop)).toBe(90);
+      expect(await logLayout(page)).toEqual(layout);
+      await expect(logMore(page)).toBeFocused();
+      expect(r.record).toMatchObject({clicks: 1, keys: 0});
+      expect(hub.logPayloads).toEqual([{task_id: task}, {task_id: task, offset: 400}]);
+      expect(errors).toEqual([]);
+    });
   });
 }
 
@@ -4965,6 +4990,40 @@ for (const viewport of viewports) {
     await expect(rawGraphProbe(page)).toBeEnabled();
     expect(hub.probes).toHaveLength(2);
     await expectStream(page, '标准输出', LOG);
+  });
+
+  test(`${viewport.name} a graph probe clicked during 继续读取 stays on screen; 结果文件 shows the appended log`, async ({page}) => {
+    await page.setViewportSize({width: viewport.width, height: viewport.height});
+    const hub = new Hub();
+    hub.device = graphTwoScopes;
+    hub.presets = [datPreset];
+    hub.artifactPathsByTask.set(task2, [datPath]);
+    hub.logChunk = 200;
+    await setup(page, hub, {scene: false});
+    await shortcut(page, '读取日志').click();
+    await expectStream(page, '标准输出', LOG.slice(0, 200));
+    await showGraph(page);
+    await binding(page).selectOption(task2);
+    await computeGraph(page, hub);
+    await pickGraphDomain(page);
+    await expectStream(page, '标准输出', LOG.slice(0, 200));
+    const release = hub.hold('task.logs');
+    hub.reached.clear();
+    try {
+      await logMore(page).click();
+      await expect.poll(() => hub.reached.has('task.logs')).toBe(true);
+      await rawGraphProbe(page).click();
+      await expect(probeLog(page)).toContainText(datPath);
+    } finally {
+      release();
+    }
+    await expect(footer(page)).toContainText('就绪');
+    await expect(probeLog(page)).toContainText(datPath);
+    await expect(logMore(page)).toHaveCount(0);
+    await modeTab(page, '结果文件').click();
+    await expectStream(page, '标准输出', LOG.slice(0, 400));
+    await expectMore(page, '继续读取', '');
+    expect(hub.logPayloads).toEqual([{task_id: task}, {task_id: task, offset: 200}]);
   });
 
   test(`${viewport.name} DAT probe resolves the shown binding's published frame only on explicit query`, async ({page}) => {
