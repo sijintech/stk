@@ -293,7 +293,9 @@ class JobsState {
   }
   void select_workspace(const std::string &id);
   void refresh_workspaces();
-  void create_workspace(const std::string &name, Done done = {});
+  /** Invoked once if a concrete created workspace becomes the selection in the creating scope. */
+  using WorkspaceAdopted = std::function<void()>;
+  void create_workspace(const std::string &name, Done done = {}, WorkspaceAdopted adopted = {});
   /** Input files of the workspace (workspace.files). */
   const std::vector<bridge::FileEntry> &workspace_files() const
   {
@@ -487,6 +489,8 @@ class JobsState {
   struct CreatedWorkspace {
     WorkspaceRow row;
     std::chrono::steady_clock::time_point at;
+    uint64_t scope_epoch;
+    WorkspaceAdopted adopted;
   };
   std::optional<CreatedWorkspace> created_workspace_;
   std::optional<bridge::LocalRuntimeStatus> local_;

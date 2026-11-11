@@ -1292,17 +1292,24 @@ void JobsState::apply_workspaces(const Json &workspaces)
     }
   }
   bool relist = false; /* the listing is stale (hub heartbeat): look again shortly */
+  if (created_workspace_ && created_workspace_->scope_epoch != epoch_) {
+    created_workspace_.reset();
+  }
+  std::string created_id;
+  WorkspaceAdopted adopted;
   if (created_workspace_) {
+    created_id = created_workspace_->row.id;
+    adopted = std::move(created_workspace_->adopted);
     bool present = false;
     for (const WorkspaceRow &w : workspaces_) {
-      present |= w.id == created_workspace_->row.id;
+      present |= w.id == created_id;
     }
     if (present || std::chrono::steady_clock::now() - created_workspace_->at > std::chrono::seconds(30)) {
       created_workspace_.reset();
     }
     else {
       workspaces_.push_back(created_workspace_->row);
-      if (workspace_ != created_workspace_->row.id) {
+      if (workspace_ != created_id) {
         workspace_.clear();
       }
       relist = true;
@@ -1325,6 +1332,11 @@ void JobsState::apply_workspaces(const Json &workspaces)
       pick = workspaces_.front().id;
     }
     select_workspace(pick);
+  }
+  if (!created_id.empty() && workspace_ == created_id) {
+    // Adoption itself advances the selection epoch. Keep the temporary row only in that scope.
+    if (created_workspace_) { created_workspace_->scope_epoch = epoch_; }
+    if (adopted) { adopted(); }
   }
   if (relist && schedule) { /* never re-list at once: that would spin while the snapshot is stale */
     std::weak_ptr<Alive> weak = alive_;
@@ -1405,7 +1417,7 @@ void JobsState::rewatch()
   watch_ = client_->watch(p, std::move(h));
 }
 
-void JobsState::create_workspace(const std::string &name, Done done)
+void JobsState::create_workspace(const std::string &name, Done done, WorkspaceAdopted adopted)
 {
   if (!ready() || active_.empty() || (hub() && node_.empty())) {
     if (done) {
@@ -1415,7 +1427,7 @@ void JobsState::create_workspace(const std::string &name, Done done)
   }
   const uint64_t epoch = epoch_;
   on(client_->workspace_create(target(), name, new_idempotency_key()),
-     [this, epoch, done, name](const bridge::Result<bridge::Submitted> &r) {
+     [this, epoch, done, name, adopted = std::move(adopted)](const bridge::Result<bridge::Submitted> &r) mutable {
        if (done) {
          done(r ? std::nullopt : std::optional<Error>(r.error()));
        }
@@ -1426,16 +1438,17 @@ void JobsState::create_workspace(const std::string &name, Done done)
          fail(std::string(store_.tr("jobs.op.create_workspace")), r.error());
          return;
        }
-       if (r.value().object.is_object()) {
-         preferred_workspace_ = get_str(r.value().object, "id");
-         created_workspace_ = CreatedWorkspace{{preferred_workspace_, name, get_str(r.value().object, "created_at")},
-                                               std::chrono::steady_clock::now()};
-         workspace_.clear();
-         set_status(store_.catalog().format("jobs.status.workspace_created", {{"name", name}}), ui::ToastKind::Success);
-       }
-       else if (r.value().action && r.value().action->in_review()) {
+       const auto id = get_str(r.value().object, "id");
+       if (r.value().action && r.value().action->in_review()) {
          set_status(std::string(store_.tr("jobs.status.in_review")), ui::ToastKind::Warning);
          refresh_actions();
+       }
+       else if (!id.empty() && (!r.value().action || r.value().action->state == "succeeded")) {
+         preferred_workspace_ = id;
+         created_workspace_ = CreatedWorkspace{{preferred_workspace_, name, get_str(r.value().object, "created_at")},
+                                               std::chrono::steady_clock::now(), epoch, std::move(adopted)};
+         workspace_.clear();
+         set_status(store_.catalog().format("jobs.status.workspace_created", {{"name", name}}), ui::ToastKind::Success);
        }
        refresh_workspaces();
      });

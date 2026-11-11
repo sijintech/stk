@@ -311,6 +311,101 @@ TEST(JobsLayout, FocusedTaskEnvironmentGuidesSetupAndHonorsDisclosure)
   EXPECT_EQ(wmtest::read_text(u.dir.str() + "/model/methods.log").find("task.submit\n"), std::string::npos);
 }
 
+TEST(JobsLayout, ANewWorkspaceShowsTheFirstTaskFormAndRequiresExplicitSubmit)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  UiOnFake u;
+  auto &jobs = u.jobs();
+  ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+  jobs.select_connection("runtime:lab");
+  ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty(); }));
+  const std::string old_workspace = jobs.workspace();
+  jobs.select_workspace("");
+  jobs.form().name = "First task draft";
+  u.f.shell->open_workbench(u.f.screen);
+  u.f.screen.run_deferred();
+  u.f.drv->frame();
+  u.click("workbench_tasks");
+  ASSERT_TRUE(u.f.shell->workbench_is_focused(u.f.screen));
+
+  const std::string base = "a1/main/focused_jobs/";
+  const std::string environment = base + "environment";
+  const std::string create = environment + "/workspace/new_workspace";
+  const std::string submit = base + "submit/submit_form";
+  const auto create_workspace = [&](const std::string &name) {
+    ASSERT_NE(u.find(create), nullptr);
+    u.click(create);
+    u.type("jobs_dialog_a1/name", name);
+    u.click("jobs_dialog_a1/ok");
+  };
+  EXPECT_EQ(u.find(submit), nullptr);
+  ASSERT_NO_FATAL_FAILURE(create_workspace("New synthetic workspace"));
+  ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty() && jobs.workspace() != old_workspace; }));
+  const std::string created = jobs.workspace();
+  ASSERT_EQ(u.find(create), nullptr);  // The untouched setup disclosure folded after adoption.
+  ASSERT_NE(u.find(submit), nullptr);
+  const auto *name = u.find(base + "submit/name");
+  ASSERT_NE(name, nullptr);
+  EXPECT_EQ(name->string.value(), "First task draft");
+  EXPECT_FALSE(jobs.submission());
+  {
+    wm::Screen other;
+    u.f.shell->install(other, nullptr);
+    u.f.shell->build_default_layout(other);
+    struct ForgetScreen {
+      app::AppShell *shell;
+      wm::Screen &screen;
+      ~ForgetScreen() { shell->forget(screen); }
+    } cleanup{u.f.shell.get(), other};
+    wmtest::ScreenDriver driver(other, 680, 900, 1);
+    u.f.shell->open_workbench(other);
+    other.run_deferred();
+    driver.frame();
+    const auto *tasks = other.ui()->find("workbench_tasks");
+    ASSERT_NE(tasks, nullptr);
+    driver.click(int(tasks->rect.cx()), other.rect().ymax - 1 - int(tasks->rect.cy()));
+    other.run_deferred();
+    driver.frame();
+    ASSERT_NE(other.ui()->find(base + "submit"), nullptr);
+    EXPECT_EQ(other.ui()->find(submit), nullptr);
+  }
+  const auto methods = [&] { return wmtest::read_text(u.dir.str() + "/model/methods.log"); };
+  EXPECT_EQ(methods().find("task.submit\n"), std::string::npos);
+  u.click(submit);
+  ASSERT_TRUE(u.pump([&] { return jobs.submission() && jobs.submission()->state == app::SubmitState::Done; }));
+  const auto log = methods();
+  const auto sent = log.find("task.submit\n");
+  ASSERT_NE(sent, std::string::npos);
+  EXPECT_EQ(log.find("task.submit\n", sent + 1), std::string::npos);
+  EXPECT_EQ(jobs.workspace(), created);
+
+  jobs.select_workspace(old_workspace);
+  EXPECT_NE(u.find(submit), nullptr);  // Preserve the open form when changing the intended destination.
+  jobs.select_workspace(created);
+  ASSERT_NE(u.find(submit), nullptr);
+  u.click(base + "submit");
+  ASSERT_EQ(u.find(submit), nullptr);
+  u.click(environment);
+  ASSERT_NO_FATAL_FAILURE(create_workspace("New synthetic workspace"));
+  // The real bridge posts its reply to the manual loop. Replace the dialog before processing it.
+  u.click("jobs_dialog_a1/cancel");
+  ASSERT_NE(u.find(create), nullptr);
+  u.click(create);
+  u.type("jobs_dialog_a1/name", "Keep this workspace draft");
+  ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty() && jobs.workspace() != created; }));
+  const auto *workspace_name = u.find("jobs_dialog_a1/name");
+  ASSERT_NE(workspace_name, nullptr);
+  EXPECT_EQ(workspace_name->string.value(), "Keep this workspace draft");
+  u.click("jobs_dialog_a1/cancel");
+  EXPECT_EQ(u.find(submit), nullptr);  // Manual collapse takes precedence for a later creation.
+  jobs.select_workspace(old_workspace);
+  EXPECT_EQ(u.find(submit), nullptr);
+  EXPECT_EQ(jobs.form().name, "First task draft");
+  EXPECT_EQ(methods().find("task.submit\n", sent + 1), std::string::npos);
+}
+
 TEST(JobsLayout, OpeningATaskResultKeepsTheFocusedWorkbench)
 {
   if (std::string(STK_BRIDGE_FAKE).empty()) {

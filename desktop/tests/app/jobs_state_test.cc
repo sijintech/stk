@@ -1027,9 +1027,14 @@ TEST_F(JobsFake, AWorkspaceCreatedThroughAHubStaysSelectedWhileTheListingIsStale
   ASSERT_TRUE(f.connect("hub:mesh"));
   const std::string before = j.workspace();
   bool done = false;
+  std::string adopted;
+  int adoptions = 0;
   j.create_workspace("d1-accept", [&](const std::optional<bridge::Error> &e) {
     EXPECT_FALSE(e.has_value());
     done = true;
+  }, [&] {
+    adopted = j.workspace();
+    ++adoptions;
   });
   ASSERT_TRUE(f.pump([&] { return done; }));
   std::string created;
@@ -1054,6 +1059,54 @@ TEST_F(JobsFake, AWorkspaceCreatedThroughAHubStaysSelectedWhileTheListingIsStale
     seen += w.id == created;
   }
   EXPECT_EQ(seen, 1);
+  EXPECT_EQ(adopted, created);
+  EXPECT_EQ(adoptions, 1);
+}
+
+TEST_F(JobsFake, WorkspaceCreationDoesNotAdoptAfterASelectionChange)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  const std::string workspace = j.workspace();
+  ASSERT_FALSE(workspace.empty());
+  bool done = false;
+  j.create_workspace("Late synthetic workspace", [&](const std::optional<bridge::Error> &e) {
+    EXPECT_FALSE(e);
+    done = true;
+  }, [&] { ADD_FAILURE() << "A stale workspace creation must not be adopted"; });
+  // The bridge reply is delivered by the manual loop. Restore the same ID before it is processed.
+  j.select_workspace("");
+  j.select_workspace(workspace);
+  ASSERT_TRUE(f.pump([&] { return done; }));
+  EXPECT_EQ(j.workspace(), workspace);
+}
+
+TEST_F(JobsFake, AProvisionalWorkspaceCannotFollowAnotherSelection)
+{
+  FakeJobs f({"--stale-workspace-lists", "10"});
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("hub:mesh"));
+  const std::string workspace = j.workspace();
+  const std::string created_name = "Hidden synthetic workspace";
+  bool checked = false;
+  j.create_workspace(created_name, [&](const std::optional<bridge::Error> &e) {
+    EXPECT_FALSE(e);
+    f.loop.executor()([&] {
+      // The creation object arrived, but the workspace listing has not selected it yet.
+      EXPECT_TRUE(j.workspace().empty());
+      j.select_workspace(workspace);
+      j.refresh_workspaces();
+      f.client->call("connections.list").then([&](const auto &result) {
+        EXPECT_TRUE(result);
+        checked = true;
+      });
+    });
+  }, [&] { ADD_FAILURE() << "The new selection must not adopt the previous creation"; });
+  ASSERT_TRUE(f.pump([&] { return checked; }));
+  EXPECT_EQ(j.workspace(), workspace);
+  EXPECT_TRUE(std::none_of(j.workspaces().begin(), j.workspaces().end(),
+                           [&](const auto &row) { return row.name == created_name; }));
 }
 
 TEST_F(JobsFake, ApprovalAfterABridgeRestartReadsTheActionAgain)

@@ -165,7 +165,7 @@ class JobsEditor final : public Editor {
       connection_panel(*environment, ctx, jobs);
       workspace_panel(*environment, ctx, jobs);
     }
-    submit_panel(body, ctx, jobs, !focused);
+    submit_panel(body, ctx, jobs, focused);
     if (!focused) { tasks_panel(body, ctx, jobs); }
     detail_panel(body, ctx, jobs);
     review_panel(body, ctx, jobs);
@@ -602,9 +602,10 @@ class JobsEditor final : public Editor {
 
   /* ---- Submit form ---- */
 
-  void submit_panel(ui::Layout &l, EditorContext &ctx, JobsState &jobs, bool default_open)
+  void submit_panel(ui::Layout &l, EditorContext &ctx, JobsState &jobs, bool focused)
   {
-    ui::Layout *p = l.panel("submit", ctx.tr("jobs.panel.submit"), default_open);
+    ui::Layout *p = l.panel("submit", ctx.tr("jobs.panel.submit"), !focused || show_first_task_by_default_,
+                            focused ? ui::Layout::PanelDefault::UntilToggled : ui::Layout::PanelDefault::Initial);
     if (!p) {
       return;
     }
@@ -1219,6 +1220,7 @@ class JobsEditor final : public Editor {
 
   void open_dialog(const Dialog d)
   {
+    ++dialog_generation_;
     dialog_ = d;
     dialog_error_.clear();
     dialog_busy_ = false;
@@ -1365,15 +1367,24 @@ class JobsEditor final : public Editor {
       case Dialog::NewWorkspace: {
         ui::Layout &m = ctx.ui->modal(key, ctx.tr("jobs.workspace.new_title"), close, mo);
         m.prop(ctx.tr("jobs.workspace.name")).text_field("name", ui::bind(new_workspace_));
-        dialog_footer(m, ctx, [this, &jobs, &cat]() {
+        dialog_footer(m, ctx, [this, &jobs, &cat, focused = focused_tasks(ctx), generation = dialog_generation_]() {
+          if (dialog_ != Dialog::NewWorkspace || generation != dialog_generation_) { return; }
           if (new_workspace_.empty()) {
             dialog_error_ = std::string(cat.tr("jobs.workspace.err.name"));
             return;
           }
           dialog_busy_ = true;
           std::weak_ptr<bool> alive = alive_;
-          jobs.create_workspace(new_workspace_, [this, alive](const std::optional<bridge::Error> &e) {
-            if (auto a = alive.lock(); !a || !*a) {
+          JobsState::WorkspaceAdopted adopted;
+          if (focused) {
+            adopted = [this, alive, generation]() {
+              if (auto a = alive.lock(); a && *a && generation == dialog_generation_) {
+                show_first_task_by_default_ = true;
+              }
+            };
+          }
+          jobs.create_workspace(new_workspace_, [this, alive, generation](const std::optional<bridge::Error> &e) {
+            if (auto a = alive.lock(); !a || !*a || dialog_ != Dialog::NewWorkspace || generation != dialog_generation_) {
               return;
             }
             dialog_busy_ = false;
@@ -1383,7 +1394,7 @@ class JobsEditor final : public Editor {
             else {
               dialog_ = Dialog::None;
             }
-          });
+          }, std::move(adopted));
         });
         break;
       }
@@ -1455,12 +1466,14 @@ class JobsEditor final : public Editor {
   int log_stream_ = 0;
   int input_sel_ = -1;
   EnvironmentDefault environment_default_ = EnvironmentDefault::Setup;
+  bool show_first_task_by_default_ = false;
   int art_sel_ = -1;
   int review_sel_ = -1;
   std::string request_for_;
   ui::LogBuffer request_log_{2000};
 
   Dialog dialog_ = Dialog::None;
+  uint64_t dialog_generation_ = 0;
   bool dialog_busy_ = false;
   bool return_to_add_ = false;
   std::string dialog_error_;
