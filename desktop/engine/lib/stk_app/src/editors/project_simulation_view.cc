@@ -14,6 +14,7 @@
 #include "stk/app/project_state.hh"
 #include "stk/app/script_state.hh"
 #include "stk/app/shell.hh"
+#include "stk/app/viewer_state.hh"
 #include "stk/core/sha256.hh"
 #include "stk/platform/file_dialog.hh"
 #include "editor_text.hh"
@@ -98,13 +99,18 @@ const Engine *run_engine(const Json &run)
   return nullptr;
 }
 
-bool execute(ScriptState &scripts, const std::string &engine, const std::string &action, const Json &params)
+std::string simulation_command(const std::string &engine, const std::string &action, const Json &params)
 {
   // Both literals encode data only, including quotes, newlines and non-ASCII paths.
-  return scripts.execute("import json as _stk_json\n"
+  return "import json as _stk_json\n"
       "from suan.workflows.native import native_action as _stk_simulation\n"
       "_stk_simulation(stk, " + Json(engine).dump() + ", " + Json(action).dump() +
-      ", _stk_json.loads(" + Json(params.dump()).dump() + ")); None");
+      ", _stk_json.loads(" + Json(params.dump()).dump() + ")); None";
+}
+
+bool execute(ScriptState &scripts, const std::string &engine, const std::string &action, const Json &params)
+{
+  return scripts.execute(simulation_command(engine, action, params));
 }
 }  // namespace
 
@@ -275,11 +281,14 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
     if (!context_current(state, project, handle, generation) || state.run_id() != run) { return; }
     if (selected_engine) { execute(scripts, selected_engine->id, "collect", {{"project_id", project}, {"expected_revision", revision}, {"run_id", run}}); }
   }).disable(!enabled || !selected_engine || !succeeded);
-  actions.button("simulation_view", ctx.tr("simulation.view"), [this, &state, &scripts, project, handle, generation, revision, run, selected_engine] {
+  std::function<void()> view = [this, &state, &scripts, project, handle, generation, revision, run, selected_engine] {
     if (!context_current(state, project, handle, generation) || state.run_id() != run) { return; }
     if (selected_engine) { execute(scripts, selected_engine->id, "view", {{"project_id", project}, {"expected_revision", revision}, {"run_id", run}}); }
-  }).disable(!enabled || !selected_engine || !succeeded ||
-              (selected_engine == &engines[0] && !scripts.desktop_ready()));
+  };
+  if (selected_engine == &engines[0] && succeeded) { view = collected_view_action(ctx, state, data_view_current); }
+  const bool can_view = enabled && selected_engine && succeeded && view &&
+                        (selected_engine != &engines[0] || scripts.desktop_ready());
+  actions.button("simulation_view", ctx.tr("simulation.view"), std::move(view)).disable(!can_view);
   if (selected_engine == &engines[0] && succeeded) {
     draw_muferro_hdf5(*panel, ctx, state, enabled, std::move(data_view_current));
   }
@@ -368,6 +377,59 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
     panel->label(ctx.tr("script.run_state." + io::get_string(scripts.status()["run"], "state")));
   }
   panel->log_view("simulation_output", scripts.output(), 6);
+}
+
+std::function<void()> ProjectSimulationView::collected_view_action(EditorContext &ctx, ProjectState &state,
+                                                                  std::function<bool()> data_view_current)
+{
+  auto *area = &ctx.area;
+  auto *shell = &area->shell();
+  auto *screen = area->screen();
+  auto *ui = ctx.ui;
+  auto *store = &ctx.store;
+  auto *client = store->bridge();
+  if (!screen || !ui || !client) { return {}; }
+  const auto *panel = ui->find(area->id() + "/main/project_simulation");
+  if (!panel) { return {}; }
+  const auto &info = *state.project();
+  const auto run = state.run_id();
+  const auto result_current = [weak = shell->lifetime(), store, client, &state, handle = info.handle,
+      revision = info.revision, run, version = state.version(), scope = store->project_scope_epoch(),
+      bridge = store->bridge_epoch(), pid = client->bridge_pid()] {
+    return !weak.expired() && store->project_scope_epoch() == scope && store->bridge() == client &&
+           store->bridge_epoch() == bridge && client->bridge_pid() == pid && state.project() &&
+           state.project()->handle == handle && state.project()->revision == revision &&
+           state.version() == version && state.run_id() == run;
+  };
+  const auto origin_current = [this, weak = std::weak_ptr<bool>(alive_), result_current, data_view_current,
+      shell, screen, area, origin = &area->editor(), ui, id = panel->id, panel_epoch = ui->panel_epoch(panel->id),
+      activity = area->activity_epoch(), visibility = screen->visibility_epoch(), generation = generation_] {
+    return !weak.expired() && result_current() && generation_ == generation && shell->has_screen(screen) &&
+           shell->has_area(area) && area->screen() == screen && screen->ui() == ui &&
+           area->activity_epoch() == activity && screen->visibility_epoch() == visibility &&
+           &area->editor() == origin && (!screen->maximized() || screen->maximized() == area) &&
+           ui->panel_open(id, false) && ui->panel_epoch(id) == panel_epoch && data_view_current();
+  };
+  return [shell, screen, store, result_current, origin_current, project = info.id, revision = info.revision, run] {
+    if (!origin_current()) { return; }
+    const auto viewer_version = store->viewer().version();
+    store->scripts().execute_collected_view([project, revision, run](const std::string &id) {
+      Json params{{"project_id", project}, {"expected_revision", revision}, {"run_id", run}};
+      if (!id.empty()) { params["native_collected_view"] = id; }
+      return simulation_command(engines[0].id, "view", params);
+    }, [shell, screen, store, origin_current, result_current, viewer_version](const std::string &, const Json &params,
+        int64_t expires, std::function<bool()> session_current, ScriptState::Completion complete) {
+      if (!session_current()) { return; }
+      if (!result_current()) {
+        complete(bridge::Error::make(bridge::ErrorCode::Conflict, std::string(store->tr("simulation.context_changed"))));
+        return;
+      }
+      shell->open_collected_view(screen, params, expires,
+          [store, origin_current, viewer_version, session_current] {
+            return session_current() && origin_current() && store->viewer().version() == viewer_version;
+          }, [result_current, session_current] { return session_current() && result_current(); }, std::move(complete));
+    });
+  };
 }
 
 void ProjectSimulationView::draw_muferro_hdf5(ui::Layout &layout, EditorContext &ctx, ProjectState &state, bool enabled,

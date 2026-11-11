@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 import threading
 import time
 
@@ -169,6 +170,15 @@ def lookup_bridge(control):
         with lock, (control / 'wire.jsonl').open('a', encoding='utf-8') as stream:
             stream.write(json.dumps(entry, sort_keys=True) + '\n')
 
+    def hold_reply(name):
+        hold = control / f'hold-{name}'
+        if hold.exists():
+            hold.unlink()
+            (control / f'held-{name}').touch()
+            deadline = time.monotonic() + 20
+            while not (control / f'release-{name}').exists() and time.monotonic() < deadline:
+                time.sleep(.01)
+
     class LookupBridge(server.Bridge):
         def handle_line(self, raw):
             try:
@@ -204,6 +214,9 @@ def lookup_bridge(control):
             return super().handle_line(raw)
 
         def send(self, message, method=None):
+            if message.get('event') == 'ui.request' and message['data']['operation'] == 'viewer.open':
+                hold_reply('dat-view')
+                record({'kind': 'viewer.open', 'path': message['data']['params']['path']})
             if method == 'project.table.query' and message.get('id') in refused:
                 refused.discard(message['id'])
                 message = {'id': message['id'], 'error': {
@@ -212,6 +225,7 @@ def lookup_bridge(control):
             elif method == 'project.table.query' and (message.get('result') or {}).get('table_id') == RESULT_TABLE_ID:
                 record({'kind': 'reply', 'id': message.get('id'), 'records': len(message['result'].get('records', []))})
             elif method == 'graph.evaluate':
+                hold_reply('dat-graph')
                 record({'kind': 'reply', 'id': message.get('id'), 'method': method})
             return super().send(message, method)
 

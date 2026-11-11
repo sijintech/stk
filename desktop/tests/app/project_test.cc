@@ -4779,7 +4779,17 @@ TEST_F(LammpsSimulationPython, NativeBatchRunReusesTwoTasksAndEngineSwitchClears
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 
-TEST_F(SimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndReopenOffline)
+class DatViewSimulationPython : public SimulationPython {
+ protected:
+  void configure_bridge(bridge::ClientOptions &options, const std::string &python) override
+  {
+    options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
+    options.command = {python, std::string(STK_REPO_ROOT) + "/desktop/tests/app/simulation_fixture.py", dir.str(),
+        "--stdio", "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
+  }
+};
+
+TEST_F(DatViewSimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndReopenOffline)
 {
   populated();
   auto &scripts = f.shell->store().scripts();
@@ -4890,8 +4900,111 @@ TEST_F(SimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndReopenOf
   settled();
   ASSERT_EQ(state().run_id(), run);
   ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); viewer.pump(); return viewer.presets_loaded() && scripts.desktop_ready(); }, 30));
-  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_view"));
-  ASSERT_NO_FATAL_FAILURE(python_done());
+  const auto click_view = [&](wm::Screen &screen, wmtest::ScreenDriver &driver) {
+    ASSERT_TRUE(loop.pump_until([&] {
+      screen.run_deferred(); driver.frame();
+      const auto *w = screen.ui()->find("project_simulation/simulation_view");
+      return w && w->enabled;
+    }, 30));
+    for (int i = 0; i < 30; ++i) {
+      const auto *w = screen.ui()->find("project_simulation/simulation_view");
+      ASSERT_NE(w, nullptr);
+      const auto visible = w->rect.intersect(w->clip);
+      if (!visible.empty() && visible.h == w->rect.h && visible.w == w->rect.w) {
+        ASSERT_TRUE(driver.click(int(visible.cx()), screen.rect().ymax - 1 - int(visible.cy())));
+        driver.frame();
+        return;
+      }
+      wm::Event wheel;
+      wheel.type = wm::EventType::Wheel;
+      wheel.x = int(w->clip.cx()); wheel.y = screen.rect().ymax - 1 - int(w->clip.cy());
+      wheel.wheel_y = w->rect.cy() > w->clip.cy() ? -3 : 3;
+      ASSERT_TRUE(driver.send(wheel)); driver.frame();
+    }
+    FAIL() << "View collected results is not visible";
+  };
+  const auto old_payload = std::make_shared<io::Payload>(io::read_stkp(std::string(STK_REPO_ROOT) +
+      "/desktop/tests/viewer/fixtures/muferro_domains.stkp"));
+  viewer.prefetch_neighbours = false;
+  viewer.open_payload(old_payload, "Previously displayed result");
+  const auto history_size = scripts.history().size();
+  ASSERT_TRUE(wmtest::write_text(dir.str() + "/hold-dat-view", "hold"));
+  ASSERT_NO_FATAL_FAILURE(click_view(f.screen, *f.drv));
+  ASSERT_TRUE(loop.pump_until([&] { return std::filesystem::exists(dir.path() / "held-dat-view"); }, 15));
+  const auto before = viewer.evaluations_started();
+  const auto camera = viewer.camera_serial();
+  const auto revision = state().project()->revision;
+  ASSERT_TRUE(f.shell->activate_editor(&f.screen, kEditorPython, true)); f.drv->frame();
+  auto *python_area = dynamic_cast<EditorArea *>(f.screen.maximized());
+  ASSERT_NE(python_area, nullptr);
+  auto draft = python_area->editor().save_workspace_state();
+  draft["source"] = "print('keep the unsaved DAT review draft')";
+  ASSERT_TRUE(python_area->editor().load_workspace_state(draft));
+  const auto first_layout = f.screen.to_json();
+  ASSERT_TRUE(wmtest::write_text(dir.str() + "/release-dat-view", "release"));
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred(); viewer.pump(); return !scripts.busy() && !viewer.evaluating();
+  }, 30));
+  EXPECT_EQ(f.screen.to_json(), first_layout);
+  EXPECT_EQ(python_area->editor().save_workspace_state(), draft);
+  EXPECT_EQ(viewer.base_payload(), old_payload);
+  EXPECT_EQ(viewer.camera_serial(), camera);
+  EXPECT_EQ(viewer.evaluations_started(), before);
+
+  wm::Screen other;
+  f.shell->install(other, nullptr); f.shell->build_default_layout(other);
+  struct ForgetScreen {
+    AppShell &shell; wm::Screen &screen;
+    ~ForgetScreen() { shell.forget(screen); }
+  } cleanup{*f.shell, other};
+  wmtest::ScreenDriver driver(other, 1440, 1800, 1);
+  auto *other_area = dynamic_cast<EditorArea *>(other.find_area("a2"));
+  ASSERT_NE(other_area, nullptr);
+  ASSERT_TRUE(other_area->set_tab_type(0, kEditorProject)); other.set_maximized(other_area); driver.frame();
+  const auto *simulation = other.ui()->find("project_simulation");
+  ASSERT_NE(simulation, nullptr);
+  ASSERT_TRUE(driver.click(int(simulation->rect.cx()), other.rect().ymax - 1 - int(simulation->rect.cy())));
+  driver.frame();
+
+  // A current script opens the correct window; leaving before its graph completes drops adoption.
+  ASSERT_TRUE(wmtest::write_text(dir.str() + "/hold-dat-graph", "hold"));
+  ASSERT_NO_FATAL_FAILURE(click_view(other, driver));
+  ASSERT_TRUE(loop.pump_until([&] {
+    other.run_deferred(); viewer.pump();
+    return std::filesystem::exists(dir.path() / "held-dat-graph");
+  }, 30));
+  ASSERT_EQ(other.maximized(), nullptr);
+  ASSERT_TRUE(viewer.evaluating());
+  ASSERT_TRUE(f.shell->activate_editor(&other, kEditorPython, true)); driver.frame();
+  const auto protected_layout = other.to_json();
+  ASSERT_TRUE(wmtest::write_text(dir.str() + "/release-dat-graph", "release"));
+  ASSERT_TRUE(loop.pump_until([&] {
+    other.run_deferred(); viewer.pump();
+    return !scripts.busy() && !viewer.evaluating() && viewer.opening_status().value("state", "") == "cancelled";
+  }, 30));
+  EXPECT_EQ(other.to_json(), protected_layout);
+  EXPECT_EQ(viewer.base_payload(), old_payload);
+  EXPECT_EQ(viewer.camera_serial(), camera);
+  EXPECT_EQ(viewer.evaluations_started(), before + 1);
+
+  other_area->set_active_tab(0); other.set_maximized(other_area); driver.frame();
+  const auto unchanged = f.screen.to_json();
+  ASSERT_NO_FATAL_FAILURE(click_view(other, driver));
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred(); other.run_deferred(); viewer.pump();
+    return !scripts.busy() && !viewer.evaluating();
+  }, 60));
+  EXPECT_EQ(f.screen.to_json(), unchanged);
+  EXPECT_EQ(python_area->editor().save_workspace_state(), draft);
+  EXPECT_EQ(other.maximized(), nullptr);
+  EXPECT_EQ(viewer.evaluations_started(), before + 2);
+  EXPECT_NE(viewer.base_payload(), old_payload);
+  EXPECT_EQ(viewer.preset_id(), "muferro-collected-domains");
+  EXPECT_EQ(viewer.shown_step(), 2);
+  EXPECT_EQ(state().project()->revision, revision);
+  ASSERT_EQ(scripts.history().size(), history_size + 1);
+  EXPECT_NE(scripts.history().back().find(run), std::string::npos);
+  EXPECT_EQ(scripts.history().back().find("native_collected_view"), std::string::npos);
   ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); viewer.pump(); return bool(viewer.payload()) || !viewer.eval_error().empty(); }, 60));
   ASSERT_TRUE(viewer.payload()) << viewer.eval_error();
   EXPECT_FALSE(viewer.payload()->layers().empty());

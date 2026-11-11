@@ -31,6 +31,8 @@ class ProjectSimulationView {
   void select_engine(int index);
   void draw_muferro_hdf5(ui::Layout &layout, EditorContext &ctx, ProjectState &state, bool enabled,
                          std::function<bool()> data_view_current);
+  std::function<void()> collected_view_action(EditorContext &ctx, ProjectState &state,
+                                              std::function<bool()> data_view_current);
   bool context_current(const ProjectState &state, const std::string &project, const std::string &handle, uint64_t generation) const;
   io::Json workspace_pending_;
   SimulationTarget target_;

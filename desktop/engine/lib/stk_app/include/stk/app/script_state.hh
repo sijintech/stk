@@ -31,6 +31,8 @@ class ScriptState {
   const std::vector<std::string> &history() const { return history_; }
 
   bool execute(const std::string &source);
+  /** Route the fixed script's UI request once. An empty route ID builds its ordinary history entry. */
+  bool execute_collected_view(std::function<std::string(const std::string &)> source, UIHandler open);
   bool execute_file(const std::string &path, const std::string &expected_version = {});
   /** Local .py document operations. Never execute, mutate history or print document source. */
   bool files_supported() const;
@@ -46,7 +48,12 @@ class ScriptState {
   void on_state(bridge::BridgeState state);
   void attach_ui();
   void ui_request(const io::Json &data);
-  bool start(io::Json params);
+  struct CollectedView {
+    std::string id;
+    UIHandler open;
+  };
+  bool start(io::Json params, std::optional<CollectedView> view = {});
+  void remember_source(const std::string &source);
   void append(std::string_view text);
   void fail(const bridge::Error &error);
 
@@ -63,6 +70,8 @@ class ScriptState {
   ui::LogBuffer output_{10000};
   std::vector<std::string> history_;
   UIHandler ui_handler_;
+  uint64_t collected_view_id_ = 0;
+  std::optional<CollectedView> collected_view_;
 };
 
 }  // namespace stk::app

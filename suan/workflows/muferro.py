@@ -496,6 +496,10 @@ class MuFerro:
 
     def view(self, run_id, *, project=None):
         """Recheck collected bytes and open the domain view; does not download or submit work."""
+        folder, preset, proof = self._collected_view(run_id, project=project)
+        return self.stk.viewer.open(folder, preset=preset, source_proof=proof)
+
+    def _collected_view(self, run_id, *, project=None):
         p = project or self.stk.project
         model = p.snapshot()
         table = _table(model, RESULT_TABLE_ID, RESULT_FIELDS, RESULT_FIELD_IDS)
@@ -523,7 +527,7 @@ class MuFerro:
         proof = {"project_root": str(root), "case_path": case_path,
                  "files": [file for file in row["values"][RESULT_FIELD_IDS["files"]]
                            if file["path"].startswith(case_path + "/")]}
-        return self.stk.viewer.open(folder, preset=preset, source_proof=proof)
+        return folder, preset, proof
 
 
 def native_action(stk, action, params):

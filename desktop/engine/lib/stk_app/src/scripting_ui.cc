@@ -30,6 +30,32 @@ Json project_json(const bridge::ProjectInfo &p)
 
 }  // namespace
 
+void AppShell::open_collected_view(wm::Screen *screen, const Json &params, int64_t expires_at,
+                                   std::function<bool()> origin_current, std::function<bool()> result_current,
+                                   ScriptState::Completion complete)
+{
+  const auto changed = [this] {
+    return Error::make(ErrorCode::Conflict, std::string(store_.tr("simulation.context_changed")));
+  };
+  if (!has_screen(screen) || !origin_current()) { complete(changed()); return; }
+  const auto weak = lifetime();
+  screen->defer([this, weak, screen, params, expires_at, origin_current = std::move(origin_current),
+                 result_current = std::move(result_current), complete = std::move(complete), changed]() mutable {
+    if (weak.expired()) { return; }
+    if (!has_screen(screen) || !origin_current()) { complete(changed()); return; }
+    if (expired(expires_at)) {
+      complete(Error::make(ErrorCode::Timeout, "The desktop request expired before execution"));
+      return;
+    }
+    try {
+      perform_viewer_request(*screen, "viewer.open", params, complete, std::move(result_current));
+    }
+    catch (const std::exception &error) {
+      complete(Error::make(ErrorCode::InvalidParams, error.what()));
+    }
+  });
+}
+
 void AppShell::handle_ui_request(const std::string &operation, const Json &params, const int64_t expires_at,
                                  std::function<bool()> valid, ScriptState::Completion complete)
 {

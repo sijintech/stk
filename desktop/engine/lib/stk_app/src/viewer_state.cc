@@ -380,6 +380,7 @@ struct ViewerState::Impl {
   std::shared_ptr<int> alive = std::make_shared<int>(0);
   uint64_t version = 0;
   bool is_opening = false;
+  std::function<bool()> opening_current;
 
   /* Metadata. */
   bool presets_requested = false, catalog_requested = false, colormaps_requested = false;
@@ -1794,7 +1795,7 @@ bool ViewerState::can_revisit_task_result(const OpenResultRequest &request) cons
 }
 
 bool ViewerState::open_path(const std::string &path, const std::string &preset, const Json &parameters,
-                            const Json &source_proof)
+                            const Json &source_proof, std::function<bool()> still_current)
 {
   Impl &m = *impl_;
   std::string err;
@@ -1821,7 +1822,7 @@ bool ViewerState::open_path(const std::string &path, const std::string &preset, 
       return false;
     }
   }
-  if (!source_proof.is_null() && m.source.kind != SourceKind::None) {
+  if (!source_proof.is_null() && (m.source.kind != SourceKind::None || still_current)) {
     if (!m.bridge_ready()) {
       m.open_error = std::string(store_.tr("viewer.error.no_bridge"));
       m.changed();
@@ -1830,6 +1831,7 @@ bool ViewerState::open_path(const std::string &path, const std::string &preset, 
     discard_opening();
     auto next = std::make_unique<Impl>(*this, store_);
     next->is_opening = true;
+    next->opening_current = std::move(still_current);
     next->source = std::move(s);
     next->label = next->source.label();
     next->overlays = m.overlays;
@@ -1846,14 +1848,16 @@ bool ViewerState::open_path(const std::string &path, const std::string &preset, 
     opening_status_ = {{"id", next->new_eval_id()}, {"state", "pending"},
                        {"source", {{"key", next->source.key()}, {"kind", source_kind_name(next->source.kind)},
                                    {"path", next->source.path}}}};
-    m.cancel_main();
-    m.cancel_prefetch();
-    m.waiting_for_metadata = false;
-    m.workspace_suspended = true;
-    m.playing = false;
-    m.pending_at = kInf;
-    m.job.reset();
-    m.open_error.clear();
+    if (!next->opening_current) {
+      m.cancel_main();
+      m.cancel_prefetch();
+      m.waiting_for_metadata = false;
+      m.workspace_suspended = true;
+      m.playing = false;
+      m.pending_at = kInf;
+      m.job.reset();
+      m.open_error.clear();
+    }
     opening_ = std::move(next);
     if (opening_->have_metadata()) {
       if (opening_->preset_id.empty() || !opening_->preset(opening_->preset_id)) {
@@ -3074,6 +3078,7 @@ void ViewerState::finish_opening()
 {
   if (!opening_) { return; }
   Impl &next = *opening_;
+  if (next.opening_current && !next.opening_current()) { discard_opening(); return; }
   std::string error;
   if (!next.bridge_ready()) {
     error = std::string(store_.tr("viewer.error.no_bridge"));

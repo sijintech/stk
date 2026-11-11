@@ -251,7 +251,7 @@ class ViewerState {
   bool can_revisit_task_result(const OpenResultRequest &request) const;
   /** `parameters` ({name: value}) override the preset defaults of an evaluated source. */
   bool open_path(const std::string &path, const std::string &preset = {}, const io::Json &parameters = io::Json(),
-                 const io::Json &source_proof = io::Json());
+                 const io::Json &source_proof = io::Json(), std::function<bool()> still_current = {});
   /** Shows an in-memory payload (tests, tools). */
   void open_payload(std::shared_ptr<const io::Payload> payload, std::string label,
                     std::shared_ptr<const MuFerroHdf5Source> hdf5_source = {});

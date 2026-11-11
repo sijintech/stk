@@ -16,7 +16,7 @@ _PARAMETERS = {
     "clone": ({"record_id"}, {"table_id"}),
     "prepare": ({"record_id", "connection"}, {"options", "identity", "table_id"}),
     "collect": ({"run_id"}, {"max_bytes"}),
-    "view": ({"run_id"}, set()),
+    "view": ({"run_id"}, {"native_collected_view"}),
     "view_structure": ({"run_id"}, {"topology", "trajectory"}),
     "logs": ({"run_id"}, set()),
     "batch_create": ({"record_ids", "connection"}, {"template_id", "options"}),
@@ -114,6 +114,14 @@ def native_action(stk, engine, action, params):
     if action == "collect":
         return service.collect(project=p, **params)
     if action == "view":
+        if "native_collected_view" in params:
+            if module is not muferro:
+                raise ValueError("A collected Viewer route requires a MuFerro run")
+            folder, preset, proof = service._collected_view(params["run_id"], project=p)
+            return stk.viewer._operation("open", {
+                "path": str(folder.absolute()), "preset": preset, "source_proof": proof,
+                "native_collected_view": params["native_collected_view"],
+            })
         result = service.view(project=p, **params)
         if module is lammps:
             summary = {key: value for key, value in result.items() if key != "files"}

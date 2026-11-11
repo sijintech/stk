@@ -81,6 +81,7 @@ void ScriptState::on_state(const bridge::BridgeState state)
     }
     session_.clear();
     ui_session_.clear();
+    collected_view_.reset();
     awaiting_run_.clear();
     status_ = Json::object();
     cursor_ = 0;
@@ -182,6 +183,7 @@ void ScriptState::refresh()
       awaiting_run_.clear();
       starting_ = false;
     }
+    if (!busy()) { collected_view_.reset(); }
     if (run != status_.end() && run->is_object() && run->contains("error") && (*run)["error"].is_object()) {
       const auto id = io::get_string(*run, "id");
       if (id != reported_error_) {
@@ -196,7 +198,7 @@ void ScriptState::refresh()
   });
 }
 
-bool ScriptState::start(Json params)
+bool ScriptState::start(Json params, std::optional<CollectedView> view)
 {
   sync();
   if (!ready() || busy()) {
@@ -209,10 +211,12 @@ bool ScriptState::start(Json params)
     params["project_handle"] = project.project()->handle;
   }
   starting_ = true;
+  collected_view_ = std::move(view);
   error_.clear();
   on(client_->call("script.execute", std::move(params)), [this](const auto &result) {
     if (!result.ok()) {
       starting_ = false;
+      collected_view_.reset();
       fail(result.error());
     }
     else {
@@ -229,16 +233,27 @@ bool ScriptState::start(Json params)
 
 bool ScriptState::execute(const std::string &source)
 {
-  if (!start({{"source", source}})) {
-    return false;
-  }
+  if (!start({{"source", source}})) { return false; }
+  remember_source(source);
+  return true;
+}
+
+bool ScriptState::execute_collected_view(std::function<std::string(const std::string &)> source, UIHandler open)
+{
+  const auto id = std::to_string(++collected_view_id_);
+  if (!start({{"source", source(id)}}, CollectedView{id, std::move(open)})) { return false; }
+  remember_source(source(""));
+  return true;
+}
+
+void ScriptState::remember_source(const std::string &source)
+{
   if (history_.empty() || history_.back() != source) {
     history_.push_back(source);
     if (history_.size() > 100) {
       history_.erase(history_.begin());
     }
   }
-  return true;
 }
 
 bool ScriptState::execute_file(const std::string &path, const std::string &expected_version)
@@ -282,6 +297,7 @@ bool ScriptState::interrupt()
     return false;
   }
   interrupting_ = true;
+  collected_view_.reset();
   on(client_->call("script.interrupt", {{"session", session_}}), [this](const auto &result) {
     interrupting_ = false;
     if (!result.ok()) {
@@ -358,11 +374,25 @@ void ScriptState::ui_request(const Json &data)
     reply(bridge::Error::make(bridge::ErrorCode::Unavailable, "No desktop executor is attached"));
     return;
   }
-  ui_handler_(io::get_string(data, "operation"), data.at("params"), io::get_int(data, "expires_at_ms", 0),
-              [this, weak, epoch, session] {
-                return weak.lock() && epoch == epoch_ && client_ && session == ui_session_;
-              },
-              std::move(reply));
+  const auto operation = io::get_string(data, "operation");
+  const auto expires = io::get_int(data, "expires_at_ms", 0);
+  const auto valid = [this, weak, epoch, session] {
+    return weak.lock() && epoch == epoch_ && client_ && session == ui_session_;
+  };
+  const auto &params = data.at("params");
+  if (operation == "viewer.open" && params.contains("native_collected_view")) {
+    if (!collected_view_ || io::get_string(params, "native_collected_view") != collected_view_->id) {
+      reply(bridge::Error::make(bridge::ErrorCode::Conflict, "The collected result request is no longer current"));
+      return;
+    }
+    auto open = std::move(collected_view_->open);
+    collected_view_.reset();
+    auto args = params;
+    args.erase("native_collected_view");
+    open(operation, args, expires, valid, std::move(reply));
+    return;
+  }
+  ui_handler_(operation, params, expires, valid, std::move(reply));
 }
 
 }  // namespace stk::app

@@ -93,7 +93,7 @@ Json viewer_status(ViewerState &viewer)
 }  // namespace
 
 void AppShell::perform_viewer_request(wm::Screen &screen, const std::string &operation, const Json &params,
-                                     ScriptState::Completion complete)
+                                     ScriptState::Completion complete, std::function<bool()> collected_current)
 {
   const auto found = operations.find(operation);
   if (found == operations.end()) { complete(Error::make(ErrorCode::Unsupported, "Unknown Viewer operation")); return; }
@@ -160,10 +160,38 @@ void AppShell::perform_viewer_request(wm::Screen &screen, const std::string &ope
     const auto source = classify_path(path, &why, preset_id);
     require(source.kind != SourceKind::None, why);
     require(source.evaluates() || (preset_id.empty() && parameters.empty()), "Payload/result sources do not accept a graph preset or parameters");
-    if (!viewer.open_path(path, preset_id, parameters, params.value("source_proof", Json()))) {
+    const auto proof = params.value("source_proof", Json());
+    std::shared_ptr<std::function<bool()>> destination;
+    std::function<bool()> still_current;
+    if (collected_current) {
+      require(!proof.is_null() && params.value("focus", true), "A collected view requires its verified source and destination");
+      if (screen.ui() && screen.ui()->text_input_active()) {
+        complete(Error::make(ErrorCode::Busy, std::string(store_.tr("app.focus.busy")))); return;
+      }
+      destination = std::make_shared<std::function<bool()>>();
+      still_current = [destination] { return *destination && (*destination)(); };
+    }
+    if (!viewer.open_path(path, preset_id, parameters, proof, std::move(still_current))) {
       complete(Error::make(ErrorCode::InvalidParams, viewer.open_error())); return;
     }
-    if (params.value("focus", true)) { focus_viewer(screen); }
+    if (destination) {
+      const auto activated = activate_editor(&screen, kEditorViewer, false);
+      if (!activated) { viewer.cancel_evaluation(); complete(activated.error()); return; }
+      auto *area = dynamic_cast<EditorArea *>(screen.find_area(io::get_string(activated.value(), "area_id")));
+      if (!area) {
+        viewer.cancel_evaluation();
+        complete(Error::make(ErrorCode::Unavailable, std::string(store_.tr("app.focus.open_failed")))); return;
+      }
+      *destination = [this, weak = lifetime(), screen = &screen, area, editor = area->editor().lifetime(),
+                      activity = area->activity_epoch(), visibility = screen.visibility_epoch(),
+                      current = std::move(collected_current)] {
+        return !weak.expired() && !editor.expired() && has_screen(screen) && has_area(area) &&
+               area->screen() == screen && area->activity_epoch() == activity &&
+               screen->visibility_epoch() == visibility && (!screen->maximized() || screen->maximized() == area) &&
+               current();
+      };
+    }
+    else if (params.value("focus", true)) { focus_viewer(screen); }
   }
   else if (operation == "viewer.close") { viewer.close(); }
   else if (operation == "viewer.configure") {
