@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-11 06:53 UTC · 原生任务 VTI 的 Viewer 候选
+
+Root 独立工作树 `stk-root-native-task-artifact-162` 的 `133a1880bbab64a1246b42dc056269043ba21f4b` 已通过定向 Viewer 22/22。冷启动按确切任务绑定和相对文件路径发一次切片请求，来源显示该文件。属性与 Python 配置保留文件绑定，整次配置在修改设置前核对路径。重访需任务范围、确切路径、发布摘要和已验证画面匹配。保留手动调整过的同文件显示。摘要用于重访匹配，实际下载沿用 Runtime 发布清单校验。独立扫描无发现，证据 `root-delivery-20261111-162/native-vti-viewer/viewer-final.xml`。
+
+Shell 接入候选保存在同目录 `shell-adapter.patch` 和 `shell-guard-test.patch`，待与 Claude 103 的 Jobs 解析组合后构建。读取清单和延后切页之间校验原发起窗口与更新的 Viewer 打开意图，包含尚未采纳的队列请求。真实基线索引和最终实窗复验步骤在 `root-delivery-20261111-162/native-vti-window/baseline-comparison.json` 和 `replay.md`。已有生产 `slice` 预检用实际发布字节重算，制造场为 32×28，范围 −3.4 到 19。尚未交付最终桌面打开链路。
+
 ## 2026-11-11 06:45 UTC · Web 日志补充回归与原生唯一 VTI 首开
 
 `7c144ea08120d76f41ab96b5a834f77c67f7ddae` 选取 Claude 102 最终头 `1ace97a2` 相对首版 `b70f0ede` 的单测试文件追加。宽窄窗各覆盖两条路径。真实鼠标点击固定在日志栏顶部的续读按钮后，栏内 90 px 和结果页外层位置都保留。续读挂起时，新点击的图谱探针仍显示，回文件模式可读追加日志。Root 保留已验证的 `50b66f2e` 产品字节。以该生产产物运行新增四项及完整 Chromium 回归 269/269、零失败与跳过，暂存扫描零发现。证据 `root-delivery-20261111-162/claude-log-followup/full.xml`。
