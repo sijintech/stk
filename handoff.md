@@ -1,5 +1,19 @@
 # STK 当前交接
 
+## 2026-11-11 04:36 UTC · 工作台读取所选 HDF5 分量与任务标准错误
+
+桌面 `1ef5de308dbe2bf3aed81ed9da2cc76a3cac9cd0` 在已收集的 MuPRO HDF5 多分量场中接受明确的零起点分量索引。同一索引用于图计算、Viewer 来源和原始体素。单分量场直接打开。缺失、越界及过长输入保持打开按钮不可用，编辑输入期间无图请求。隔离候选和 root 集成各通过原生定向 19/19，覆盖原始 uint64 值、显示范围、选择生命周期和旧 Viewer 保护。
+
+桌面固定起点为项目表格最大化、已选合成运行和 `/t00000002/Polar` 第 2 步，Linux X11 英文 1600×1100、中文 680×1000，比例 1、无需滚动。旧头 `55534fc0` 一次点击可打开分量 0，同坐标 X=2、Y=1、Z=0 读得 float32 42，界面没有分量选择。集成头从同一状态先点分量输入、填 `1` 并按 Enter，再点打开，共两次点击、一个数字和一次确认键。查看来源后执行体素查询读得 float32 43，来源显示步 2 和分量 1。两窗各一次字段读取、一次显示计算、一次原始体素查询，项目数据库与文件摘要均保持一致。
+
+Web `333a0e6930104f964d67555ac7f3c93227fa7f56` 由 Claude 在独立 `claude/workbench-task-stderr-99` worktree 交付，root 审阅后修复挂起时的键盘焦点和日志与探针的回执顺序。结果区按用户操作顺序呈现最近确认的读数或日志。失败与过期回执保留已确认内容，继续复用 `task.logs`，每次明确读取一个流。生产构建与 240/240 Playwright 全量通过，含宽窄窗的 8 个日志及探针用例。旧版缺少流入口，Claude 初版上的四条 root 回归复现焦点和探针问题。文档站 38 页构建通过。
+
+Web 固定起点为中文 Tasks 已选合成失败任务、滚动为零，Viewer 已打开同一任务的 `scalar-0.vti`。真实本机 Hub、节点和 Runtime 上，Chromium 1440×900 与 390×844 均用两次点击「读取日志 → 标准错误」读取诊断。第一条请求沿用默认 stdout，第二条明确请求 stderr。Runtime stdout 为空、stderr 为 46 字节，界面逐字显示诊断。再点一次「任务」回到原按钮，保持原 Canvas、任务和滚动。模型调用零，任务记录未改变。旧版一次点击只读取空 stdout，无法从该栏切换到 stderr。当前 Web 每次读取流起点的单块内容。
+
+验收回执、截图和测试日志在外部 `root-delivery-20261111-158` 的 `native-hdf5-window`、`native-hdf5-component`、`task-log-window` 和 `web-task-stderr`。本轮使用合成任务与数据。MuPRO 真实主机、SDK/许可、合作方小算例与扫描参数仍待落实，现有收集继续核验 DAT 完成信号。
+
+远端主线仍为 `a184cd213477896a5dd89cb5b0b93c1ca783dccf`。该头 Runtime 13/13、Secret scan 与 Pages 通过。Desktop Linux 主回归 2236/2236，打包与干净机冒烟通过，Windows 和 macOS 仍运行，整轮达到终态后再推送。旧 PR #53、#54 的头未变，均未合入。原四份状态文档的工作区改动和 AOCI 暂存资产已保留。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42955953031) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42955953032) [Pages](https://github.com/sijintech/stk/actions/runs/42955953035) [Secret scan](https://github.com/sijintech/stk/actions/runs/42955953004)
+
 ## 2026-11-11 03:57 UTC · 统一工作台新片已发布到 main
 
 远端 `main` 从 `abdc57f7a8cdc648920b34fe53e54c219719d720` 快进至 `a184cd213477896a5dd89cb5b0b93c1ca783dccf`。已独立核对远端完整 SHA，13 个提交范围扫描零发现。包含新工作区直接呈现首个任务表单、Web 任务草稿目标一致性、成功任务单文件预选、中英文指南和 macOS 静默重显对照。原 AOCI 与状态文档工作区改动已保留。
