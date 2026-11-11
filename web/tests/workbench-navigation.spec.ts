@@ -1,4 +1,4 @@
-// Browser regression for the Hub Web section navigation (工作台 / 任务 / 结果): the explicit 结果 / 读取日志
+// Browser regression for the Hub Web section navigation (工作台 / 任务 / 结果): the explicit 在查看器中打开 / 读取日志
 // shortcuts in Tasks open 结果 in one click with their target in view, and a late result never moves the user.
 // It drives the built app (`npm run build` first, or STK_WEB_DIST=<dir>) in Chromium; page.route serves the
 // files and a mocked hub, so no server, model or network is used. Without a build these tests are skipped.
@@ -28,6 +28,7 @@ const EXAMPLE = fileURLToPath(new URL('../../docs/specs/examples/payload-v2/', i
 const PRESET = {id: 'field-view', name: '场视图', bindings: [{name: 'field'}], parameters: [{name: 'step', type: 'step', default: 'latest'}]};
 const STEPS = [0, 500, 1000];
 const HDF5_ARTIFACT = {path: 'case/run.h5', size: 8192, sha256: 'd'.repeat(64)};
+const digestOf = (path: string) => createHash('sha256').update(path).digest('hex');
 const HDF5_FIELDS = [
   {selector: '/t00000002/Polar', step: 2, name: 'Polar', shape: [4, 3, 2, 3], dtype: 'float32'},
   {selector: '/t00000002/Scalar', step: 2, name: 'Scalar', shape: [4, 3, 2, 1], dtype: 'float32'},
@@ -82,8 +83,18 @@ class Hub {
     }
   }
   later = false;
-  // When set, task.artifacts lists exactly these paths instead of scalar-0.vti (and scalar-1.vti once `later`).
+  // When set, task.artifacts lists exactly these paths instead of scalar-0.vti (and scalar-1.vti once `later`). Each is
+  // published as the Runtime describes it, with a size and a lowercase SHA-256 (here of its path, a synthetic stand-in).
+  // `artifactRows` answers exactly these entries instead, for malformed or digest-less lists.
   artifactPaths?: string[];
+  artifactRows?: unknown[];
+  // `queueArtifacts`: each task.artifacts read then waits, in arrival order, in `artifactQueue` until the test calls
+  // its release. `artifactReadError` refuses the read-only node read with that status. `reviewKinds`: an action of
+  // these kinds goes to execution review, which GET actions then lists, instead of running.
+  queueArtifacts = false;
+  readonly artifactQueue: (() => void)[] = [];
+  artifactReadError?: number;
+  readonly reviewKinds = new Set<string>();
   readonly artifactPathsByTask = new Map<string, string[]>();
   readKinds = ['task.get', 'task.artifacts', 'task.events'];
   readonly taskReadResults = new Map<string, unknown>();
@@ -125,6 +136,7 @@ class Hub {
   logFault: null | 'offset' | 'next_offset' | 'base64' | 'no-offsets' = null;
   readonly viewErrors = new Map<string, string>();
   reportedViewSource?: {task_id: string; path: string} | 'omit';
+  reportedViewDigest?: string;
   // Payloads of the view.build and view.probe actions, in order: which task and artifact each one asked for.
   readonly builds: Record<string, any>[] = [];
   readonly probes: Record<string, any>[] = [];
@@ -154,13 +166,15 @@ class Hub {
   }
   private async publishedArtifacts(taskId: string) {
     const later = this.later;
+    if (this.queueArtifacts) await new Promise<void>(resolve => this.artifactQueue.push(resolve));
     await this.gate(`task.artifacts ${taskId}`);
     await this.gate('task.artifacts');
     const hdf5 = this.hdf5Artifacts.get(taskId);
     if (hdf5) return [hdf5, {path: 'case/Polar.00000002.dat', size: 1024}];
+    if (this.artifactRows) return this.artifactRows;
     const paths = this.artifactPathsByTask.get(taskId) ?? this.artifactPaths ??
       ['scalar-0.vti', ...(later ? ['scalar-1.vti'] : [])];
-    return paths.map(path => ({path, size: 10}));
+    return paths.map(path => ({path, size: 10, sha256: digestOf(path)}));
   }
   async install(page: Page) {
     await page.addInitScript(() => sessionStorage.setItem('stk-token', 'abcdefghijklmnopqrstu'));
@@ -261,7 +275,10 @@ class Hub {
       }
       // The running task's event log: no new events yet.
       if (kind === 'task.events') return json({result: {events: [], next_offset: 0, size: 0, terminal: false}});
-      if (kind === 'task.artifacts') return json({result: await this.publishedArtifacts(request.postDataJSON().payload?.task_id)});
+      if (kind === 'task.artifacts') {
+        if (this.artifactReadError) return json({detail: '无权读取任务产物'}, this.artifactReadError);
+        return json({result: await this.publishedArtifacts(request.postDataJSON().payload?.task_id)});
+      }
     }
     if (path === 'actions' && request.method() === 'POST') {
       const body = request.postDataJSON();
@@ -271,11 +288,18 @@ class Hub {
       const viewError = this.viewErrors.get(body.kind);
       await this.gate(body.kind);
       if (viewError) return json({detail: viewError}, 502);
+      if (this.reviewKinds.has(body.kind)) {
+        const item = {id: body.id, state: 'review', review_reason: '读取或构建需要执行复核', request: {kind: body.kind, payload: body.payload}};
+        this.actionRows.unshift(item);
+        return json(item);
+      }
       if (body.kind === 'view.build') {
         const field = this.field;
         const source = this.reportedViewSource ?? {task_id: body.payload.task_id, path: body.payload.path};
+        const dataset_id = this.reportedViewDigest ?? digestOf(body.payload.path);
         return json({id: body.id, state: 'succeeded',
-          result: {...scene, manifest: {...scene.manifest, field, value_range: this.valueRange, ...(source === 'omit' ? {} : {source})}}});
+          result: {...scene, manifest: {...scene.manifest, field, dataset_id, value_range: this.valueRange,
+            ...(source === 'omit' ? {} : {source})}}});
       }
       if (body.kind === 'view.probe') {
         return json({id: body.id, state: 'succeeded', result: {position: body.payload.position, values: [0.5], units: 'V'}});
@@ -386,7 +410,7 @@ class Hub {
 
 const nav = (page: Page) => page.getByRole('navigation', {name: '工作区'});
 const go = (page: Page, label: string) => nav(page).getByRole('button', {name: label, exact: true}).click();
-const shortcut = (page: Page, label: '结果' | '读取日志') => page.locator('aside.tasks .inline').getByRole('button', {name: label, exact: true});
+const shortcut = (page: Page, label: '在查看器中打开' | '读取日志') => page.locator('aside.tasks .inline').getByRole('button', {name: label, exact: true});
 const surfaces = {工作台: 'aside.chat', 任务: 'aside.tasks', 结果: 'section.analysis'} as const;
 const footer = (page: Page) => page.locator('footer');
 // 任务 keeps the run environment and the new task form in disclosures under the queue.
@@ -421,7 +445,7 @@ function posts(page: Page) {
 
 // Paired app with the task selected in 任务 (a list click stays in 任务), drafts in 工作台 and 任务,
 // a loaded scene with a moved camera and a probe input in 结果. Ends in 任务.
-async function setup(page: Page, hub: Hub, {scene: withScene = true} = {}) {
+async function setup(page: Page, hub: Hub, {scene: withScene = true, verifiedTask = true} = {}) {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(String(e)));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
@@ -435,7 +459,7 @@ async function setup(page: Page, hub: Hub, {scene: withScene = true} = {}) {
   await selectEnvironment(page, project(page), ws);
   await page.getByRole('button', {name: /解析场验证/}).click();
   await expectActive(page, '任务');
-  await expect(page.getByRole('region', {name: '所选任务状态'})).toContainText('已读取 Runtime 状态');
+  if (verifiedTask) await expect(page.getByRole('region', {name: '所选任务状态'})).toContainText('已读取 Runtime 状态');
   await disclosure(page, '新建任务').click();
   await page.getByLabel('TaskSpec').fill('{"argv":["python3","draft.py"],"outputs":[]}');
   if (withScene) {
@@ -459,7 +483,7 @@ async function setup(page: Page, hub: Hub, {scene: withScene = true} = {}) {
 
 // Freeze timers so periodic hub polls cannot add requests while one explicit click is counted.
 async function freeze(page: Page) {
-  await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 20);
+  await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 500);
   await page.waitForTimeout(300);
 }
 
@@ -499,7 +523,7 @@ for (const viewport of viewports) {
   test.describe(viewport.name, () => {
     test.use({viewport: {width: viewport.width, height: viewport.height}});
 
-    test('Tasks 结果 opens 结果 in one click and shows the files it reads', async ({page}) => {
+    test('Tasks 在查看器中打开 opens 结果 in one click and shows the files it reads', async ({page}) => {
       const hub = new Hub();
       const errors = await setup(page, hub);
       const fileList = page.getByLabel('结果文件');
@@ -517,7 +541,7 @@ for (const viewport of viewports) {
       hub.later = true;
       const release = hub.hold('task.artifacts');
       const sent = posts(page);
-      await shortcut(page, '结果').click();
+      await shortcut(page, '在查看器中打开').click();
       // One click: 结果 is open and the file list is in view while the read is still pending.
       await expectActive(page, '结果');
       await expect(fileList).toBeInViewport();
@@ -629,9 +653,13 @@ for (const viewport of viewports) {
 
     test('a held shortcut read completes without moving the user', async ({page}) => {
       const hub = new Hub();
+      hub.artifactRows = [{path: 'scalar-0.vti', size: 10}];
       const errors = await setup(page, hub, {scene: false});
       const fileList = page.getByLabel('结果文件'), log = page.locator('section.analysis details.logs pre');
-      for (const [label, kind, away] of [['结果', 'task.artifacts', '任务'], ['读取日志', 'task.logs', '工作台']] as const) {
+      await go(page, '结果');
+      await expect(fileList.locator('option', {hasText: 'scalar-0.vti'})).toHaveCount(1);
+      hub.artifactRows = undefined;
+      for (const [label, kind, away] of [['在查看器中打开', 'task.artifacts', '任务'], ['读取日志', 'task.logs', '工作台']] as const) {
         await go(page, '任务');
         hub.later = true;
         const release = hub.hold(kind);
@@ -679,7 +707,7 @@ for (const viewport of viewports) {
       });
     }
 
-    test('Tasks 结果 keeps the chosen 图谱 mode and its panel', async ({page}) => {
+    test('Tasks 在查看器中打开 keeps the chosen 图谱 mode and its panel', async ({page}) => {
       const hub = new Hub();
       const errors = await setup(page, hub, {scene: false});
       await go(page, '结果');
@@ -693,7 +721,7 @@ for (const viewport of viewports) {
       await freeze(page);
       hub.later = true;
       const sent = posts(page);
-      await shortcut(page, '结果').click();
+      await shortcut(page, '在查看器中打开').click();
       await expectActive(page, '结果');
       const tab = page.getByRole('tab', {name: '图谱'});
       await expect(tab).toHaveAttribute('aria-selected', 'true');
@@ -771,7 +799,7 @@ for (const viewport of viewports) {
       await r.click(row, '任务行');
       await expect(status(page)).toContainText('已读取 Runtime 状态');
       await expect(page.locator('aside.tasks .task-scope')).toHaveText('所选任务 · 节点甲 · 项目一');
-      await expect(shortcut(page, '结果')).toBeInViewport({ratio: 1});
+      await expect(shortcut(page, '在查看器中打开')).toBeInViewport({ratio: 1});
       await page.screenshot({path: test.info().outputPath(`${viewport.name}-connected-selected.png`)});
       // Initial setup has already folded. The next action opens its own disclosure.
       const at = [await top(queue(page)), await top(status(page))];
@@ -1196,7 +1224,7 @@ for (const viewport of viewports) {
       const sent = posts(page);
       const r = route(page, `${viewport.name}-result-source`);
       // The existing one-click shortcut: 结果 opens with the list it reads, and the source line already in view.
-      await r.click(shortcut(page, '结果'), 'Tasks 结果');
+      await r.click(shortcut(page, '在查看器中打开'), 'Tasks 在查看器中打开');
       await expectActive(page, '结果');
       await expect(source(page)).toBeInViewport();
       await expect(fileList.locator('option', {hasText: 'scalar-1.vti'})).toHaveCount(1);
@@ -1471,7 +1499,7 @@ for (const viewport of viewports) {
       await go(page, '任务');
       const r = route(page, `${viewport.name}-source-details`);
       // The existing one-click shortcut is unchanged: 结果 with its file list focused and the summary line in view.
-      await r.click(shortcut(page, '结果'), 'Tasks 结果');
+      await r.click(shortcut(page, '在查看器中打开'), 'Tasks 在查看器中打开');
       await expectActive(page, '结果');
       await expect(fileList).toBeFocused();
       await expect(fileList.locator('option', {hasText: 'scalar-1.vti'})).toHaveCount(1);
@@ -2264,7 +2292,7 @@ for (const viewport of viewports) {
       await draft(page).fill('B 的草稿');
       expect(await scroll()).toEqual(offsets);
       await go(page, '任务');
-      await shortcut(page, '结果').click();
+      await shortcut(page, '在查看器中打开').click();
       await expectActive(page, '结果');
       await go(page, '任务');
       await shortcut(page, '读取日志').click();
@@ -3777,13 +3805,13 @@ const focused = (page: Page) => page.evaluate(() => {
 async function place(page: Page) {
   await queue(page).locator('.task-list').evaluate(el => { el.scrollTop = 160; });
   await page.locator('aside.tasks').evaluate(el => {
-    const at = [...el.querySelectorAll('.inline > button')].find(b => b.textContent === '结果')!.getBoundingClientRect();
+    const at = [...el.querySelectorAll('.inline > button')].find(b => b.textContent === '在查看器中打开')!.getBoundingClientRect();
     const area = el.getBoundingClientRect();
     el.scrollTop += at.top + at.height / 2 - (area.top + area.height / 2);
   });
   const at = await offsets(page);
   expect(at.queue).toBe(160);
-  for (const name of ['结果', '读取日志'] as const) await expect(shortcut(page, name)).toBeInViewport({ratio: 1});
+  for (const name of ['在查看器中打开', '读取日志'] as const) await expect(shortcut(page, name)).toBeInViewport({ratio: 1});
   return at;
 }
 // Pixels of the scrolled queue and of the unsubmitted TaskSpec (apart from the shortcut, whose focus ring may differ).
@@ -4353,8 +4381,8 @@ for (const viewport of viewports) {
   test.describe(`${viewport.name} 任务 return focus`, () => {
     test.use({viewport: {width: viewport.width, height: viewport.height}});
 
-    for (const [launcher, how, graph] of [['结果', 'pointer', false], ['结果', 'Enter', false], ['读取日志', 'pointer', false],
-      ['读取日志', 'Space', false], ['结果', 'pointer', true]] as const) {
+    for (const [launcher, how, graph] of [['在查看器中打开', 'pointer', false], ['在查看器中打开', 'Enter', false], ['读取日志', 'pointer', false],
+      ['读取日志', 'Space', false], ['在查看器中打开', 'pointer', true]] as const) {
       test(`${launcher} by ${how}${graph ? ' in 图谱' : ''} then 任务 returns the focus to ${launcher} and keeps 任务 and 结果`, async ({page}) => {
         const hub = new Hub();
         const ready = await prepare(page, hub, {graph});
@@ -4377,9 +4405,9 @@ for (const viewport of viewports) {
         await page.screenshot({path: test.info().outputPath(`${viewport.name}-returned.png`)});
         await expectKept(page, ready, 'after');
         sent.stop(); seen.stop();
-        const read = launcher === '结果' ? '/api/v1/nodes/{node}/read task.artifacts' : '/api/v1/actions task.logs';
+        const read = launcher === '在查看器中打开' ? '/api/v1/nodes/{node}/read task.artifacts' : '/api/v1/actions task.logs';
         expect(sent.seen).toEqual([read]);
-        expect(seen.seen).toEqual([launcher === '结果' ? 'POST nodes/{node}/read task.artifacts' : 'POST actions task.logs']);
+        expect(seen.seen).toEqual([launcher === '在查看器中打开' ? 'POST nodes/{node}/read task.artifacts' : 'POST actions task.logs']);
         expect([hub.evaluations, hub.calls, hub.replies, hub.messages]).toEqual([[], [], 0, []]);
         expect(r.record).toMatchObject(how === 'pointer' ? {clicks: 2, keys: 0} : {clicks: 0, keys: 2});
         r.save();
@@ -4401,15 +4429,15 @@ for (const viewport of viewports) {
         const sent = posts(page);
         const r = measured(page, `${viewport.name}-rail-${how}`);
         // A shortcut trip earlier is used up by its own return and by a later plain one.
-        await r.activate(shortcut(page, '结果'), how, '结果');
+        await r.activate(shortcut(page, '在查看器中打开'), how, '在查看器中打开');
         await expect(footer(page)).toContainText('就绪');
         await r.activate(railButton(page, '任务'), how, '任务');
-        await expect(shortcut(page, '结果')).toBeFocused();
+        await expect(shortcut(page, '在查看器中打开')).toBeFocused();
         for (const step of ['结果', '任务'] as const) await r.activate(railButton(page, step), how, step);
         await expectActive(page, '任务');
         await expect(railButton(page, '任务')).toBeFocused();
         // The shortcut trip, then 结果 twice from the rail: 结果 again in place is passive as well.
-        await r.activate(shortcut(page, '结果'), how, '结果');
+        await r.activate(shortcut(page, '在查看器中打开'), how, '在查看器中打开');
         await expect(footer(page)).toContainText('就绪');
         for (const step of ['结果', '任务'] as const) await r.activate(railButton(page, step), how, step);
         await expect(railButton(page, '任务')).toBeFocused();
@@ -4442,7 +4470,7 @@ for (const viewport of viewports) {
         }]);
       }
       for (const [name, trip] of trips) {
-        await shortcut(page, '结果').click();
+        await shortcut(page, '在查看器中打开').click();
         await expectActive(page, '结果');
         await expect(footer(page)).toContainText('就绪');
         await trip();
@@ -4462,7 +4490,7 @@ for (const viewport of viewports) {
     test('a held read leaves the busy shortcut unfocused on return, and its late reply moves nothing', async ({page}) => {
       const hub = new Hub();
       const ready = await prepare(page, hub);
-      for (const [launcher, kind] of [['结果', 'task.artifacts'], ['读取日志', 'task.logs']] as const) {
+      for (const [launcher, kind] of [['在查看器中打开', 'task.artifacts'], ['读取日志', 'task.logs']] as const) {
         const release = hub.hold(kind);
         hub.reached.clear();
         await shortcut(page, launcher).click();
@@ -4486,13 +4514,13 @@ for (const viewport of viewports) {
       test(`a shortcut ${clip} out of view on return keeps the focus on the rail and the offsets`, async ({page}) => {
         const hub = new Hub();
         const ready = await prepare(page, hub);
-        await shortcut(page, '结果').click();
+        await shortcut(page, '在查看器中打开').click();
         await expectActive(page, '结果');
         await expect(footer(page)).toContainText('就绪');
         // A shorter window in 结果 (the same side of the compact width) puts the shortcut under the bottom of 任务;
         // the queue's height follows the window, so it is shortened 4 px at a time until the shortcut is clipped.
         const clipped = () => page.locator('aside.tasks').evaluate((el, clip) => {
-          const at = [...el.querySelectorAll('.inline > button')].find(b => b.textContent === '结果')!.getBoundingClientRect();
+          const at = [...el.querySelectorAll('.inline > button')].find(b => b.textContent === '在查看器中打开')!.getBoundingClientRect();
           const bottom = el.getBoundingClientRect().bottom;
           return clip === 'partly' ? at.top < bottom - 4 && at.bottom > bottom : at.top >= bottom;
         }, clip);
@@ -4504,7 +4532,7 @@ for (const viewport of viewports) {
         expect(at.queue).toBeGreaterThan(0);
         await railButton(page, '任务').click();
         await expectActive(page, '任务');
-        const visible = await shortcut(page, '结果').evaluate(el => {
+        const visible = await shortcut(page, '在查看器中打开').evaluate(el => {
           const at = el.getBoundingClientRect(), area = el.closest('aside')!.getBoundingClientRect();
           return [at.top < area.bottom, at.bottom <= area.bottom];
         });
@@ -4519,10 +4547,10 @@ for (const viewport of viewports) {
       const hub = new Hub();
       const ready = await prepare(page, hub);
       // Leaving the task and selecting the same ID again, then a plain rail trip.
-      await shortcut(page, '结果').click();
+      await shortcut(page, '在查看器中打开').click();
       await expect(footer(page)).toContainText('就绪');
       await railButton(page, '任务').click();
-      await expect(shortcut(page, '结果')).toBeFocused();
+      await expect(shortcut(page, '在查看器中打开')).toBeFocused();
       await queue(page).locator('.task').filter({has: page.locator('span', {hasText: /^额外任务 5$/})}).click();
       await expect(page.locator('aside.tasks .task.selected')).toHaveText(/额外任务 5/);
       await queue(page).getByRole('button', {name: /解析场验证/}).click();
@@ -4533,7 +4561,7 @@ for (const viewport of viewports) {
       // The node is revoked while 结果 shows the shortcut's result: the scope and its shortcut are gone on return,
       // and stay gone when the node is listed again.
       await place(page);
-      await shortcut(page, '结果').click();
+      await shortcut(page, '在查看器中打开').click();
       await expect(footer(page)).toContainText('就绪');
       hub.device = {...longQueue, revoked: true};
       hub.publish();
@@ -4543,7 +4571,7 @@ for (const viewport of viewports) {
       await expect(page.getByLabel('执行节点').locator('option')).toHaveCount(2);
       await railButton(page, '任务').click();
       await expectActive(page, '任务');
-      await expect(shortcut(page, '结果')).toHaveCount(0);
+      await expect(shortcut(page, '在查看器中打开')).toHaveCount(0);
       await expect(railButton(page, '任务')).toBeFocused();
       expect(ready.errors).toEqual([]);
     });
@@ -4555,7 +4583,7 @@ test('History opened by narrowing clears the old Tasks shortcut return', async (
   await page.setViewportSize(wide);
   const hub = new Hub();
   const ready = await prepare(page, hub);
-  await shortcut(page, '结果').click();
+  await shortcut(page, '在查看器中打开').click();
   await expectActive(page, '结果');
   await expect(footer(page)).toContainText('就绪');
   await historyPanel(page).getByRole('button', {name: '新对话', exact: true}).focus();
@@ -4568,7 +4596,7 @@ test('History opened by narrowing clears the old Tasks shortcut return', async (
   const at = await offsets(page);
   await railButton(page, '任务').click();
   await expectActive(page, '任务');
-  await expect(shortcut(page, '结果')).toBeInViewport({ratio: 1});
+  await expect(shortcut(page, '在查看器中打开')).toBeInViewport({ratio: 1});
   await expect(railButton(page, '任务')).toBeFocused();
   expect(await offsets(page)).toEqual(at);
   expect(await state(page)).toEqual(ready.before);
@@ -5228,7 +5256,7 @@ for (const viewport of viewports) {
       await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
       await taskRow(page, '解析场验证').click();
       await expect(status(page)).toContainText('已读取 Runtime 状态');
-      await expect(shortcut(page, '结果')).toBeInViewport({ratio: 1});
+      await expect(shortcut(page, '在查看器中打开')).toBeInViewport({ratio: 1});
       const surface = page.locator('aside.tasks');
       await surface.evaluate(el => { el.scrollTop = 0; });
       await pause(page);
@@ -5796,93 +5824,458 @@ test('a new workspace the node lists only later opens 新建任务 at once, keep
   expect(errors).toEqual([]);
 });
 
-// 结果 from a selected task's 结果 shortcut, with exactly one file the 结果文件 list can show: the reply that shortcut
-// itself read and adopted preselects that path in 结果文件 mode, and nothing else. No view.build is sent, the focus
-// stays on the list and the Viewer is untouched; 加载视图 is still the user's explicit click. More files, none,
-// an existing or cleared choice, the 结果 nav button, 读取日志 and 图谱 keep the list as it is, as does a reply that
-// arrives after the task changed, 结果 was left, the mode switched, the history covered 结果 or the choice was edited.
+// 结果 from a selected successful task's 在查看器中打开, as the desktop names it. When the list that click itself read
+// and adopted publishes exactly one VTI, with a canonical path, a whole size and a lowercase SHA-256, beside only
+// .log/.txt/.md notes, 结果文件 opens it in one step: that path is chosen and one view.build of the current slice
+// options shows it, for that exact task and path. Any other list with exactly one file the 结果文件 list can show
+// (no digest, NPY, DAT, VTK, a VTI beside another result, an ambiguous list) only preselects it, and 加载视图 stays
+// the user's explicit click. More files, none, an existing or cleared choice, a shown Viewer, the 结果 nav button,
+// 读取日志 and 图谱 keep the list as it is, as does a reply that arrives after the task or project changed, 结果
+// was left, the mode switched, the history covered 结果 or the choice was edited; a 视图 edit while the list is read
+// keeps the choice but leaves the build to 加载视图.
 const fileList = (page: Page) => page.getByLabel('结果文件');
 const loadButton = (page: Page) => page.getByRole('button', {name: '加载视图'});
 const listed = async (page: Page) => (await fileList(page).locator('option').allTextContents()).slice(1);
+const openInViewer = (page: Page) => shortcut(page, '在查看器中打开');
+const built = (hub: Hub) => hub.builds.map(b => [b.task_id, b.path, b.options]);
+const sliceOf = (path: string, axis = 2, index = 0) => [task, path, {mode: 'slice', axis, index}];
+const LIST_READ = '/api/v1/nodes/{node}/read task.artifacts', LIST_ACTION = '/api/v1/actions task.artifacts';
+const REVIEW_NOTE = '操作等待复核，请在任务面板查看完整参数。';
 async function settled(page: Page) {
   await expect(footer(page)).toContainText('就绪');
   await page.waitForTimeout(300);
 }
+// Lists that keep the two-step route: the one file the list shows is chosen, and nothing is built.
+const published = (path: string, extra: Record<string, unknown> = {}) => ({path, size: 10, sha256: digestOf(path), ...extra});
+const TWO_STEP: [string, unknown[], string][] = [
+  ['a VTI published without a digest', [{path: 'scalar-0.vti', size: 10}], 'scalar-0.vti'],
+  ['a VTI with an uppercase digest', [published('scalar-0.vti', {sha256: digestOf('scalar-0.vti').toUpperCase()})], 'scalar-0.vti'],
+  ['an empty VTI', [published('scalar-0.vti', {size: 0})], 'scalar-0.vti'],
+  ['a sole NPY', [published('notes.txt'), published('field.npy')], 'field.npy'],
+  ['a sole DAT', [published('case/Polar.00001000.dat')], 'case/Polar.00001000.dat'],
+  ['a sole VTK', [published('mesh.vtk')], 'mesh.vtk'],
+  ['a VTI beside a result JSON', [published('scalar-0.vti'), published('result.json')], 'scalar-0.vti'],
+  ['a VTI beside an HDF5 file', [published('scalar-0.vti'), published('case/run.h5')], 'scalar-0.vti'],
+  ['a result JSON listed before a VTI', [published('result.json'), published('scalar-0.vti')], 'scalar-0.vti'],
+  ['a VTI with a non-canonical path', [published('./scalar-0.vti')], './scalar-0.vti'],
+  ['a VTI that names the directory of a note', [published('out.vti'), published('out.vti/notes.txt')], 'out.vti'],
+  ['a VTI beside notes repeated by case', [published('scalar-0.vti'), published('notes.txt'), published('NOTES.txt')], 'scalar-0.vti'],
+  ['a VTI beside a note of negative size', [published('scalar-0.vti'), published('run.log', {size: -1})], 'scalar-0.vti'],
+];
 for (const viewport of viewports) {
   test.describe(`${viewport.name} single result file`, () => {
     test.use({viewport: {width: viewport.width, height: viewport.height}});
 
     for (const legacy of [false, true]) {
-      test(`Tasks 结果 preselects the only viewable file ${legacy ? 'through the legacy task.artifacts action' : 'through the read-only node read'} and 加载视图 builds that file once`, async ({page}) => {
+      test(`在查看器中打开 opens the sole published VTI in one click ${legacy ? 'through the legacy task.artifacts action' : 'through the read-only node read'}, and 任务 returns to it`, async ({page}) => {
         const hub = new Hub();
-        // A non-viewable file next to it: the list and the count use the same extension test.
-        hub.artifactPaths = ['notes.txt', 'scalar-0.vti'];
+        // Notes beside it: logs and text are not results.
+        hub.artifactPaths = ['notes.txt', 'run.log', 'README.md', 'scalar-0.vti'];
         if (legacy) hub.readKinds = ['task.get', 'task.events'];
+        const release = hub.hold('task.artifacts');
         const errors = await setup(page, hub, {scene: false});
         await freeze(page);
         const sent = posts(page);
-        const r = route(page, `${viewport.name}-${legacy ? 'legacy' : 'read'}-single-result`);
-        const release = hub.hold('task.artifacts');
-        hub.reached.clear();
-        await r.click(shortcut(page, '结果'), 'Tasks 结果');
+        const list = legacy ? LIST_ACTION : LIST_READ;
+        const r = route(page, `${viewport.name}-${legacy ? 'legacy' : 'read'}-sole-vti`);
+        await r.click(openInViewer(page), '在查看器中打开');
         await expectActive(page, '结果');
         await expect(fileList(page)).toBeFocused();
         await expect.poll(() => hub.reached.has('task.artifacts')).toBe(true);
+        // While its list is read nothing is chosen or built, and 结果 names no file yet.
         await expect(fileList(page)).toHaveValue('');
+        await expect(source(page)).toHaveText(shown('尚未加载结果文件'));
+        expect(hub.builds).toEqual([]);
+        expect(sent.seen).toEqual(legacy ? [list] : []);
         release();
+        await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+        await expect(page.locator('section.analysis .legend')).toBeVisible();
+        await expect(title(page)).toHaveText('phi');
         await expect(fileList(page)).toHaveValue('scalar-0.vti');
         expect(await listed(page)).toEqual(['scalar-0.vti']);
         await settled(page);
-        // Chosen, not loaded: no build, the focus where the click left it, the Viewer still empty.
         await expect(fileList(page)).toBeFocused();
-        await expect(source(page)).toHaveText(`${shown('尚未加载结果文件')}${pending('scalar-0.vti')}`);
-        await expect(title(page)).toHaveText('科学结果');
-        await expect(page.locator('section.analysis .legend')).toHaveCount(0);
-        expect(hub.builds).toEqual([]);
-        expect(sent.seen).toEqual([legacy ? '/api/v1/actions task.artifacts' : '/api/v1/nodes/{node}/read task.artifacts']);
-        await r.click(loadButton(page), '加载视图');
-        await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
-        await expect(page.locator('section.analysis .legend')).toBeVisible();
+        expect(built(hub)).toEqual([sliceOf('scalar-0.vti')]);
+        expect(sent.seen).toEqual([...(legacy ? [list] : []), '/api/v1/actions view.build']);
+        // Fixed start: 任务 with the successful task selected, 结果文件 mode, no Viewer. Was 结果 + 加载视图.
+        expect(r.record).toMatchObject({clicks: 1, selects: 0});
+        await page.screenshot({path: test.info().outputPath(`${viewport.name}-${legacy ? 'legacy' : 'read'}-sole-vti.png`)});
+        // One click back: 任务 returns the focus to the launcher. Opening the same task again lists it and keeps the scene.
+        await page.locator('section.analysis .viewport canvas').evaluate(el => { (el as any).__marker = 'same-canvas'; });
+        await r.click(nav(page).getByRole('button', {name: '任务', exact: true}), '任务');
+        await expectActive(page, '任务');
+        await expect(openInViewer(page)).toBeFocused();
+        await page.screenshot({path: test.info().outputPath(`${viewport.name}-${legacy ? 'legacy' : 'read'}-sole-vti-returned.png`)});
+        await r.click(openInViewer(page), '在查看器中打开');
+        await expectActive(page, '结果');
         await settled(page);
         sent.stop();
-        expect(hub.builds.map(b => [b.task_id, b.path])).toEqual([[task, 'scalar-0.vti']]);
-        expect(writes(sent.seen)).toEqual([...(legacy ? ['/api/v1/actions task.artifacts'] : []), '/api/v1/actions view.build']);
-        // Fixed start: 任务 with the task selected, 结果文件 mode, nothing chosen. Was 结果 + select + 加载视图.
-        expect(r.record).toMatchObject({clicks: 2, selects: 0});
+        expect(await canvasMarker(page)).toBe('same-canvas');
+        await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+        expect(built(hub)).toEqual([sliceOf('scalar-0.vti')]);
+        expect(sent.seen).toEqual([...(legacy ? [list] : []), '/api/v1/actions view.build', list]);
+        expect([hub.evaluations, hub.probes, hub.calls, hub.replies, hub.messages, hub.creates]).toEqual([[], [], [], 0, [], []]);
+        expect(r.record).toMatchObject({clicks: 3, selects: 0});
         r.save();
-        await page.screenshot({path: test.info().outputPath(`${viewport.name}-${legacy ? 'legacy' : 'read'}-single-result.png`)});
+        // Drafts and the task are kept.
+        await expect(page.getByLabel('对话内容')).toHaveValue('未发送的草稿：分析 phi 场');
+        await expect(page.getByLabel('TaskSpec')).toHaveValue('{"argv":["python3","draft.py"],"outputs":[]}');
+        await expect(page.locator('aside.tasks .task.selected')).toContainText('解析场验证');
         expect(errors).toEqual([]);
       });
     }
 
-    test('a failed legacy list read or a failed 加载视图 keeps its existing error', async ({page}) => {
+    for (const [what, rows, file] of TWO_STEP) {
+      test(`在查看器中打开 with ${what} only preselects it for 加载视图`, async ({page}) => {
+        const hub = new Hub();
+        hub.artifactRows = rows;
+        const errors = await setup(page, hub, {scene: false});
+        await openInViewer(page).click();
+        await expect(fileList(page)).toHaveValue(file);
+        await settled(page);
+        await expect(fileList(page)).toBeFocused();
+        await expect(source(page)).toHaveText(`${shown('尚未加载结果文件')}${pending(file)}`);
+        await expect(page.locator('section.analysis .legend')).toHaveCount(0);
+        expect(hub.builds).toEqual([]);
+        await loadButton(page).click();
+        await expect(source(page)).toHaveText(shown(`显示 ${file}`));
+        expect(built(hub)).toEqual([sliceOf(file)]);
+        expect(errors).toEqual([]);
+      });
+    }
+
+    test('a failed legacy list read or a failed one-step build keeps its existing error and 加载视图', async ({page}) => {
       const hub = new Hub();
       hub.readKinds = ['task.get', 'task.events'];
       hub.viewErrors.set('task.artifacts', '无权读取任务产物');
       const errors = await setup(page, hub, {scene: false});
-      await shortcut(page, '结果').click();
+      await openInViewer(page).click();
       await expect(page.getByRole('alert')).toContainText('无权读取任务产物');
       await settled(page);
       await expect(fileList(page)).toHaveValue('');
       expect(await listed(page)).toEqual([]);
+      expect(hub.builds).toEqual([]);
       await page.getByRole('alert').getByRole('button', {name: '关闭'}).click();
       hub.viewErrors.delete('task.artifacts');
       hub.viewErrors.set('view.build', '视图构建被拒绝');
       await go(page, '任务');
-      await shortcut(page, '结果').click();
+      await openInViewer(page).click();
+      // The one build is reported as 加载视图 reports it; the choice stays for an explicit retry.
+      await expect(page.getByRole('alert')).toContainText('视图构建被拒绝');
+      await settled(page);
+      await expect(fileList(page)).toHaveValue('scalar-0.vti');
+      await expect(source(page)).toHaveText(`${shown('尚未加载结果文件')}${pending('scalar-0.vti')}`);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti')]);
+      hub.viewErrors.delete('view.build');
+      await loadButton(page).click();
+      await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti'), sliceOf('scalar-0.vti')]);
+      expect(unexpected(errors, 502)).toEqual([]);
+    });
+
+    test('a refused current artifact read cannot fall back to a legacy action or build', async ({page}) => {
+      const hub = new Hub();
+      hub.readKinds = ['task.get', 'task.events'];
+      const errors = await setup(page, hub, {scene: false});
+      let release!: () => void;
+      const held = new Promise<void>(resolve => { release = resolve; });
+      let asked = false;
+      await page.route('**/api/v1/nodes/*/read', async route => {
+        const body = route.request().postDataJSON();
+        if (body?.kind !== 'task.artifacts' || body?.payload?.task_id !== task) return route.fallback();
+        asked = true;
+        await held;
+        await route.fulfill({status: 403, json: {detail: '无权读取任务产物'}});
+      });
+      const sent = posts(page);
+      const launcher = openInViewer(page);
+      try {
+        // Advertise the node read and hold its exact-task response through the shortcut.
+        hub.readKinds = ['task.get', 'task.events', 'task.artifacts'];
+        hub.publish();
+        await expect.poll(() => asked).toBe(true);
+        await launcher.click();
+        await expectActive(page, '结果');
+        await expect(fileList(page)).toHaveValue('');
+        expect(hub.builds).toEqual([]);
+      } finally {
+        release();
+      }
+      await expect(page.getByRole('button', {name: '连接工作台 →'})).toBeVisible();
+      await page.waitForTimeout(300);
+      sent.stop();
+      expect(sent.seen).toContain('/api/v1/nodes/{node}/read task.artifacts');
+      expect(writes(sent.seen)).toEqual([]);
+      expect(hub.builds).toEqual([]);
+      expect(unexpected(errors, 403)).toEqual([]);
+    });
+
+    test('a legacy artifact action in review cannot adopt its result envelope or build', async ({page}) => {
+      const hub = new Hub();
+      hub.readKinds = ['task.get', 'task.events'];
+      const errors = await setup(page, hub, {scene: false});
+      await page.route('**/api/v1/actions', async route => {
+        const body = route.request().postDataJSON();
+        if (route.request().method() !== 'POST' || body?.kind !== 'task.artifacts') return route.fallback();
+        expect(body.payload).toEqual({task_id: task});
+        const item = {id: body.id, state: 'review', review_reason: '读取结果文件需要执行复核',
+          request: {kind: body.kind, payload: body.payload},
+          result: [{path: 'scalar-0.vti', sha256: 'a'.repeat(64), size: 1024}]};
+        hub.actionRows.unshift(item);
+        await route.fulfill({json: item});
+      });
+      const sent = posts(page);
+      await openInViewer(page).click();
+      await expectActive(page, '结果');
+      await expect(page.getByRole('alert')).toContainText('操作等待复核');
+      await settled(page);
+      await expect(fileList(page)).toHaveValue('');
+      expect(await listed(page)).toEqual([]);
+      await expect(page.locator('section.analysis .viewport canvas')).toHaveCount(0);
+      sent.stop();
+      expect(writes(sent.seen)).toEqual(['/api/v1/actions task.artifacts']);
+      expect(hub.builds).toEqual([]);
+      expect(errors).toEqual([]);
+    });
+
+    test('a build sent to execution review keeps its choice and opens nothing', async ({page}) => {
+      const hub = new Hub();
+      hub.reviewKinds.add('view.build');
+      const errors = await setup(page, hub, {scene: false});
+      await openInViewer(page).click();
+      await expect(page.getByRole('alert')).toContainText(REVIEW_NOTE);
+      await settled(page);
+      await expect(fileList(page)).toHaveValue('scalar-0.vti');
+      await expect(source(page)).toHaveText(`${shown('尚未加载结果文件')}${pending('scalar-0.vti')}`);
+      await expect(page.locator('section.analysis .legend')).toHaveCount(0);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti')]);
+      expect(hub.actionRows.map(a => [a.request.kind, a.state])).toEqual([['view.build', 'review']]);
+      expect(errors).toEqual([]);
+    });
+
+    test('an already accepted terminal list opens the exact result without another read', async ({page}) => {
+      const hub = new Hub();
+      hub.artifactPaths = ['scalar-0.VTI'];
+      const errors = await setup(page, hub, {scene: false});
+      await go(page, '结果');
+      await expect.poll(() => listed(page)).toEqual(['scalar-0.VTI']);
+      await go(page, '任务');
+      await freeze(page);
+      const sent = posts(page);
+      await openInViewer(page).click();
+      await expect(source(page)).toHaveText(shown('显示 scalar-0.VTI'));
+      await settled(page);
+      sent.stop();
+      expect(sent.seen).toEqual(['/api/v1/actions view.build']);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.VTI')]);
+      expect(errors).toEqual([]);
+    });
+
+    for (const first of ['old', 'current'] as const) {
+      test(`a click waiting on the heartbeat list adopts only the exact terminal list (${first} reply first)`, async ({page}) => {
+        const hub = new Hub();
+        hub.queueArtifacts = true;
+        const releaseTask = hub.holdNext('task.get');
+        const errors = await setup(page, hub, {scene: false, verifiedTask: false});
+        await expect.poll(() => hub.artifactQueue.length).toBe(1);
+        const [old] = hub.artifactQueue.splice(0);
+        const sent = posts(page);
+        await openInViewer(page).click();
+        await expectActive(page, '结果');
+        expect(sent.seen).toEqual([]);
+        releaseTask();
+        await expect(page.locator('aside.tasks .task-observation')).toContainText('已读取 Runtime 状态');
+        await expect.poll(() => hub.artifactQueue.length).toBe(1);
+        const [current] = hub.artifactQueue.splice(0);
+        if (first === 'old') {
+          old();
+          await expect(footer(page)).toContainText('正在处理请求');
+          await expect(fileList(page)).toHaveValue('');
+          expect(built(hub)).toEqual([]);
+        }
+        current();
+        await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+        if (first === 'current') old();
+        await settled(page);
+        sent.stop();
+        expect(sent.seen).toEqual([LIST_READ, '/api/v1/actions view.build']);
+        expect(built(hub)).toEqual([sliceOf('scalar-0.vti')]);
+        expect(errors).toEqual([]);
+      });
+    }
+
+    test('an automatic build requires the published digest before adopting its scene', async ({page}) => {
+      const hub = new Hub();
+      hub.reportedViewDigest = digestOf('another file');
+      const errors = await setup(page, hub, {scene: false});
+      await openInViewer(page).click();
+      await expect(page.getByRole('alert')).toContainText('返回的数据摘要与发布文件不符');
+      await expect(fileList(page)).toHaveValue('scalar-0.vti');
+      await expect(page.locator('section.analysis .viewport canvas')).toHaveCount(0);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti')]);
+      expect(errors).toEqual([]);
+    });
+
+    test('an in-flight automatic build cannot adopt its scene after the read capability is lost and restored', async ({page}) => {
+      const hub = new Hub();
+      const errors = await setup(page, hub, {scene: false});
+      const release = hub.hold('view.build');
+      try {
+        await openInViewer(page).click();
+        await expect.poll(() => hub.reached.has('view.build')).toBe(true);
+        hub.readKinds = ['task.get', 'task.events'];
+        const denied = page.waitForResponse(res => res.url().endsWith('/api/v1/policy'));
+        hub.publish();
+        await denied;
+        // The denied policy is a distinct render before the same read capability returns.
+        await expect(footer(page)).toContainText('正在处理请求');
+        hub.readKinds = ['task.get', 'task.artifacts', 'task.events'];
+        const currentRead = page.waitForRequest(req => req.method() === 'POST' && req.postDataJSON()?.kind === 'task.artifacts');
+        hub.publish();
+        await currentRead;
+      } finally {
+        release();
+      }
+      await settled(page);
+      await expect(page.locator('section.analysis .viewport canvas')).toHaveCount(0);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti')]);
+      expect(errors).toEqual([]);
+    });
+
+    test('an artifact list containing a null entry opens nothing and leaves the workbench usable', async ({page}) => {
+      const hub = new Hub();
+      hub.artifactRows = [null, published('scalar-0.vti')];
+      const errors = await setup(page, hub, {scene: false});
+      await openInViewer(page).click();
+      await expect(page.getByRole('alert')).toContainText('任务产物清单格式无效');
+      await expect(fileList(page)).toHaveValue('');
+      expect(built(hub)).toEqual([]);
+      await go(page, '工作台');
+      await expect(page.getByLabel('对话内容')).toHaveValue('未发送的草稿：分析 phi 场');
+      expect(errors).toEqual([]);
+    });
+
+    test('a conflicting exact task fact keeps the successful heartbeat from authorizing a build', async ({page}) => {
+      const hub = new Hub();
+      hub.taskReadResults.set(task, {...row, state: 'failed'});
+      const errors = await setup(page, hub, {scene: false, verifiedTask: false});
+      await expect(page.getByRole('region', {name: '所选任务状态'})).toContainText('最近节点快照');
+      await openInViewer(page).click();
+      await expect(fileList(page)).toHaveValue('scalar-0.vti');
+      await settled(page);
+      expect(built(hub)).toEqual([]);
+      await expect(page.locator('section.analysis .viewport canvas')).toHaveCount(0);
+      expect(errors).toEqual([]);
+    });
+
+    test('leaving 结果 or changing the project while the list is read opens nothing', async ({page}) => {
+      const hub = new Hub();
+      hub.device = twoProjects;
+      hub.artifactRows = [{path: 'scalar-0.vti', size: 10}];
+      const errors = await setup(page, hub, {scene: false});
+      for (const away of ['任务', '工作台'] as const) {
+        const release = hub.hold('task.artifacts');
+        hub.reached.clear();
+        await go(page, '任务');
+        await openInViewer(page).click();
+        await expect.poll(() => hub.reached.has('task.artifacts')).toBe(true);
+        await go(page, away);
+        release();
+        await settled(page);
+        await expectActive(page, away);
+        expect(hub.builds).toEqual([]);
+      }
+      await go(page, '结果');
+      await expect(fileList(page)).toHaveValue('');
+      await expect(source(page)).toHaveText(shown('尚未加载结果文件'));
+      const release = hub.hold('task.artifacts');
+      hub.reached.clear();
+      await go(page, '任务');
+      await openInViewer(page).click();
+      await expect.poll(() => hub.reached.has('task.artifacts')).toBe(true);
+      await go(page, '任务');
+      await selectEnvironment(page, project(page), ws2);
+      await go(page, '结果');
+      release();
+      await settled(page);
+      await expectActive(page, '结果');
+      await expect(source(page)).toHaveText('未选择任务，在「任务」中选择任务');
+      expect(hub.builds).toEqual([]);
+      expect(errors).toEqual([]);
+    });
+
+    test('a 视图 edit while the list is read, or another view at the click, leaves the build to 加载视图', async ({page}) => {
+      const hub = new Hub();
+      const release = hub.hold('task.artifacts');
+      const errors = await setup(page, hub, {scene: false});
+      await openInViewer(page).click();
+      await expect.poll(() => hub.reached.has('task.artifacts')).toBe(true);
+      await page.getByRole('combobox', {name: '方向', exact: true}).selectOption('0');
+      release();
       await expect(fileList(page)).toHaveValue('scalar-0.vti');
       await settled(page);
       expect(hub.builds).toEqual([]);
       await loadButton(page).click();
-      await expect(page.getByRole('alert')).toContainText('视图构建被拒绝');
+      await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti', 0)]);
+      // Another task in 等值面 view: the click preselects, and 加载视图 builds the view the user chose.
+      hub.device = twoTasks;
+      hub.artifactPathsByTask.set(task2, ['other.vti']);
+      await go(page, '任务');
+      await page.locator('aside.tasks .section-title').getByRole('button', {name: '刷新', exact: true}).click();
+      await taskRow(page, '对照任务').click();
+      await go(page, '结果');
+      await fileViewMode(page).selectOption('iso');
+      await go(page, '任务');
+      await openInViewer(page).click();
+      await expect(fileList(page)).toHaveValue('other.vti');
       await settled(page);
-      expect(hub.builds.map(b => [b.task_id, b.path])).toEqual([[task, 'scalar-0.vti']]);
-      await expect(source(page)).toHaveText(`${shown('尚未加载结果文件')}${pending('scalar-0.vti')}`);
-      expect(unexpected(errors, 502)).toEqual([]);
+      expect(hub.builds).toHaveLength(1);
+      await loadButton(page).click();
+      await expect(source(page)).toHaveText(shown('显示 other.vti', '对照任务'));
+      expect(hub.builds.map(b => [b.task_id, b.path, b.options.mode])).toEqual([[task, 'scalar-0.vti', 'slice'], [task2, 'other.vti', 'iso']]);
+      expect(errors).toEqual([]);
     });
+
+    // The one build of 在查看器中打开 is fenced like 加载视图: leaving 结果 keeps the page the user chose and lets the same
+    // task's scene complete for the return; another file choice or task discards it, and 结果来源 never names it.
+    const heldBuild: [string, (page: Page) => Promise<void>, '结果' | '任务', string][] = [
+      ['leaving 结果', async page => { await go(page, '任务'); }, '任务', shown('显示 scalar-0.vti')],
+      ['clearing the file choice', async page => { await fileList(page).selectOption(''); }, '结果', shown('尚未加载结果文件')],
+      ['selecting another task', async page => { await go(page, '任务'); await taskRow(page, '对照任务').click(); }, '任务',
+        shown('尚未加载结果文件', '对照任务')],
+    ];
+    for (const [what, act, stay, after] of heldBuild) {
+      test(`a held one-step build after ${what} moves nothing and is shown only for its own choice`, async ({page}) => {
+        const hub = new Hub();
+        hub.device = twoTasks;
+        hub.artifactPathsByTask.set(task2, ['other.vti']);
+        const errors = await setup(page, hub, {scene: false});
+        const release = hub.hold('view.build');
+        hub.reached.clear();
+        await openInViewer(page).click();
+        await expect.poll(() => hub.reached.has('view.build')).toBe(true);
+        // While it is built the file is chosen, not yet shown, and the explicit retry waits for it.
+        await expect(fileList(page)).toHaveValue('scalar-0.vti');
+        await expect(source(page)).toHaveText(`${shown('尚未加载结果文件')}${pending('scalar-0.vti')}`);
+        await expect(loadButton(page)).toBeDisabled();
+        await act(page);
+        release();
+        await settled(page);
+        await expectActive(page, stay);
+        expect(built(hub)).toEqual([sliceOf('scalar-0.vti')]);
+        if (stay === '任务') await go(page, '结果');
+        await expect(source(page)).toHaveText(after);
+        await expect(page.locator('section.analysis .legend')).toHaveCount(after === shown('显示 scalar-0.vti') ? 1 : 0);
+        expect(built(hub)).toEqual([sliceOf('scalar-0.vti')]);
+        expect(errors).toEqual([]);
+      });
+    }
 
     test('the 结果 nav button, 读取日志, several files, no viewable file and 图谱 choose no file', async ({page}) => {
       const hub = new Hub();
+      hub.artifactRows = [{path: 'scalar-0.vti', size: 10}];
       const errors = await setup(page, hub, {scene: false});
       await go(page, '结果');
       await settled(page);
@@ -5893,10 +6286,11 @@ for (const viewport of viewports) {
       await expect(probeLog(page)).toHaveText(LOG);
       await settled(page);
       await expect(fileList(page)).toHaveValue('');
+      hub.artifactRows = undefined;
       for (const paths of [['scalar-0.vti', 'scalar-1.vti'], ['notes.txt', 'case/run.h5']]) {
         hub.artifactPaths = paths;
         await go(page, '任务');
-        await shortcut(page, '结果').click();
+        await shortcut(page, '在查看器中打开').click();
         await expect.poll(() => listed(page)).toEqual(paths.filter(p => p.endsWith('.vti')));
         await settled(page);
         await expect(fileList(page)).toHaveValue('');
@@ -5905,7 +6299,7 @@ for (const viewport of viewports) {
       hub.artifactPaths = ['scalar-0.vti'];
       await modeTab(page, '图谱').click();
       await go(page, '任务');
-      await shortcut(page, '结果').click();
+      await shortcut(page, '在查看器中打开').click();
       await expect(modeTab(page, '图谱')).toHaveAttribute('aria-selected', 'true');
       await settled(page);
       await modeTab(page, '结果文件').click();
@@ -5921,7 +6315,7 @@ for (const viewport of viewports) {
       await go(page, '结果');
       await fileList(page).selectOption('');
       await go(page, '任务');
-      await shortcut(page, '结果').click();
+      await shortcut(page, '在查看器中打开').click();
       await settled(page);
       await expect(fileList(page)).toHaveValue('');
       await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
@@ -5936,12 +6330,12 @@ for (const viewport of viewports) {
       await go(page, '结果');
       await fileList(page).selectOption('scalar-0.vti');
       await go(page, '任务');
-      await shortcut(page, '结果').click();
+      await shortcut(page, '在查看器中打开').click();
       await settled(page);
       await expect(fileList(page)).toHaveValue('scalar-0.vti');
       await fileList(page).selectOption('');
       await go(page, '任务');
-      await shortcut(page, '结果').click();
+      await shortcut(page, '在查看器中打开').click();
       await settled(page);
       await expect(fileList(page)).toHaveValue('');
       expect(await listed(page)).toEqual(['scalar-0.vti']);
@@ -5961,11 +6355,16 @@ for (const viewport of viewports) {
     for (const [what, act] of late) {
       test(`a held shortcut list read chooses no file after ${what}`, async ({page}) => {
         const hub = new Hub();
+        hub.artifactRows = [{path: 'scalar-0.vti', size: 10}];
         const errors = await setup(page, hub, {scene: false});
+        await go(page, '结果');
+        await expect.poll(() => listed(page)).toEqual(['scalar-0.vti']);
+        await go(page, '任务');
+        hub.artifactRows = undefined;
         hub.artifactPaths = ['scalar-1.vti'];
         const release = hub.hold('task.artifacts');
         hub.reached.clear();
-        await shortcut(page, '结果').click();
+        await shortcut(page, '在查看器中打开').click();
         await expect.poll(() => hub.reached.has('task.artifacts')).toBe(true);
         await act(page);
         await expectActive(page, '结果');
@@ -5983,10 +6382,9 @@ for (const viewport of viewports) {
       const hub = new Hub();
       hub.device = twoTasks;
       hub.artifactPathsByTask.set(task2, ['other.vti']);
-      const errors = await setup(page, hub, {scene: false});
       const release = hub.hold(`task.artifacts ${task}`);
-      hub.reached.clear();
-      await shortcut(page, '结果').click();
+      const errors = await setup(page, hub, {scene: false});
+      await shortcut(page, '在查看器中打开').click();
       await expect.poll(() => hub.reached.has(`task.artifacts ${task}`)).toBe(true);
       await go(page, '任务');
       await taskRow(page, '对照任务').click();
@@ -6009,7 +6407,7 @@ test('a failed task keeps its published result available for explicit selection'
   hub.artifactPaths = ['notes.txt', 'scalar-0.vti'];
   const errors = await setup(page, hub, {scene: false});
   await expect(page.getByRole('region', {name: '所选任务状态'})).toContainText('失败');
-  await shortcut(page, '结果').click();
+  await shortcut(page, '在查看器中打开').click();
   await expect.poll(() => listed(page)).toEqual(['scalar-0.vti']);
   await expect(footer(page)).toContainText('就绪');
   await expect(fileList(page)).toHaveValue('');

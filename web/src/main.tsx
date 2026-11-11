@@ -1,4 +1,4 @@
-import React,{useCallback,useEffect,useLayoutEffect,useRef,useState} from 'react';
+import React,{useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {flushSync} from 'react-dom';
 import {createRoot} from 'react-dom/client';
 import {action,api,ApiError,events,hasToken,Json,readNode,setToken} from './api';
@@ -14,6 +14,9 @@ const GraphPanel=React.lazy(()=>import('./GraphPanel'));
 const ExampleView=import.meta.env.DEV&&new URLSearchParams(location.search).has('example')?React.lazy(()=>import('./ExampleView')):null;
 const lostAccess=(error:unknown)=>error instanceof ApiError&&(error.status===401||error.status===403);
 type ObservedTask = {scope:TaskScope;name:string;state:string;cancelRequested:boolean;verifiedIdentity:boolean;exactTerminal:boolean};
+type ArtifactConnection = {scope:TaskScope;modern:boolean;observesTask:boolean};
+type ArtifactTarget = {connection:ArtifactConnection;succeeded:boolean;exactTerminal:boolean};
+type ArtifactRead = {target:ArtifactTarget;controller:AbortController;result:Promise<Json[]|null>;accepted?:Json[]};
 // The scene 结果 shows in file mode, bound to the task scope and artifact path of the view.build that produced it.
 // Choosing another file only edits the choice: the canvas and its source stay until a new build succeeds.
 type Displayed = {scope:TaskScope;path:string;scene:Json};
@@ -40,7 +43,42 @@ function decodeLog(bytes:Uint8Array,first:boolean,final:boolean):{text:string;ta
 }
 const logCount=(value:unknown):value is number=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=0;
 // A published file the 结果文件 list offers.
-const viewable=(artifact:Json)=>/\.(vti|vtk|npy|dat)$/.test(artifact.path);
+const viewable=(artifact:Json)=>/\.(vti|vtk|npy|dat)$/i.test(artifact.path);
+// The rule the desktop's 在查看器中打开 uses for one step (JobsState sole_task_vti): a published path in canonical relative
+// POSIX form, as view.build and the graph accept it verbatim (no absolute path, drive letter, backslash, control
+// character, or empty, "." or ".." segment), at most 1024 characters.
+const canonicalArtifactPath=(path:unknown):path is string=>typeof path==='string'&&!!path&&[...path].length<=1024&&
+  !/[\\\u0000-\u001f\u007f]/.test(path)&&!/^[A-Za-z]:/.test(path)&&path.split('/').every(part=>part&&part!=='.'&&part!=='..');
+// Logs and notes a result may carry beside its data; anything else may be a result.
+const noteArtifact=(path:string)=>/\.(log|txt|md)$/i.test(path);
+// The one VTI of a published list whose other entries are only logs or notes. Every other file (DAT, NPY, VTK, HDF5,
+// JSON, images, plugin formats) counts as a possible result, so a mixed list keeps the two-step route. The whole list
+// is refused when any entry has a non-canonical path, a digest that is not lowercase SHA-256, a size that is not a
+// whole non-negative number, or a path that repeats another (also by case) or names a directory of another entry.
+// The file must also be one the 结果文件 list offers, so the choice it makes is a listed option.
+function soleVti(list:unknown[]):Json|null{
+  const folded=new Set<string>();
+  let candidate:Json|null=null;
+  for(const entry of list){
+    if(!entry||typeof entry!=='object')return null;
+    const file=entry as Json;
+    if(!canonicalArtifactPath(file.path)||typeof file.sha256!=='string'||!/^[0-9a-f]{64}$/.test(file.sha256)||
+       !Number.isSafeInteger(file.size)||file.size<0)return null;
+    const key=file.path.toLowerCase();
+    if(folded.has(key))return null;
+    folded.add(key);
+    if(!noteArtifact(file.path)){
+      if(candidate)return null;
+      candidate=file;
+    }
+  }
+  for(const key of folded){
+    for(let slash=key.indexOf('/');slash!==-1;slash=key.indexOf('/',slash+1)){
+      if(folded.has(key.slice(0,slash)))return null;
+    }
+  }
+  return candidate&&/\.vti$/i.test(candidate.path)&&candidate.size>0?candidate:null;
+}
 // Persistent sections: 工作台 is the conversation home. All three stay mounted; only the active one is shown.
 type Section='workbench'|'tasks'|'results';
 type EnvironmentDisclosure='setup'|'auto-closed'|'open'|'closed';
@@ -115,6 +153,8 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const [readKinds,setReadKinds]=useState<string[]|null>(null),[taskRefresh,setTaskRefresh]=useState(0);
   const [analysis,setAnalysis]=useState<'file'|'graph'>('file'),[mode,setMode]=useState('slice'),[axis,setAxis]=useState(2),[index,setIndex]=useState(0),[level,setLevel]=useState(0),[probe,setProbe]=useState<number[]>([0,0,0]);
   const levelEdited=useRef(false);
+  // Edits of 视图, 方向, 索引 and 等值: one made while 在查看器中打开 waits for its list leaves the open to 加载视图.
+  const viewEdits=useRef(0);
   // Conversations are Hub sessions, independent of the selected node, Runtime workspace and task.
   const refreshNow=useRef(()=>{});
   const conv=useConversations(disconnect,()=>refreshNow.current());
@@ -144,13 +184,18 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const returnFocus=useRef<{scope:TaskScope;launcher:HTMLButtonElement}|null>(null);
   const generation=useRef(0),scopeVersion=useRef(0),activeScope=useRef<TaskScope|null>(null),refreshing=useRef(false),alive=useRef(true);
   const artifactReads=useRef({started:0,applied:0}),logReads=useRef(0);
+  const modernArtifacts=useRef<ArtifactRead|null>(null);
   // The accepted log as of the latest change, so a continuation reply can tell whether it still extends it.
   const logNow=useRef<TaskLog|null>(null),continuing=useRef(false);
   const acceptLog=useCallback((next:TaskLog|null)=>{logNow.current=next;setLog(next);},[]);
-  // The explicit Tasks shortcut may choose the sole file from its accepted reply for a successful task.
+  // The explicit Tasks shortcut 在查看器中打开 may choose the sole file from its own accepted reply for a successful
+  // task, and open a sole published VTI in one step (`open`: the click was in 切片 view; `edits`: viewEdits then).
   // Leaving 结果, opening history over it, switching mode, editing the file choice or changing tasks drops the pick.
-  const defaultPick=useRef<{scope:TaskScope}|null>(null),fileEdited=useRef(false);
+  const defaultPick=useRef<{scope:TaskScope;open:boolean;edits:number}|null>(null),fileEdited=useRef(false);
   const completedTaskScopeNow=useRef<TaskScope|null>(null);
+  const exactCompletedTaskScopeNow=useRef<TaskScope|null>(null);
+  // 结果 is shown in 结果文件 mode with no compact history over it, as of the latest render.
+  const filesShown=useRef(false);
   // The displayed record as of the latest change, so a late probe reply can tell whether its scene is still shown.
   const displayedNow=useRef<Displayed|null>(null);
   const readingOrder=useRef(0);
@@ -181,7 +226,9 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const taskBound=!!task&&(!!heartbeat||observed?.verifiedIdentity===true);
   const completedTaskScope=taskBound&&(observed?.state??(heartbeat||null)?.state)==='succeeded'?selection:null;
   completedTaskScopeNow.current=completedTaskScope;
+  filesShown.current=tab==='results'&&analysis==='file'&&!overlay;
   const exactTerminal=observed?.exactTerminal===true;
+  exactCompletedTaskScopeNow.current=exactTerminal?completedTaskScope:null;
   let graphTasks=tasks;
   if(taskBound&&observed){
     const row={id:task,name:observed.name,state:observed.state,cancel_requested:observed.cancelRequested,workspace_id:observed.scope.workspace};
@@ -198,6 +245,15 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const canReadEvents=canRead&&features.includes('task.events')&&readKinds?.includes('task.events')===true;
   const canReadTask=readKinds===null?null:canRead&&features.includes('task.get')&&readKinds.includes('task.get');
   const taskOnline=online&&selected?.online===true;
+  const artifactConnection=useMemo(()=>taskBound&&taskOnline&&selection?
+    {scope:selection,modern:canReadArtifacts,observesTask:canReadTask===true}:null,
+    [selection,taskBound,taskOnline,canReadArtifacts,canReadTask]);
+  const artifactTarget=useMemo(()=>artifactConnection?.modern?{connection:artifactConnection,succeeded:!!completedTaskScope,exactTerminal}:null,
+    [artifactConnection,completedTaskScope,exactTerminal]);
+  const artifactTargetNow=useRef(artifactTarget);
+  artifactTargetNow.current=artifactTarget;
+  const artifactConnectionNow=useRef(artifactConnection);
+  artifactConnectionNow.current=artifactConnection;
   // Readable scope of 任务: the queue lists the chosen node, filtered by the chosen project; the selected task keeps its
   // own scope, which can be another project of the node while no project is chosen.
   const nodes=devices.filter(d=>d.role==='node'&&!d.revoked),workspaces:Json[]=selected?.snapshot?.workspaces||[];
@@ -240,11 +296,34 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     });
   },[]);
   const acceptArtifacts=useCallback((version:number,request:number,result:unknown):result is Json[]=>{
-    if(!alive.current||scopeVersion.current!==version||request<=artifactReads.current.applied||!Array.isArray(result))return false;
+    if(!alive.current||scopeVersion.current!==version||request<=artifactReads.current.applied||
+       !Array.isArray(result)||result.some(file=>!file||typeof file.path!=='string'))return false;
     artifactReads.current.applied=request;
     setArtifacts(result);
     return true;
   },[]);
+  const readArtifacts=useCallback((target:ArtifactTarget,refresh=false)=>{
+    const previous=modernArtifacts.current;
+    if(previous?.target===target&&(!refresh||!previous.accepted))return previous.result;
+    previous?.controller.abort();
+    const controller=new AbortController(),scope=target.connection.scope;
+    const version=scopeVersion.current,request=++artifactReads.current.started;
+    const result=readNode(scope.node,'task.artifacts',{task_id:scope.task},controller.signal).then(receipt=>{
+      if(artifactTargetNow.current!==target||controller.signal.aborted||activeScope.current!==scope)return null;
+      if(acceptArtifacts(version,request,receipt)){
+        entry.accepted=receipt;
+        return receipt;
+      }
+      throw new Error('任务产物清单格式无效。');
+    }).catch(error=>{
+      if(modernArtifacts.current?.controller===controller)modernArtifacts.current=null;
+      if(artifactTargetNow.current!==target||controller.signal.aborted||activeScope.current!==scope)return null;
+      throw error;
+    });
+    const entry:ArtifactRead={target,controller,result};
+    modernArtifacts.current=entry;
+    return result;
+  },[acceptArtifacts]);
   function selectWorkspace(id:string,created=false){
     restoreEnvironment.current=false;
     // A successful explicit creation can precede the node's next listing. Only remember its exact returned ID.
@@ -338,17 +417,13 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // A graph error or probe reply belongs to the scope it was raised in.
   useEffect(()=>{setGraphError('');setGraphProbe(null);},[graphKey,graphScope]);
   useEffect(()=>{
-    if(!taskBound||!taskOnline||!canReadArtifacts)return;
-    const abort=new AbortController();
-    const version=scopeVersion.current;
-    const request=++artifactReads.current.started;
-    void readNode(node,'task.artifacts',{task_id:task},abort.signal).then(result=>{
-      if(!abort.signal.aborted)acceptArtifacts(version,request,result);
-    }).catch(error=>{
-      if(!abort.signal.aborted&&lostAccess(error))disconnect();
-    });
-    return()=>abort.abort();
-  },[node,task,taskBound,taskOnline,canReadArtifacts,exactTerminal,acceptArtifacts,disconnect]);
+    if(!artifactTarget)return;
+    void readArtifacts(artifactTarget).catch(error=>{if(lostAccess(error))disconnect();});
+    return()=>{
+      const entry=modernArtifacts.current;
+      if(entry?.target===artifactTarget){entry.controller.abort();modernArtifacts.current=null;}
+    };
+  },[artifactTarget,readArtifacts,disconnect]);
   async function run(fn:()=>Promise<void>,active?:()=>boolean){
     const report=active?setViewError:setError;
     setBusy(true);report('');
@@ -358,16 +433,46 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   }
   const invoke=(kind:string,payload:Json,target=node,active?:()=>boolean)=>action(target,kind,payload,
     ()=> (active?setViewError:setError)('操作等待复核，请在任务面板查看完整参数。'),{active});
-  async function files(pick:{scope:TaskScope}|null){
-    const version=scopeVersion.current;
-    const request=++artifactReads.current.started;
-    const result=canReadArtifacts?await readNode(node,'task.artifacts',{task_id:task}):
-      (await invoke('task.artifacts',{task_id:task})).result;
-    if(!acceptArtifacts(version,request,result)||!pick||defaultPick.current!==pick)return;
+  async function files(connection:ArtifactConnection|null,pick:{scope:TaskScope;open:boolean;edits:number}|null){
+    if(!connection||artifactConnectionNow.current!==connection||activeScope.current!==connection.scope)return;
+    const scope=connection.scope;
+    let result:Json[]|null;
+    if(connection.modern){
+      const target=artifactTargetNow.current;
+      if(!target||target.connection.scope!==scope)return;
+      const accepted=modernArtifacts.current?.target===target?modernArtifacts.current.accepted:undefined;
+      // A confirmed sole VTI can open from its current listing. Other uses of this action still refresh the file list.
+      const reuse=pick?.open&&target.succeeded&&(!connection.observesTask||target.exactTerminal)&&accepted&&soleVti(accepted);
+      result=await readArtifacts(target,!reuse);
+      const latest=artifactTargetNow.current;
+      // The exact terminal read can replace a same-connection heartbeat receipt while this click waits.
+      if(latest!==target){
+        if(!latest||latest.connection!==target.connection||!latest.exactTerminal||!latest.succeeded||
+           !pick||defaultPick.current!==pick)return;
+        result=await readArtifacts(latest);
+        if(artifactTargetNow.current!==latest)return;
+      }
+    }else{
+      const version=scopeVersion.current,request=++artifactReads.current.started;
+      const item=await invoke('task.artifacts',{task_id:scope.task},scope.node);
+      result=item.state==='succeeded'&&artifactConnectionNow.current===connection&&
+        acceptArtifacts(version,request,item.result)?item.result:null;
+    }
+    if(!result||!pick||defaultPick.current!==pick)return;
     defaultPick.current=null;
     const choices=result.filter(viewable);
-    if(choices.length===1&&completedTaskScopeNow.current===pick.scope&&activeScope.current===pick.scope&&
-       !fileEdited.current&&!displayedNow.current)setPath(choices[0].path);
+    if(choices.length!==1||completedTaskScopeNow.current!==pick.scope||activeScope.current!==pick.scope||
+       fileEdited.current||displayedNow.current)return;
+    setPath(choices[0].path);
+    const sole=soleVti(result);
+    if(!sole||sole.path!==choices[0].path||!pick.open||viewEdits.current!==pick.edits||!filesShown.current||
+       artifactConnectionNow.current!==connection||
+       (connection.observesTask&&exactCompletedTaskScopeNow.current!==scope))return;
+    const currentBuild=startBuild(scope);
+    const active=()=>currentBuild()&&artifactConnectionNow.current===connection&&completedTaskScopeNow.current===scope;
+    setViewError('');
+    try{await buildView(scope,sole.path,{mode:'slice',axis,index},active,sole.sha256);}
+    catch(error){if(lostAccess(error))throw error;if(active())setViewError(String(error));}
   }
   function selectTask(id:string,workspaceId:string){
     if(!workspaceId||!/^[0-9a-f]{32}$/.test(id))return;
@@ -380,23 +485,29 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   }
   // A build is accepted only for the scope and file choice it was started with: another task, project or node, or
   // another file choice before it completes, discards it. The accepted scene keeps that scope and path.
-  function loadView(){const current=++generation.current,scope=activeScope.current,source=path;if(!scope)return;
-    const active=()=>alive.current&&generation.current===current&&activeScope.current===scope;
+  function startBuild(scope:TaskScope){
+    const current=++generation.current;
+    return ()=>alive.current&&generation.current===current&&activeScope.current===scope;
+  }
+  async function buildView(scope:TaskScope,source:string,options:Json,active:()=>boolean,expectedDigest?:string){
+    const item=await invoke('view.build',{task_id:scope.task,path:source,options},scope.node,active);
+    if(item.state!=='succeeded'||!item.result||!active())return;
+    const manifest=item.result.manifest;
+    const reported=manifest?.source;
+    if((reported!==undefined||expectedDigest)&&(reported?.task_id!==scope.task||reported?.path!==source)){
+      throw new Error('返回的结果来源与所选文件不符。');
+    }
+    if(expectedDigest&&manifest.dataset_id!==expectedDigest)throw new Error('返回的数据摘要与发布文件不符。');
+    const midpoint=(manifest.value_range[0]+manifest.value_range[1])/2;
+    show({scope,path:source,scene:item.result});
+    // Other views can seed an untouched threshold. An iso build used its captured value, and an edit while any
+    // build was pending belongs to the next request.
+    if(options.mode!=='iso'&&!levelEdited.current)setLevel(midpoint);
+  }
+  function loadView(){const scope=activeScope.current,source=path;if(!scope)return;
+    const active=startBuild(scope);
     const options:Json={mode,axis};if(mode==='slice')options.index=index;if(mode==='iso')options.level=level;if(mode==='vectors')options.component='magnitude';
-    void run(async()=>{
-      const item=await invoke('view.build',{task_id:scope.task,path:source,options},scope.node,active);
-      if(!item.result||!active())return;
-      const manifest=item.result.manifest;
-      const reported=manifest?.source;
-      if(reported!==undefined&&(reported?.task_id!==scope.task||reported?.path!==source)){
-        throw new Error('返回的结果来源与所选文件不符。');
-      }
-      const midpoint=(manifest.value_range[0]+manifest.value_range[1])/2;
-      show({scope,path:source,scene:item.result});
-      // Other views can seed an untouched threshold. An iso build used its captured value, and an edit while any
-      // build was pending belongs to the next request.
-      if(mode!=='iso'&&!levelEdited.current)setLevel(midpoint);
-    },active);
+    void run(()=>buildView(scope,source,options,active),active);
   }
   // One explicit read of one stream with the published task.logs action. Standard output keeps the original payload
   // (the node's default stream); standard error names its stream. The text is accepted only for this instance, the
@@ -451,7 +562,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     }catch(error){if(active()||lostAccess(error))throw error;}
     finally{continuing.current=false;}
   }
-  // An explicit 结果 / 读取日志 click in Tasks opens 结果 at once and brings the target into view; the read itself
+  // An explicit 在查看器中打开 / 读取日志 click in Tasks opens 结果 at once and brings the target into view; the read itself
   // keeps its own scope checks and never navigates on completion. The analysis mode and Viewer are left as they are.
   // 读取日志 also gives the open log pane its full bounded height (logRoom, until the task scope changes), so the
   // text that arrives later scrolls inside the pane and moves nothing in 结果, whichever page the user is on then.
@@ -459,7 +570,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     returnFocus.current=activeScope.current&&{scope:activeScope.current,launcher};
     const scope=activeScope.current;
     defaultPick.current=target==='files'&&scope&&completedTaskScope===scope&&analysis==='file'&&
-      !path&&!displayedNow.current&&!fileEdited.current?{scope}:null;
+      !path&&!displayedNow.current&&!fileEdited.current?{scope,open:mode==='slice',edits:viewEdits.current}:null;
     const pick=defaultPick.current;
     flushSync(()=>{setTab('results');if(target==='logs')setLogRoom(true);});
     const pane=logPane.current;
@@ -467,6 +578,11 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     const element=target==='logs'?pane?.querySelector('summary'):analysis==='file'?fileChoice.current:modeChoice.current?.querySelector<HTMLElement>('[aria-selected="true"]');
     (target==='logs'?pane:element)?.scrollIntoView({block:'nearest'});element?.focus({preventScroll:true});
     return pick;
+  }
+  function openTaskFiles(launcher:HTMLButtonElement){
+    const connection=artifactConnectionNow.current;
+    const pick=openResults('files',launcher);
+    void run(()=>files(connection,pick));
   }
   // A held Enter repeats on the shortcut that just got the focus back; only a fresh press opens 结果 again.
   const ignoreRepeat=(e:React.KeyboardEvent)=>{if(e.repeat&&e.key==='Enter')e.preventDefault();};
@@ -612,7 +728,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       {task&&selection&&<TaskObservation key={`${node}/${selection.workspace}/${task}`} scope={selection}
         heartbeat={heartbeat} online={taskOnline} supported={canReadTask} refresh={taskRefresh}
         onObservation={observeTask} onAccessLost={disconnect} onNodeGone={nodeGone}/>}
-      {taskBound&&<div className="inline"><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{const stream=taskLog?.stream??'stdout';openResults('logs',e.currentTarget);void run(()=>readLogs(stream));}}>读取日志</button><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{const pick=openResults('files',e.currentTarget);void run(()=>files(pick));}}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
+      {taskBound&&<div className="inline"><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>{const stream=taskLog?.stream??'stdout';openResults('logs',e.currentTarget);void run(()=>readLogs(stream));}}>读取日志</button><button disabled={busy} onKeyDown={ignoreRepeat} onClick={e=>openTaskFiles(e.currentTarget)}>在查看器中打开</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
       {actions.filter(a=>a.state==='review').map(a=><article className="review" key={a.id}><strong>等待执行复核</strong><p>{a.review_reason}</p><pre>{JSON.stringify(a.request.payload,null,2)}</pre>{[true,false].map(approved=><button key={String(approved)} disabled={busy} onClick={()=>void run(async()=>{await api(`actions/${a.id}/review`,'POST',{approved});})}>{approved?'批准执行':'拒绝'}</button>)}</article>)}
       <details className="setting" ref={environment} open={environmentOpen}><summary onClick={event=>{
         event.preventDefault();setEnvironmentDisclosure(environmentOpen?'closed':'open');
@@ -654,9 +770,9 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         if(next!==path)levelEdited.current=false;
         fileEdited.current=true;defaultPick.current=null;setPath(next);generation.current++;setViewError('');
       }}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(viewable).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
-      <label>视图<select value={mode} onChange={e=>setMode(e.target.value)}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>
-      {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>setAxis(Number(e.target.value))}>{['X','Y','Z'].map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={index} onChange={e=>setIndex(Number(e.target.value))}/></label></>}
-      {mode==='iso'&&<label>等值<input type="number" value={level} onChange={e=>{levelEdited.current=true;setLevel(Number(e.target.value));}}/></label>}
+      <label>视图<select value={mode} onChange={e=>{viewEdits.current++;setMode(e.target.value);}}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>
+      {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>{viewEdits.current++;setAxis(Number(e.target.value));}}>{['X','Y','Z'].map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={index} onChange={e=>{viewEdits.current++;setIndex(Number(e.target.value));}}/></label></>}
+      {mode==='iso'&&<label>等值<input type="number" value={level} onChange={e=>{viewEdits.current++;levelEdited.current=true;setLevel(Number(e.target.value));}}/></label>}
       <button disabled={busy||!taskBound||!path} onClick={loadView}>加载视图</button></div>
       <ErrorBoundary resetKey={shownScene}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}><Viewer scene={shownScene} onPick={setProbe}/></React.Suspense></ErrorBoundary>
       {shownScene&&<div className="legend"><span>{shownScene.manifest.value_range[0].toPrecision(5)}</span><i/><span>{shownScene.manifest.value_range[1].toPrecision(5)} {shownScene.manifest.units}</span><small>{shownScene.manifest.display_reduced?'显示网格已简化':'完整显示网格'} · 数值查询使用原始数据</small></div>}
