@@ -86,6 +86,10 @@ std::optional<NativePauseSnapshot> hidden_pause_target(wm::NativeWindowHandle pa
                                                        std::string_view session_id,
                                                        const NativeHidePauseTrace &observation);
 
+/** One native pause while the exact hidden target holds its verified production suspension. */
+bool pause_suspended_hidden_playback(wm::NativeWindowHandle parent, std::string_view session_id,
+                                     const NativeHidePauseTrace &observation);
+
 struct NativeCloseObservation {
   std::string_view reason; // Empty until the exact observed view enters shutdown.
   std::chrono::steady_clock::time_point when;

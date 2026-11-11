@@ -1435,6 +1435,46 @@ std::optional<NativePauseSnapshot> hidden_pause_target(wm::NativeWindowHandle pa
   return pause.available ? std::optional(pause) : std::nullopt;
 }
 
+bool pause_suspended_hidden_playback(wm::NativeWindowHandle parent, std::string_view session_id,
+                                     const NativeHidePauseTrace &observation)
+{
+  std::string error;
+  const auto state = find_view(parent, session_id, error);
+  if (!matches_hidden_pause(state, observation) || !state->suspension.ready(true) ||
+      state->test_owns_playback_suspension || observation.overflow ||
+      observation.events.size() - observation.event_count < 2) {
+    return false;
+  }
+  const auto pause = cocoa::test_pause_snapshot(state);
+  if (!pause.isolated_actuator || !pause.acknowledged || !pause.verified) { return false; }
+  const auto begin = observation.events.begin();
+  const auto end = begin + observation.event_count;
+  const auto reply = std::find_if(begin, end, [](const auto &event) {
+    return event.phase == "reply" && event.playback_state == int(WKMediaPlaybackStateSuspended);
+  });
+  if (reply == end || std::any_of(reply, end, [](const auto &event) {
+        return event.phase == "pause-during-suspension";
+      })) {
+    return false;
+  }
+
+  const auto close = state->test_close_observation;
+  const auto visibility = state->visibility_generation;
+  const std::weak_ptr<cocoa::State> weak = state;
+  __weak WKWebView *expected_view = state->view;
+  using Clock = detail::MediaPauseVerification::Clock;
+  cocoa::observe_hide_pause(state, "pause-during-suspension", Clock::now());
+  [state->view pauseAllMediaPlaybackWithCompletionHandler:^{
+    const auto current = weak.lock();
+    if (matches_hidden_pause(current, *close->hide_pause) && current->view == expected_view &&
+        current->visibility_generation == visibility && current->suspension.ready(true) &&
+        !current->test_owns_playback_suspension) {
+      cocoa::observe_hide_pause(current, "pause-during-suspension-ack", Clock::now());
+    }
+  }];
+  return true;
+}
+
 bool arm_isolated_pause(wm::NativeWindowHandle parent, std::string_view session_id,
                         uint64_t navigation_generation)
 {

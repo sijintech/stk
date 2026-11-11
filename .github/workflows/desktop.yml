@@ -508,6 +508,15 @@ jobs:
           ctest --test-dir build --output-on-failure -R '^reports_visible_native_pause_(video|html-video)_metal$' --timeout 180 --output-junit "$PWD/build/ctest-native-visible-pause.xml"
           python3 desktop/tests/check_required_tests.py build/ctest-native-visible-pause.xml 'reports_visible_native_pause_video_metal' 'reports_visible_native_pause_html-video_metal'
 
+      - name: Native WKWebView pause during the verified hidden suspension
+        if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          status=0
+          ctest --test-dir build --output-on-failure -R '^reports_pause_during_hidden_suspension_video_metal$' --timeout 180 --output-junit "$PWD/build/ctest-native-pause-during-suspension.xml" || status=$?
+          python3 desktop/tests/check_required_tests.py build/ctest-native-pause-during-suspension.xml reports_pause_during_hidden_suspension_video_metal || status=$?
+          exit "$status"
+
       - name: Native WKWebView second pause diagnostic while visible
         if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
         run: |
@@ -617,6 +626,7 @@ jobs:
             build/ctest-native-quiet-hide.xml
             build/ctest-native-isolated-hide.xml
             build/ctest-native-isolated-hide.log
+            build/ctest-native-pause-during-suspension.xml
             build/ctest-native-visible-pause.xml
             build/ctest-native-second-visible-pause.xml
             build/ctest-native-hide-after-verified-pause.xml
@@ -641,6 +651,7 @@ jobs:
             build/tests/app/reports-quiet-pre-seek-hide-html-video/**
             build/tests/app/reports-isolated-quiet-pre-seek-hide-video/**
             build/tests/app/reports-isolated-quiet-pre-seek-hide-html-video/**
+            build/tests/app/reports-pause-during-hidden-suspension-video/**
             build/tests/app/reports-visible-native-pause-video/**
             build/tests/app/reports-visible-native-pause-html-video/**
             build/tests/app/reports-second-visible-native-pause-video/**

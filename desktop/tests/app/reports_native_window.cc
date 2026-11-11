@@ -77,6 +77,7 @@ struct Options {
   bool pre_seek_hide_control = false;
   bool quiet_hidden_hold = false;
   bool isolated_pause_control = false;
+  bool pause_during_hidden_suspension = false;
   bool visible_pause_control = false;
   bool second_visible_pause_control = false;
   bool visible_pause_diagnostic() const { return visible_pause_control || second_visible_pause_control; }
@@ -910,6 +911,11 @@ class Exercise {
   bool arm_isolated_pause(const std::string &session, uint64_t navigation)
   {
     return document_preview::test::arm_isolated_pause(window_.native_window_handle(), session, navigation);
+  }
+  bool pause_suspended_hidden_playback(const std::string &session,
+                                      const document_preview::test::NativeHidePauseTrace &trace)
+  {
+    return document_preview::test::pause_suspended_hidden_playback(window_.native_window_handle(), session, trace);
   }
   std::shared_ptr<const document_preview::test::NativeCloseObservation> observe_native_close(
       const std::string &session, uint64_t watch_pause_navigation = 0) noexcept
@@ -3115,12 +3121,31 @@ raise SystemExit(main())
             constexpr auto hold = document_preview::detail::MediaPauseVerification::timeout +
                                   std::chrono::milliseconds(250);
             ui.hidden_media_checkpoint("quiet-native-hold");
-            ui.wait([&] { return !resources->active() || Clock::now() - started >= hold; },
-                "Hidden hold without DOM observation", 3);
+#ifdef __APPLE__
+            const auto *trace = close && close->hide_pause ? &*close->hide_pause : nullptr;
+            bool extra_pause_dispatched = false;
+#endif
+            ui.wait([&] {
+              const bool finished = !resources->active() || Clock::now() - started >= hold;
+#ifdef __APPLE__
+              if (!finished && options.pause_during_hidden_suspension && !extra_pause_dispatched && trace) {
+                extra_pause_dispatched = ui.pause_suspended_hidden_playback(session, *trace);
+              }
+#endif
+              return finished;
+            }, "Hidden hold without DOM observation", 3);
             result["quiet_hidden_observation"] = {{"session_sha256", core::Sha256::hex(session)},
                 {"elapsed_seconds", media_seconds(started, Clock::now())},
                 {"session_active_before_dom_probe", resources->active()}};
             require(resources->active(), "Native media session closed during the hold without DOM observation");
+#ifdef __APPLE__
+            if (options.pause_during_hidden_suspension) {
+              require(extra_pause_dispatched && trace && !trace->overflow &&
+                  std::any_of(trace->events.begin(), trace->events.begin() + trace->event_count, [](const auto &event) {
+                    return event.phase == "pause-during-suspension-ack" && event.webview_hidden && !event.visible;
+                  }), "The extra pause needs its exact acknowledgement before the original quiet hold ends");
+            }
+#endif
           }
           ui.hidden_media_checkpoint("paused-begin");
           auto hidden = options.quiet_hidden_hold ? ui.media(session) :
@@ -3212,6 +3237,19 @@ raise SystemExit(main())
 #endif
       auto reshown = ui.held_media(cycle, "reshown-no-autoresume", session, hidden, 0.50,
                                    options.isolated_pause_control, std::move(observe_hold_exit));
+#ifdef __APPLE__
+      if (options.pause_during_hidden_suspension) {
+        const auto &hold = result.at("reshown_hold_native_observation");
+        const auto &release = hold.at("last_recorded_release_state");
+        const auto &ack = hold.at("release_ack");
+        using Playback = document_preview::test::PlaybackState;
+        require(hold.at("matches_hidden_pause") == true && !ack.is_null() && !release.is_null() &&
+            (release.at("raw_playback_state") == int(Playback::Paused) ||
+             release.at("raw_playback_state") == int(Playback::None)) &&
+            release.at("seconds_from_reveal").get<double>() < hold.at("hold_exit_seconds").get<double>(),
+            "The hold needs an exact release acknowledgement and Paused/None before it exits");
+      }
+#endif
       ui.media_capture(cycle, "reshown-red-paused", 1, ui.media_rectangle(bounds, reshown), reshown, session);
       // Return to the earliest segment before a second explicit Play. Rewinding is
       // itself local input; showing the tab must never provide that playback action.
@@ -3444,6 +3482,7 @@ int main(int argc, char **argv)
       continue;
     }
     if (arg == "--pre-seek-hide-control") { options.pre_seek_hide_control = true; continue; }
+    if (arg == "--pause-during-hidden-suspension") { options.pause_during_hidden_suspension = true; continue; }
     if (arg == "--quiet-pre-seek-hide-control" || arg == "--isolated-quiet-pre-seek-hide-control") {
       options.pre_seek_hide_control = true;
       options.quiet_hidden_hold = true;
@@ -3470,6 +3509,7 @@ int main(int argc, char **argv)
                                                options.fresh_pause_diagnostic())) ||
       (options.suspend_reveal_control && (options.source != "video" || options.pause_order_diagnostic() ||
           options.pre_seek_hide_control || options.fresh_pause_diagnostic() || options.first_toolbar_pause_control)) ||
+      (options.pause_during_hidden_suspension && (!options.isolated_pause_control || options.source != "video")) ||
       ((options.pause_order_diagnostic() || options.pre_seek_hide_control || options.fresh_pause_diagnostic() ||
         options.first_toolbar_pause_control) &&
           options.source != "video" && options.source != "html-video") ||
@@ -3478,7 +3518,7 @@ int main(int argc, char **argv)
        && options.source != "video" && options.source != "html-video"
 #endif
       )) {
-    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control|--visible-native-pause-control|--second-visible-native-pause-control|--repeat-verified-visible-native-pause-control|--hide-after-verified-native-pause-control|--hide-without-repeat-native-pause-control|--hide-without-repeat-native-pause-dom-control|--fresh-native-hide-dom-control|--fresh-native-visible-dom-control|--visible-frame-clock-control|--first-toolbar-pause-delay-control|--first-toolbar-pause-immediate-control|--suspend-reveal-control]\n"); return 2;
+    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control|--visible-native-pause-control|--second-visible-native-pause-control|--repeat-verified-visible-native-pause-control|--hide-after-verified-native-pause-control|--hide-without-repeat-native-pause-control|--hide-without-repeat-native-pause-dom-control|--fresh-native-hide-dom-control|--fresh-native-visible-dom-control|--visible-frame-clock-control|--first-toolbar-pause-delay-control|--first-toolbar-pause-immediate-control|--suspend-reveal-control] [--pause-during-hidden-suspension]\n"); return 2;
   }
   Json result = {{"format", "stk.reports-native-evidence/1"}, {"status", "running"}, {"required_cycles", options.reading_cycles()},
       {"completed_cycles", 0}, {"images", Json::array()}, {"native_scroll_requests", Json::array()},
@@ -3562,6 +3602,12 @@ int main(int argc, char **argv)
         (options.quiet_hidden_hold ? "quiet-pre-seek-hide-control" : "pre-seek-hide-control");
     if (options.isolated_pause_control) {
       result["control"] = "One fixed test-only pause action in a private WKContentWorld; native playback state and the original deadline decide verification";
+    }
+    if (options.pause_during_hidden_suspension) {
+      result["scenario"] = "pause-during-hidden-suspension";
+      result["matched_control"] = "reports_isolated_quiet_pre_seek_hide_video_metal";
+      result["intervention"] = "One native pause after the exact hidden suspension is verified and before the original reveal";
+      result["production_ui_acceptance"] = false;
     }
   }
   fs::path directory;
