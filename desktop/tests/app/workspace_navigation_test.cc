@@ -2328,5 +2328,240 @@ TEST_F(FocusedLiteraturePython, NoEntryWithoutAnAdoptedSavedQuestion)
   EXPECT_TRUE(literature_calls().empty());
 }
 
+// A legacy bridge (no project.agent.run_*) whose first agent message is saved while the project
+// reads: the real ProjectAgent then keeps its Start for later. The wrapper runs the observing
+// fixture's script unchanged and replaces only what this scenario needs: the session is saved
+// directly in the project's ledger (the product's create needs a model route, which the fixture
+// has none of), a Start is refused before any executor, and one project read can be held.
+// ``agent_calls`` separates the three kinds: "request" (sent at once), "start" and "read".
+class DeferredAgentStartLiteraturePython : public FocusedLiteraturePython {
+ protected:
+  static constexpr const char *kRefusedStart = "fixture refuses the agent start";
+
+  void configure_bridge(bridge::ClientOptions &options, const std::string &python) override
+  {
+    FocusedLiteraturePython::configure_bridge(options, python);
+    const auto script = dir.path() / "legacy_agent.py";
+    std::ofstream(script) << R"PY(
+import runpy
+import threading
+from pathlib import Path
+from suan.desktop_bridge import __main__ as entry
+from suan.desktop_bridge import server
+from suan.desktop_bridge.protocol import BridgeError
+from suan.project.agent_sessions import HARNESS, digest
+
+here = Path(__file__).parent
+serve = entry.main
+
+def trace(kind, method):
+    with (here / "agent_calls").open("a") as out:
+        out.write(kind + " " + method + "\n")
+
+def main():
+    observed = server.Bridge.__init__
+    def init(self, *args, **kwargs):
+        observed(self, *args, **kwargs)
+        for method in ("project.agent.run_target", "project.agent.run_plan", "project.agent.run_decide",
+                       "project.agent.run_observe"):
+            del self.methods[method]
+        def create(params, call):
+            trace("request", "project.agent.create")
+            sessions = self.projects._get(params["handle"]).agent_sessions
+            identity, text, turn = params["session_id"], params["text"], params["turn_id"]
+            return sessions.create(identity, {"id": identity, "harness": HARNESS}, text, turn_id=turn,
+                                   request_sha256=digest({"text": text, "turn_id": turn}))
+        def start(params, call):
+            trace("start", "project.agent.start")
+            raise BridgeError("unavailable", "fixture refuses the agent start")
+        def reading(method, original):
+            def read(params, call):
+                trace("read", method)
+                return original(params, call)
+            return read
+        catalog = self.methods["project.catalog"]
+        def held_catalog(params, call):
+            gate = here / "hold_project_read"
+            if gate.exists():
+                (here / "project_read_held").touch()
+                released = threading.Event()
+                for _ in range(6000):
+                    if not gate.exists() or released.wait(0.01):
+                        break
+            return catalog(params, call)
+        self.methods["project.agent.create"] = create
+        self.methods["project.agent.start"] = start
+        for method in ("project.agent.route", "project.agent.list", "project.agent.get"):
+            self.methods[method] = reading(method, self.methods[method])
+        self.methods["project.catalog"] = held_catalog
+    server.Bridge.__init__ = init
+    serve()
+
+entry.main = main
+runpy.run_path(str(here / "observe.py"), run_name="__main__")
+)PY";
+    options.command[2] = core::path_to_utf8(script);
+  }
+
+  std::vector<std::string> agent_calls()
+  {
+    std::vector<std::string> calls;
+    std::ifstream trace(dir.path() / "agent_calls");
+    for (std::string line; std::getline(trace, line);) { calls.push_back(line); }
+    return calls;
+  }
+  /** How many calls of one kind ("request", "start" or "read") the bridge received. */
+  int agent_calls(const std::string &kind)
+  {
+    const auto calls = agent_calls();
+    return int(std::count_if(calls.begin(), calls.end(), [&](const auto &line) { return line.starts_with(kind + " "); }));
+  }
+  /** Exactly the one saved message, no Start, and nothing the observing fixture forbids. */
+  void expect_start_still_deferred()
+  {
+    auto &agent = project().agent();
+    EXPECT_TRUE(agent.deferred_start_pending());
+    EXPECT_FALSE(agent.busy());
+    EXPECT_FALSE(project().busy());
+    EXPECT_TRUE(agent.error().empty()) << agent.error();
+    EXPECT_EQ(agent_calls("request"), 1);
+    EXPECT_EQ(agent_calls("start"), 0);
+    EXPECT_FALSE(std::filesystem::exists(dir.path() / "unexpected_write"));
+  }
+};
+
+TEST_F(DeferredAgentStartLiteraturePython, LiteratureEntryAndReturnKeepADeferredLegacyAgentStartUndispatched)
+{
+  ASSERT_NO_FATAL_FAILURE(start());
+  auto &agent = project().agent();
+  ASSERT_TRUE(agent.supported());
+  ASSERT_FALSE(agent.runs_supported());  // Legacy: a saved message is followed by Start, with no target.
+
+  // The other conversation is left in Agent mode, then hidden behind the focused question.
+  ASSERT_NO_FATAL_FAILURE(click("workbench_split"));
+  ASSERT_EQ(f.screen.maximized(), nullptr);
+  const int agent_tab = other().active_tab();
+  ASSERT_EQ(other().editor().type().id, kEditorAI);
+  const auto prefix = other().id() + "/main/";
+  ASSERT_NE(widget(prefix + "ai_intent/" + handle()), nullptr);
+  widget(prefix + "ai_intent/" + handle())->index.assign(3);
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    return widget(prefix + "ai_agent_text/" + handle()) && agent.route_loaded() && agent.list_loaded();
+  }, 30)) << agent.error();
+  ASSERT_NO_FATAL_FAILURE(focus_origin());
+  ASSERT_NO_FATAL_FAILURE(wait_for(kFirst));
+  ASSERT_NE(widget("ai_open_literature"), nullptr);
+  EXPECT_EQ(widget("ai_agent_text/" + handle()), nullptr);
+  ASSERT_NO_FATAL_FAILURE(idle());
+  ASSERT_TRUE(agent.selected().empty());
+  ASSERT_FALSE(agent.busy());
+  ASSERT_EQ(agent_calls("request"), 0);
+  ASSERT_EQ(agent_calls("start"), 0);
+  ASSERT_GE(agent_calls("read"), 2);  // The route and the session list, read while that tab was drawn.
+
+  // The message is sent while the project is idle; its saved reply arrives during a project read
+  // that the bridge holds, so the real Start is refused locally and kept for later.
+  std::ofstream(dir.path() / "hold_project_read") << "1";
+  ASSERT_TRUE(agent.ask("Deferred legacy agent message"));
+  ASSERT_TRUE(agent.busy());
+  project().refresh();
+  ASSERT_TRUE(project().busy());
+  ASSERT_TRUE(loop.pump_until([&] {
+    return agent.deferred_start_pending() && std::filesystem::exists(dir.path() / "project_read_held");
+  }, 30)) << agent.error();
+  EXPECT_TRUE(project().busy());
+  EXPECT_FALSE(agent.busy());
+  const auto session = agent.selected();
+  ASSERT_FALSE(session.empty());
+  EXPECT_EQ(io::get_string(agent.view().at("session"), "id"), session);
+  EXPECT_FALSE(agent.running());
+  EXPECT_FALSE(agent.history_selection_available());
+  EXPECT_EQ(agent_calls("request"), 1);
+  EXPECT_EQ(agent_calls("start"), 0);
+  const int reads_before_idle = agent_calls("read");
+
+  // The project becomes idle while only the question is drawn: nothing resumes the Start.
+  std::filesystem::remove(dir.path() / "hold_project_read");
+  ASSERT_NO_FATAL_FAILURE(idle());
+  ASSERT_NO_FATAL_FAILURE(wait_for(kFirst));
+  for (int frame = 0; frame < 3; ++frame) { loop.run_ready(); f.drv->frame(); }
+  ASSERT_NO_FATAL_FAILURE(expect_start_still_deferred());
+  ASSERT_EQ(f.screen.maximized(), &origin());
+  ASSERT_NE(widget("ai_open_literature"), nullptr);
+  const float reading = position();
+  const auto exchange = discussion().exchange_generation();
+  const auto selection = agent.selection_epoch();
+
+  // Entering the split would draw the Agent tab, whose next draw sends the Start.
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    ASSERT_NO_FATAL_FAILURE(click("ai_open_literature"));
+    loop.run_ready();
+    f.drv->frame();
+    EXPECT_EQ(literature(), nullptr);
+    ASSERT_NO_FATAL_FAILURE(expect_same_conversation(reading, exchange));
+    ASSERT_NO_FATAL_FAILURE(expect_start_still_deferred());
+  }
+  EXPECT_EQ(other().active_tab(), agent_tab);
+  EXPECT_EQ(agent.selected(), session);
+  EXPECT_EQ(agent.selection_epoch(), selection);
+
+  // With the Agent tab no longer shown in its area, the entry opens and the Start still waits.
+  other().set_active_tab(0);
+  f.drv->frame();
+  ASSERT_NE(other().editor().type().id, kEditorAI);
+  ASSERT_NO_FATAL_FAILURE(click("ai_open_literature"));
+  ASSERT_EQ(f.screen.maximized(), nullptr);
+  ASSERT_NE(literature(), nullptr);
+  ASSERT_NE(literature(), &origin());
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    return !project().busy() && !discussion().busy() && !discussion().exchange_busy();
+  }, 30));
+  ASSERT_NO_FATAL_FAILURE(expect_start_still_deferred());
+
+  // The recorded return is superseded by a tab change in the split; no conversation is shown
+  // any more, so the ordinary Workbench destination is the first AI tab: the hidden Agent tab.
+  ASSERT_EQ(origin().active_tab(), 1);
+  origin().set_active_tab(0);
+  f.drv->frame();
+  ASSERT_NE(origin().editor().type().id, kEditorAI);
+  auto *shown = literature();
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
+    loop.run_ready();
+    f.drv->frame();
+    EXPECT_EQ(f.screen.maximized(), nullptr);
+    EXPECT_FALSE(f.shell->workbench_is_focused(f.screen));
+    EXPECT_EQ(literature(), shown);
+    EXPECT_EQ(other().active_tab(), 0);
+    EXPECT_EQ(origin().active_tab(), 0);
+    ASSERT_NO_FATAL_FAILURE(expect_start_still_deferred());
+  }
+  EXPECT_EQ(agent.selected(), session);
+  EXPECT_EQ(agent.selection_epoch(), selection);
+  EXPECT_EQ(discussion().exchange_id(), kFirst);
+  EXPECT_EQ(discussion().exchange_generation(), exchange);
+  EXPECT_TRUE(literature_calls().empty());
+  // Until here every agent call after the saved message was a read, if anything.
+  EXPECT_EQ(agent_calls().size(), size_t(1 + agent_calls("read")));
+  EXPECT_GE(agent_calls("read"), reads_before_idle);
+
+  // Control: the Start was really waiting. Showing the Agent tab is what sends it, exactly once,
+  // and the bridge refuses it before any executor or model.
+  other().set_active_tab(agent_tab);
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    return agent_calls("start") == 1 && !agent.busy() && !agent.error().empty();
+  }, 30));
+  EXPECT_EQ(agent.error(), kRefusedStart);
+  EXPECT_FALSE(agent.deferred_start_pending());
+  for (int frame = 0; frame < 3; ++frame) { loop.run_ready(); f.drv->frame(); }
+  EXPECT_EQ(agent_calls("start"), 1);
+  EXPECT_EQ(agent_calls("request"), 1);
+  EXPECT_FALSE(agent.running());
+  EXPECT_FALSE(std::filesystem::exists(dir.path() / "unexpected_write"));
+}
+
 }  // namespace
 }  // namespace stk::app
