@@ -1,5 +1,17 @@
 # STK 当前交接
 
+## 2026-11-11 05:21 UTC · 原生任务日志明确恢复
+
+`48e6d42231fd7fb57529388d73d323493dc39dae` 集成 Claude 100 的任务日志补丁。Claude 在独立工作树交付源码和回归，Root 另建隔离工作树复现、构建和审查。旧版用例实测仍显示「实时」且缺重试按钮。初版两条回归把 JSON 键序当成值，Root 改为核对两流偏移；另修订撤权测试的快照测量起点，先等已排队的任务状态和产物读请求抵达。
+
+日志订阅最终失败后，详情在日志区显示原因，保留接受的文本和分流半行。可恢复错误的一次点击只重新订阅当前任务两流。读取偏移采用源 `next_offset`。按钮和回调同时绑定失败代次，旧失败的按钮无法重试新失败。窄窗单独排版长原因，重试按钮保留点击宽度。Bridge 自身的非最终错误与自动恢复沿用原路径。
+
+真实 X11 英文 1600×1100、中文 680×1000，固定起点为聚焦「任务」选中唯一失败的合成任务，已显示第一行。用真实 Runtime 与生产 Bridge 注入已发布的可重试最终错误。在同一任务区一次点击恢复。UTF-8 替换后首批显示字节为 29，重新订阅从 stdout 源字节 27、stderr 0 继续，合并视图补全原半行并显示 stderr 诊断，各一份。每窗总计两次日志订阅、一次事件订阅，测量中的第二次日志订阅是唯一请求，任务记录未变化。该取证覆盖最终回执路径，真实长时间失联和目标平台还需各自证据。验收 `root-delivery-20261111-158/native-task-log-window/integrated-en`、`integrated-zh`。
+
+隔离 `7d3762b1` 和 Root 集成各通过原生 Jobs 66/66、零跳过。六条新用例在独立工作树各重复五次通过，i18n 2/2，文档站 38 页。测试及补丁证据在 `root-delivery-20261111-159/native-log-retry`。合入本地 main，待发布头 `09efc0d1` 的 Desktop 整轮终态后推送。该头 Secret scan、Pages 已通过，Desktop 与 Runtime 仍运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42963571163) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42963571022)
+
+Claude 新任务在 `claude/mupro-pilot-verification-doc-101` 独立工作树，基线 `48e6d422`。范围是核对 MuPRO 试点文档的当前分量、体素和真实验收要求，保留旧合成试验为历史。Root 继续持有 main、审阅、验证和发布。
+
 ## 2026-11-11 05:07 UTC · 统一工作台发布到 main
 
 远端 `main` 从 `a184cd213477896a5dd89cb5b0b93c1ca783dccf` 快进到 `09efc0d1b783d7abf7171fc1004beea0b5145901`，发布后独立核对完整 SHA，12 个提交范围扫描无发现。包含原生 MuPRO HDF5 分量、Web 标准错误与探针顺序、同标签页任务环境恢复、原生引用页取景及 macOS 隔离对照失败取证。组合桌面、文献/UI、Reports 原生窗口目标均已构建。工作区既有 AOCI 与状态文档修改已保护。
