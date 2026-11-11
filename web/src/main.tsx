@@ -477,7 +477,17 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         event.preventDefault();setNewTaskDisclosure(newTaskOpen?'closed':'open');
       }}>新建任务{workspace?` · ${workspaceName(workspace)}`:' · 先选择项目'}</summary>
       <button type="button" className="primary wide" disabled={busy||!workspace} onClick={()=>void run(async()=>{const version=scopeVersion.current;const a=await invoke('task.submit',{template:'demo-field',spec:{workspace_id:workspace,name:'解析场验证',argv:['@python','-m','suan.control.demo_job'],outputs:['scalar-0.vti','scalar-1.vti','vector.vti']}});if(a.result&&scopeVersion.current===version)selectTask(a.result.id,workspace);})}>运行解析场示例</button>
-      <p className="muted">自定义任务：输入 TaskSpec JSON。新命令将先进入执行复核。</p><form onSubmit={e=>{e.preventDefault();const form=new FormData(e.currentTarget);void run(async()=>{const spec=JSON.parse(String(form.get('spec')));await invoke('task.submit',{spec:{workspace_id:workspace,...spec}});});}}><textarea name="spec" aria-label="TaskSpec" defaultValue={'{"argv":["python3","analysis.py"],"outputs":[]}'}/><button disabled={busy||!workspace}>提交复核</button></form>
+      <p className="muted">自定义任务：输入 TaskSpec JSON。新命令将先进入执行复核。</p><form onSubmit={e=>{
+        e.preventDefault();
+        const form=new FormData(e.currentTarget);
+        void run(async()=>{
+          const spec=JSON.parse(String(form.get('spec')));
+          if(spec?.workspace_id!==undefined&&spec.workspace_id!==workspace){
+            throw new Error('TaskSpec 的工作区与当前项目不一致。请在「运行环境」选择目标项目，或修改 TaskSpec 中的 workspace_id。');
+          }
+          await invoke('task.submit',{spec:{...spec,workspace_id:workspace}});
+        });
+      }}><textarea name="spec" aria-label="TaskSpec" defaultValue={'{"argv":["python3","analysis.py"],"outputs":[]}'}/><button disabled={busy||!workspace}>提交复核</button></form>
       </details>
       <details><summary>最近操作与重试</summary>{actions.filter(a=>a.request.kind!=='task.events').slice(0,20).map(a=><p key={a.id}><small>{a.request.kind} · {a.state}<br/>{a.error}</small></p>)}<button onClick={()=>void run(async()=>{const saved=sessionStorage.getItem('stk-last-action');if(saved)await api('actions','POST',JSON.parse(saved));})}>以相同 ID 重试上次操作</button></details>
     </aside>

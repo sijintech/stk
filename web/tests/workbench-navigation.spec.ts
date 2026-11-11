@@ -4831,6 +4831,52 @@ test('after the automatic opening, ordinary choices keep 新建任务 open and a
   expect(errors).toEqual([]);
 });
 
+test('the retained custom task draft cannot submit to a different workspace than the form shows', async ({page}) => {
+  const hub = new Hub();
+  hub.review = true;
+  const errors = await nodeChosen(page, hub);
+  const sent = posts(page);
+  await createWorkspace(page, '原工作区');
+  const original = createdId(1), current = createdId(2);
+  await expect(project(page)).toHaveValue(original);
+  const spec = page.getByLabel('TaskSpec');
+  const draft = {workspace_id: original, argv: ['python3', 'draft.py'], outputs: []};
+  await spec.fill(JSON.stringify(draft));
+  await disclosure(page, '运行环境').click();
+  await createWorkspace(page, '当前工作区');
+  await expect(project(page)).toHaveValue(current);
+  await expect(disclosure(page, '新建任务')).toHaveText('新建任务 · 当前工作区');
+  await expect(spec).toHaveValue(JSON.stringify(draft));
+
+  const submit = page.getByRole('button', {name: '提交复核'});
+  const submittedWorkspaces: string[] = [];
+  page.on('request', request => {
+    if (request.method() !== 'POST' || !request.url().endsWith('/api/v1/actions')) return;
+    const body = request.postDataJSON();
+    if (body?.kind === 'task.submit') submittedWorkspaces.push(body.payload.spec.workspace_id);
+  });
+  await submit.click();
+  await expect(footer(page)).toContainText('就绪');
+  expect(submittedWorkspaces).toEqual([]);
+  const creates = ['/api/v1/actions workspace.create', '/api/v1/actions workspace.create'];
+  expect(writes(sent.seen)).toEqual(creates);
+  await expect(page.getByRole('alert')).toContainText('工作区与当前项目不一致');
+  await expect(spec).toHaveValue(JSON.stringify(draft));
+  await expect(project(page)).toHaveValue(current);
+
+  await spec.fill(JSON.stringify({...draft, workspace_id: current}));
+  const request = page.waitForRequest(r => r.method() === 'POST' && r.url().endsWith('/api/v1/actions') &&
+    r.postDataJSON()?.kind === 'task.submit');
+  await submit.click();
+  expect((await request).postDataJSON()).toMatchObject({node_id: node,
+    payload: {spec: {...draft, workspace_id: current}}});
+  await expect(footer(page)).toContainText('就绪');
+  expect(submittedWorkspaces).toEqual([current]);
+  sent.stop();
+  expect(writes(sent.seen)).toEqual([...creates, '/api/v1/actions task.submit']);
+  expect(errors).toEqual([]);
+});
+
 test('a new workspace the node lists only later opens 新建任务 at once, keeps it through the fold and submits to it', async ({page}) => {
   await page.setViewportSize({width: 1440, height: 900});
   const hub = new Hub();
