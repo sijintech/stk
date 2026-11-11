@@ -1,5 +1,15 @@
 # STK 当前交接
 
+## 2026-11-11 08:34 UTC · Web 和桌面使用同一默认 VTI 切片
+
+本地 main `57cae4fb05bd7ebd85e9b16d94d741f127b20f59` 使 Web 的明确一步打开在未填写索引时采用桌面默认的中间网格层。省略 `view.build.options.index` 沿用已发布 Runtime 计算，按所选轴取该维度除以 2 的整数部分。显式索引含 0 保留，手动首次加载仍使用表单显示值。收到自动绘制回执后核对发布摘要、方向和实际索引。「来源」显示实际绘制的位置，后续表单编辑不会改写已显示位置。未修改运行参数、协议或模型配置。
+
+Node 22 构建通过，Chromium 全套 385/385、零失败与跳过。回归覆盖改轴后默认中点、显式第 0 层、构建在途编辑和错误切片回执。主线与隔离提交 `c3ee5db6ef0dbe2afac8dcfa787a87f85222ec47` 的 HTML、JS、CSS 摘要一致，入口 `f6bb3353ecc1319fa469c40b4f6dc3c4b1e0cbc6ae719a95df85c9b7c4ca6983`。
+
+真实 Hub、NodeAgent 与 Runtime 从已选成功任务、空 Viewer 和两份未提交草稿起步，1440×900、390×844 共十条通过。清单已到或在途都一次点击打开，无额外清单或重复绘制。另用精确主线构建完成两次首开回放。「来源」均显示 Z · 索引 12；与原生宽窄窗实际发送到画面的 896 个 float32 样本按相同网格坐标逐点比较，完全一致，范围 −3.4…19。实测任务及产物不变，模型调用零。使用合成 VTI。证据 `root-delivery-20261111-167/centered-vti` 的 `full.xml`、`centered-trial`、`main-exact` 与 `cross-client-samples.json`。
+
+远端 main 仍为 `d4064e51`，Desktop `42986687264`、Runtime `42986687285` 在运行，Pages `42986687238` 与 Secret scan `42986687229` 通过。Claude 105 的独立执行句柄仍活跃，已采用的进度提示快照仍可复验。旧 PR #53/#54 的精确头不变，继续开放。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42986687264) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42986687285)
+
 ## 2026-11-11 08:24 UTC · 主线发布 Web 一步打开与进度反馈
 
 Root 将远端 main 从 `d1eb1467d1f1b1be86b423e466ffcdff59d21612` 快进到 `d4064e5124f7a81e90f257f2580af35b49c555ae`，推送后独立核对远端完整 SHA。8 个提交范围扫描无发现。发布包含 Web 一步打开唯一 VTI、可核对的清单与构建进度、新 macOS 原生暂停对照。原 AOCI 与状态文档工作区修改保留。Claude 105 已冻结、验收并集成的两个文件与当前作者工作树的 SHA 一致，作者最终收尾仍在独立工作树。
