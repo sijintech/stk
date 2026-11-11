@@ -1,5 +1,15 @@
 # STK 开发计划
 
+## 2026-11-11 06:45 UTC · Web 日志补充回归与原生唯一 VTI 首开
+
+`7c144ea08120d76f41ab96b5a834f77c67f7ddae` 选取 Claude 102 最终头 `1ace97a2` 相对首版 `b70f0ede` 的单测试文件追加。宽窄窗各覆盖两条路径。真实鼠标点击固定在日志栏顶部的续读按钮后，栏内 90 px 和结果页外层位置都保留。续读挂起时，新点击的图谱探针仍显示，回文件模式可读追加日志。Root 保留已验证的 `50b66f2e` 产品字节。以该生产产物运行新增四项及完整 Chromium 回归 269/269、零失败与跳过，暂存扫描零发现。证据 `root-delivery-20261111-162/claude-log-followup/full.xml`。
+
+原生唯一 VTI 首开的真实基线完成。Linux X11 英文 1600×1100、中文 680×1000，固定起点为聚焦任务页已选成功任务、真实清单已收到，唯一可查看产物为有正负值的 `scalar-0.vti`，另有 `notes.txt`。已发布 `8a9da131` 与本地 `b83c5da6` 各在两种窗验证。点击「在查看器中打开」前零图计算，点击一次后唯一计算使用 `muferro-domains`，实际 Bridge 报 `Polar: The dataset has no frames yet`，没有显示结果。真实 Runtime 任务及产物摘要一致，零模型调用。证据 `root-delivery-20261111-162/native-vti-window/window-red-*`。
+
+Claude 103 已在独立 `claude/workbench-native-task-artifact-103` worktree 从 `be0a29b7` 开始原生 JobsState 的精确产物选择与延迟清单处理。Root 在另一独立工作树接入现成的切片预设、锁定任务路径、显示来源和保留确切结果的重访。原生候选仍在构建，尚未交付；最终需在真实窗口验证首开和返回各一次点击、已发布源值和摘要，以及重访零重复计算。当前用合成 VTI。
+
+远端 `8a9da131` 的 Runtime `42970731620` 于 06:35:50 UTC 整轮 13/13。Linux Python 3.11、3.12、3.14 分别 6898、6915、6898 通过，PET 文件各 43/43。Windows 两个 Python 版本各 5503 通过。Desktop Linux 主回归 2243/2243、零跳过，打包和新环境冒烟通过。macOS 和 Windows Desktop 仍在运行，整轮达到终态后推送已验收提交。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42970731620) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42970731524)
+
 ## 2026-11-11 06:29 UTC · 返回原任务标签与 Web 日志继续读取
 
 原生 `b83c5da6b8688ff93434f35300d9da69db2c9ea6` 在「在查看器中打开」成功后记录原任务编辑器、当前窗口和结果来源。从该结果直接点击「任务」，仍在同一任务范围时恢复原标签。普通一级导航和范围失效沿原布局选择。新增回归在旧版复现错误标签，最终 Jobs 78/78、零跳过，含窗口与 GPU 用例。
