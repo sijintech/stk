@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-11 06:10 UTC · 上一主线 Desktop 终态与 DAT 等待取证
+
+远端 `09efc0d1b783d7abf7171fc1004beea0b5145901` 的 Desktop `42963571163` 于 06:09:56 UTC 达到整轮终态，5/6 作业通过。Linux 2237/2237，打包及新环境冒烟通过。Windows CPU 1537/1537，原生 20 轮验收作业通过。macOS CPU 1597/1597、Metal 254/254，必测原生 4/6。MP4 和 HTML 视频各在隐藏后位置下限失败，首轮分别从 0.347071917 到 0.234 秒、从 0.205410 到 0.102 秒。普通静默 2/2，隔离静默 0/2，单独挂起和重显 1/1。Runtime 整轮 13/13，Secret scan 与 Pages 均通过。上一 Desktop 整轮已终止。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42963571163) [Windows 原生作业](https://github.com/sijintech/stk/actions/runs/42963571163/job/130349707275) [macOS 工件](https://github.com/sijintech/stk/actions/runs/42963571163/artifacts/13832491939)
+
+`ed4538d6` 按字节集成独立候选 `384b7cd8` 的单文件诊断。静默普通和隔离对照在既有重显保持检查结束时记录已挂接的同代次 show、释放确认、最后一条原生播放状态，及既有 DOM 回调和首次断言失败时点。缺失和代次不符有独立状态。沿用原探测次数、等待与断言。Linux 普通、探针启用与 Apple 条件分支语法检查通过，实际 Cocoa 需新平台回执。证据 `root-delivery-20261111-160/cocoa-hold-exit`。
+
+补充 `f096a67d` 的真实 X11 预设等待验收。沿用上节 DAT 固定起点和受测二进制，两窗一次点击打开，延迟真实 Bridge 的图目录回执。发起窗口接受打开后，再一次点击「工作台」离开 Viewer。释放回执后两窗继续显示工作台，零图计算，SQLite 摘要一致。保留同一分栏中的 Viewer 可见时，换用旁边的 Python 标签仍可让原请求完成。证据 `root-delivery-20261111-160/dat-origin-window/workbench-during-metadata-en`、`workbench-during-metadata-zh2`。
+
 ## 2026-11-11 06:08 UTC · 已收集 MuFerro DAT 在发起窗口打开
 
 原生 `4717b298` 集成独立 `df94b58e` 的发起窗口与项目运行校验。一次性标记只用于按钮发起的内部回调，Python 历史保留可重新执行的普通命令。`1e55d490` 接通 Viewer 尚未加载预设的首次明确打开，等准确预设后使用原文件校验和图请求。`f096a67d` 区分被动元数据回执与 Viewer 操作。运行、发起页或目标 Viewer 的范围失效时，取消待采纳画面。文档站 38 页构建通过。
