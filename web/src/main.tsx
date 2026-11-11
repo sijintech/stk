@@ -25,6 +25,15 @@ type OpenProgress = {connection:ArtifactConnection;pick:DefaultPick;stage:'listi
 // The scene 结果 shows in file mode, bound to the task scope and artifact path of the view.build that produced it.
 // Choosing another file only edits the choice: the canvas and its source stay until a new build succeeds.
 type Displayed = {scope:TaskScope;path:string;scene:Json};
+const SLICE_AXES=['X','Y','Z'] as const;
+function displayedSlice(manifest?:Json){
+  if(manifest?.mode!=='slice')return null;
+  const {axis,index,dimensions}=manifest;
+  if((axis!==0&&axis!==1&&axis!==2)||!Array.isArray(dimensions)||dimensions.length!==3)return null;
+  const size=dimensions[axis];
+  if(!Number.isSafeInteger(size)||size<=0||!Number.isSafeInteger(index)||index<0||index>=size)return null;
+  return {axis,index,size};
+}
 // The task log 结果 shows: the text of one stream as accepted for the task scope it was read in. `next` is the source
 // byte offset the Runtime reported after the accepted bytes (null for a reply without offsets, which cannot be
 // continued safely); `tail` holds the bytes of a UTF-8 character split at that offset, shown once the rest arrives.
@@ -156,7 +165,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const [selection,setSelection]=useState<TaskScope|null>(null),[artifacts,setArtifacts]=useState<Json[]>([]),[path,setPath]=useState(''),[displayed,setDisplayed]=useState<Displayed|null>(null);
   const [observedTask,setObservedTask]=useState<ObservedTask|null>(null);
   const [readKinds,setReadKinds]=useState<string[]|null>(null),[taskRefresh,setTaskRefresh]=useState(0);
-  const [analysis,setAnalysis]=useState<'file'|'graph'>('file'),[mode,setMode]=useState('slice'),[axis,setAxis]=useState(2),[index,setIndex]=useState(0),[level,setLevel]=useState(0),[probe,setProbe]=useState<number[]>([0,0,0]);
+  const [analysis,setAnalysis]=useState<'file'|'graph'>('file'),[mode,setMode]=useState('slice'),[axis,setAxis]=useState(2),[sliceIndexOverride,setSliceIndexOverride]=useState<number|null>(null),[level,setLevel]=useState(0),[probe,setProbe]=useState<number[]>([0,0,0]);
   const levelEdited=useRef(false);
   // Edits of 视图, 方向, 索引 and 等值: one made while 在查看器中打开 waits for its list leaves the open to 加载视图.
   const viewEdits=useRef(0);
@@ -245,6 +254,8 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     graphTasks=tasks.some(item=>item.id===task)?tasks.map(item=>item.id===task?row:item):[row,...tasks];
   }
   const shown=taskBound&&displayed?.scope===selection?displayed:null,shownScene=shown?.scene??null;
+  const shownSlice=displayedSlice(shownScene?.manifest);
+  const sliceIndex=sliceIndexOverride??(shown?.path===path&&shownSlice?.axis===axis?shownSlice.index:0);
   // The scope 图谱 works in: the chosen project, and the selected task with its own project once it is bound. Any change
   // (another project with no task selected included) starts the panel afresh and drops its late replies.
   const graphScope=JSON.stringify([workspace,task&&selection?selection.workspace:'',taskBound?task:'']);
@@ -508,7 +519,10 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     const active=()=>currentBuild()&&artifactConnectionNow.current===connection&&completedTaskScopeNow.current===scope;
     setViewError('');
     enter('loading',sole.path);
-    try{await buildView(scope,sole.path,{mode:'slice',axis,index},active,sole.sha256);}
+    // With no explicit index, Runtime resolves the same middle grid plane as the desktop slice preset.
+    const options:Json={mode:'slice',axis};
+    if(sliceIndexOverride!==null)options.index=sliceIndexOverride;
+    try{await buildView(scope,sole.path,options,active,sole.sha256);}
     catch(error){if(lostAccess(error))throw error;if(active())setViewError(String(error));}
   }
   function selectTask(id:string,workspaceId:string){
@@ -534,7 +548,13 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     if((reported!==undefined||expectedDigest)&&(reported?.task_id!==scope.task||reported?.path!==source)){
       throw new Error('返回的结果来源与所选文件不符。');
     }
-    if(expectedDigest&&manifest.dataset_id!==expectedDigest)throw new Error('返回的数据摘要与发布文件不符。');
+    if(expectedDigest){
+      if(manifest.dataset_id!==expectedDigest)throw new Error('返回的数据摘要与发布文件不符。');
+      const slice=displayedSlice(manifest);
+      if(!slice||slice.axis!==options.axis||slice.index!==(options.index??Math.floor(slice.size/2))){
+        throw new Error('返回的切片位置与所选方向或索引不符。');
+      }
+    }
     const midpoint=(manifest.value_range[0]+manifest.value_range[1])/2;
     show({scope,path:source,scene:item.result});
     // Other views can seed an untouched threshold. An iso build used its captured value, and an edit while any
@@ -543,7 +563,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   }
   function loadView(){const scope=activeScope.current,source=path;if(!scope)return;
     const active=startBuild(scope);
-    const options:Json={mode,axis};if(mode==='slice')options.index=index;if(mode==='iso')options.level=level;if(mode==='vectors')options.component='magnitude';
+    const options:Json={mode,axis};if(mode==='slice')options.index=sliceIndex;if(mode==='iso')options.level=level;if(mode==='vectors')options.component='magnitude';
     void run(()=>buildView(scope,source,options,active),active);
   }
   // One explicit read of one stream with the published task.logs action. Standard output keeps the original payload
@@ -718,6 +738,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       <div><dt>项目</dt><dd><SourceValue value={sourceNames.workspace}/><SourceValue value={selection.workspace} selectable/></dd></div>
       <div><dt>任务</dt><dd>{taskBound?<SourceValue value={sourceNames.task}/>:<span className="muted">正在确认任务</span>}<SourceValue value={selection.task} selectable/></dd></div>
       <div><dt>显示的文件</dt><dd>{shown?<SourceValue value={shown.path} selectable/>:<span className="muted">尚未加载结果文件</span>}</dd></div>
+      {shownSlice&&<div><dt>显示的切片</dt><dd>{SLICE_AXES[shownSlice.axis]} · 索引 {shownSlice.index}</dd></div>}
       {sourceNext&&<div><dt>已选文件</dt><dd><SourceValue value={path} selectable/><span className="muted">{loadingChoice?'正在加载视图…':'尚未加载，点「加载视图」后显示'}</span></dd></div>}
     </dl>:<p className="muted">未选择任务。在「任务」中选择任务后，这里显示它的节点、项目与文件。</p>}
     <div className="source-details-foot"><button type="button" className="quiet" onClick={closeSource}>收起</button></div>
@@ -808,7 +829,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         fileEdited.current=true;dropPick();setPath(next);generation.current++;setViewError('');
       }}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(viewable).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
       <label>视图<select value={mode} onChange={e=>{viewEdits.current++;setMode(e.target.value);}}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>
-      {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>{viewEdits.current++;setAxis(Number(e.target.value));}}>{['X','Y','Z'].map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={index} onChange={e=>{viewEdits.current++;setIndex(Number(e.target.value));}}/></label></>}
+      {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>{viewEdits.current++;setAxis(Number(e.target.value));}}>{SLICE_AXES.map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={sliceIndex} onChange={e=>{viewEdits.current++;setSliceIndexOverride(Number(e.target.value));}}/></label></>}
       {mode==='iso'&&<label>等值<input type="number" value={level} onChange={e=>{viewEdits.current++;levelEdited.current=true;setLevel(Number(e.target.value));}}/></label>}
       <button disabled={busy||!taskBound||!path} onClick={loadView}>加载视图</button></div>
       <ErrorBoundary resetKey={shownScene}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}><Viewer scene={shownScene} onPick={setProbe}/></React.Suspense></ErrorBoundary>

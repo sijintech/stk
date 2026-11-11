@@ -137,6 +137,7 @@ class Hub {
   readonly viewErrors = new Map<string, string>();
   reportedViewSource?: {task_id: string; path: string} | 'omit';
   reportedViewDigest?: string;
+  reportedViewIndex?: number;
   // Payloads of the view.build and view.probe actions, in order: which task and artifact each one asked for.
   readonly builds: Record<string, any>[] = [];
   readonly probes: Record<string, any>[] = [];
@@ -297,8 +298,11 @@ class Hub {
         const field = this.field;
         const source = this.reportedViewSource ?? {task_id: body.payload.task_id, path: body.payload.path};
         const dataset_id = this.reportedViewDigest ?? digestOf(body.payload.path);
+        const {mode, axis} = body.payload.options;
+        const dimensions = [32, 28, 24];
+        const index = mode === 'slice' ? this.reportedViewIndex ?? body.payload.options.index ?? Math.floor(dimensions[axis] / 2) : null;
         return json({id: body.id, state: 'succeeded',
-          result: {...scene, manifest: {...scene.manifest, field, dataset_id, value_range: this.valueRange,
+          result: {...scene, manifest: {...scene.manifest, field, dataset_id, mode, axis, dimensions, index, value_range: this.valueRange,
             ...(source === 'omit' ? {} : {source})}}});
       }
       if (body.kind === 'view.probe') {
@@ -1533,7 +1537,7 @@ for (const viewport of viewports) {
       await expect(sourcePanel(page)).toHaveAttribute('id', 'result-source-details');
       await expect(sourceToggle(page)).toBeFocused();
       expect(await detailRows(page)).toEqual([['节点', `节点甲${node}`], ['项目', `项目一${ws}`], ['任务', `解析场验证${task}`],
-        ['显示的文件', 'scalar-0.vti'], ['已选文件', 'scalar-1.vti尚未加载，点「加载视图」后显示']]);
+        ['显示的文件', 'scalar-0.vti'], ['显示的切片', 'Z · 索引 0'], ['已选文件', 'scalar-1.vti尚未加载，点「加载视图」后显示']]);
       expect(await detailValues(page)).toEqual([node, ws, task, 'scalar-0.vti', 'scalar-1.vti']);
       expect(await sourcePanel(page).evaluate(el => [el.scrollWidth <= el.clientWidth, el.getBoundingClientRect().right <= innerWidth])).toEqual([true, true]);
       expect(await resultLayout(page)).toEqual(placed);
@@ -3114,7 +3118,7 @@ for (const viewport of viewports) {
       await go(page, '结果');
       const rows = async () => { await sourceToggle(page).click(); const value = await detailRows(page); await page.keyboard.press('Escape');
         await expect(sourcePanel(page)).toHaveCount(0); return value; };
-      const fileRows = [['节点', `节点甲${node}`], ['项目', `项目一${ws}`], ['任务', `解析场验证${task}`], ['显示的文件', 'scalar-0.vti']];
+      const fileRows = [['节点', `节点甲${node}`], ['项目', `项目一${ws}`], ['任务', `解析场验证${task}`], ['显示的文件', 'scalar-0.vti'], ['显示的切片', 'Z · 索引 0']];
       const graphRows = [
         ['显示内容', '显示的三维结果'], ['图谱预设', '场视图field-view'], ['输出', 'main'], ['节点', '节点甲' + node],
         ['计算绑定 field', '解析场验证' + task], ['运行工作区 field', '项目一' + ws], ['已显示时间步', '1000'],
@@ -5840,7 +5844,8 @@ const loadButton = (page: Page) => page.getByRole('button', {name: '加载视图
 const listed = async (page: Page) => (await fileList(page).locator('option').allTextContents()).slice(1);
 const openInViewer = (page: Page) => shortcut(page, '在查看器中打开');
 const built = (hub: Hub) => hub.builds.map(b => [b.task_id, b.path, b.options]);
-const sliceOf = (path: string, axis = 2, index = 0) => [task, path, {mode: 'slice', axis, index}];
+const sliceOf = (path: string, axis = 2, index?: number) =>
+  [task, path, {mode: 'slice', axis, ...(index === undefined ? {} : {index})}];
 const LIST_READ = '/api/v1/nodes/{node}/read task.artifacts', LIST_ACTION = '/api/v1/actions task.artifacts';
 const REVIEW_NOTE = '操作等待复核，请在任务面板查看完整参数。';
 async function settled(page: Page) {
@@ -5941,7 +5946,7 @@ for (const viewport of viewports) {
         expect(hub.builds).toEqual([]);
         await loadButton(page).click();
         await expect(source(page)).toHaveText(shown(`显示 ${file}`));
-        expect(built(hub)).toEqual([sliceOf(file)]);
+        expect(built(hub)).toEqual([sliceOf(file, 2, 0)]);
         expect(errors).toEqual([]);
       });
     }
@@ -5972,7 +5977,7 @@ for (const viewport of viewports) {
       await loadButton(page).click();
       await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
       await expect(page.getByRole('alert')).toHaveCount(0);
-      expect(built(hub)).toEqual([sliceOf('scalar-0.vti'), sliceOf('scalar-0.vti')]);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti'), sliceOf('scalar-0.vti', 2, 0)]);
       expect(unexpected(errors, 502)).toEqual([]);
     });
 
@@ -6121,6 +6126,61 @@ for (const viewport of viewports) {
       expect(errors).toEqual([]);
     });
 
+    test('the default slice uses the selected axis midpoint and a later manual load keeps that index', async ({page}) => {
+      const hub = new Hub();
+      const errors = await setup(page, hub, {scene: false});
+      await go(page, '结果');
+      await page.getByRole('combobox', {name: '方向', exact: true}).selectOption('0');
+      await go(page, '任务');
+      await openInViewer(page).click();
+      await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+      await expect(page.getByRole('spinbutton', {name: '索引', exact: true})).toHaveValue('16');
+      await page.getByRole('button', {name: '来源', exact: true}).click();
+      await expect(page.getByRole('region', {name: '来源详情', exact: true})).toContainText('X · 索引 16');
+      await page.getByRole('button', {name: '收起', exact: true}).click();
+      await expect(loadButton(page)).toBeEnabled();
+      await loadButton(page).click();
+      await settled(page);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti', 0), sliceOf('scalar-0.vti', 0, 16)]);
+      expect(errors).toEqual([]);
+    });
+
+    test('an explicit zero is used by the shortcut and a later edit stays in the form', async ({page}) => {
+      const hub = new Hub();
+      const errors = await setup(page, hub, {scene: false});
+      await go(page, '结果');
+      const index = page.getByRole('spinbutton', {name: '索引', exact: true});
+      await index.fill('3');
+      await index.fill('0');
+      await go(page, '任务');
+      const release = hub.hold('view.build');
+      try {
+        await openInViewer(page).click();
+        await expect.poll(() => hub.reached.has('view.build')).toBe(true);
+        await index.fill('5');
+      } finally {
+        release();
+      }
+      await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+      await expect(index).toHaveValue('5');
+      await page.getByRole('button', {name: '来源', exact: true}).click();
+      await expect(page.getByRole('region', {name: '来源详情', exact: true})).toContainText('Z · 索引 0');
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti', 2, 0)]);
+      expect(errors).toEqual([]);
+    });
+
+    test('a reply for the wrong default slice never replaces the Viewer', async ({page}) => {
+      const hub = new Hub();
+      hub.reportedViewIndex = 0;
+      const errors = await setup(page, hub, {scene: false});
+      await openInViewer(page).click();
+      await expect(page.getByRole('alert')).toContainText('返回的切片位置与所选方向或索引不符');
+      await expect(fileList(page)).toHaveValue('scalar-0.vti');
+      await expect(page.locator('section.analysis .viewport canvas')).toHaveCount(0);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti')]);
+      expect(errors).toEqual([]);
+    });
+
     test('an in-flight automatic build cannot adopt its scene after the read capability is lost and restored', async ({page}) => {
       const hub = new Hub();
       const errors = await setup(page, hub, {scene: false});
@@ -6222,7 +6282,7 @@ for (const viewport of viewports) {
       expect(hub.builds).toEqual([]);
       await loadButton(page).click();
       await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
-      expect(built(hub)).toEqual([sliceOf('scalar-0.vti', 0)]);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti', 0, 0)]);
       // Another task in 等值面 view: the click preselects, and 加载视图 builds the view the user chose.
       hub.device = twoTasks;
       hub.artifactPathsByTask.set(task2, ['other.vti']);
@@ -6768,7 +6828,7 @@ for (const viewport of viewports) {
       await settled(page);
       expect(await canvasMarker(page)).toBe('same-canvas');
       expect(staged(await trail())).toEqual([]);
-      expect(built(hub)).toEqual([sliceOf('scalar-0.vti')]);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti', 2, 0)]);
       expect(errors).toEqual([]);
     });
 
