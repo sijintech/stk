@@ -26,6 +26,19 @@ const viewable=(artifact:Json)=>/\.(vti|vtk|npy|dat)$/.test(artifact.path);
 // Persistent sections: 工作台 is the conversation home. All three stay mounted; only the active one is shown.
 type Section='workbench'|'tasks'|'results';
 type EnvironmentDisclosure='setup'|'auto-closed'|'open'|'closed';
+const RUN_ENVIRONMENT='stk-run-environment';
+const scopeId=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{32}$/.test(value);
+function rememberedEnvironment(devices:Json[]):{node:string;workspace:string}|null{
+  try{
+    const choice=JSON.parse(sessionStorage.getItem(RUN_ENVIRONMENT)??'null');
+    if(!scopeId(choice?.node)||!scopeId(choice?.workspace))return null;
+    const node=devices.find(device=>device.id===choice.node&&device.role==='node'&&!device.revoked);
+    if(Array.isArray(node?.snapshot?.workspaces)&&node.snapshot.workspaces.some((row:Json)=>row.id===choice.workspace)){
+      return {node:choice.node,workspace:choice.workspace};
+    }
+  }catch{/* A malformed tab preference is discarded on the first accepted listing. */}
+  return null;
+}
 // 新建任务 is closed by default. A workspace created and adopted from 运行环境 opens it once; any summary click is the
 // user's choice from then on, which later creations keep.
 type NewTaskDisclosure='default'|'open'|'closed';
@@ -58,10 +71,13 @@ function App(){
   const [connected,setConnected]=useState(hasToken());
   const disconnect=useCallback(()=>{
     setToken('');
-    for(const key of ['stk-event-cursor','stk-last-action','stk-session'])sessionStorage.removeItem(key);
+    for(const key of ['stk-event-cursor','stk-last-action','stk-session',RUN_ENVIRONMENT])sessionStorage.removeItem(key);
     setConnected(false);
   },[]);
-  return connected?<Workbench disconnect={disconnect}/>:<Connect connected={()=>setConnected(true)}/>;
+  return connected?<Workbench disconnect={disconnect}/>:<Connect connected={()=>{
+    sessionStorage.removeItem(RUN_ENVIRONMENT);
+    setConnected(true);
+  }}/>;
 }
 
 function Connect({connected}:{connected:()=>void}){
@@ -97,6 +113,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const [name,setName]=useState('科学项目'),[log,setLog]=useState<TaskLog|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
   const [environmentDisclosure,setEnvironmentDisclosure]=useState<EnvironmentDisclosure>('setup');
   const environment=useRef<HTMLDetailsElement>(null);
+  const restoreEnvironment=useRef(true);
   const [newTaskDisclosure,setNewTaskDisclosure]=useState<NewTaskDisclosure>('default');
   const newTaskOpen=newTaskDisclosure==='open';
   const [fileProbe,setFileProbe]=useState<ProbeReading|null>(null),[graphProbe,setGraphProbe]=useState<ProbeReading|null>(null);
@@ -184,8 +201,12 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     generation.current++;scopeVersion.current++;activeScope.current=null;defaultPick.current=null;fileEdited.current=false;
     setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);show(null);setLog(null);setGraphProbe(null);setGraphSource(null);setLogRoom(false);
   },[show]);
-  const clearNode=useCallback(()=>{clearTask();setNode('');setWorkspace('');},[clearTask]);
-  const nodeGone=useCallback((scope:TaskScope)=>{if(activeScope.current===scope)clearNode();},[clearNode]);
+  const selectNode=useCallback((id:string)=>{
+    restoreEnvironment.current=false;
+    sessionStorage.removeItem(RUN_ENVIRONMENT);
+    clearTask();setNode(id);setWorkspace('');
+  },[clearTask]);
+  const nodeGone=useCallback((scope:TaskScope)=>{if(activeScope.current===scope)selectNode('');},[selectNode]);
   const observeTask=useCallback((scope:TaskScope,fact:TaskFact,verifiedIdentity:boolean)=>{
     if(activeScope.current!==scope)return;
     setObservedTask(previous=>{
@@ -202,7 +223,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     setArtifacts(result);
     return true;
   },[]);
-  function selectWorkspace(id:string){clearTask();setWorkspace(id);}
+  function selectWorkspace(id:string,created=false){
+    restoreEnvironment.current=false;
+    // A successful explicit creation can precede the node's next listing. Only remember its exact returned ID.
+    if(selected?.role==='node'&&scopeId(node)&&scopeId(id)&&(created||workspaces.some(row=>row.id===id))){
+      sessionStorage.setItem(RUN_ENVIRONMENT,JSON.stringify({node,workspace:id}));
+    }else sessionStorage.removeItem(RUN_ENVIRONMENT);
+    clearTask();setWorkspace(id);
+  }
   // 新建 in 运行环境: the receipt's workspace is chosen only while this instance and the node and selection the create
   // was sent from are current (scopeVersion), and only by the ID the Runtime returned. Adopting it is the evidence
   // that opens 新建任务 by default; a review, a receipt without an ID or a late reply changes nothing. Nothing is
@@ -211,9 +239,8 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     const version=scopeVersion.current;
     const a=await invoke('workspace.create',{name});
     const id:unknown=a.result?.id;
-    if(!alive.current||scopeVersion.current!==version||a.state!=='succeeded'||
-       typeof id!=='string'||!/^[a-f0-9]{32}$/.test(id))return;
-    selectWorkspace(id);
+    if(!alive.current||scopeVersion.current!==version||a.state!=='succeeded'||!scopeId(id))return;
+    selectWorkspace(id,true);
     setNewTaskDisclosure(current=>current==='default'?'open':current);
   }
   const refresh=useCallback(async()=>{
@@ -225,6 +252,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       })]);
       if(!alive.current)return;
       setDevices(d);setDevicesRead(true);setActions(a);mergeList(s);setOnline(true);
+      // Consume the tab preference only with an authenticated listing. A failed first refresh leaves it pending,
+      // with neither selection shown, so the ordinary refresh path can validate it when connectivity returns.
+      if(restoreEnvironment.current&&Array.isArray(d)){
+        restoreEnvironment.current=false;
+        const choice=rememberedEnvironment(d);
+        if(choice){setNode(choice.node);setWorkspace(choice.workspace);}
+        else sessionStorage.removeItem(RUN_ENVIRONMENT);
+      }
       if(p!==null)setReadKinds(Array.isArray(p?.read_kinds)?p.read_kinds:[]);
     }catch(error){
       if(!alive.current)return;
@@ -277,7 +312,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     fit();window.addEventListener('resize',fit);return()=>window.removeEventListener('resize',fit);
   },[sourceOpen]);
   useEffect(()=>{void refresh();const abort=new AbortController();void events(()=>void refresh(),abort.signal);const timer=setInterval(()=>void refresh(),5000);return()=>{abort.abort();clearInterval(timer);};},[refresh]);
-  useEffect(()=>{if(node&&!selected)clearNode();},[node,selected,clearNode]);
+  useEffect(()=>{if(node&&!selected)selectNode('');},[node,selected,selectNode]);
   // A graph error or probe reply belongs to the scope it was raised in.
   useEffect(()=>{setGraphError('');setGraphProbe(null);},[graphKey,graphScope]);
   useEffect(()=>{
@@ -514,7 +549,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       <details className="setting" ref={environment} open={environmentOpen}><summary onClick={event=>{
         event.preventDefault();setEnvironmentDisclosure(environmentOpen?'closed':'open');
       }}>运行环境 · {nodeName||'未选择节点'}{selected&&` · ${workspace?workspaceName(workspace):'未选择项目'}`}</summary>
-      <label>执行节点<select value={node} onChange={e=>{clearTask();setNode(e.target.value);setWorkspace('');}}><option value="">选择节点</option>{nodes.map(d=><option key={d.id} value={d.id}>{d.online?'●':'○'} {d.name}</option>)}</select></label>
+      <label>执行节点<select value={node} onChange={e=>selectNode(e.target.value)}><option value="">选择节点</option>{nodes.map(d=><option key={d.id} value={d.id}>{d.online?'●':'○'} {d.name}</option>)}</select></label>
       {selected&&<p className="muted">{selected.online?'在线':'离线'} · 最近更新 {selected.last_seen?new Date(selected.last_seen*1000).toLocaleString():'尚未连接'}{selected.snapshot.cpu_percent!==undefined&&<><br/>CPU {selected.snapshot.cpu_percent}% · 内存 {selected.snapshot.memory_percent}%</>}</p>}
       <label>项目<select value={workspace} onChange={e=>selectWorkspace(e.target.value)}><option value="">选择项目</option>{workspaces.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
       <div className="inline"><input aria-label="项目名称" value={name} onChange={e=>setName(e.target.value)}/><button disabled={busy||!node} onClick={()=>void run(createWorkspace)}>新建</button></div>

@@ -4863,6 +4863,144 @@ test('automatic folding leaves outside focus alone and reopens when the selected
   expect(errors).toEqual([]);
 });
 
+const preferredWorkspace = '5'.repeat(32);
+function environmentHub() {
+  const hub = new Hub();
+  hub.device = {...device, snapshot: {...device.snapshot, workspaces: [{id: ws, name: '同名工作区'}]}};
+  hub.others = [{...device, id: node2, name: '节点乙', snapshot: {...device.snapshot,
+    tasks: [{...row, id: task2, name: '节点乙的任务', workspace_id: preferredWorkspace}],
+    workspaces: [{id: preferredWorkspace, name: '同名工作区'}]}}];
+  return hub;
+}
+
+async function chooseSecondEnvironment(page: Page) {
+  await selectEnvironment(page, page.getByLabel('执行节点'), node2);
+  await selectEnvironment(page, project(page), preferredWorkspace);
+}
+
+const savedEnvironment = (page: Page) => page.evaluate(() => sessionStorage.getItem('stk-run-environment'));
+
+for (const viewport of viewports) {
+  test(`${viewport.name} a paired tab reload restores its chosen environment on the first Tasks click`, async ({page}) => {
+    await page.setViewportSize({width: viewport.width, height: viewport.height});
+    const hub = environmentHub();
+    const errors = await start(page, hub);
+    await go(page, '任务');
+    await chooseSecondEnvironment(page);
+    await expect(taskRow(page, '节点乙的任务')).toBeVisible();
+
+    const sent = traffic(page), requests = posts(page);
+    await page.reload();
+    await expectActive(page, '工作台');
+    const r = route(page, `restore-environment-${viewport.name}`);
+    await r.click(nav(page).getByRole('button', {name: '任务', exact: true}), '任务');
+    await expectActive(page, '任务');
+    await expect(disclosure(page, '运行环境')).toHaveText('运行环境 · 节点乙 · 同名工作区');
+    await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+    await expect(page.getByLabel('执行节点')).toHaveValue(node2);
+    await expect(project(page)).toHaveValue(preferredWorkspace);
+    await expect(taskRow(page, '节点乙的任务')).toBeInViewport({ratio: 1});
+    await expect(queue(page).locator('.task.selected')).toHaveCount(0);
+    await expect(status(page)).toHaveCount(0);
+    expect(await page.locator('aside.tasks').evaluate(el => el.scrollTop)).toBe(0);
+    expect(r.record).toMatchObject({clicks: 1, selects: 0});
+    expect([sent.seen, requests.seen, errors]).toEqual([[], [], []]);
+    r.save();
+    sent.stop();
+    requests.stop();
+  });
+}
+
+test('an unavailable first snapshot keeps the tab preference pending until an authenticated refresh', async ({page}) => {
+  const hub = environmentHub();
+  const errors = await start(page, hub);
+  await go(page, '任务');
+  await chooseSecondEnvironment(page);
+  const saved = JSON.stringify({node: node2, workspace: preferredWorkspace});
+  expect(await savedEnvironment(page)).toBe(saved);
+
+  hub.down = true;
+  const sent = posts(page);
+  await page.reload();
+  await expectActive(page, '工作台');
+  await expect(page.locator('header .connection')).toContainText('连接中断');
+  await go(page, '任务');
+  await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
+  await expect(page.getByLabel('执行节点')).toHaveValue('');
+  await expect(project(page)).toHaveValue('');
+  expect(await savedEnvironment(page)).toBe(saved);
+  await disclosure(page, '新建任务').click();
+  const spec = page.getByLabel('TaskSpec');
+  await spec.fill('{"argv":["python3","draft.py"],"outputs":[]}');
+
+  hub.down = false;
+  await page.locator('aside.tasks .section-title').getByRole('button', {name: '刷新'}).click();
+  await expect(taskRow(page, '节点乙的任务')).toBeVisible();
+  await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+  await expect(project(page)).toHaveValue(preferredWorkspace);
+  await expect(spec).toHaveValue('{"argv":["python3","draft.py"],"outputs":[]}');
+  expect(sent.seen).toEqual([]);
+  sent.stop();
+  expect(unexpected(errors, 503)).toEqual([]);
+});
+
+for (const invalid of ['revoked node', 'workspace absent from the chosen node'] as const) {
+  test(`a fresh listing discards the previous environment with a ${invalid}`, async ({page}) => {
+    const hub = environmentHub();
+    const original = hub.others[0];
+    const errors = await start(page, hub);
+    await go(page, '任务');
+    await chooseSecondEnvironment(page);
+    hub.device = {...hub.device, snapshot: {...hub.device.snapshot,
+      workspaces: [...hub.device.snapshot.workspaces, {id: preferredWorkspace, name: '同名工作区'}]}};
+    hub.others = [invalid === 'revoked node' ? {...original, revoked: true} :
+      {...original, snapshot: {...original.snapshot, workspaces: []}}];
+    const sent = posts(page);
+    await page.reload();
+    await expectActive(page, '工作台');
+    await go(page, '任务');
+    await expect(page.getByLabel('执行节点').locator(`option[value="${node}"]`)).toHaveCount(1);
+    await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
+    await expect(page.getByLabel('执行节点')).toHaveValue('');
+    await expect(project(page)).toHaveValue('');
+    expect(await savedEnvironment(page)).toBeNull();
+
+    hub.others = [original];
+    await page.locator('aside.tasks .section-title').getByRole('button', {name: '刷新'}).click();
+    await expect(page.getByLabel('执行节点').locator(`option[value="${node2}"]`)).toHaveCount(1);
+    await expect(page.getByLabel('执行节点')).toHaveValue('');
+    expect([sent.seen, errors]).toEqual([[], []]);
+    sent.stop();
+  });
+}
+
+test('partial environment choices and an explicit disconnect forget the tab preference', async ({page}) => {
+  const hub = environmentHub();
+  const errors = await start(page, hub);
+  await go(page, '任务');
+  await chooseSecondEnvironment(page);
+  await selectEnvironment(page, project(page), '');
+  expect(await savedEnvironment(page)).toBeNull();
+  await chooseSecondEnvironment(page);
+  await selectEnvironment(page, page.getByLabel('执行节点'), node);
+  await expect(project(page)).toHaveValue('');
+  expect(await savedEnvironment(page)).toBeNull();
+  await chooseSecondEnvironment(page);
+  expect(await savedEnvironment(page)).not.toBeNull();
+  await page.locator('header').getByRole('button', {name: '断开'}).click();
+  await expect(page.getByLabel('一次性配对码')).toBeVisible();
+  expect(await savedEnvironment(page)).toBeNull();
+  await page.getByText('使用已有设备凭据').click();
+  await page.getByLabel('设备凭据').fill('abcdefghijklmnopqrstu');
+  await page.getByRole('button', {name: '连接', exact: true}).click();
+  await expectActive(page, '工作台');
+  await go(page, '任务');
+  await expect(page.getByLabel('执行节点').locator(`option[value="${node2}"]`)).toHaveCount(1);
+  await expect(page.getByLabel('执行节点')).toHaveValue('');
+  await expect(project(page)).toHaveValue('');
+  expect(errors).toEqual([]);
+});
+
 // 新建任务 after an explicit 新建 in 运行环境: when the create receipt names its workspace and that workspace is chosen
 // for the same node and selection, the form is open by default. Its own buttons remain the only submission. An
 // ordinary choice, a reply after the scope or connection changed, a review or a receipt without an ID leave it as it
@@ -4881,6 +5019,30 @@ async function nodeChosen(page: Page, hub: Hub) {
   await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
   return errors;
 }
+
+test('a confirmed created environment can restore once the fresh listing contains its exact ID', async ({page}) => {
+  const hub = new Hub();
+  hub.listLater = true;
+  const errors = await nodeChosen(page, hub);
+  await createWorkspace(page, '项目一');
+  const id = createdId(1);
+  await expect(footer(page)).toContainText('就绪');
+  await expect(disclosure(page, '新建任务')).toHaveText(`新建任务 · ${id.slice(0, 8)}`);
+  await expect(project(page)).toHaveValue('');
+  expect(await savedEnvironment(page)).toBe(JSON.stringify({node, workspace: id}));
+
+  hub.listCreated();
+  const sent = posts(page);
+  await page.reload();
+  await expectActive(page, '工作台');
+  await go(page, '任务');
+  await expect(project(page)).toHaveValue(id);
+  await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+  await expect(settings(page, '新建任务')).not.toHaveAttribute('open', '');
+  expect(hub.creates).toEqual([{node, name: '项目一'}]);
+  expect([sent.seen, errors]).toEqual([[], []]);
+  sent.stop();
+});
 
 for (const viewport of viewports) {
   test(`${viewport.name} a confirmed new workspace shows 新建任务 with no disclosure click and no submission`, async ({page}) => {
