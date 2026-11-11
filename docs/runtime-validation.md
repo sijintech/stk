@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-11 01:26 UTC · 文献设计交付与当前平台回归
+
+`6dbf7cb3` 选择集成实际 Claude 文献设计提交 `072f13139d04393810d9391c910879cc41475f8d`，唯一文件为 `docs/design/workbench-literature-entry.md`。Root 与独立源码审阅确认原问答身份、跨分栏待派发动作保护、冻结引用与选中 scopes、当前授权和明确刷新计数。点击数仍是设计目标。Claude 在干净独立 `stk-claude-literature-94/claude/workbench-literature-94` 从 `6dbf7cb3` 实现已分配的六条原生导航、UI 和测试路径；Root 维护公共契约、状态、整合及发布。原 `stk-claude` 的 Web 改动在原工作树内。此次暂存扫描无发现。
+
+上一组合 `17b3b3ae` 的完整原生项目回归已结束，977/977，951.010 秒，零失败和跳过，测后核对测试二进制摘要一致。随后才重建含 `64e4fff4` 一步返回问答的组合测试，55/55，10.21 秒，含导航、草稿、来源、明确准备及 OpenGL UI，零失败和跳过。完整日志在外部 `root-delivery-20261111-151/native-result-revisit`，本片组合定向在 `root-delivery-20261111-153/native-integration`。
+
+远端 `16541e8f` 的 Runtime 整轮 13/13。Desktop Linux 主作业 2221/2221、619.19 秒，打包和新环境冒烟也通过。Windows CPU 1525/1526，唯一失败是 HDF5 体素回归将同一实际目录的两种路径分隔符按字符串比较，独立工作树正在修正断言。Windows 原生作业已由成功暂存的候选独立启动，继续执行。当前 Desktop 整轮尚未结束，本地后续提交待其终态后推送。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42931986988) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42931986868)
+
+macOS CPU 1586/1586、Metal 254/254，必测原生 4/6，MP4 与 HTML 视频仍在隐藏暂停时回到先前时间。正式工件的所取成员通过 ZIP CRC 并分别记录 SHA。新可选挂起/释放对照 1/1、9.03169 秒，同一视图和导航依次为 Playing、Suspended、释放后 Paused、明确操作后 Playing。首次和保持 0.75 秒后的重显位置都为 0.074674875 秒，随后明确播放到 0.1802841253 秒。初始挂起前为 0.113265125 秒，因此这条对照只证明所测释放流程。生产候选在独立 worktree 实现，保留原必测标准，目标 macOS 验收待新头。外部正式收据为 `root-delivery-20261111-150/published-platform-ci/macos-summary.json`。 [macOS 工件](https://github.com/sijintech/stk/actions/runs/42931986988/artifacts/13818583337)
+
 ## 2026-11-11 01:04 UTC · 撰写后一步返回已选问答
 
 `64e4fff4` 按逐字节相同的补丁集成独立桌面候选 `c6030606`。聚焦工作台的撰写区有已验证的选中问答时，可直接回到该问答。回程沿用当前项目、问答、输入草稿和正文位置，把键盘焦点交给正文。旧入口回调在撰写代次、项目或选中问答变化时作废。已有问答的回程无需读取隐藏的分页历史，显式打开历史继续加载。`2fb24ba5` 更新共用设计。两次 Root 暂存扫描零发现。
