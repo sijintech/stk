@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-11 06:12 UTC · 双端工作台更新发布到 main
+
+远端 `main` 从 `09efc0d1b783d7abf7171fc1004beea0b5145901` 快进到 `8a9da1313fd4c4cef3f01e17afef9d1285feb7d8`。推送后独立核对完整远端 SHA，12 个提交范围扫描零发现。包含桌面任务日志续读、Web 等值面输入保留、MuPRO 试点文档、桌面已收集 DAT 的发起窗口与冷启动，以及 Cocoa 重显对照取证。Root 组合桌面、项目测试和 Reports 原生窗口目标已构建。既有 AOCI 与四份状态文档工作区改动保留。
+
+该精确头 Secret scan `42970731604` 已通过。Desktop `42970731524`、Runtime `42970731620` 和 Pages `42970731615` 已启动。上个头的 macOS 两项原生视频仍未通过，新轮核对独立重显对照的释放轨迹。旧 PR #53、#54 的确切头和状态已复核，仍开放。Claude 102 在独立 worktree 的 Web 日志续读处于开发中。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42970731524) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42970731620) [Pages](https://github.com/sijintech/stk/actions/runs/42970731615) [Secret scan](https://github.com/sijintech/stk/actions/runs/42970731604)
+
+上一发布头 `09efc0d1` 的 Windows 原生官方工件已核对选定成员 CRC，6/6、1276 秒、零跳过。PDF、MP4、HTML 视频各 20/20，分别有 160、161、161 张图。PDF 捕获目标创建一次、复用 425 次并回收，匹配 426 次捕获请求，最长启动 101 ms。第 5、20 轮抽样图摘要与报告一致。终态索引 `root-delivery-20261111-159/published-platform-ci-09efc0d1/platform-terminal-summary.json`。 [Windows 工件](https://github.com/sijintech/stk/actions/runs/42963571163/artifacts/13833710221)
+
 ## 2026-11-11 06:10 UTC · 上一主线 Desktop 终态与 DAT 等待取证
 
 远端 `09efc0d1b783d7abf7171fc1004beea0b5145901` 的 Desktop `42963571163` 于 06:09:56 UTC 达到整轮终态，5/6 作业通过。Linux 2237/2237，打包及新环境冒烟通过。Windows CPU 1537/1537，原生 20 轮验收作业通过。macOS CPU 1597/1597、Metal 254/254，必测原生 4/6。MP4 和 HTML 视频各在隐藏后位置下限失败，首轮分别从 0.347071917 到 0.234 秒、从 0.205410 到 0.102 秒。普通静默 2/2，隔离静默 0/2，单独挂起和重显 1/1。Runtime 整轮 13/13，Secret scan 与 Pages 均通过。上一 Desktop 整轮已终止。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42963571163) [Windows 原生作业](https://github.com/sijintech/stk/actions/runs/42963571163/job/130349707275) [macOS 工件](https://github.com/sijintech/stk/actions/runs/42963571163/artifacts/13832491939)
