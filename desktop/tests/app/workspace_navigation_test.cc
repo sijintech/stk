@@ -706,15 +706,31 @@ def init(self, *args, **kwargs):
                 turn = str(uuid4())
                 sessions.create(identity, {"id": identity, "harness": HARNESS}, text,
                                 turn_id=turn, request_sha256=digest({"text": text, "turn_id": turn}))
-        if params["configuration"]["adapter"] == "test-completed":
+        status_seed = Path(__file__).with_name("request_status")
+        if status_seed.exists():
+            status = status_seed.read_text()
+            status_seed.unlink()
             requests = self.projects._get(params["handle"]).requests
             request = result["request"]["id"]
-            owner = str(uuid4())
-            requests._claim(request, executor_id=owner)
-            answer = Path(__file__).with_name("saved_answer")
-            text = answer.read_text() if answer.exists() else "Saved answer"
-            answer.unlink(missing_ok=True)
-            result["request"] = requests._complete(request, executor_id=owner, text=text)
+            if status == "cancelled":
+                result["request"] = requests.cancel(request)
+            else:
+                owner = str(uuid4())
+                running, claimed = requests._claim(request, executor_id=owner)
+                assert claimed
+                if status == "completed":
+                    answer = Path(__file__).with_name("saved_answer")
+                    text = answer.read_text() if answer.exists() else "Saved answer"
+                    answer.unlink(missing_ok=True)
+                    result["request"] = requests._complete(request, executor_id=owner, text=text)
+                elif status == "uncertain-cancel":
+                    result["request"] = requests.cancel(request)
+                elif status in ("failed", "uncertain"):
+                    code = {"failed": "adapter_failed", "uncertain": "transport_uncertain"}[status]
+                    result["request"] = requests._settle(request, executor_id=owner, status=status, code=code)
+                else:
+                    assert status == "running"
+                    result["request"] = running
         return result
     def unexpected(params, call):
         Path(__file__).with_name("unexpected_write").touch()
@@ -759,21 +775,28 @@ main()
 
   void save_question(const char *id, const char *question, bool completed = false)
   {
+    save_question_state(id, question, completed ? "completed" : "pending");
+  }
+
+  void save_question_state(const char *id, const char *question, const std::string &status,
+                           const char *adapter = "test-controlled")
+  {
     auto &discussion = project().discussion();
     ASSERT_TRUE(discussion.capture(kTable, {kRow}, {kField}, question));
     ASSERT_TRUE(loop.pump_until([&] { return !discussion.busy(); }, 30)) << discussion.error();
     ASSERT_TRUE(discussion.add_message(question));
     ASSERT_TRUE(loop.pump_until([&] { return !discussion.busy(); }, 30)) << discussion.error();
     ASSERT_TRUE(discussion.message().contains("id")) << discussion.error();
+    if (status != "pending") { std::ofstream(dir.path() / "request_status") << status; }
     std::optional<bridge::Result<Json>> result;
     client->call("project.requests.create",
                  {{"handle", handle()}, {"request_id", id}, {"message_id", discussion.message().at("id")},
-                  {"configuration", {{"adapter", completed ? "test-completed" : "test-controlled"},
+                  {"configuration", {{"adapter", status == "completed" ? "test-completed" : adapter},
                                      {"model", "fixture-v1"}}}})
         .then([&](auto reply) { result = std::move(reply); });
     ASSERT_TRUE(loop.pump_until([&] { return result.has_value(); }, 30));
     ASSERT_TRUE(result->ok()) << result->error().describe();
-    ASSERT_EQ(result->value().at("request").at("status"), completed ? "completed" : "pending");
+    ASSERT_EQ(result->value().at("request").at("status"), status == "uncertain-cancel" ? "uncertain" : status);
   }
 
   std::string attention_key(const char *id, const char *status)
@@ -1138,6 +1161,109 @@ TEST_F(SavedConversationNavigationPython, BrowseSavedQuestionsBeyondTheRecentRai
   const auto reopened = "ai_question/" + handle();
   ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget(reopened) != nullptr; }, 30));
   EXPECT_EQ(widget(reopened)->string.value(), "Keep the unsent question");
+}
+
+TEST_F(SavedConversationNavigationPython, FocusedQuestionShowsOnlyApplicableActionsAndKeepsExactDetails)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_table());
+  struct Case {
+    const char *id, *seed, *status, *error;
+    bool send, cancel, recover, archive;
+  };
+  const Case cases[] = {
+      {kFirst, "pending", "pending", "", true, true, false, true},
+      {kSecond, "completed", "completed", "", false, false, false, true},
+      {"cccccccc-cccc-4ccc-8ccc-cccccccccccc", "running", "running", "", false, true, true, false},
+      {"dddddddd-dddd-4ddd-8ddd-dddddddddddd", "uncertain", "uncertain", "transport_uncertain", false, true, true, false},
+      {"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "uncertain-cancel", "uncertain", "cancel_unconfirmed", false, false, true, false},
+      {"ffffffff-ffff-4fff-8fff-ffffffffffff", "failed", "failed", "adapter_failed", false, false, false, true},
+      {"99999999-9999-4999-8999-999999999999", "cancelled", "cancelled", "cancelled_before_start", false, false, false, true},
+  };
+  for (const auto &item : cases) {
+    ASSERT_NO_FATAL_FAILURE(save_question_state(item.id, "Captured temperature", item.seed, "aliyun-token-plan/1"));
+  }
+  std::ofstream(dir.path() / "forbid_question_preparation").put('\n');
+  f.drv->ctx.rect.xmax = 1600;
+  f.drv->ctx.rect.ymax = 1000;
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  auto &discussion = project().discussion();
+  const auto wait_for = [&](auto ready) {
+    ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return ready(); }, 30)) << discussion.exchange_error();
+  };
+  const auto show = [&](const Case &item) {
+    ASSERT_TRUE(discussion.load_exchange(item.id));
+    ASSERT_NO_FATAL_FAILURE(wait_for([&] {
+      const auto &request = discussion.exchange_request();
+      return io::get_string(request, "id") == item.id && io::get_string(request, "status") == item.status &&
+          !discussion.busy() && !discussion.exchange_busy() && widget("ai_refresh_reply") &&
+          widget("ai_refresh_reply")->enabled && widget("ai_transcript");
+    }));
+  };
+  const auto contains_text = [&](std::string_view text) {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) {
+        if (item.text.find(text) != std::string::npos) { return true; }
+      }
+    }
+    return false;
+  };
+  ASSERT_NO_FATAL_FAILURE(wait_for([&] { return widget("ai_prepare") && !discussion.busy(); }));
+  for (const auto &item : cases) {
+    SCOPED_TRACE(item.seed);
+    ASSERT_NO_FATAL_FAILURE(show(item));
+    const auto tr = [&](const std::string &key) { return f.shell->store().tr(key); };
+    EXPECT_TRUE(contains_text(std::string(tr(std::string("discussion.requests.") + item.status)) + " · fixture-v1"));
+    EXPECT_TRUE(contains_text("This question uses: Captured temperature · revision 1"));
+    EXPECT_FALSE(contains_text(std::string_view(item.id).substr(0, 8)));
+    EXPECT_EQ(widget("ai_send_saved") != nullptr, item.send);
+    EXPECT_EQ(widget("ai_cancel") != nullptr, item.cancel);
+    EXPECT_EQ(widget("ai_recover") != nullptr, item.recover);
+    EXPECT_EQ(widget("ai_archive") != nullptr, item.archive);
+    if (item.cancel && widget("ai_cancel")) { EXPECT_TRUE(widget("ai_cancel")->enabled); }
+    if (item.recover && widget("ai_recover")) { EXPECT_TRUE(widget("ai_recover")->enabled); }
+    if (*item.error) { EXPECT_TRUE(contains_text(item.error)); }
+    if (item.send) {
+      ASSERT_NE(widget("ai_send_saved"), nullptr);
+      EXPECT_EQ(widget("ai_send_saved")->text, "Send this saved question (fixture-v1)");
+      EXPECT_FALSE(widget("ai_send_saved")->enabled);
+      EXPECT_TRUE(contains_text(tr("ai.send.key_required")));
+    }
+    EXPECT_EQ(contains_text(tr("discussion.requests.cancel_requested")), std::string_view(item.seed) == "uncertain-cancel");
+  }
+
+  ASSERT_NO_FATAL_FAILURE(show(cases[1]));
+  const auto [x, y] = f.widget_center("ai_scope_detail");
+  ASSERT_TRUE(f.drv->click(x, y));
+  f.drv->frame();
+  EXPECT_TRUE(contains_text(std::string("Request ID · ") + kSecond));
+  EXPECT_TRUE(contains_text("Context ID · " + io::get_string(discussion.exchange_request(), "context_id")));
+  EXPECT_NE(widget("ai_copy_request_id"), nullptr);
+  EXPECT_NE(widget("ai_copy_context_id"), nullptr);
+
+  f.drv->ctx.rect.xmax = 680;
+  f.drv->ctx.rect.ymax = 900;
+  ASSERT_NO_FATAL_FAILURE(show(cases[0]));
+  ASSERT_NE(widget("ai_archive"), nullptr);
+  ASSERT_TRUE(widget("ai_archive")->enabled);
+  widget("ai_archive")->on_click();
+  ASSERT_NO_FATAL_FAILURE(wait_for([&] { return widget("ai_archive") && widget("ai_archive")->text == "Restore" &&
+      widget("ai_archive")->enabled; }));
+  EXPECT_EQ(widget("ai_send_saved"), nullptr);
+  EXPECT_TRUE(contains_text("Archived: this question is not sent."));
+  widget("ai_archive")->on_click();
+  ASSERT_NO_FATAL_FAILURE(wait_for([&] { return !project().busy() && !discussion.busy() &&
+      widget("ai_archive") && widget("ai_archive")->text == "Archive" && widget("ai_cancel") && widget("ai_cancel")->enabled; }));
+  ASSERT_NE(widget("ai_send_saved"), nullptr);
+  widget("ai_cancel")->on_click();
+  ASSERT_TRUE(discussion.busy());  // The explicit action dispatched after the archive-driven list refresh.
+  ASSERT_NO_FATAL_FAILURE(wait_for([&] {
+    return io::get_string(discussion.exchange_request(), "status") == "cancelled" && widget("ai_archive");
+  }));
+  EXPECT_EQ(widget("ai_send_saved"), nullptr);
+  EXPECT_EQ(widget("ai_cancel"), nullptr);
+  EXPECT_EQ(project().project()->revision, 1);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 
 TEST_F(SavedConversationNavigationPython, RecentQuestionsRestoreTheScrolledTranscript)

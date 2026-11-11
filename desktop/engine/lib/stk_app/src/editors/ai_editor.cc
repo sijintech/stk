@@ -1078,6 +1078,13 @@ class AIEditor final : public Editor {
     const auto progress = discussion.exchange_progress();
     const auto context = discussion.exchange_context();
     const std::string id = io::get_string(request, "id"), status = io::get_string(request, "status");
+    const auto model = io::get_string(request.value("configuration", Json::object()), "model");
+    const bool pending = status == "pending";
+    const bool active = status == "running" || status == "uncertain";
+    const bool cancel_requested = io::get_bool(request, "cancel_requested", false);
+    const auto current = [&discussion, &state, handle, id] {
+      return state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id;
+    };
     // A list read marks its page loaded at dispatch. Wait for it to settle before using the empty layout.
     const bool compact_empty = focused && (compose_first || (page.loaded && page.items.empty())) && request.empty() &&
                                discussion.exchange_id().empty() && !discussion.busy() && !discussion.exchange_busy() &&
@@ -1111,12 +1118,14 @@ class AIEditor final : public Editor {
       raw_reply_ = wrapped_text(io::get_string(reply, "text"), wrap_width, ctx);
     }
     if (!request.empty()) {
-      layout.paragraph(std::string(ctx.tr("discussion.requests." + status)) + " · " +
-          io::get_string(request.at("configuration"), "model") + " · " + id.substr(0, 8));
+      auto summary = std::string(ctx.tr("discussion.requests." + status)) + " · " + model;
+      if (!focused) { summary += " · " + id.substr(0, 8); }
+      layout.paragraph(summary);
       layout.paragraph(ctx.store.catalog().format("ai.request_source", {{"revision", std::to_string(io::get_int(request, "source_revision", -1))},
           {"title", io::get_string(context, "title")}}));
       if (discussion.following()) { layout.label(ctx.tr("ai.following")); }
-      else if (status == "running" || status == "uncertain") { layout.paragraph(ctx.tr("ai.paused")); }
+      else if (active) { layout.paragraph(ctx.tr("ai.paused")); }
+      if (focused && active && cancel_requested) { layout.paragraph(ctx.tr("discussion.requests.cancel_requested")); }
       if (request.contains("error_code") && request["error_code"].is_string()) { layout.paragraph(request["error_code"].get<std::string>()); }
       if (auto_ && auto_->key == key && (auto_->request_id == id || auto_->previous_id == id)) {
         if (!auto_->notice.empty()) { layout.paragraph(auto_->notice); }
@@ -1131,46 +1140,49 @@ class AIEditor final : public Editor {
       const float transcript_units = wide ? std::clamp(height / unit - 23.0f - candidate_space, 5.0f, 22.0f) :
           settings_open ? 6.0f : std::clamp(height / unit - 25.0f - candidate_space, 6.0f, 22.0f);
       layout.log_view("ai_transcript", transcript_, transcript_units, transcript_position(id));
+    }
+    if (!compact_empty && (!focused || !id.empty())) {
       const bool archived = ctx.store.archive().archived("request", id);
       // An automatic question whose local model is not running yet is sent once STK has started it.
       const bool auto_request = auto_ && auto_->key == key && auto_->request_id == id && !id.empty();
       const auto blocked = request.empty() || (auto_request && io::get_bool(auto_->current, "start", false)) ? std::string() :
           send_blocked(ctx, discussion, io::get_string(request.value("configuration", Json::object()), "adapter"), &context);
-      if (status == "pending" && !blocked.empty() && blocked != "ai.missing_key") { layout.paragraph(ctx.tr(blocked)); }
+      if (pending && !blocked.empty()) {
+        if (blocked != "ai.missing_key") { layout.paragraph(ctx.tr(blocked)); }
+        else if (focused && !archived) { layout.paragraph(ctx.tr("ai.send.key_required")); }
+      }
       auto &actions = layout.row();
-      // The saved question goes to the model frozen in it, named on the button.
-      const auto send_model = io::get_string(request.value("configuration", Json::object()), "model");
-      const auto send_text = send_model.empty() ? std::string(ctx.tr("ai.send_saved")) :
-          ctx.store.catalog().format("ai.send_saved_model", {{"model", send_model}});
-      actions.button("ai_send_saved", send_text, [this, &discussion, &state, handle, id, auto_request] {
-        if (!state.project() || state.project()->handle != handle || io::get_string(discussion.exchange_request(), "id") != id) { return; }
-        if (auto_request && auto_ && auto_->request_id == id) {  // started (and sent) next frame; again after a refusal
-          auto_->send = true;
-          auto_->sent = false;
-          return;
-        }
-        discussion.start_request(id);
-      }).disable(!enabled || status != "pending" || archived || !blocked.empty() ||
-                 (auto_request && auto_ && auto_->send && !auto_->sent));
-      actions.button("ai_refresh_reply", ctx.tr("ai.refresh"), [&discussion, &state, handle, id] {
-        if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
-          discussion.refresh_exchange();
-        }
-      })
-          .disable(!enabled || id.empty() || discussion.exchange_busy());
-      actions.button("ai_cancel", ctx.tr("discussion.requests.cancel"), [&discussion, &state, handle, id] {
-        if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
-          discussion.cancel_request(id);
-        }
-      }).disable(!enabled || (status != "pending" && status != "running" && status != "uncertain"));
-      if (status == "running" || status == "uncertain") {
-        layout.button("ai_recover", ctx.tr("discussion.requests.recover"), [&discussion, &state, handle, id] {
-          if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
-            discussion.recover_request(id);
+      if (focused) { actions.alignment(ui::LayoutAlign::Left); }
+      if (!focused || (pending && !archived)) {
+        // The saved question goes to the model frozen in it, named on the button.
+        const auto send_text = model.empty() ? std::string(ctx.tr("ai.send_saved")) :
+            ctx.store.catalog().format("ai.send_saved_model", {{"model", model}});
+        actions.button("ai_send_saved", send_text, [this, &discussion, current, id, auto_request] {
+          if (!current()) { return; }
+          if (auto_request && auto_ && auto_->request_id == id) {  // started (and sent) next frame; again after a refusal
+            auto_->send = true;
+            auto_->sent = false;
+            return;
           }
+          discussion.start_request(id);
+        }).disable(!enabled || !pending || archived || !blocked.empty() ||
+                   (auto_request && auto_ && auto_->send && !auto_->sent));
+      }
+      actions.button("ai_refresh_reply", ctx.tr("ai.refresh"), [&discussion, current] {
+        if (current()) { discussion.refresh_exchange(); }
+      }).disable(!enabled || id.empty() || discussion.exchange_busy());
+      if (!focused || ((pending || active) && !cancel_requested)) {
+        actions.button("ai_cancel", ctx.tr("discussion.requests.cancel"), [&discussion, current, id] {
+          if (current()) { discussion.cancel_request(id); }
+        }).disable(!enabled || (!pending && !active));
+      }
+      if (active) {
+        auto &recovery = focused ? actions : layout;
+        recovery.button("ai_recover", ctx.tr("discussion.requests.recover"), [&discussion, current, id] {
+          if (current()) { discussion.recover_request(id); }
         }).disable(!enabled);
       }
-      archive_button(actions, ctx, "request", id, "ai_archive", false, enabled && status != "running" && status != "uncertain");
+      if (!focused || !active) { archive_button(actions, ctx, "request", id, "ai_archive", false, enabled && !active); }
     }
     if (parameter_request && status == "completed") { proposal_actions(layout, ctx, state, handle, id, enabled); }
     if (!compose_first) {
@@ -1179,7 +1191,25 @@ class AIEditor final : public Editor {
     }
     if (auto *details = layout.panel("ai_scope_detail", ctx.tr("ai.scope_detail"), false)) {
       hint(*details, ctx, "ai.single_turn");
-      if (!id.empty()) { details->paragraph(id); details->paragraph(io::get_string(request, "context_id")); }
+      if (!id.empty()) {
+        const auto context_id = io::get_string(request, "context_id");
+        if (focused) {
+          const auto show_id = [&](std::string_view kind, const std::string &value) {
+            const auto suffix = std::string(kind) + "_id";
+            auto &row = details->row();
+            row.paragraph(ctx.store.catalog().format("ai." + suffix, {{"id", value}}));
+            auto *window = ctx.draw ? ctx.draw->window : nullptr;
+            const auto label = ctx.tr("ai.copy_" + suffix);
+            row.button("ai_copy_" + suffix, label, [window, value, current, weak = lifetime()] {
+              if (window && !weak.expired() && current()) { window->manager().set_clipboard_text(value); }
+            }).width((layout.ctx().measurer().width(label, style.font) + 2 * style.text_margin) / style.unit)
+              .disable(!window);
+          };
+          show_id("request", id);
+          show_id("context", context_id);
+        }
+        else { details->paragraph(id); details->paragraph(context_id); }
+      }
       if (parameter_request && !reply.empty()) {
         details->label(ctx.tr("ai.raw_reply"));
         details->log_view("ai_raw_reply", raw_reply_, 6);
