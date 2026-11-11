@@ -7,6 +7,7 @@
  * bridge traffic is in JobsState (AppStore::jobs()); this class keeps only per-area UI state.
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <ctime>
@@ -158,7 +159,8 @@ class JobsEditor final : public Editor {
     auto &body = focused ? l.scope("focused_jobs") : l;
     status_line(body, ctx, jobs);
     if (focused) { tasks_panel(body, ctx, jobs); }
-    auto *environment = focused ? body.panel("environment", environment_title(ctx, jobs), false) : &body;
+    auto *environment = focused ? body.panel("environment", environment_title(ctx, jobs),
+        environment_default_open(jobs), ui::Layout::PanelDefault::UntilToggled) : &body;
     if (environment) {
       connection_panel(*environment, ctx, jobs);
       workspace_panel(*environment, ctx, jobs);
@@ -309,6 +311,23 @@ class JobsEditor final : public Editor {
   }
 
   /* ---- Connection ---- */
+
+  enum class EnvironmentDefault { Setup, AutoClosed, Reopened };
+
+  bool environment_default_open(const JobsState &jobs)
+  {
+    const auto &selected = jobs.workspace();
+    const bool valid = !selected.empty() && std::ranges::any_of(jobs.workspaces(), [&](const WorkspaceRow &row) {
+      return row.id == selected;
+    });
+    if (environment_default_ == EnvironmentDefault::Setup && valid) {
+      environment_default_ = EnvironmentDefault::AutoClosed;
+    }
+    else if (environment_default_ == EnvironmentDefault::AutoClosed && !valid) {
+      environment_default_ = EnvironmentDefault::Reopened;
+    }
+    return environment_default_ != EnvironmentDefault::AutoClosed;
+  }
 
   static std::string connection_name(EditorContext &ctx, const ConnectionRow &c)
   {
@@ -1435,6 +1454,7 @@ class JobsEditor final : public Editor {
   int detail_tab_ = 0;
   int log_stream_ = 0;
   int input_sel_ = -1;
+  EnvironmentDefault environment_default_ = EnvironmentDefault::Setup;
   int art_sel_ = -1;
   int review_sel_ = -1;
   std::string request_for_;

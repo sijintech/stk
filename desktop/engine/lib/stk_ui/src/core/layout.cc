@@ -189,7 +189,7 @@ Layout &Layout::scope(std::string_view key)
   return l;
 }
 
-Layout *Layout::panel(std::string_view key, std::string_view title, bool default_open)
+Layout *Layout::panel(std::string_view key, std::string_view title, bool default_open, PanelDefault default_policy)
 {
   Layout &p = add_child(Kind::Panel, false);
   const WidgetId pid = utf8::hash_combine(scope_, utf8::fnv1a(key));
@@ -202,8 +202,18 @@ Layout *Layout::panel(std::string_view key, std::string_view title, bool default
   h.height = block_->ctx().style().panel_header;
   p.header_ = &h;
   /* Remember the default so the first toggle flips it (panel state persists by id). */
-  block_->ctx().panels_.try_emplace(pid, default_open);
-  p.open_ = block_->ctx().panel_open(pid, default_open);
+  auto &ctx = block_->ctx();
+  bool &open = ctx.panels_.try_emplace(pid, default_open).first->second;
+  if (default_policy == PanelDefault::UntilToggled && ctx.panel_epoch(pid) == 0) {
+    // Move focus from a control that this automatic collapse removes to its disclosure button.
+    if (open && !default_open && !ctx.next_frame_focus_ &&
+        ctx.previous_panel_focus_key_.starts_with(h.key + "/")) {
+      ctx.restore_focus_next_frame(h.key);
+    }
+    open = default_open;
+    ctx.track_panel_focus_ |= open;
+  }
+  p.open_ = open;
   if (!p.open_) {
     return nullptr;
   }

@@ -197,6 +197,10 @@ void Context::begin_frame(Vec2 window_size, double now)
   ++frame_serial_;
   window_ = window_size;
   now_ = std::max(now_, now);
+  previous_panel_focus_key_.clear();
+  if (std::exchange(track_panel_focus_, false)) {
+    if (const auto *focused = find_id(focus_)) { previous_panel_focus_key_ = focused->key; }
+  }
   blocks_.clear();
   draw_.clear();
   building_ = true;

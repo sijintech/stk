@@ -344,6 +344,7 @@ struct Widget {
 class Layout {
  public:
   enum class Kind : uint8_t { Column, Row, Split, Grid, Box, Panel, Splitter };
+  enum class PanelDefault : uint8_t { Initial, UntilToggled };
 
   /* Containers. */
   Layout &row(bool align = false);
@@ -353,8 +354,10 @@ class Layout {
   /** Grid flow with a fixed number of columns (row-major). */
   Layout &grid(int columns, bool align = false);
   Layout &box();
-  /** Collapsible panel; returns the body layout, or nullptr while collapsed. */
-  Layout *panel(std::string_view key, std::string_view title, bool default_open = true);
+  /** Collapsible panel; returns the body layout, or nullptr while collapsed.
+   * UntilToggled lets changing defaults take effect until the user toggles this panel. */
+  Layout *panel(std::string_view key, std::string_view title, bool default_open = true,
+                PanelDefault default_policy = PanelDefault::Initial);
   /** Property-split row (label right-aligned in the left 40 %); returns the value layout. */
   Layout &prop(std::string_view label, std::string_view tooltip = {});
   /** Side-by-side panes separated by a draggable bar; `factor` is the left share. */
@@ -802,6 +805,8 @@ class Context {
 
   std::unordered_map<WidgetId, bool> panels_;
   std::unordered_map<WidgetId, uint64_t> panel_epochs_;
+  bool track_panel_focus_ = false;
+  std::string previous_panel_focus_key_;
   std::unordered_map<WidgetId, float> scroll_;
   std::unordered_map<WidgetId, bool> follow_;
   std::unordered_map<WidgetId, TableState> tables_;

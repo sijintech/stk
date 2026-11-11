@@ -263,6 +263,54 @@ TEST(JobsLayout, FocusedTasksShowTheQueueAndRequireOpeningTheDraftToSubmit)
   ASSERT_TRUE(u.pump([&] { return jobs.submission() && jobs.submission()->state == app::SubmitState::Done; }));
 }
 
+TEST(JobsLayout, FocusedTaskEnvironmentGuidesSetupAndHonorsDisclosure)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  UiOnFake u;
+  auto &jobs = u.jobs();
+  ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+  jobs.select_connection("runtime:lab");
+  ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty(); }));
+  const std::string workspace = jobs.workspace();
+  jobs.select_workspace("");
+  jobs.form().name = "Unsubmitted task draft";
+  u.f.shell->open_workbench(u.f.screen);
+  u.f.screen.run_deferred();
+  u.f.drv->frame();
+  u.click("workbench_tasks");
+  ASSERT_TRUE(u.f.shell->workbench_is_focused(u.f.screen));
+
+  const std::string panel = "a1/main/focused_jobs/environment";
+  const std::string picker = panel + "/workspace/workspace";
+  const auto *control = u.find(picker);
+  ASSERT_NE(control, nullptr);  // Setup is already open before a workspace is selected.
+  ASSERT_TRUE(u.f.screen.ui()->focus_widget(control->id));
+  ASSERT_TRUE(u.f.drv->key(wm::Key::Enter));
+  ASSERT_TRUE(u.f.drv->key(wm::Key::End));
+  ASSERT_TRUE(u.f.drv->key(wm::Key::Enter));
+  EXPECT_EQ(jobs.workspace(), workspace);
+  EXPECT_EQ(u.find(picker), nullptr);
+  const auto *header = u.find(panel);
+  ASSERT_NE(header, nullptr);
+  EXPECT_EQ(u.f.screen.ui()->focused(), header->id);
+
+  jobs.select_workspace("");
+  EXPECT_NE(u.find(picker), nullptr);
+  jobs.select_workspace(workspace);
+  EXPECT_NE(u.find(picker), nullptr);  // After setup has retired, recovery stays open.
+  u.click(panel);
+  jobs.select_workspace("");
+  EXPECT_EQ(u.find(picker), nullptr);  // An explicit close wins even after losing scope.
+  u.click(panel);
+  jobs.select_workspace(workspace);
+  EXPECT_NE(u.find(picker), nullptr);  // An explicit open also survives scope changes.
+  EXPECT_EQ(jobs.form().name, "Unsubmitted task draft");
+  EXPECT_FALSE(jobs.submission());
+  EXPECT_EQ(wmtest::read_text(u.dir.str() + "/model/methods.log").find("task.submit\n"), std::string::npos);
+}
+
 TEST(JobsLayout, OpeningATaskResultKeepsTheFocusedWorkbench)
 {
   if (std::string(STK_BRIDGE_FAKE).empty()) {
