@@ -359,8 +359,13 @@ label.check input{width:auto}
 .file-pick{flex-direction:row;align-items:center;gap:8px;margin:0 0 0 auto}
 .file-pick input{width:auto}
 /* The stream switch of a task log stays at the top of the scrolling pane; the shown stream changes colour only. */
-.log-streams{position:sticky;top:0;z-index:1;display:flex;gap:6px;margin:10px 0 0;padding:4px 0;background:#1b1c25}
+.log-streams{position:sticky;top:0;z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0 0;padding:4px 0;background:#1b1c25}
+.log-stream-choice{display:flex;gap:6px}
 .log-streams button{padding:4px 10px;font-size:12px}
+/* 继续读取 follows the stream switch; once the stream has ended it stays in place, dimmed, beside the reason. */
+.log-streams button.log-more.ended,.log-streams button.log-more.ended:hover{cursor:default;opacity:.55;background:#292a36;border-color:#454555}
+.log-note{flex:1 1 12em;min-width:0;color:#8d8f96;font-size:12px}
+.log-note:empty{flex:0 0 0}
 .log-streams button.active,.log-streams button.active:hover{background:#354660;border-color:#7e9cd8;color:#fff}
 .log-streams button[aria-disabled="true"]{cursor:wait}
 @media(max-width:700px){.mode-switch{align-self:stretch}.mode-switch button{flex:1}.graph-params label{max-width:none;min-width:40%}.graph-outputs{grid-template-columns:1fr}.overlay-col{max-width:62%}.overlays{font-size:10px}}

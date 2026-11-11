@@ -113,10 +113,16 @@ class Hub {
   private unlisted: (() => void)[] = [];
   listCreated() { for (const list of this.unlisted.splice(0)) list(); }
   readonly actionRows: Record<string, any>[] = [];
-  // task.logs: fails for every stream or one; `logTexts` keys `${task_id} ${stream}`; `logPayloads` records each payload.
+  // task.logs: fails for every stream or one; `logTexts` keys `${task_id} ${stream}` (a string, or a Buffer for raw
+  // bytes); `logPayloads` records each payload. As suan/runtime/service.py answers it, a reply is at most `logChunk`
+  // bytes from the asked offset, with offset, next_offset and terminal (the task row's state when the read starts).
+  // `logReply`: 'legacy' answers only {data}, as older nodes did; the faults corrupt one reply each, then reset.
   logsFail: boolean | 'stdout' | 'stderr' = false;
-  readonly logTexts = new Map<string, string>();
+  readonly logTexts = new Map<string, string | Buffer>();
   readonly logPayloads: Record<string, any>[] = [];
+  logChunk = 1024 * 1024;
+  logReply: 'normal' | 'legacy' = 'normal';
+  logFault: null | 'offset' | 'next_offset' | 'base64' | 'no-offsets' = null;
   readonly viewErrors = new Map<string, string>();
   reportedViewSource?: {task_id: string; path: string} | 'omit';
   // Payloads of the view.build and view.probe actions, in order: which task and artifact each one asked for.
@@ -358,10 +364,20 @@ class Hub {
       if (body.kind === 'task.logs') {
         // As the node reads it: the stream defaults to stdout; text is per task and stream (LOG for any stdout not set).
         this.logPayloads.push(body.payload);
-        const stream = body.payload.stream ?? 'stdout', fail = this.logsFail === true || this.logsFail === stream;
+        const stream = body.payload.stream ?? 'stdout', offset = body.payload.offset ?? 0;
+        const state = this.device.snapshot.tasks.find(t => t.id === body.payload.task_id)?.state;
+        const terminal = ['succeeded', 'failed', 'cancelled'].includes(state ?? '');
         const text = this.logTexts.get(`${body.payload.task_id} ${stream}`) ?? (stream === 'stdout' ? LOG : '');
-        return json(fail ? {id: body.id, state: 'failed', error: '日志暂不可读'} :
-          {id: body.id, state: 'succeeded', result: {data: Buffer.from(text).toString('base64')}});
+        const bytes = Buffer.from(text).subarray(offset, offset + this.logChunk);
+        const fault = this.logFault;
+        this.logFault = null;
+        const fail = this.logsFail === true || this.logsFail === stream;
+        if (fail) return json({id: body.id, state: 'failed', error: '日志暂不可读'});
+        const data = fault === 'base64' ? '%%' : bytes.toString('base64');
+        const result = this.logReply === 'legacy' || fault === 'no-offsets' ? {data} : {data,
+          offset: fault === 'offset' ? offset + 1 : offset,
+          next_offset: offset + bytes.length + (fault === 'next_offset' ? 1 : 0), terminal};
+        return json({id: body.id, state: 'succeeded', result});
       }
     }
     return json({detail: `unmocked ${path}`}, 500);
@@ -4016,6 +4032,294 @@ for (const viewport of viewports) {
       requests.stop();
       expect(requests.seen.filter(call => call.endsWith('task.logs'))).toEqual(['/api/v1/actions task.logs']);
       expect(hub.logPayloads).toEqual([{task_id: task}, {task_id: task, stream: 'stderr'}]);
+    });
+  });
+}
+
+// 继续读取: from the first block of the selected task's log, one click reads the next block of the shown stream with the
+// same task.logs action from the accepted next_offset (source bytes) and appends it. Synthetic CJK text, so byte and
+// character offsets differ; the 30-byte blocks split a line and a character of the running task's stdout.
+const runningTasks = {...device, snapshot: {...device.snapshot, tasks: [{...row, state: 'running'}, row2]}};
+const finishedTasks = {...device, snapshot: {...device.snapshot, tasks: [row, row2]}};
+const RUN_LOG = '第1步 网格已生成\n第2步 求解收敛\n', RUN_FIRST = '第1步 网格已生成\n第2', RUN_MORE = '第3步 写出结果\n';
+const RUN_CUT = 30, RUN_BYTES = Buffer.byteLength(RUN_LOG);
+const logMore = (page: Page) => logPane(page).locator('.log-streams').getByRole('button', {name: /^(继续读取|已读完)$/});
+const logNote = (page: Page) => logPane(page).getByRole('status');
+async function expectMore(page: Page, label: '继续读取' | '已读完', note: string) {
+  await expect(logMore(page)).toHaveText(label);
+  await expect(logMore(page)).toHaveAttribute('aria-disabled', label === '已读完' ? 'true' : 'false');
+  await expect(logNote(page)).toHaveText(note);
+}
+
+for (const viewport of viewports) {
+  test.describe(`${viewport.name} task log continuation`, () => {
+    test.use({viewport: {width: viewport.width, height: viewport.height}});
+
+    test('继续读取 appends the next block at the accepted byte offset and keeps the Viewer, stream and focus', async ({page}) => {
+      const hub = new Hub();
+      hub.device = runningTasks;
+      hub.logChunk = RUN_CUT;
+      hub.logTexts.set(`${task} stdout`, RUN_LOG);
+      const errors = await setup(page, hub);
+      await go(page, '结果');
+      await pause(page);
+      const viewer = await paneShot(page, filePane(page), 'viewer-before');
+      await go(page, '任务');
+      // Fixed start: 结果 after 读取日志 shows the first 30 bytes of stdout, ending inside 步 and inside the second line.
+      await shortcut(page, '读取日志').click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', RUN_FIRST);
+      await expectMore(page, '继续读取', '');
+      expect(hub.logPayloads).toEqual([{task_id: task}]);
+      await expect(logMore(page)).toBeInViewport({ratio: 1});
+      const before = await state(page), layout = await logLayout(page);
+      const sent = posts(page);
+      const r = measured(page, `${viewport.name}-continue`);
+      await r.activate(logMore(page), 'pointer', '继续读取');
+      await expect(footer(page)).toContainText('就绪');
+      // The half line and the split character are completed in place; the request asked byte 30, not a text length.
+      await expectStream(page, '标准输出', RUN_LOG);
+      expect(RUN_FIRST.length).not.toBe(RUN_CUT);
+      expect(hub.logPayloads.slice(1)).toEqual([{task_id: task, offset: RUN_CUT}]);
+      await expectActive(page, '结果');
+      await expect(logMore(page)).toBeFocused();
+      await expectMore(page, '继续读取', '');
+      expect(r.record).toMatchObject({clicks: 1, keys: 0});
+      r.save();
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-continue.png`)});
+      expect(await logLayout(page)).toEqual(layout);
+      sent.stop();
+      expect(writes(sent.seen)).toEqual(['/api/v1/actions task.logs']);
+      expect(await state(page)).toEqual(before);
+      expect((await paneShot(page, filePane(page), 'viewer-after')).equals(viewer)).toBe(true);
+      // Nothing new yet while the task runs: the text stays and the user may read again later.
+      await logMore(page).click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', RUN_LOG);
+      await expectMore(page, '继续读取', '暂无新内容，可稍后继续读取。');
+      // Section switches, 刷新, choosing the task again and the periodic refresh send no continuation.
+      for (const section of ['任务', '工作台', '结果', '任务']) await go(page, section);
+      await page.locator('aside.tasks .section-title').getByRole('button', {name: '刷新'}).click();
+      await taskRow(page, '解析场验证').click();
+      await page.clock.runFor(11000);
+      await go(page, '结果');
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', RUN_LOG);
+      expect(hub.logPayloads).toHaveLength(3);
+      // The task writes more, then ends: each click reads once from the accepted offset; an empty block at the end stops.
+      hub.logTexts.set(`${task} stdout`, RUN_LOG + RUN_MORE);
+      await logMore(page).click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', RUN_LOG + RUN_MORE);
+      await expectMore(page, '继续读取', '');
+      hub.device = finishedTasks;
+      await logMore(page).click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectMore(page, '已读完', '标准输出已读完，任务已结束。');
+      await expect(logMore(page)).toBeFocused();
+      await logMore(page).click({force: true});
+      await page.keyboard.press('Enter');
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', RUN_LOG + RUN_MORE);
+      const end = RUN_BYTES + Buffer.byteLength(RUN_MORE);
+      expect(hub.logPayloads.slice(1)).toEqual([RUN_CUT, RUN_BYTES, RUN_BYTES, end].map(offset => ({task_id: task, offset})));
+      // A raw-value probe after the log covers it and hides 继续读取; the stream switch shows the log again.
+      await page.getByRole('button', {name: '查询原始值'}).click();
+      await expect(logPane(page).locator('pre')).toContainText('"values"');
+      await expect(logMore(page)).toHaveCount(0);
+      await expect(footer(page)).toContainText('就绪');
+      await logStream(page, '标准输出').click();
+      await expect(footer(page)).toContainText('就绪');
+      // An explicit stream read starts again at the first block, which a finished task can still continue.
+      await expectStream(page, '标准输出', RUN_FIRST);
+      await expectMore(page, '继续读取', '');
+      expect(hub.logPayloads.at(-1)).toEqual({task_id: task});
+      expect(errors).toEqual([]);
+    });
+
+    test('a held 标准错误 continuation keeps the keyboard, sends one request and completes a split character', async ({page}) => {
+      const hub = new Hub();
+      hub.device = failedTasks;
+      hub.logChunk = 20;
+      const stderr = 'ValueError: 网格🔥尺寸\n'; // 🔥 takes bytes 18–21, so the first block ends inside it
+      hub.logTexts.set(`${task} stdout`, '');
+      hub.logTexts.set(`${task} stderr`, stderr);
+      const errors = await setup(page, hub, {scene: false});
+      await shortcut(page, '读取日志').click();
+      await expect(footer(page)).toContainText('就绪');
+      // The failed task's empty stdout has ended at once; its stderr is one click away.
+      await expectStream(page, '标准输出', '标准输出暂无内容。');
+      await expectMore(page, '已读完', '标准输出已读完，任务已结束。');
+      await logStream(page, '标准错误').focus();
+      await page.keyboard.press('Enter');
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准错误', 'ValueError: 网格');
+      await expectMore(page, '继续读取', '');
+      await expect(logStream(page, '标准错误')).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(logMore(page)).toBeFocused();
+      const release = hub.hold('task.logs');
+      hub.reached.clear();
+      const requests = posts(page);
+      try {
+        await page.keyboard.press('Enter');
+        await expect.poll(() => hub.reached.has('task.logs')).toBe(true);
+        await expect(logMore(page)).toHaveAttribute('aria-disabled', 'true');
+        await expect(logMore(page)).toBeFocused();
+        await page.keyboard.press('Enter');
+        await page.keyboard.press('Space');
+        await logMore(page).click({force: true});
+      } finally {
+        release();
+      }
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准错误', stderr);
+      await expect(logMore(page)).toBeFocused();
+      requests.stop();
+      expect(requests.seen.filter(call => call.endsWith('task.logs'))).toEqual(['/api/v1/actions task.logs']);
+      await page.keyboard.press('Enter');
+      await expect(footer(page)).toContainText('就绪');
+      await expectMore(page, '已读完', '标准错误已读完，任务已结束。');
+      await expect(logMore(page)).toBeFocused();
+      await expectStream(page, '标准错误', stderr);
+      expect(hub.logPayloads).toEqual([{task_id: task}, {task_id: task, stream: 'stderr'},
+        {task_id: task, stream: 'stderr', offset: 20}, {task_id: task, stream: 'stderr', offset: Buffer.byteLength(stderr)}]);
+      expect(errors).toEqual([]);
+    });
+
+    test('a failed, malformed or expired continuation keeps the confirmed log; a retry asks the same offset', async ({page}) => {
+      const hub = new Hub();
+      hub.device = runningTasks;
+      hub.logChunk = RUN_CUT;
+      hub.logTexts.set(`${task} stdout`, RUN_LOG);
+      hub.logTexts.set(`${task2} stdout`, '对照任务输出\n');
+      const errors = await setup(page, hub, {scene: false});
+      const alert = page.getByRole('alert');
+      await shortcut(page, '读取日志').click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', RUN_FIRST);
+      // A failed read and each malformed reply report an error and keep the first block and 继续读取.
+      for (const [fault, message] of [['fail', '日志暂不可读'], ['offset', '日志回执格式无效'], ['next_offset', '日志回执格式无效'],
+        ['base64', '日志回执格式无效'], ['no-offsets', '日志回执格式无效']] as const) {
+        if (fault === 'fail') hub.logsFail = 'stdout'; else hub.logFault = fault;
+        await logMore(page).click();
+        await expect(alert).toContainText(message);
+        await expect(footer(page)).toContainText('就绪');
+        await expectStream(page, '标准输出', RUN_FIRST);
+        await expectMore(page, '继续读取', '');
+        await alert.getByRole('button', {name: '关闭'}).click();
+        hub.logsFail = false;
+      }
+      await logMore(page).click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', RUN_LOG);
+      expect(hub.logPayloads.slice(1)).toEqual(Array(6).fill({task_id: task, offset: RUN_CUT}));
+      // Held continuations, then 对照任务 chosen before they answer: neither the late text nor a late error is adopted.
+      hub.logTexts.set(`${task} stdout`, RUN_LOG + RUN_MORE);
+      for (const late of ['text', 'error'] as const) {
+        const release = hub.hold('task.logs');
+        hub.reached.clear();
+        await logMore(page).click();
+        await expect.poll(() => hub.reached.has('task.logs')).toBe(true);
+        await go(page, '任务');
+        await taskRow(page, '对照任务').click();
+        await expect(status(page)).toContainText('已读取 Runtime 状态');
+        hub.logsFail = late === 'error' ? 'stdout' : false;
+        release();
+        await expect(footer(page)).toContainText('就绪');
+        await page.waitForTimeout(300);
+        await expect(alert).toHaveCount(0);
+        await expectActive(page, '任务');
+        await go(page, '结果');
+        await expect(logPane(page).locator('pre')).toHaveText(NO_LOG);
+        await expect(logStreams(page)).toHaveCount(0);
+        hub.logsFail = false;
+        // Back to the first task, a new scope: 读取日志 starts again at the first block, without an offset.
+        await go(page, '任务');
+        await taskRow(page, '解析场验证').click();
+        await expect(status(page)).toContainText('已读取 Runtime 状态');
+        await shortcut(page, '读取日志').click();
+        await expect(footer(page)).toContainText('就绪');
+        await expectStream(page, '标准输出', RUN_FIRST);
+      }
+      // The first held read continued the whole stdout (from byte 45), the second the new first block (from byte 30).
+      expect(hub.logPayloads.slice(7)).toEqual([{task_id: task, offset: RUN_BYTES}, {task_id: task},
+        {task_id: task, offset: RUN_CUT}, {task_id: task}]);
+      expect(errors).toEqual([]);
+    });
+
+    test('an offset-zero continuation without offsets keeps the accepted empty log and can retry', async ({page}) => {
+      const hub = new Hub();
+      hub.device = {...runningTasks, snapshot: {...runningTasks.snapshot, tasks: [{...row, state: 'queued'}, row2]}};
+      const stream = `${task} stdout`;
+      hub.logTexts.set(stream, '');
+      const errors = await setup(page, hub, {scene: false});
+      await shortcut(page, '读取日志').click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', '标准输出暂无内容。');
+
+      hub.logTexts.set(stream, '新输出\n');
+      hub.logFault = 'no-offsets';
+      await logMore(page).click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', '标准输出暂无内容。');
+      await expect(page.getByRole('alert')).toContainText('日志回执格式无效');
+      await expectMore(page, '继续读取', '暂无新内容，可稍后继续读取。');
+      await expect(logMore(page)).toBeFocused();
+
+      await page.keyboard.press('Enter');
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', '新输出');
+      await expect(logMore(page)).toBeFocused();
+      expect(hub.logPayloads).toEqual([{task_id: task}, {task_id: task, offset: 0}, {task_id: task, offset: 0}]);
+      expect(errors).toEqual([]);
+    });
+
+    test('a split UTF-8 BOM is removed only at source byte zero', async ({page}) => {
+      const hub = new Hub();
+      hub.device = runningTasks;
+      hub.logChunk = 2;
+      hub.logTexts.set(`${task} stdout`, Buffer.from([0xef, 0xbb, 0xbf, 0x41, 0xef, 0xbb, 0xbf, 0x42]));
+      const errors = await setup(page, hub, {scene: false});
+      const text = logPane(page).locator('pre');
+      await shortcut(page, '读取日志').click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', '标准输出暂无内容。');
+
+      await logMore(page).click();
+      await expect(footer(page)).toContainText('就绪');
+      // The raw rendered string also determines copied text. Normalized locator text can hide the leading mark.
+      expect(await text.textContent()).toBe('A');
+      await logMore(page).click();
+      await expect(footer(page)).toContainText('就绪');
+      expect(await text.textContent()).toBe('A');
+      await logMore(page).click();
+      await expect(footer(page)).toContainText('就绪');
+      expect(await text.textContent()).toBe('A\uFEFFB');
+      expect(hub.logPayloads).toEqual([{task_id: task}, ...[2, 4, 6].map(offset => ({task_id: task, offset}))]);
+      expect(errors).toEqual([]);
+    });
+
+    test('a reply without offsets shows its text and offers no continuation', async ({page}) => {
+      const hub = new Hub();
+      hub.device = runningTasks;
+      hub.logReply = 'legacy';
+      hub.logTexts.set(`${task} stdout`, RUN_LOG);
+      hub.logTexts.set(`${task} stderr`, STDERR);
+      const errors = await setup(page, hub, {scene: false});
+      await shortcut(page, '读取日志').click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准输出', RUN_LOG);
+      await expect(logMore(page)).toHaveCount(0);
+      await expect(logNote(page)).toHaveText('此日志回执不含读取位置，不能继续读取。');
+      await logStream(page, '标准错误').click();
+      await expect(footer(page)).toContainText('就绪');
+      await expectStream(page, '标准错误', STDERR);
+      await expect(logMore(page)).toHaveCount(0);
+      await expect(logStream(page, '标准错误')).toBeFocused();
+      await page.waitForTimeout(300);
+      expect(hub.logPayloads).toEqual([{task_id: task}, {task_id: task, stream: 'stderr'}]);
+      expect(errors).toEqual([]);
     });
   });
 }

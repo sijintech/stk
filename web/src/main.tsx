@@ -17,10 +17,28 @@ type ObservedTask = {scope:TaskScope;name:string;state:string;cancelRequested:bo
 // The scene 结果 shows in file mode, bound to the task scope and artifact path of the view.build that produced it.
 // Choosing another file only edits the choice: the canvas and its source stay until a new build succeeds.
 type Displayed = {scope:TaskScope;path:string;scene:Json};
-// The task log 结果 shows: the text of one stream as accepted for the task scope it was read in.
+// The task log 结果 shows: the text of one stream as accepted for the task scope it was read in. `next` is the source
+// byte offset the Runtime reported after the accepted bytes (null for a reply without offsets, which cannot be
+// continued safely); `tail` holds the bytes of a UTF-8 character split at that offset, shown once the rest arrives.
+// `ended`: an empty chunk while the task was already terminal, so nothing more will be written. `idle`: the latest
+// continuation found no new bytes while the task was still running.
 type LogStream='stdout'|'stderr';
-type TaskLog = {scope:TaskScope;stream:LogStream;order:number;text:string};
+type TaskLog = {scope:TaskScope;stream:LogStream;order:number;text:string;next:number|null;tail:Uint8Array;ended:boolean;idle:boolean};
 const LOG_STREAMS:readonly (readonly [LogStream,string])[]=[['stdout','标准输出'],['stderr','标准错误']];
+// The decoded text of `bytes` and the trailing bytes of a character that continues past them. A character is never
+// counted by its displayed length: offsets stay in source bytes, and an incomplete sequence waits for the next chunk.
+function decodeLog(bytes:Uint8Array,first:boolean,final:boolean):{text:string;tail:Uint8Array}{
+  let cut=bytes.length;
+  if(!final){
+    let lead=bytes.length-1;
+    while(lead>=0&&lead>bytes.length-4&&(bytes[lead]&0xc0)===0x80)lead--;
+    const byte=lead<0?0:bytes[lead],width=byte>=0xf8?1:byte>=0xf0?4:byte>=0xe0?3:byte>=0xc0?2:1;
+    if(width>1&&bytes.length-lead<width)cut=lead;
+  }
+  // A byte-order mark is dropped only at the start of the stream, as a single read of the whole file would.
+  return {text:new TextDecoder('utf-8',{ignoreBOM:!first}).decode(bytes.subarray(0,cut)),tail:bytes.slice(cut)};
+}
+const logCount=(value:unknown):value is number=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=0;
 // A published file the 结果文件 list offers.
 const viewable=(artifact:Json)=>/\.(vti|vtk|npy|dat)$/.test(artifact.path);
 // Persistent sections: 工作台 is the conversation home. All three stay mounted; only the active one is shown.
@@ -126,6 +144,9 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const returnFocus=useRef<{scope:TaskScope;launcher:HTMLButtonElement}|null>(null);
   const generation=useRef(0),scopeVersion=useRef(0),activeScope=useRef<TaskScope|null>(null),refreshing=useRef(false),alive=useRef(true);
   const artifactReads=useRef({started:0,applied:0}),logReads=useRef(0);
+  // The accepted log as of the latest change, so a continuation reply can tell whether it still extends it.
+  const logNow=useRef<TaskLog|null>(null),continuing=useRef(false);
+  const acceptLog=useCallback((next:TaskLog|null)=>{logNow.current=next;setLog(next);},[]);
   // The explicit Tasks shortcut may choose the sole file from its accepted reply for a successful task.
   // Leaving 结果, opening history over it, switching mode, editing the file choice or changing tasks drops the pick.
   const defaultPick=useRef<{scope:TaskScope}|null>(null),fileEdited=useRef(false);
@@ -200,8 +221,8 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     !tasks.length?'节点快照中暂无任务。':!queue.length?`${workspaceName(workspace)} 中暂无任务，可在下方「新建任务」中提交。`:'';
   const clearTask=useCallback(()=>{
     generation.current++;scopeVersion.current++;activeScope.current=null;defaultPick.current=null;fileEdited.current=false;levelEdited.current=false;
-    setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);show(null);setLog(null);setGraphProbe(null);setGraphSource(null);setLogRoom(false);
-  },[show]);
+    setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);show(null);acceptLog(null);setGraphProbe(null);setGraphSource(null);setLogRoom(false);
+  },[show,acceptLog]);
   const selectNode=useCallback((id:string)=>{
     restoreEnvironment.current=false;
     sessionStorage.removeItem(RUN_ENVIRONMENT);
@@ -388,10 +409,47 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     try{
       const item=await invoke('task.logs',stream==='stdout'?{task_id:scope.task}:{task_id:scope.task,stream},scope.node);
       if(!item.result||!active())return;
-      if(typeof item.result.data!=='string')throw new Error('日志回执格式无效。');
-      const bytes=Uint8Array.from(atob(item.result.data),c=>c.charCodeAt(0));
-      setLog({scope,stream,order,text:new TextDecoder().decode(bytes)});
+      const chunk=logChunk(item.result,null);
+      const ended=chunk.next!==null&&!chunk.bytes.length&&chunk.terminal;
+      const {text,tail}=decodeLog(chunk.bytes,true,chunk.next===null||ended);
+      acceptLog({scope,stream,order,text,next:chunk.next,tail,ended,idle:chunk.next!==null&&!ended&&!chunk.bytes.length});
     }catch(error){if(active()||lostAccess(error))throw error;}
+  }
+  // A null request offset identifies the first read, which may accept a legacy reply without offsets. An explicit
+  // continuation, including one from byte zero, must report the exact source byte range it returned.
+  function logChunk(result:Json,asked:number|null){
+    const invalid=()=>new Error('日志回执格式无效。');
+    if(typeof result.data!=='string')throw invalid();
+    let bytes:Uint8Array;
+    try{bytes=Uint8Array.from(atob(result.data),c=>c.charCodeAt(0));}catch{throw invalid();}
+    if(result.offset===undefined&&result.next_offset===undefined){
+      if(asked!==null)throw invalid();
+      return {bytes,next:null,terminal:false};
+    }
+    const offset=asked??0;
+    if(!logCount(result.offset)||!logCount(result.next_offset)||result.offset!==offset||result.next_offset!==offset+bytes.length)throw invalid();
+    return {bytes,next:result.next_offset as number,terminal:result.terminal===true};
+  }
+  // 继续读取: one task.logs read of the shown stream from the offset accepted last, appended to its text. It is kept
+  // only for the same instance, task scope, stream and accepted log (a new read, another stream or another task
+  // discards it), in the order of the click. A failure leaves the log as it was, so another click asks the same offset.
+  async function continueLog(){
+    const base=logNow.current,scope=activeScope.current;
+    if(!base||!scope||base.scope!==scope||base.next===null||base.ended||continuing.current)return;
+    continuing.current=true;
+    const version=scopeVersion.current,current=++logReads.current,order=beginReading(),offset=base.next;
+    const active=()=>alive.current&&activeScope.current===scope&&scopeVersion.current===version&&logReads.current===current&&logNow.current===base;
+    try{
+      const item=await invoke('task.logs',base.stream==='stdout'?{task_id:scope.task,offset}:{task_id:scope.task,stream:base.stream,offset},scope.node);
+      if(!item.result||!active())return;
+      const chunk=logChunk(item.result,offset);
+      const ended=!chunk.bytes.length&&chunk.terminal;
+      const bytes=new Uint8Array(base.tail.length+chunk.bytes.length);
+      bytes.set(base.tail);bytes.set(chunk.bytes,base.tail.length);
+      const {text,tail}=decodeLog(bytes,offset===base.tail.length,ended);
+      acceptLog({...base,order,text:base.text+text,next:chunk.next,tail,ended,idle:!ended&&!chunk.bytes.length});
+    }catch(error){if(active()||lostAccess(error))throw error;}
+    finally{continuing.current=false;}
   }
   // An explicit 结果 / 读取日志 click in Tasks opens 结果 at once and brings the target into view; the read itself
   // keeps its own scope checks and never navigates on completion. The analysis mode and Viewer are left as they are.
@@ -519,8 +577,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const probeReading=analysis==='graph'?graphProbe:shown?fileProbe:null;
   const resultText=probeReading&&(!taskLog||probeReading.order>taskLog.order)?probeReading.text:'';
   const logShown=resultText?null:taskLog;
-  const logText=taskLog?taskLog.text||`${LOG_STREAMS.find(([key])=>key===taskLog.stream)![1]}暂无内容。`:'';
+  const streamLabel=taskLog?LOG_STREAMS.find(([key])=>key===taskLog.stream)![1]:'';
+  const logText=taskLog?taskLog.text||`${streamLabel}暂无内容。`:'';
   const streamSwitch=taskBound&&logRoom;
+  // 继续读取 is offered for the shown log once its reply reported offsets. It stays in place, inert, when the stream has
+  // ended, so a keyboard user keeps the focus on it.
+  const logMore=streamSwitch&&logShown&&logShown.next!==null?logShown:null;
+  const logNote=!streamSwitch||!logShown?'':logShown.next===null?'此日志回执不含读取位置，不能继续读取。':
+    logShown.ended?`${streamLabel}已读完，任务已结束。`:logShown.idle?'暂无新内容，可稍后继续读取。':'';
   return <div className="app"><header><div className="wordmark">STK <span>科学工作台</span></div><span className={online?'connection':'connection offline'}>{online?'控制服务已连接':'连接中断 · 显示最近状态'}</span><button className="quiet" onClick={disconnect}>断开</button></header>
     {notice&&<div className="notice" role="alert">{notice}<button onClick={()=>error?setError(''):analysis==='file'?setViewError(''):setGraphError('')}>关闭</button></div>}
     <div className="workspace">
@@ -598,9 +662,12 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       {shownScene&&<div className="legend"><span>{shownScene.manifest.value_range[0].toPrecision(5)}</span><i/><span>{shownScene.manifest.value_range[1].toPrecision(5)} {shownScene.manifest.units}</span><small>{shownScene.manifest.display_reduced?'显示网格已简化':'完整显示网格'} · 数值查询使用原始数据</small></div>}
       <div className="probe"><strong>物理坐标探针</strong>{probe.map((v,i)=><input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={v} onChange={e=>setProbe(probe.map((n,j)=>i===j?Number(e.target.value):n))}/>)}<button disabled={busy||!shown} onClick={probeValue}>查询原始值</button></div></div>
       <details className={logRoom?'logs log-room':'logs'} ref={logPane} open><summary>日志 / 探针结果</summary>
-        {streamSwitch&&<div className="log-streams" role="group" aria-label="日志流">{LOG_STREAMS.map(([key,label])=><button type="button" key={key}
+        {streamSwitch&&<div className="log-streams"><div className="log-stream-choice" role="group" aria-label="日志流">{LOG_STREAMS.map(([key,label])=><button type="button" key={key}
           className={logShown?.stream===key?'active':''} aria-pressed={logShown?.stream===key} aria-disabled={busy}
-          onKeyDown={ignoreRepeat} onClick={()=>{if(!busy)void run(()=>readLogs(key));}}>{label}</button>)}</div>}
+          onKeyDown={ignoreRepeat} onClick={()=>{if(!busy)void run(()=>readLogs(key));}}>{label}</button>)}</div>
+          {logMore&&<button type="button" className={logMore.ended?'log-more ended':'log-more'} aria-disabled={busy||logMore.ended}
+            onKeyDown={ignoreRepeat} onClick={()=>{if(!busy&&!logMore.ended&&!continuing.current)void run(continueLog);}}>{logMore.ended?'已读完':'继续读取'}</button>}
+          <small className="log-note" role="status">{logNote}</small></div>}
         <pre>{(selected&&(resultText||logText))||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
     </section>
     <aside className={`chat surface${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'||overlay}>
