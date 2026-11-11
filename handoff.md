@@ -1,5 +1,17 @@
 # STK 当前交接
 
+## 2026-11-11 01:44 UTC · 隐藏媒体候选与上一轮 Desktop 终态
+
+`dbedeac2` 按逐字节相同的六路径补丁集成独立候选 `cc8b26599f4802fde78197ac57669e5eca168514`。文档宿主的隐藏路径使用专用暂停入口，Cocoa 对精确 WKWebView 顺序提交挂起与原有暂停，隐藏期持有一对挂起/释放。重显后核验原视图、导航、媒体与可见代次，在确认 Paused/None 后恢复原生输入。串行回执处理覆盖快速隐藏/重显、迟到释放、实际 AppKit 可见性中断与同视图新导航，验证期限为一秒。普通显式暂停沿用现有入口。原必测与可选原生验收未改。
+
+两名独立 Agent 和 Root 审阅生命周期。Linux 独立应用与相关测试构建通过，38/38、2.61 秒。Root 正常 CMake 重建应用、项目和文档资源目标后，38/38、1.44 秒，零跳过，含真实 Xvfb 宿主路由与暂停合并。macOS Objective-C++ 编译与 MP4、HTML 视频各 20 轮的目标平台验收仍待新头 CI。暂存扫描无发现。外部构建和测试在 `root-delivery-20261111-153/cocoa-hide-suspension`。
+
+远端上一代码头 `16541e8f1c41c0ed8387048e6770cd5f190c6120` 的 Desktop `42931986988` 已于 01:38:15 UTC 整轮结束，4/6 作业通过。Linux 主回归 2221/2221，Linux 打包和新环境冒烟通过。Windows CPU 1525/1526 的唯一失败由 `5c48faa5` 修正。macOS CPU 1586/1586、Metal 254/254，必测原生 4/6；其两个视频失败与可选挂起/释放 1/1 的正式细节见前节。当前已满足上一整轮终态的推送门。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42931986988)
+
+Windows 原生作业独立结束并通过 6/6、1032.61 秒。官方工件的所取成员通过 CRC 和摘要核对。PDF、MP4、HTML 视频各完成 20/20 轮，验收图分别 160、161、161 张。PDF 的 450 次捕获请求记录 WGC 创建 1 次、复用 449 次并结束回收，已接受帧的最长捕获启动 49 ms。第 5 和第 20 轮重新准备的关键 PNG 与报告 SHA 相同。外部正式汇总为 `root-delivery-20261111-150/published-platform-ci/platform-terminal-summary.json`。 [Windows 工件](https://github.com/sijintech/stk/actions/runs/42931986988/artifacts/13820246740)
+
+Claude 的独立文献入口实现仍在进行，Root 已记录返回路径需同样防止待派发准备/发送的审阅点。它的未审定代码保持在 `stk-claude-literature-94`。两条开放旧 PR 的头与范围已重核，本批没有适用的待合入改动。
+
 ## 2026-11-11 01:32 UTC · Windows HDF5 路径断言修正
 
 `5c48faa5` 选择集成独立候选 `7b34a24a0b55829183502799dbad5c3766aeaaaf`，唯一修改为 `muferro_hdf5_view_test.cc` 的本地运行目录断言。UTF-8 本地绑定先解析为文件系统路径，再比较规范化后的精确运行目录。图谱、选择器、分量、范围、发布源摘要与拒绝场景继续由原断言检查。两次暂存扫描无发现。
