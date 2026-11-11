@@ -319,6 +319,7 @@ class AIEditor final : public Editor {
       body.block().set_scroll_scope("ai_question_composer", focus);
       const auto &input = question_composer(body, ctx, state, draft, key, true);
       if (focus && ctx.ui) { ctx.ui->restore_focus_next_frame(input.key); }
+      draw_return_to_question(body, ctx, state);
     }
     body.paragraph(ctx.tr("ai.intro"));
     if (!state.error().empty()) { body.paragraph(state.error()); }
@@ -352,6 +353,35 @@ class AIEditor final : public Editor {
   }
 
  private:
+  void draw_return_to_question(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
+  {
+    auto &discussion = state.discussion();
+    const auto request = discussion.exchange_id();
+    if (request.empty() || io::get_string(discussion.exchange_request(), "id") != request) { return; }
+    auto *area = &ctx.area;
+    auto *screen = area->screen();
+    const auto handle = state.project()->handle;
+    const auto current = [this, weak = lifetime(), area, screen, visibility = screen->visibility_epoch(),
+                          activity = area->activity_epoch(), compose = compose_generation_,
+                          &state, handle, &discussion, request, exchange = discussion.exchange_generation()] {
+      return !weak.expired() && area->screen() == screen && screen->visibility_epoch() == visibility &&
+          screen->maximized() == area && area->activity_epoch() == activity && area->shell().workbench_is_focused(*screen) &&
+          state.project() && state.project()->handle == handle && compose_generation_ == compose &&
+          discussion.exchange_generation() == exchange && discussion.exchange_id() == request &&
+          io::get_string(discussion.exchange_request(), "id") == request;
+    };
+    layout.row().alignment(ui::LayoutAlign::Left).button("ai_return_question", ctx.tr("ai.return_question"),
+        [this, current, handle, ui = ctx.ui, key = layout.block().name() + "/ai_transcript", store = &ctx.store] {
+      if (!current() || compose_handle_ != handle) { return; }
+      compose_handle_.clear();
+      compose_focus_visibility_.reset();
+      if (ui) {
+        ui->restore_focus_next_frame(key, [this, current] { return current() && compose_handle_.empty(); });
+      }
+      store->changed();
+    });
+  }
+
   /** ``endpoint`` is a model endpoint ID (empty: the built-in Token Plan). ``automatic``: the service chooses the
    * endpoint and model for each question (models.route, S1d); the default where the service offers it. */
   struct Draft {
@@ -1059,15 +1089,18 @@ class AIEditor final : public Editor {
     const std::string handle = state.project()->handle;
     advance_auto(ctx, state);
     const auto &page = discussion.page("requests");
+    const bool history_on_rail = focused && discussion.recent_requests_supported();
     if (!discussion.exchange_id().empty()) { opened_history_ = true; }
     if (!compose_first) {
       discussion.sync_archive();  // Archived questions leave the list unless switched to them.
-      if (!page.loaded && enabled) { discussion.load_page("requests", page.offset, true); }
+      // The accepted exchange and the rail do not depend on the separate paginated history.
+      if (!page.loaded && enabled && (!history_on_rail || discussion.exchange_id().empty())) {
+        discussion.load_page("requests", page.offset, true);
+      }
       if (!opened_history_ && page.loaded && !page.items.empty() && enabled && !discussion.exchange_busy()) {
         opened_history_ = discussion.load_exchange(io::get_string(page.items.back(), "id"));
       }
     }
-    const bool history_on_rail = focused && discussion.recent_requests_supported();
     if (!history_on_rail) {
       layout.label(ctx.tr("ai.history"));
       draw_saved_questions(layout, ctx, state);
@@ -1217,6 +1250,7 @@ class AIEditor final : public Editor {
     }
     if (history_on_rail && !compose_first) {
       if (auto *history = layout.panel("ai_all_saved_questions", ctx.tr("ai.history"), false)) {
+        if (!page.loaded && enabled) { discussion.load_page("requests", page.offset, true); }
         draw_saved_questions(*history, ctx, state);
       }
     }
@@ -1409,6 +1443,7 @@ class AIEditor final : public Editor {
     if (draft.intent == kAgentIntent) { draft.intent = 0; }
     saved_questions_handle_.clear();
     compose_handle_ = project.handle;
+    ++compose_generation_;
     compose_focus_visibility_ = visibility;
     return true;
   }
@@ -1793,6 +1828,7 @@ class AIEditor final : public Editor {
   std::string active_draft_, opening_, shown_context_, shown_exchange_;
   bool opened_history_ = false;
   std::string saved_questions_handle_, compose_handle_;
+  uint64_t compose_generation_ = 0;
   std::optional<uint64_t> compose_focus_visibility_;
   bool model_has_text_ = false;
   struct NewEndpoint { std::string id, name, base_url, models; bool internal = false; int tier = 0; } new_endpoint_;

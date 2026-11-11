@@ -1055,11 +1055,17 @@ TEST_F(SavedConversationNavigationPython, BrowseSavedQuestionsBeyondTheRecentRai
     ~CloseViewer() { state.close(); }
   } close_viewer{viewer};
   ASSERT_NO_FATAL_FAILURE(prepare_table());
+  {
+    std::ofstream answer(dir.path() / "saved_answer");
+    answer << "Saved answer\n";
+    for (int line = 0; line < 90; ++line) { answer << "Older reply row " << line << '\n'; }
+  }
   ASSERT_NO_FATAL_FAILURE(save_question(kFirst, "Question older than the recent list", true));
   for (char digit = '1'; digit <= '8'; ++digit) {
     const std::string id = std::string(8, digit) + "-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     ASSERT_NO_FATAL_FAILURE(save_question(id.c_str(), "Newer saved question"));
   }
+  std::ofstream(dir.path() / "forbid_question_preparation").put('\n');
   const auto payload = std::make_shared<io::Payload>(io::read_stkp(std::string(STK_REPO_ROOT) +
       "/desktop/tests/viewer/fixtures/muferro_domains.stkp"));
   viewer.open_payload(payload, "Already open");
@@ -1114,10 +1120,60 @@ TEST_F(SavedConversationNavigationPython, BrowseSavedQuestionsBeyondTheRecentRai
     return !discussion.exchange_busy() && discussion.exchange_id() == kFirst && widget(draft);
   }, 30));
   EXPECT_EQ(io::get_string(discussion.exchange_question(), "text"), "Question older than the recent list");
-  EXPECT_EQ(io::get_string(discussion.exchange_reply(), "text"), "Saved answer");
+  EXPECT_TRUE(io::get_string(discussion.exchange_reply(), "text").starts_with("Saved answer\n"));
   EXPECT_EQ(discussion.context(), context);
   EXPECT_EQ(f.screen.maximized(), ai);
   widget(draft)->string.assign("Keep the unsent question");
+  const auto selected = discussion.exchange_request();
+  const auto reading_position = [&] {
+    const auto *transcript = widget("ai_transcript");
+    return transcript ? f.screen.ui()->scroll_of(transcript->id) : -1.0f;
+  };
+  const auto page_up = [&] {
+    ASSERT_NO_FATAL_FAILURE(click("ai_transcript"));
+    const auto tail = reading_position();
+    ASSERT_TRUE(f.drv->key(wm::Key::PageUp));
+    f.drv->frame();
+    EXPECT_GT(reading_position(), 0.0f);
+    EXPECT_LT(reading_position(), tail);
+  };
+  const auto return_and_check = [&](const float scroll, const std::string &text) {
+    ASSERT_NO_FATAL_FAILURE(click("ai_return_question"));
+    EXPECT_EQ(widget("ai_return_question"), nullptr);
+    EXPECT_EQ(f.screen.maximized(), ai);
+    ASSERT_NE(widget("ai_transcript"), nullptr);
+    ASSERT_NE(widget(draft), nullptr);
+    EXPECT_LT(widget("ai_transcript")->rect.y, widget(draft)->rect.y);
+    EXPECT_EQ(f.screen.ui()->focused(), widget("ai_transcript")->id);
+    EXPECT_EQ(reading_position(), scroll);
+    EXPECT_EQ(widget(draft)->string.value(), text);
+    EXPECT_EQ(discussion.exchange_request(), selected);
+    EXPECT_EQ(discussion.context(), context);
+  };
+  ASSERT_NO_FATAL_FAILURE(page_up());
+  const auto wide_position = reading_position();
+  const auto before_wide_return = reads();
+  ASSERT_NO_FATAL_FAILURE(click("workbench_write_question"));
+  ASSERT_NE(widget(draft), nullptr);
+  EXPECT_EQ(f.screen.ui()->focused(), widget(draft)->id);
+  ASSERT_NE(widget("ai_return_question"), nullptr);
+  const auto stale_return = widget("ai_return_question")->on_click;
+  ASSERT_TRUE(f.drv->key(wm::Key::X, wm::ModNone, "x"));
+  ASSERT_TRUE(f.screen.ui()->text_input_active());
+  ASSERT_NO_FATAL_FAILURE(return_and_check(wide_position, "Keep the unsent questionx"));
+  EXPECT_EQ(reads(), before_wide_return);
+  ASSERT_TRUE(f.drv->key(wm::Key::PageDown));
+  f.drv->frame();
+  ASSERT_GT(reading_position(), wide_position);
+
+  const auto after_page = reading_position();
+  ASSERT_NO_FATAL_FAILURE(click("workbench_write_question"));
+  stale_return();
+  f.drv->frame();
+  ASSERT_NE(widget("ai_return_question"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(return_and_check(after_page, "Keep the unsent questionx"));
+  EXPECT_EQ(reads(), before_wide_return);
+
   ASSERT_NO_FATAL_FAILURE(click("workbench_results"));
   ASSERT_EQ(f.screen.maximized(), results);
   f.drv->ctx.rect.xmax = 680;
@@ -1140,8 +1196,35 @@ TEST_F(SavedConversationNavigationPython, BrowseSavedQuestionsBeyondTheRecentRai
   EXPECT_EQ(discussion.exchange_id(), kFirst);
   ASSERT_NO_FATAL_FAILURE(click("ai_close_saved_questions"));
   ASSERT_NE(widget(draft), nullptr);
-  EXPECT_EQ(widget(draft)->string.value(), "Keep the unsent question");
+  EXPECT_EQ(widget(draft)->string.value(), "Keep the unsent questionx");
   EXPECT_EQ(discussion.exchange_id(), kFirst);
+  ASSERT_NO_FATAL_FAILURE(page_up());
+  const auto narrow_position = reading_position();
+  const auto before_narrow_return = reads();
+  ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+  std::string compose_entry;
+  for (const auto &block : f.screen.ui()->blocks()) {
+    for (const auto &item : block->widgets()) {
+      if (item.type == ui::WidgetType::MenuItem && item.text == f.shell->store().tr("ai.write_question")) {
+        compose_entry = item.key;
+      }
+    }
+  }
+  ASSERT_FALSE(compose_entry.empty());
+  ASSERT_NO_FATAL_FAILURE(click(compose_entry));
+  ASSERT_NE(widget(draft), nullptr);
+  EXPECT_EQ(f.screen.ui()->focused(), widget(draft)->id);
+  discussion.set_show_archived("requests", true);
+  f.drv->frame();
+  ASSERT_FALSE(discussion.page("requests").loaded);
+  ASSERT_TRUE(f.drv->key(wm::Key::Y, wm::ModNone, "y"));
+  ASSERT_NO_FATAL_FAILURE(return_and_check(narrow_position, "Keep the unsent questionxy"));
+  EXPECT_FALSE(discussion.page("requests").loaded);
+  EXPECT_EQ(reads(), before_narrow_return);
+  discussion.set_show_archived("requests", false);
+  ASSERT_TRUE(f.drv->key(wm::Key::PageDown));
+  f.drv->frame();
+  EXPECT_GT(reading_position(), narrow_position);
   EXPECT_EQ(viewer.payload(), payload);
   EXPECT_EQ(viewer.camera_serial(), camera);
   EXPECT_EQ(state.project()->revision, 1);
@@ -1160,7 +1243,7 @@ TEST_F(SavedConversationNavigationPython, BrowseSavedQuestionsBeyondTheRecentRai
   EXPECT_EQ(widget("ai_close_saved_questions"), nullptr);
   const auto reopened = "ai_question/" + handle();
   ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget(reopened) != nullptr; }, 30));
-  EXPECT_EQ(widget(reopened)->string.value(), "Keep the unsent question");
+  EXPECT_EQ(widget(reopened)->string.value(), "Keep the unsent questionxy");
 }
 
 TEST_F(SavedConversationNavigationPython, FocusedQuestionShowsOnlyApplicableActionsAndKeepsExactDetails)
@@ -1571,6 +1654,7 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionDoesNotOpenSavedHistoryOn
   EXPECT_EQ(f.screen.ui()->focused(), widget(key)->id);
   EXPECT_TRUE(discussion.exchange_id().empty());
   EXPECT_EQ(widget("ai_transcript"), nullptr);
+  EXPECT_EQ(widget("ai_return_question"), nullptr);
   EXPECT_FALSE(std::filesystem::exists(dir.path() / "history_reads"));
 }
 

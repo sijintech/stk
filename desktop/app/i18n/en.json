@@ -1559,6 +1559,7 @@
   "ai.refresh": "Refresh reply",
   "ai.compose": "Prepare a question",
   "ai.write_question": "Write question",
+  "ai.return_question": "Return to selected question",
   "ai.prepare_hint": "Prepare saves this text and data selection. Review the saved question above, then send it explicitly.",
   "ai.prepare": "Prepare question (no send)",
   "ai.scope_detail": "Request details",

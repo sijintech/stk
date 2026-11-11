@@ -1559,6 +1559,7 @@
   "ai.refresh": "刷新回复",
   "ai.compose": "准备问题",
   "ai.write_question": "写问题",
+  "ai.return_question": "返回已选问答",
   "ai.prepare_hint": "准备会保存这段文字及数据范围。核对上方已保存的问题后，再明确发送。",
   "ai.prepare": "准备问题（不发送）",
   "ai.scope_detail": "请求详情",
