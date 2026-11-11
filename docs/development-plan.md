@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-11 03:21 UTC · 双语首个任务指南与远端 Runtime 终态
+
+`a1f12980` 集成 Claude 独立工作树的两份用户指南，并对照桌面控件、Web 表单和最终任务目标检查修订措辞。中英文覆盖创建工作区、默认展开、明确提交、草稿及目标不一致提示。Root 以 Node 22.23.3 运行 Astro 检查和生产构建，7 个文件零诊断，生成 38 页。两个生成页面的实际文本和本地快速上手、旧版指南路径已核对。暂存扫描零发现。证据在外部 `root-delivery-20261111-156/user-guide/render-receipt.json`。
+
+远端 `abdc57f7` 的 Runtime `42948501059` 于 03:15:40 UTC 结束，12/13。唯一失败为 Linux Python 3.12 的既有 PET 测试，6914 通过、149 跳过、4 deselected。测试已经通过协调器一秒预算断言，随后在 `tests/test_pet_study.py:618` 读子工作流时，桥接 `project.workflow_runs.get` 请求 203 在 60 秒内无回执。上个发布头对应 Linux 3.12 通过，相关 Python 源码无差异。Root Python 3.12.14 将原用例独立运行八次，8/8，保留原预算与超时，额外取证继续。Linux 3.11、3.14 和两项 Windows Python 作业通过。外部收据为 `root-delivery-20261111-156/pet-timeout` 和 `root-delivery-20261111-155/published-platform-ci`。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42948501059)
+
+同发布头 Desktop 的 Linux 打包和新环境冒烟已通过，Linux 主回归、Windows CPU 和 macOS 后续验收仍在运行。本地工作台、任务目标修正与双语指南等待整轮结束后推送。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42948501049)
+
 ## 2026-11-11 03:14 UTC · 新工作区直接进入首个任务表单
 
 `8296e5e1` 以逐字节相同补丁集成独立原生候选 `65baa1df`，`49d8c858` 集成 Claude 独立 Web 工作树候选，Root 要求成功回执与规范 ID，并补无效 ID 回归。两端只在发起创建的当前工作台采纳确切工作区后默认展开「新建任务」。普通改选保留开合与草稿，手动开合优先。原生隔离回归验证延迟回执、回执与列表之间的改选、暂缺新工作区的 Hub 列表、第二窗口、对话框替换。Web 回归覆盖同名工作区的确切 ID、晚到快照、重连、仅待复核和保留草稿。提交仍为明确操作。
