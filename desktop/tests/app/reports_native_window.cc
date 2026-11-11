@@ -603,7 +603,7 @@ class Exercise {
     }
     click_point(p); ++clicks;
   }
-  void tab(app::EditorArea &area, int index)
+  std::string_view tab(app::EditorArea &area, int index)
   {
     const int count = area.tab_count();
     require(index >= 0 && index < count, "Tab selection must name an existing tab");
@@ -645,6 +645,7 @@ class Exercise {
     result_["tab_navigation"].push_back({{"target_index", index}, {"route", route},
         {"area_width", area.rect().width()}, {"mouse_clicks", clicks - before_clicks}, {"key_presses", key_presses}});
     save();
+    return route;
   }
   void native_scroll(int cycle, ui::Rect bounds)
   {
@@ -3085,7 +3086,23 @@ raise SystemExit(main())
       const auto reveal_started = Clock::now();
       try {
 #endif
-        ui.tab(*area, 0); ui.wait(ready, "Paused video report shown again");
+        [[maybe_unused]] const auto reveal_route = ui.tab(*area, 0);
+#ifdef __APPLE__
+        if (html_video && options.quiet_hidden_hold && reveal_route == "area_menu") {
+          // Keyboard selection leaves the pointer on the menu button, whose tooltip blocks the native view.
+          auto &pointer = result["quiet_reveal_pointer"];
+          pointer = {{"tab_route", std::string(reveal_route)}, {"moved", false}, {"before", ui.input_state()}};
+          const auto *viewport = ui.widget("reports_document_viewport");
+          if (viewport && viewport->type == ui::WidgetType::NativeViewport && viewport->enabled && ui.visible(viewport)) {
+            const ui::Vec2 center{viewport->rect.cx(), viewport->rect.cy()};
+            pointer["viewport_center"] = {center.x, center.y};
+            ui.move_pointer(center);
+            pointer["moved"] = true;
+            pointer["after"] = ui.input_state();
+          }
+        }
+#endif
+        ui.wait(ready, "Paused video report shown again");
 #ifdef __APPLE__
       }
       catch (...) {
