@@ -1,5 +1,11 @@
 # 开发交接记录
 
+## 2026-11-11 03:55 UTC · 上一轮 Desktop 达到整轮终态
+
+远端 `abdc57f7a8cdc648920b34fe53e54c219719d720` 的 Desktop `42948501049` 于 03:55:05 UTC 结束，5/6 作业通过。Linux 主回归 2233/2233、打包和新环境冒烟通过。Windows CPU 1536/1536，原生 20 轮验收作业也通过。macOS CPU 1596/1596、Metal 254/254，必测原生 4/6，仍有 MP4 和 HTML 视频隐藏位置下限失败。两条静默对照的重显阻挡和本地诊断修订见下节。Windows 官方工件已发布，逐成员详情另行核对。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42948501049) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42948501049/artifacts/13826463628) [macOS 原生工件](https://github.com/sijintech/stk/actions/runs/42948501049/artifacts/13825909265)
+
+同一发布头 Runtime 12/13、Secret scan 与 Pages 通过。Windows Python 3.11 和 3.12 均通过，唯一 Runtime 失败为 Linux 3.12 的 PET 桥接等待，独立 43/43 与受控锁取证见下节。已满足上一 Desktop 整轮终态的推送条件。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42948501059)
+
 ## 2026-11-11 03:50 UTC · 单文件结果预选与 macOS 重显对照
 
 `4f9e47c0` 集成 Claude 独立 Web 候选，并复用成功任务范围判断，防止失败任务的残留产物被预选。Root 新增用例在原候选确实收到失败任务的一个发布文件并被自动选中，最终版保留可手选列表和空选择。用户显式点击成功任务的「结果」捷径，当次列表确切采纳、仅有一个可查看文件、文件选择未编辑且 Viewer 尚无显示时预选该文件，加载使用原按钮。主导航、图谱、多个文件、已编辑选择、已显示画面以及迟到回执覆盖在内。现代只读和旧版 action 路径均验证。Claude 独立全量 231/231，定向 21 项各重复十次，Root 最终生产构建和 Web 全量 232/232，零跳过。最终入口摘要 `703be6a20b4d286580cd0d2730867b6ff298053b05464b0c23c89cac7969824d`。
