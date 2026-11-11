@@ -127,8 +127,11 @@ def _run_child(target, *args):
 def test_foreign_hot_journal_is_refused_without_mutating_originals(tmp_path):
     root = tmp_path / "foreign"; root.mkdir(); path = root / "literature.sqlite3"
     with closing(sqlite3.connect(path)) as db, db:
+        # Each row occupies its own 4 KiB page. A small update still spills the
+        # child's two-page cache without hundreds of synchronous journal flushes.
+        db.execute("PRAGMA page_size=4096")
         db.execute("CREATE TABLE unrelated(value TEXT)")
-        db.executemany("INSERT INTO unrelated VALUES(?)", [("original" + "x" * 2048,) for _ in range(512)])
+        db.executemany("INSERT INTO unrelated VALUES(?)", [("original" + "x" * 2048,)] * 16)
         db.execute("PRAGMA application_id=1398033481"); db.execute("PRAGMA user_version=1")
     _leave_foreign_hot_journal(path)
     journal = path.with_name(path.name + "-journal")
