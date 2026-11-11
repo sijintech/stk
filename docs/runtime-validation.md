@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-11 08:23 UTC · 上一主线 Desktop 终态与 Web 精确主线回放
+
+`d1eb1467d1f1b1be86b423e466ffcdff59d21612` 的 Desktop `42978761506` 于 08:22:33 UTC 整轮终止，5/6。最后结束的 Windows 原生 `130399062683` 成功，Linux 三项、Windows CPU 成功，唯一失败为已记录的 macOS。原生 Windows 的图像与 JUnit 工件 `13840270339`。上轮终态已独立核对，符合主线推送门禁。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42978761506) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42978761506/artifacts/13840270339)
+
+另用主线 `5856675e` 构建逐项重放前述宽窄窗十条路线，全部通过。浏览器与真实 Runtime 回执在 `root-delivery-20261111-166/web-result-progress/main-exact`。更新后的文档站 38 页构建成功并产生 Pagefind。
+
 ## 2026-11-11 08:17 UTC · Web 结果进度与上一主线 macOS 工件
 
 Root 将 Claude 105 独立工作树的验证快照合入本地 main `5856675ef846669d9eb1d966fe5166646e54602a`。源码和测试与隔离审阅 `b215fb130f09f03516c8a8fc28eba058de0c7643` 一致。Web 沿用原状态位置，显式一步打开时显示「列出结果文件」与「正在加载视图」。来源显示实际所选文件正在加载。离开结果时隐藏进度，返回同一有效选择且原构建仍在进行时恢复。切换任务、范围或文件会使旧提示失效。复核、错误与手动加载保留既有流程。Claude 的最终提交还在独立 worktree 收尾。
