@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-11 00:26 UTC · 上一轮 Desktop 终态与 Windows 捕获复用
+
+远端 `ee0515122d2e7a565705e63c98694ad0bece0c2b` 的 Desktop `42920785230` 于 00:20:43 UTC 结束，5/6 作业成功。Linux 主回归 2211/2211，Linux 打包、新环境冒烟、Windows CPU 1516/1516 与 Windows 原生 6/6 通过。Windows 原生共 1315.37 秒，PDF、MP4、HTML 视频各完成 20/20 轮，分别有 160、161、161 张验收图。官方工件的逐成员 CRC 已核对，原生日志记录一个 WGC 捕获目标创建、430 次复用和结束回收。PDF 已接受图像的最长捕获启动为 72 ms。完整 Windows ZIP 下载出现 EOF，当前结论来自已核对的正式报告与日志成员。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42920785230) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42920785230/artifacts/13815826674)
+
+macOS CPU 1576/1576、Metal 254/254，必测原生 4/6。ZIP 完整 SHA-256 已与 GitHub 核对。MP4 首次隐藏后从 0.352418 s 回到 0.234 s，HTML 视频在隐藏保持中从 0.246686 s 回到 0.102 s。两者仍暂停且导航未换，派发均在隐藏前，ACK 均在隐藏后。先确认可见暂停、再隐藏但不重复派发的四条对照，隐藏后的被动原生枚举仍全报 Playing，其中两条带 DOM 尾部观察各相隔 0.4 s 且位置变化为 0。保持重复派发的两条对照则分别收到 29 和 27 次 Playing，随后会话由看门狗关闭。可选的挂起再重显对照将随本批代码运行。 [macOS 原生工件](https://github.com/sijintech/stk/actions/runs/42920785230/artifacts/13813874701)
+
+前轮本地 `631808cc` 原生项目完整回归 976/976，923.797 秒，零失败和跳过。测后重建前核对测试二进制摘要。证据位于外部 `root-delivery-20261110-149/native-combined`。同远端 Runtime 13/13、Pages 与 Secret scan 通过。两条开放 PR 已重核头和范围。#53 是已用不同回执语义处理的旧传输改动，#54 只改旧版大写交接文件。当前未合入这两条 PR。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42920785047)
+
 ## 2026-11-11 00:10 UTC · 双端 MuPRO 原始体素与中英文工作台指南
 
 `631808cc` 集成独立原生候选 `1ab5182a`，十三条路径的补丁内容一致。已显示且有本地收集证明的 HDF5 帧在普通分栏 Viewer 和聚焦结果页的「来源」内可查询原始体素。查询固定到实际场、步号、分量、收集文件摘要和从零开始的网格索引。更改坐标、关闭来源、切页或替换画面作废在途回执。单体素数据验证字节、摘要、来源和原始 dtype。恢复或导入的 Viewer 载荷在缺少现行证明时仅供查看。
