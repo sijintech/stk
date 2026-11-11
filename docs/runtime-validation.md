@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-11 01:45 UTC · 工作台与平台修正已发布至 main
+
+远端 `main` 从 `16541e8f1c41c0ed8387048e6770cd5f190c6120` 快进到 `9ce14a5ba5701b38c6f34e98f320582f5c4bdc83`，推送后独立核对完整 SHA。14 个提交范围扫描零发现。包含聚焦问答适用操作、撰写一步返回已选问答、同一任务已验证结果复用、Claude 文献入口设计、Windows HDF5 本地路径断言和 Cocoa 隐藏媒体候选。原四状态文档和 AOCI 的工作区改动已按原字节保护。
+
+同头 Desktop `42941178087`、Runtime `42941178016`、Secret scan `42941178080` 和 Pages `42941177965` 均已启动。重点验证新的 Windows CPU 路径断言与 Cocoa 编译、MP4/HTML 视频必测原生验收。上一头完整终态与本地真实窗口、977/977 全量、55/55 导航、15/15 HDF5 及 38/38 媒体宿主结果见前节，各自绑定所测代码。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42941178087) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42941178016) [Secret scan](https://github.com/sijintech/stk/actions/runs/42941178080) [Pages](https://github.com/sijintech/stk/actions/runs/42941177965)
+
+实际 Claude 的 `CL-WORKBENCH-LITERATURE-94` 六路径实现仍在独立工作树运行，Root 已准备英文宽窗与中文窄窗的正常路径基线。入口尚未作为实现发布，返回待派发动作保护仍需审阅。该基线使用公开合成问答、未发送草稿、文献检索文字与稳定 Viewer，在两种窗口均记录进入两次、回程一次，草稿、阅读位置和画面保持。外部证据为 `root-delivery-20261111-153/literature-window/baseline-aggregate.json`。
+
 ## 2026-11-11 01:44 UTC · 隐藏媒体候选与上一轮 Desktop 终态
 
 `dbedeac2` 按逐字节相同的六路径补丁集成独立候选 `cc8b26599f4802fde78197ac57669e5eca168514`。文档宿主的隐藏路径使用专用暂停入口，Cocoa 对精确 WKWebView 顺序提交挂起与原有暂停，隐藏期持有一对挂起/释放。重显后核验原视图、导航、媒体与可见代次，在确认 Paused/None 后恢复原生输入。串行回执处理覆盖快速隐藏/重显、迟到释放、实际 AppKit 可见性中断与同视图新导航，验证期限为一秒。普通显式暂停沿用现有入口。原必测与可选原生验收未改。
