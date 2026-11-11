@@ -1,5 +1,15 @@
 # 开发交接记录
 
+## 2026-11-11 03:14 UTC · 新工作区直接进入首个任务表单
+
+`8296e5e1` 以逐字节相同补丁集成独立原生候选 `65baa1df`，`49d8c858` 集成 Claude 独立 Web 工作树候选，Root 要求成功回执与规范 ID，并补无效 ID 回归。两端只在发起创建的当前工作台采纳确切工作区后默认展开「新建任务」。普通改选保留开合与草稿，手动开合优先。原生隔离回归验证延迟回执、回执与列表之间的改选、暂缺新工作区的 Hub 列表、第二窗口、对话框替换。Web 回归覆盖同名工作区的确切 ID、晚到快照、重连、仅待复核和保留草稿。提交仍为明确操作。
+
+固定起点为任务页已确认并选中新建工作区、运行环境收起、没有任务。真实 Linux X11 和本机 Runtime 在英文 1600×1100、中文 680×1000、缩放 1 各测一次。旧版均点击一次「新建任务」，最终版零次。Root 应用 `2b320dc052ea05766301cf060e0adc7753cbcfbb34153cf5528ce0b0e26b276d` 与隔离候选两张对应结果图整窗像素一致。真实 Chromium、Hub、外连节点及本机 Runtime 在 1440×900 和 390×844 以相同起点复验，任务页滚动位置均为零，点击从 1 次降到 0 次。各轮实际仅创建一个工作区，零任务提交和模型调用。正式收据位于外部 `root-delivery-20261111-156/{first-task-window,first-task-browser}/comparison.json`。
+
+`0c526425` 修正 Web 自定义任务目标。旧组合在表单显示 B 时，将含 A ID 的原草稿发往 A，回归抓到了实际请求 ID。最终版在该冲突下保留草稿与 B，提示核对且零任务请求；改为相同 ID 后一次明确点击向 B 发送复核。未指定 ID 沿用当前工作区。Root 原生 Jobs 60/60，隔离原生 60/60，四项定向各连跑十轮通过。Claude Web 全量 209/209，Root 最终生产构建和完整 Web 210/210，零失败或跳过。最终 Web 入口摘要 `bd6ed9e93dd69a344a8eaed9c48dbdf341a32993c40db99c3c5b8232e6ac34b3`。测试和失败对照在外部 `root-delivery-20261111-156/web-first-task`。各次暂存扫描零发现。
+
+远端 `abdc57f7` 的 Windows Python 3.11 和 3.12 Runtime 两项各通过 5503 个用例，包含原热日志失败所在测试文件，3.11 于 03:03:05 UTC 完成。Desktop 的 Linux 包与新环境冒烟通过，Desktop 整轮仍在运行。Secret scan 和 Pages 通过。本地提交等待当前远端 Desktop 整轮结束再推送。开放 PR #53、#54 的头保持上次审阅结果。Claude 已转入独立 `stk-claude-workbench-first-task-guide-97` 补中英文用户指南。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42948501059) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42948501049)
+
 ## 2026-11-11 02:49 UTC · 工作台更新已发布到 main
 
 远端 `main` 从 `9ce14a5ba5701b38c6f34e98f320582f5c4bdc83` 快进至 `abdc57f7a8cdc648920b34fe53e54c219719d720`，已独立核验完整 SHA。13 个提交范围扫描零发现。包含桌面文献一步入口与旧版 Agent 专项回归、Windows SQLite 夹具修正、桌面运行环境默认展开、Web 历史键盘焦点，以及 Cocoa 重显失败取证。原工作区 AOCI 资产与四份状态文档的既有修改已保留。
