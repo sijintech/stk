@@ -174,7 +174,8 @@ void log_last_media_observation(const Json &result) noexcept
                             "hidden_media_native_close", "frame_clock_verdict",
                             "first_toolbar_pause_delay", "first_toolbar_pause_trace",
                             "first_toolbar_pause_immediate", "first_toolbar_pause_immediate_trace",
-                            "repeat_verified_visible_pause", "suspend_reveal"}) {
+                            "repeat_verified_visible_pause", "suspend_reveal",
+                            "failed_reveal_observation", "failed_reveal_native_pause_trace"}) {
       const auto item = result.find(key);
       if (item == result.end() || !item->is_object()) continue;
       // These objects contain only fixed phase names, hashes and numerical probe facts.
@@ -1858,6 +1859,52 @@ class Exercise {
     }
     catch (...) {} // Preserve the original test failure.
   }
+  void record_failed_media_reveal(int cycle, const app::EditorArea &area, const std::string &session,
+                                  const document_preview::ResourceSession &resources,
+                                  const document_preview::test::NativeCloseObservation *close,
+                                  Clock::time_point playing_returned, Clock::time_point reveal_started) noexcept
+  {
+    record_native_pause_trace(close, session, "failed_reveal_native_pause_trace");
+    record_hidden_native_close(close, session, playing_returned);
+    try {
+      const auto *context = screen_.ui();
+      const auto *viewport = widget("reports_document_viewport"), *focus = widget("reports_document_focus");
+      const auto *main = area.find_region("main");
+      const auto parent = window_.native_window_handle();
+      const auto *trace = close && close->hide_pause ? &*close->hide_pause : nullptr;
+      const auto bounds = [](ui::Rect rect) { return Json::array({rect.x, rect.y, rect.w, rect.h}); };
+      Json overlays = {{"modal", false}, {"popup", false}, {"tooltip", false}, {"toast", false}};
+      if (context) {
+        for (const auto &block : context->blocks()) {
+          switch (block->kind()) {
+            case ui::Block::Kind::Modal: overlays["modal"] = true; break;
+            case ui::Block::Kind::Popup: overlays["popup"] = true; break;
+            case ui::Block::Kind::Tooltip: overlays["tooltip"] = true; break;
+            case ui::Block::Kind::Toast: overlays["toast"] = true; break;
+            case ui::Block::Kind::Region: break;
+          }
+        }
+      }
+      using namespace document_preview;
+      std::string lookup_error;
+      const bool same_resource = test::resource_session(parent, session, lookup_error).get() == &resources;
+      const auto hidden_pause = trace ? test::hidden_pause_target(parent, session, *trace) : std::nullopt;
+      result_["failed_reveal_observation"] = {
+          {"phase", "quiet-html-video-reveal"}, {"cycle", cycle}, {"session_sha256", core::Sha256::hex(session)},
+          {"elapsed_seconds", media_seconds(reveal_started, Clock::now())},
+          {"active_tab", area.active_tab()}, {"client_size", {window_.width(), window_.height()}},
+          {"main_rect", main ? bounds(screen_.to_ui(main->rect())) : Json(nullptr)},
+          {"input", input_state()}, {"overlays", std::move(overlays)},
+          {"viewport", viewport ? Json{{"native_widget", viewport->type == ui::WidgetType::NativeViewport},
+              {"enabled", viewport->enabled}, {"fully_visible", visible(viewport)},
+              {"rect", bounds(viewport->rect)}, {"clip", bounds(viewport->clip)}} : Json(nullptr)},
+          {"focus_control_enabled", focus ? Json(focus->enabled) : Json(nullptr)},
+          {"resources_active", resources.active()}, {"same_native_resource", same_resource},
+          {"exact_visible_native_target", trace ? Json(test::visible_playback_target(parent, session, *trace, false)) : Json(nullptr)},
+          {"exact_hidden_pause", hidden_pause ? native_pause_json(*hidden_pause) : Json(nullptr)}};
+    }
+    catch (...) {} // Keep the original reveal failure even if evidence collection fails.
+  }
 #endif
   void hidden_media_checkpoint(const char *stage) noexcept
   {
@@ -3034,7 +3081,20 @@ raise SystemExit(main())
         }
       }();
       require(area->tab(1).save_workspace_state() == draft_state, "Video hide preserves the Python draft");
-      ui.tab(*area, 0); ui.wait(ready, "Paused video report shown again");
+#ifdef __APPLE__
+      const auto reveal_started = Clock::now();
+      try {
+#endif
+        ui.tab(*area, 0); ui.wait(ready, "Paused video report shown again");
+#ifdef __APPLE__
+      }
+      catch (...) {
+        if (html_video && options.quiet_hidden_hold) {
+          ui.record_failed_media_reveal(cycle, *area, session, *resources, close.get(), playing_returned, reveal_started);
+        }
+        throw;
+      }
+#endif
       auto reshown = ui.held_media(cycle, "reshown-no-autoresume", session, hidden, 0.50);
       ui.media_capture(cycle, "reshown-red-paused", 1, ui.media_rectangle(bounds, reshown), reshown, session);
       // Return to the earliest segment before a second explicit Play. Rewinding is
