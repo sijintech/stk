@@ -1,5 +1,17 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-11 08:00 UTC · Web 与桌面统一唯一 VTI 的打开入口
+
+本地 main 产品提交 `b63019c254d089e67bb765f4670c0c488dd10f61`。Claude 在独立分支交付 `d22b5873f915e4bfd1f3ab99f40b0c53994f8c77`，其单步打开和行为回归随 Root 组合进入主线。Root 复用同范围当前产物读取，保留已有画面和手动刷新。首次打开只采用当前授权及成功任务清单。支持确切任务读取时，须有确切终态。旧版 Hub 仅使用一个显式清单动作，复核或拒绝回执不能打开。画面采用前核对任务、路径和发布摘要；读取能力变动会使在途自动构建的结果失去采用资格。结果页一级导航只切页。源码与独立审阅提交 `4bbd68228fa4b6058c44752915e19da0e9b7953f` 逐字节一致。
+
+Main 和隔离产物的 `index.html`、JavaScript 与 CSS SHA256 清单一致，入口 SHA256 `1383baaeba59ad94f610884487ed4928897ce53da108ab4bb5ac4e95e35253b4`。Node 22 构建及 Chromium 全套 325/325，零失败、跳过，含现代在途清单复用、确切终态替换的两种回执顺序、旧版复核载荷、403、授权来回切换、摘要不符、损坏清单及已有结果刷新。证据 `root-delivery-20261111-165/full-combined.xml`。
+
+1440×900 与 390×844 的真实 Hub、NodeAgent 和 Runtime 共六条通过。固定起点是任务页已选成功任务、空 Viewer 和两份未提交草稿。清单已到或在途时一次点击「在查看器中打开」，均无新增清单请求，实际显示唯一 `scalar-0.vti`。返回和重访各一次点击。返回时恢复原入口焦点及草稿，重访刷新一次清单、零额外构建，画布像素一致。两条先离开路线在工作台保留草稿，释放原回执后零构建。Web 按既有索引 Z=0 打开，896 个切片样本范围 −1…21.4，确切发布摘要 `47e88b30…`。桌面既有默认 Z=12。真实任务及产物未变，零模型调用。证据 `root-delivery-20261111-165/final-real-summary.json`。
+
+Claude 已在独立 `claude/workbench-result-progress-105` 从该产品提交开始整理 Web 等待清单和自动构建的状态反馈，复用既有状态位置。Root 负责审查、主线、真实环境复验、发布和 CI。任务卡 `root-delivery-20261111-165/claude-workbench-result-progress-105.txt`。
+
+远端仍为 `d1eb1467`。Runtime `42978761563` 于 07:45:31 UTC 成功终止，13/13。Linux 3.11、3.12、3.14 分别 6898、6915、6898，PET 各 43/43，Windows 两矩阵各 5503。Desktop Linux 主回归 2253/2253、零跳过，打包和干净机冒烟通过。Desktop 整轮仍在运行，Windows 与 macOS 待终态。PR #53、#54 的头仍分别 `c9f13994`、`2dd3e4ee`，现有开放状态保留。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42978761563) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42978761506)
+
 ## 2026-11-11 07:42 UTC · Cocoa 隐藏挂起对照与 Web 产物清单复用
 
 本地 main `c8aa0f0cff5aa80d536bef9054e01884d0888d0b` 按字节集成独立候选 `3362001000e009d69e7c13d0a5630c683a2cca18`。在同轮保留原隔离 MP4 对照，并增加一个可选诊断。生产流程确认自己持有的挂起、同一报告的隐藏暂停和原生 `Suspended` 后，在原有 1.25 秒等待内补发一次 `pauseAllMediaPlayback`。原视图、资源会话、导航、媒体和可见性均匹配且回执早于重显才计入。保留原释放、0.50 秒观察和明确 Play，成功还需原生释放回执和 Paused/None。Linux Reports 测试目标构建成功，资源、探针、宿主 44/44；Reports 测试 C++ 普通、探针与 Apple 条件分支语法检查通过。工作流的命名、选测和归档路径已核对。尚待 macOS 编译及真实运行。证据 `root-delivery-20261111-164/cocoa-suspended-pause`。WebKit 上游会在已中断的会话收到原生 Pause 时将待恢复状态置为 Paused，该代码用于提出对照假设，runner 的系统 WebKit 版本须以实测为准。 [WebKit 会话实现](https://github.com/WebKit/WebKit/blob/f6e529d2cd6c793bc85ddfb7d8c97be33cda9c35/Source/WebCore/platform/audio/PlatformMediaSession.cpp#L368-L376)
