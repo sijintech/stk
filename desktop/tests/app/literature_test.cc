@@ -464,6 +464,184 @@ TEST_P(LiteratureMouse, CachedActionRefusesSameClientRestartBeforeItsStateListen
 
 INSTANTIATE_TEST_SUITE_P(FixedLayouts, LiteratureMouse, ::testing::Bool());
 
+// Replay the cached resolve/render pair and a distinct synthetic page through
+// the strict wire and real editor. The fixture supplies no retrieval model.
+constexpr const char *framing_script = R"PY(
+import base64,copy,hashlib,json,os,struct,sys,threading,zlib
+from pathlib import Path
+from suan.desktop_bridge.literature import LiteratureService, request_sha256
+from suan.literature.collection import RECIPE
+from suan.literature.pdf import checksum
+
+control=Path(sys.argv.pop(1))
+fixture=Path(os.environ['PYTHONPATH'])/'desktop/tests/app/fixtures/literature-page-1.json'
+first=json.loads(fixture.read_text(encoding='utf-8'))
+second=copy.deepcopy(first)
+citation=second['resolved']['citation']
+citation['inner']['page_index']=1
+citation.pop('evidence_sha256')
+citation['evidence_sha256']=checksum(citation)
+second['rendered']['citation']=citation
+for part in ('resolved','rendered'):
+    second[part]['page']['page_index']=1
+highlight=second['rendered']['highlights'][-1]
+for character in second['resolved']['characters']:
+    if character['index']!=highlight['index']:
+        character['box']=None
+second['rendered']['highlights']=[highlight]
+second['rendered']['geometry_sha256']=checksum([highlight])
+
+def chunk(tag,data):
+    return struct.pack('>I',len(data))+tag+data+struct.pack('>I',zlib.crc32(tag+data))
+image=second['rendered']['image']
+width,height=image['width'],image['height']
+pixels=(b'\0'+bytes((240,245,250,255))*width)*height
+png=(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',width,height,8,6,0,0,0))
+     +chunk(b'IDAT',zlib.compress(pixels))+chunk(b'IEND',b''))
+image.update(data_base64=base64.b64encode(png).decode(),bytes=len(png),sha256=hashlib.sha256(png).hexdigest())
+
+pages=(first,second)
+scope={key:citation[key] for key in ('corpus_id','database_id','corpus_generation','dense_generation')}
+fingerprint='a'*64
+scope['encoder_fingerprint']=fingerprint
+corpus_id=scope['corpus_id']
+uuid='00000000-0000-4000-8000-000000000001'
+operations={}
+lock=threading.Lock()
+
+def framing(self,action,params):
+    with lock:
+        with control.with_suffix('.calls').open('a') as f:f.write(action+'\n')
+        if action=='info':
+            return {'corpora':[{'corpus_id':corpus_id,'database_id':scope['database_id'],'name':'Owned fixture',
+                                'create_operation':uuid}],
+                    'encoder_generation':1,'encoder_configured':True,'active_jobs':0}
+        if action=='encoder.info':
+            return {'generation':1,'selection':{'assets_sha256':'b'*64,'fingerprint':fingerprint,'review_id':uuid}}
+        if action=='corpora.info':
+            assert params['corpus_id']==corpus_id
+            return {'corpus_id':corpus_id,'database_id':scope['database_id'],'generation':scope['corpus_generation'],
+                    'dense_generation':scope['dense_generation'],'dense_source_generation':scope['corpus_generation'],
+                    'dense_encoder_fingerprint':fingerprint}
+        if action=='operations.result':
+            operation=operations[params['operation_id']]
+            assert params['expected_request_sha256']==operation['operation']['request_sha256']
+            return operation
+        assert params['scopes']==[corpus_id]
+        if action=='search':
+            hits=[]
+            for index,page in enumerate(pages,1):
+                resolved=page['resolved']
+                hits.append({**scope,**{k:resolved[k] for k in ('text','text_status','structure_status','citation')},
+                             'score':1/(60+index),'dense_score':None,'dense_rank':None,'lexical_rank':index,
+                             'dense_window':None})
+            result={'retriever':'local_collection_fts5_e5_rrf','recipe':RECIPE,
+                    'query_sha256':hashlib.sha256(params['query'].encode()).hexdigest(),'scopes':[scope],'hits':hits}
+        else:
+            assert action in ('citations.resolve','pages.render')
+            page=next(p for p in pages if p['resolved']['citation']==params['citation'])
+            result=page['resolved' if action=='citations.resolve' else 'rendered']
+        operation={'operation_id':params['operation_id'],'action':action,'state':'completed',
+                   'request_sha256':request_sha256(action,params),'result_sha256':checksum(result),'error':None}
+        operations[params['operation_id']]={'operation':operation,'result':result}
+        return {'operation':operation}
+LiteratureService.call=framing
+from suan.desktop_bridge.__main__ import main
+main()
+)PY";
+
+class LiteratureFraming : public LiteratureMouse {
+ protected:
+  const char *service_script() const override { return framing_script; }
+};
+
+TEST_P(LiteratureFraming, ANewCitedPageFitsWhileTheSamePageKeepsItsView)
+{
+  const auto seed = io::read_json_file(STK_REPO_ROOT "/desktop/tests/app/fixtures/literature-page-1.json");
+  const auto corpus_id = io::get_string(seed.at("resolved"), "corpus_id");
+  store.jobs().create_texture = [next = uint64_t(8000)](const io::Image &) mutable { return ++next; };
+  store.jobs().free_texture = [](uint64_t) {};
+  ASSERT_NO_FATAL_FAILURE(click("tool_literature"));
+  ASSERT_NE(literature_area(), nullptr);
+  fixture.screen.set_maximized(literature_area()); frame();
+  ASSERT_NO_FATAL_FAILURE(click("literature_refresh"));
+  ASSERT_NO_FATAL_FAILURE(click("literature_scope/" + corpus_id));
+  ASSERT_NO_FATAL_FAILURE(text("literature_query", "owned fixture"));
+  ASSERT_NO_FATAL_FAILURE(click("literature_search"));
+
+  const auto page = [&] { return widget("literature_page"); };
+  const auto painted = [&]() -> ui::Rect {
+    const auto *w = page();
+    if (w) {
+      for (const auto &cmd : fixture.screen.ui()->draw_list().cmds) {
+        if (cmd.type == ui::CmdType::Image && cmd.texture == w->image.texture) {
+          return {cmd.rect.x - w->rect.x, cmd.rect.y - w->rect.y, cmd.rect.w, cmd.rect.h};
+        }
+      }
+    }
+    ADD_FAILURE() << "No painted citation page";
+    return {};
+  };
+  const auto open = [&](const char *hit, uint64_t before) {
+    const auto n = clicks;
+    ASSERT_NO_FATAL_FAILURE(click(hit));
+    ASSERT_TRUE(loop.pump_until([&] { frame(); return page() && page()->image.texture > before; }, 15));
+    EXPECT_EQ(clicks - n, 1);
+  };
+  ASSERT_NO_FATAL_FAILURE(open("literature_hit/0", 0));
+  const auto initial = painted();
+  const auto texture = page()->image.texture;
+  const auto image_id = page()->id;
+  auto visible = page()->rect.intersect(page()->clip);
+  ASSERT_FALSE(visible.empty());
+  const auto x = int(visible.cx()), y = fixture.screen.rect().ymax - 1 - int(visible.cy());
+  wm::Event zoom; zoom.type = wm::EventType::Wheel; zoom.x = x; zoom.y = y; zoom.wheel_y = 2;
+  ASSERT_TRUE(fixture.drv->send(zoom)); frame();
+  EXPECT_GT(painted().w, initial.w);
+  fixture.drv->drag(x, y, x + 28, y + 15); frame();
+  const auto moved = painted();
+  EXPECT_NE(moved, initial);
+  frame();
+  EXPECT_EQ(painted(), moved);
+  ASSERT_NO_FATAL_FAILURE(section(1));
+  EXPECT_EQ(page(), nullptr);
+  ASSERT_NO_FATAL_FAILURE(section(0));
+  EXPECT_EQ(painted(), moved);
+  ASSERT_NE(page(), nullptr);
+  EXPECT_EQ(page()->image.texture, texture);
+  EXPECT_EQ(calls("pages.render"), 1);
+
+  ASSERT_NO_FATAL_FAILURE(open("literature_hit/1", texture));
+  ASSERT_NE(page(), nullptr);
+  EXPECT_EQ(page()->id, image_id);
+  const auto fitted = painted();
+  EXPECT_EQ(fitted, initial);
+  ASSERT_TRUE(page()->image.highlights);
+  ASSERT_EQ(page()->image.highlights->size(), 1u);
+  const auto &source = seed.at("rendered").at("highlights").back().at("quad").at(0);
+  const auto &corner = page()->image.highlights->front().front();
+  EXPECT_FLOAT_EQ(corner.x, source.at(0).get<float>());
+  EXPECT_FLOAT_EQ(corner.y, source.at(1).get<float>());
+  size_t triangles = 0;
+  for (const auto &cmd : fixture.screen.ui()->draw_list().cmds) {
+    if (cmd.type == ui::CmdType::Triangle && cmd.color == page()->image.highlight_color) {
+      EXPECT_NEAR(cmd.p[0].x, page()->rect.x + fitted.x + corner.x / page()->image.width * fitted.w, .001);
+      EXPECT_NEAR(cmd.p[0].y, page()->rect.y + fitted.y + corner.y / page()->image.height * fitted.h, .001);
+      ++triangles;
+    }
+  }
+  EXPECT_EQ(triangles, 2u);
+  EXPECT_EQ(calls("search"), 1);
+  EXPECT_EQ(calls("citations.resolve"), 2);
+  EXPECT_EQ(calls("pages.render"), 2);
+  std::cout << "LITERATURE_FRAMING fit=" << initial.x << ',' << initial.y << ',' << initial.w << ',' << initial.h
+            << " zoom_pan=" << moved.x << ',' << moved.y << ',' << moved.w << ',' << moved.h
+            << " second_page=" << fitted.x << ',' << fitted.y << ',' << fitted.w << ',' << fitted.h
+            << " highlights=" << triangles / 2 << " search=1 resolve=2 render=2\n";
+}
+
+INSTANTIATE_TEST_SUITE_P(Reader, LiteratureFraming, ::testing::Values(false));
+
 #ifdef STK_LITERATURE_REAL_ASSETS_ACCEPTANCE
 // This wrapper observes owned requests/replies without replacing any DTO or
 // inference. Interpreter selection is trusted Bridge construction, never UI/RPC.

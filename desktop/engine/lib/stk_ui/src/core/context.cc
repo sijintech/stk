@@ -1377,6 +1377,12 @@ int Context::table_resize_hit(const Widget &w, Vec2 p)
   return -1;
 }
 
+void Context::reset_image_view(WidgetId id)
+{
+  images_.erase(id);
+  if (drag_.id == id && drag_.kind == DragState::Kind::ImagePan) { drag_ = {}; }
+}
+
 Rect Context::image_display_rect(const Widget &w)
 {
   const Rect area = w.rect.inset(style_.pixel, style_.pixel);

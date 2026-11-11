@@ -560,6 +560,8 @@ class Context {
   Layout &modal(std::string_view key, std::string_view title, std::function<void()> on_close, ModalOptions opts = {});
   /** Restore focus on the next layout when the exact widget is visible and the request is current. */
   void restore_focus_next_frame(std::string key, std::function<bool()> current = {});
+  /** Discard pan and zoom when the content of an existing image widget changes. */
+  void reset_image_view(WidgetId id);
   void end_frame();
   const DrawList &draw_list() const { return draw_; }
   /**

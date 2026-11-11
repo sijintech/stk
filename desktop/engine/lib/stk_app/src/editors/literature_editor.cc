@@ -142,6 +142,8 @@ class LiteratureEditor final : public Editor {
   uint64_t generation_ = 0, input_generation_ = 0, view_lifetime_ = 0, texture_ = 0;
   std::function<void(uint64_t)> free_texture_;
   LiteraturePage page_;
+  // Keep the framing identity across a texture release so reopening the exact page preserves its view.
+  Json viewed_page_;
   std::shared_ptr<const std::vector<std::array<ui::Vec2, 4>>> highlights_;
   int section_ = 0, basis_ = 0; int64_t versions_offset_ = 0, operations_offset_ = 0;
   size_t text_page_ = 0;
@@ -497,9 +499,18 @@ class LiteratureEditor final : public Editor {
       pages.button("literature_text_previous", ctx.tr("literature.previous"), [this, live = guard(true)] { if (live() && text_page_) { --text_page_; } }).disable(text_page_ == 0);
       pages.button("literature_text_next", ctx.tr("literature.next"), [this, live = guard(true)] { if (live()) { ++text_page_; } }).disable(text_page_ + 2 >= offsets.size());
     }
-    if (!render_request_.empty() && adopted_render_ != render_request_ && resolved.is_object() && value("pages.render").is_object()) {
+    bool refit = false;
+    const auto &rendered = value("pages.render");
+    if (!render_request_.empty() && adopted_render_ != render_request_ && resolved.is_object() && rendered.is_object()) {
       const auto request = render_request_;
-      if (page_.adopt(resolved, value("pages.render"))) {
+      if (page_.adopt(resolved, rendered)) {
+        const auto &citation = page_.citation();
+        const auto &inner = citation.at("inner");
+        const auto &base = inner.contains("base") ? inner.at("base") : inner;
+        auto frame = Json::array({citation.at("corpus_id"), citation.at("database_id"), base.at("version_id"),
+                                  base.at("source_sha256"), base.at("page_index"), rendered.at("image").at("sha256")});
+        refit = frame != viewed_page_;
+        viewed_page_ = std::move(frame);
         auto quads = std::make_shared<std::vector<std::array<ui::Vec2, 4>>>();
         for (const auto &q : *page_.highlights()) {
           std::array<ui::Vec2, 4> points;
@@ -516,7 +527,9 @@ class LiteratureEditor final : public Editor {
       if (!texture_ && jobs.create_texture && jobs.free_texture) {
         free_texture_ = jobs.free_texture; texture_ = jobs.create_texture(*page_.image());
       }
-      body.image("literature_page", {texture_, int(page_.image()->width), int(page_.image()->height), 18, highlights_});
+      auto &image = body.image("literature_page",
+                               {texture_, int(page_.image()->width), int(page_.image()->height), 18, highlights_});
+      if (refit) { body.ctx().reset_image_view(image.id); }
     }
   }
   void pagination(ui::Layout &body, EditorContext &ctx, const std::string &kind, int64_t &offset, size_t count, int64_t limit)
