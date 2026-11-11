@@ -142,6 +142,8 @@ struct MediaProbeObservation {
   std::optional<bool> accepted;
   std::optional<document_preview::test::MediaProbeResult> reply;
 };
+using MediaHoldExit = std::function<void(Clock::time_point, Clock::time_point,
+    std::optional<Clock::time_point>, size_t, bool)>;
 struct HiddenMediaObservation {
   int cycle = 0;
   Clock::time_point started = Clock::now();
@@ -176,7 +178,7 @@ void log_last_media_observation(const Json &result) noexcept
                             "first_toolbar_pause_immediate", "first_toolbar_pause_immediate_trace",
                             "repeat_verified_visible_pause", "suspend_reveal",
                             "failed_reveal_observation", "failed_reveal_native_pause_trace",
-                            "failed_reshown_hold"}) {
+                            "failed_reshown_hold", "reshown_hold_native_observation"}) {
       const auto item = result.find(key);
       if (item == result.end() || !item->is_object()) continue;
       // These objects contain only fixed phase names, hashes and numerical probe facts.
@@ -1823,27 +1825,81 @@ class Exercise {
     }
     record();
   }
+  static Json native_hide_pause_event(const document_preview::test::NativeHidePauseEvent &event)
+  {
+    return {{"phase", event.phase}, {"elapsed_seconds", event.elapsed_seconds},
+        {"visible", event.visible}, {"webview_hidden", event.webview_hidden}, {"owns_focus", event.owns_focus},
+        {"raw_playback_state", event.playback_state ? Json(*event.playback_state) : Json(nullptr)}};
+  }
+  static Json native_hide_pause_trace(const document_preview::test::NativeHidePauseTrace &pause,
+                                      const std::string &session)
+  {
+    Json events = Json::array();
+    for (size_t i = 0; i < pause.event_count; ++i) { events.push_back(native_hide_pause_event(pause.events[i])); }
+    return {{"session_sha256", core::Sha256::hex(session)}, {"media_generation", pause.media_generation},
+        {"navigation_generation", pause.navigation_generation}, {"overflow", pause.overflow},
+        {"events", std::move(events)}};
+  }
   void record_native_pause_trace(const document_preview::test::NativeCloseObservation *close,
                                  const std::string &session,
                                  const char *key = "hidden_media_native_pause_trace") noexcept
   {
     try {
-      if (!close || !close->hide_pause) { return; }
-      const auto &pause = *close->hide_pause;
-      Json events = Json::array();
-      for (size_t i = 0; i < pause.event_count; ++i) {
-        const auto &event = pause.events[i];
-        events.push_back({{"phase", event.phase}, {"elapsed_seconds", event.elapsed_seconds},
-            {"visible", event.visible}, {"webview_hidden", event.webview_hidden},
-            {"owns_focus", event.owns_focus},
-            {"raw_playback_state", event.playback_state ? Json(*event.playback_state) : Json(nullptr)}});
+      if (close && close->hide_pause) {
+        result_[key] = native_hide_pause_trace(*close->hide_pause, session);
       }
-      result_[key] = {{"session_sha256", core::Sha256::hex(session)},
-          {"media_generation", pause.media_generation},
-          {"navigation_generation", pause.navigation_generation}, {"overflow", pause.overflow},
-          {"events", std::move(events)}};
     }
     catch (...) {} // Diagnostics must never replace the original test exception.
+  }
+  void record_reshown_hold_native_observation(int cycle, const std::string &session,
+      const document_preview::test::NativeCloseObservation *close, const std::optional<NativePause> &hidden_pause,
+      Clock::time_point reveal_started, Clock::time_point hold_started, Clock::time_point exited,
+      std::optional<Clock::time_point> failed_predicate, size_t samples, bool success) noexcept
+  {
+    try {
+      // The observer is already attached. Reading its trace and the existing DOM receipt is passive.
+      const auto *trace = close && close->hide_pause ? &*close->hide_pause : nullptr;
+      const bool comparable = hidden_pause && trace;
+      const bool matched = comparable && trace->media_generation == hidden_pause->media_generation &&
+                           trace->navigation_generation == hidden_pause->navigation_generation;
+      const auto dispatch = trace && trace->event_count ? std::optional(trace->dispatched) : std::nullopt;
+      const auto last_event = [&](std::string_view phase) -> Json {
+        if (!matched || !dispatch) { return nullptr; }
+        for (size_t i = trace->event_count; i > 0; --i) {
+          const auto &event = trace->events[i - 1];
+          if (event.phase != phase) { continue; }
+          auto raw = native_hide_pause_event(event);
+          raw["seconds_from_reveal"] = media_seconds(reveal_started, *dispatch) + event.elapsed_seconds;
+          return raw;
+        }
+        return nullptr;
+      };
+      Json probe = nullptr;
+      if (last_media_probe_ && last_media_probe_->started >= hold_started) {
+        const auto &r = *last_media_probe_;
+        probe = {{"started_seconds", media_seconds(reveal_started, r.started)},
+            {"dispatched_seconds", media_time(reveal_started, r.dispatched)},
+            {"callback_seconds", media_time(reveal_started, r.callback)},
+            {"finished_seconds", media_time(reveal_started, r.finished)},
+            {"dispatch_accepted", r.accepted ? Json(*r.accepted) : Json(nullptr)},
+            {"reply_ok", r.reply ? Json(r.reply->ok) : Json(nullptr)},
+            {"media", r.reply && r.reply->ok ? media_json(r.reply->media) : Json(nullptr)}};
+      }
+      result_["reshown_hold_native_observation"] = {{"cycle", cycle}, {"phase", "reshown-no-autoresume"},
+          {"session_sha256", core::Sha256::hex(session)}, {"clock_origin", "before-reveal-tab"},
+          {"success", success}, {"completed_dom_samples", samples},
+          {"hold_started_seconds", media_seconds(reveal_started, hold_started)},
+          {"hold_exit_seconds", media_seconds(reveal_started, exited)},
+          {"first_failed_predicate_seconds", media_time(reveal_started, failed_predicate)},
+          {"last_dom_probe", std::move(probe)}, {"observer_attached", close != nullptr},
+          {"hidden_pause", hidden_pause ? native_pause_json(*hidden_pause) : Json(nullptr)},
+          {"matches_hidden_pause", comparable ? Json(matched) : Json(nullptr)},
+          {"native_dispatch_seconds", media_time(reveal_started, dispatch)},
+          {"show", last_event("show")}, {"release_ack", last_event("release-ack")},
+          {"last_recorded_release_state", last_event("release-state")},
+          {"native_trace", trace ? native_hide_pause_trace(*trace, session) : Json(nullptr)}};
+    }
+    catch (...) {} // Preserve the original hold result.
   }
   void record_hidden_native_close(const document_preview::test::NativeCloseObservation *close,
                                   const std::string &session, Clock::time_point playing_returned) noexcept
@@ -2007,7 +2063,8 @@ class Exercise {
     return observed;
   }
   Media held_media(int cycle, const std::string &phase, const std::string &session,
-                   const Media &before, double seconds, bool record_failed_reshown_hold = false)
+                   const Media &before, double seconds, bool record_failed_reshown_hold = false,
+                   MediaHoldExit observe_exit = {})
   {
     const auto start = Clock::now();
     if (hidden_media_) {
@@ -2015,7 +2072,8 @@ class Exercise {
     }
     Media after;
     size_t samples = 0;
-    wait([&] {
+    std::optional<Clock::time_point> failed_predicate;
+    const auto sample = [&] {
       after = media(session);
       ++samples;
       const auto delta = after.current_time - before.current_time;
@@ -2023,6 +2081,7 @@ class Exercise {
           after.navigation_generation == before.navigation_generation, after.paused, !after.ended,
           !after.seeking, std::abs(delta) <= 0.10};
       const bool hold_ok = std::all_of(checks.begin(), checks.end(), [](bool value) { return value; });
+      if (observe_exit && !hold_ok) { failed_predicate = Clock::now(); }
       if (hidden_media_) {
         auto &observation = *hidden_media_;
         observation.hold_checks = checks;
@@ -2045,9 +2104,18 @@ class Exercise {
       }
       require(hold_ok, "Paused media advanced, resumed, ended or changed navigation during " + phase);
       return std::chrono::duration<double>(Clock::now() - start).count() >= seconds;
-    }, "Paused media hold " + phase, seconds + 10);
+    };
+    try {
+      wait(sample, "Paused media hold " + phase, seconds + 10);
+    }
+    catch (...) {
+      if (observe_exit) { observe_exit(start, Clock::now(), failed_predicate, samples, false); }
+      throw;
+    }
+    const auto exited = Clock::now();
+    if (observe_exit) { observe_exit(start, exited, failed_predicate, samples, true); }
     result_["media_holds"].push_back({{"cycle", cycle}, {"phase", phase},
-        {"observed_wall_seconds", std::chrono::duration<double>(Clock::now() - start).count()},
+        {"observed_wall_seconds", media_seconds(start, exited)},
         {"before", media_json(before)}, {"after", media_json(after)}});
     save(); return after;
   }
@@ -3025,6 +3093,7 @@ raise SystemExit(main())
       ui.begin_hidden_media(cycle, session, playing, playing_returned);
 #ifdef __APPLE__
       const auto close = ui.observe_native_close(session, playing.navigation_generation);
+      std::optional<NativePause> quiet_hidden_pause;
 #endif
       auto hidden = [&] {
         try {
@@ -3074,6 +3143,9 @@ raise SystemExit(main())
                 "Quiet hidden hold must verify one new native pause on the same navigation before DOM sampling");
             require(hidden.navigation_generation == playing.navigation_generation && hidden.paused && !hidden.seeking,
                 "The first post-hold DOM sample must show the same media paused");
+#ifdef __APPLE__
+            quiet_hidden_pause = pause;
+#endif
           }
           require(hidden.current_time < 2.9 && hidden.current_time >= playing.current_time - 0.05 && !hidden.ended,
               "Hidden pause must precede the color transition and natural ending");
@@ -3128,8 +3200,18 @@ raise SystemExit(main())
         throw;
       }
 #endif
+      MediaHoldExit observe_hold_exit;
+#ifdef __APPLE__
+      if (options.quiet_hidden_hold) {
+        observe_hold_exit = [&](Clock::time_point start, Clock::time_point exited,
+                               std::optional<Clock::time_point> failure, size_t samples, bool success) {
+          ui.record_reshown_hold_native_observation(cycle, session, close.get(), quiet_hidden_pause,
+              reveal_started, start, exited, failure, samples, success);
+        };
+      }
+#endif
       auto reshown = ui.held_media(cycle, "reshown-no-autoresume", session, hidden, 0.50,
-                                   options.isolated_pause_control);
+                                   options.isolated_pause_control, std::move(observe_hold_exit));
       ui.media_capture(cycle, "reshown-red-paused", 1, ui.media_rectangle(bounds, reshown), reshown, session);
       // Return to the earliest segment before a second explicit Play. Rewinding is
       // itself local input; showing the tab must never provide that playback action.
