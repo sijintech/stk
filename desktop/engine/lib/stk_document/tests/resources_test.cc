@@ -58,6 +58,53 @@ TEST(DocumentResources, PauseCallbacksCannotAffectAnotherPauseOrNavigation)
   EXPECT_EQ(check.observe(false, 11, 9, start + 200ms), Check::Result::Paused);
 }
 
+TEST(DocumentResources, SuspensionCoalescesHidesAndBalancesRapidRevealHideAfterEveryAcknowledgement)
+{
+  using Lease = detail::MediaPlaybackSuspension;
+  using namespace std::chrono_literals;
+  const Lease::Clock::time_point start{};
+  Lease lease;
+  EXPECT_TRUE(lease.ready(false));
+  lease.require(true);
+  const auto suspend = lease.next(start);
+  ASSERT_TRUE(suspend);
+  EXPECT_TRUE(suspend->suspend);
+  lease.require(true);
+  EXPECT_FALSE(lease.next(start + 1ms));
+  lease.require(false); // Reveal before the YES reply cannot submit NO out of order.
+  EXPECT_FALSE(lease.next(start + 2ms));
+  EXPECT_EQ(lease.acknowledge(*suspend, start + 3ms), Lease::Reply::Accepted);
+  const auto release = lease.next(start + 3ms);
+  ASSERT_TRUE(release);
+  EXPECT_FALSE(release->suspend);
+  lease.require(true); // Another hide while NO is in flight requires a new YES.
+  EXPECT_FALSE(lease.ready(true));
+  EXPECT_FALSE(lease.next(start + 4ms));
+  EXPECT_EQ(lease.acknowledge(*suspend, start + 5ms), Lease::Reply::Ignored);
+  EXPECT_EQ(lease.acknowledge(*release, start + 6ms), Lease::Reply::Accepted);
+  const auto reacquire = lease.next(start + 6ms);
+  ASSERT_TRUE(reacquire);
+  EXPECT_TRUE(reacquire->suspend);
+  EXPECT_EQ(lease.acknowledge(*reacquire, start + 7ms), Lease::Reply::Accepted);
+  EXPECT_TRUE(lease.ready(true));
+  EXPECT_FALSE(lease.next(start + 8ms));
+}
+
+TEST(DocumentResources, SuspensionMissingAndLateAcksFailWithinTheOriginalOneSecondBudget)
+{
+  using Lease = detail::MediaPlaybackSuspension;
+  using namespace std::chrono_literals;
+  const Lease::Clock::time_point start{};
+  Lease lease;
+  lease.require(true);
+  const auto command = lease.next(start);
+  ASSERT_TRUE(command);
+  EXPECT_FALSE(lease.expired(*command, start + 999ms));
+  EXPECT_TRUE(lease.expired(*command, start + 1s));
+  EXPECT_EQ(lease.acknowledge(*command, start + 1s), Lease::Reply::Failed);
+  EXPECT_FALSE(lease.ready(true));
+}
+
 PreviewIdentity identity()
 {
   return {"11111111-1111-4111-8111-111111111111",

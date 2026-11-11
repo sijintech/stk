@@ -49,6 +49,9 @@ class NativeDocumentView {
     error = "Media playback control is not supported by this view.";
     return false;
   }
+  /** Pause before synchronously hiding the child. Platforms may hold playback suspension
+   * through the hidden interval and release it after a verified, paused visible return. */
+  virtual bool pause_media_for_hide(std::string &error) { return pause_media(error); }
   /** Explicit focus only while the parent is active; never activate a background window. */
   virtual void focus() = 0;
   /** Called after native Tab traversal leaves the page and OS focus has been returned.

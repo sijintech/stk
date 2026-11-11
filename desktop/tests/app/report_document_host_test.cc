@@ -277,6 +277,7 @@ struct ViewProbe {
   bool visible = false, closed = false, fail_pause = false, refuse_show = false;
   NativeViewStatus status = NativeViewStatus::Loading;
   int shows = 0;
+  int hide_pauses = 0;
   std::vector<bool> pause_visible; // Child visibility at each native pause dispatch.
 };
 struct LiveFixture {
@@ -312,6 +313,11 @@ class MockDocumentView final : public document_preview::NativeDocumentView {
     probe_->pause_visible.push_back(probe_->visible);
     if (probe_->fail_pause) { error = "synthetic pause failure"; return false; }
     return true;
+  }
+  bool pause_media_for_hide(std::string &error) override
+  {
+    ++probe_->hide_pauses;
+    return pause_media(error);
   }
   void focus() override {}
   void set_focus_exit_handler(document_preview::FocusExitHandler) override {}
@@ -478,6 +484,7 @@ TEST(ReportDocumentHostDisplay, PauseClickCoalescesWithTheHidePauseAndNeverReuse
       EXPECT_EQ(fixture->log[log_before + 1], "v1:hide");
       ASSERT_TRUE(live.frame()); // A real layout between down and up keeps the child hidden.
       EXPECT_FALSE(v1->visible); EXPECT_EQ(v1->pause_visible.size(), pauses + 1);
+      EXPECT_EQ(v1->hide_pauses, 1);
       ASSERT_TRUE(live.pointer(wm::EventType::MouseUp, "pause_fixture_pause"));
       ASSERT_EQ(fixture->clicks.size(), 1u);
       EXPECT_FALSE(fixture->clicks[0].visible_at_dispatch);
@@ -491,10 +498,13 @@ TEST(ReportDocumentHostDisplay, PauseClickCoalescesWithTheHidePauseAndNeverReuse
     {
       SCOPED_TRACE("after re-show every Pause reaches the view again");
       const auto pauses = v1->pause_visible.size();
+      const auto hide_pauses = v1->hide_pauses;
       EXPECT_TRUE(host.pause_media());
       ASSERT_EQ(v1->pause_visible.size(), pauses + 1); EXPECT_TRUE(v1->pause_visible.back());
+      EXPECT_EQ(v1->hide_pauses, hide_pauses);
       ASSERT_TRUE(live.press("pause_fixture_pause"));
       ASSERT_EQ(v1->pause_visible.size(), pauses + 2); EXPECT_TRUE(v1->pause_visible.back());
+      EXPECT_EQ(v1->hide_pauses, hide_pauses + 1);
       ASSERT_TRUE(live.pointer(wm::EventType::MouseUp, "pause_fixture_pause"));
       ASSERT_EQ(fixture->clicks.size(), 2u); EXPECT_FALSE(fixture->clicks[1].visible_at_dispatch);
       EXPECT_TRUE(fixture->clicks[1].accepted);

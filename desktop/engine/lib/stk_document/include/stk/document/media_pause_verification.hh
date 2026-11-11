@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 
 namespace stk::document_preview::detail {
 
@@ -45,6 +46,49 @@ class MediaPauseVerification {
   uint64_t generation_, navigation_;
   Clock::time_point deadline_;
   bool finished_ = false;
+};
+
+/** One view-owned suspension pair, with at most one native command awaiting its ACK.
+ * Desired state may change while a command is in flight. Its effect must settle before
+ * the opposite command is submitted, even when its original navigation has changed. */
+class MediaPlaybackSuspension {
+ public:
+  using Clock = MediaPauseVerification::Clock;
+  enum class Reply { Ignored, Accepted, Failed };
+  struct Command {
+    uint64_t serial;
+    bool suspend;
+  };
+
+  void require(bool suspended) { desired_ = suspended; }
+  bool ready(bool suspended) const { return !pending_ && desired_ == suspended && owned_ == suspended; }
+  std::optional<Command> next(Clock::time_point now)
+  {
+    if (pending_ || desired_ == owned_) { return {}; }
+    owned_ = desired_;
+    pending_ = Command{++serial_, owned_};
+    deadline_ = now + MediaPauseVerification::timeout;
+    return pending_;
+  }
+  Reply acknowledge(Command command, Clock::time_point now)
+  {
+    if (!pending_ || pending_->serial != command.serial || pending_->suspend != command.suspend) {
+      return Reply::Ignored;
+    }
+    if (now >= deadline_) { return Reply::Failed; }
+    pending_.reset();
+    return Reply::Accepted;
+  }
+  bool expired(Command command, Clock::time_point now) const
+  {
+    return pending_ && pending_->serial == command.serial && now >= deadline_;
+  }
+
+ private:
+  bool desired_ = false, owned_ = false;
+  uint64_t serial_ = 0;
+  std::optional<Command> pending_;
+  Clock::time_point deadline_{};
 };
 
 }  // namespace stk::document_preview::detail

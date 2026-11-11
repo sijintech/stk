@@ -54,7 +54,7 @@ struct ReportDocumentHost::State : std::enable_shared_from_this<State> {
       if (view) {
         if (has_media && was_visible) {
           std::string pause_error;
-          if (!view->pause_media(pause_error)) { failed = true; }
+          if (!view->pause_media_for_hide(pause_error)) { failed = true; }
           else { hidden_pause_view = view.get(); hidden_pause_session = resources.get(); }
         }
         view->set_visible(false);

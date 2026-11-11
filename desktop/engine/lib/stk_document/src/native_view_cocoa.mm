@@ -19,6 +19,9 @@
 
 namespace stk::document_preview::cocoa {
 
+struct PauseRequest;
+struct ReleaseRequest;
+
 struct State {
   std::shared_ptr<ResourceSession> resources;
   NativeViewState result;
@@ -28,9 +31,17 @@ struct State {
   __strong WKNavigation *navigation = nil;
   __strong NSView *focus_before = nil;
   __strong NSView *focus_after = nil;
+  __weak NSResponder *focus_wait_responder = nil;
   FocusExitHandler focus_exit;
   uint64_t focus_generation = 0;
   uint64_t media_generation = 0;
+  uint64_t visibility_generation = 0;
+  uint64_t focus_after_media = 0;
+  detail::MediaPlaybackSuspension suspension;
+  std::shared_ptr<PauseRequest> hide_pause;
+  std::shared_ptr<ReleaseRequest> release;
+  std::optional<detail::MediaPauseVerification::Clock::time_point> release_started;
+  bool media_interaction_blocked = false;
   std::string requested_url;
   bool closed = false;
   bool policy_ready = false;
@@ -44,6 +55,7 @@ struct State {
   uint64_t test_retain_visible_pause_generation = 0;
   uint64_t test_isolated_pause_navigation = 0;
   bool test_owns_playback_suspension = false;
+  bool test_release_waits_for_owner = false;
 #endif
 };
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
@@ -124,6 +136,19 @@ static bool relinquish_focus(const std::shared_ptr<State> &state)
 static void shutdown(const std::shared_ptr<State> &state, NativeViewStatus status, const char *message);
 static constexpr char kPauseWatchdogFailure[] = "Could not verify paused document media playback";
 static constexpr char kPauseReplyFailure[] = "Could not pause document media playback";
+static constexpr char kSuspensionFailure[] = "Could not verify document media playback suspension";
+static void reconcile_media(const std::shared_ptr<State> &state);
+static bool request_hidden_pause(const std::shared_ptr<State> &state, std::string &error);
+
+static bool actually_visible(const std::shared_ptr<State> &state)
+{
+  if (!live(state) || !state->visible || !state->has_bounds) { return false; }
+  NSWindow *parent = state->parent;
+  WKWebView *view = state->view;
+  return view && view.superview == parent.contentView && view.window == parent &&
+         !view.isHiddenOrHasHiddenAncestor && !NSIsEmptyRect(view.visibleRect) &&
+         parent.isVisible && !parent.isMiniaturized;
+}
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
 static constexpr char kIsolatedPauseFailure[] = "The isolated test pause did not pause its media element";
 
@@ -162,8 +187,11 @@ struct PauseRequest {
   std::weak_ptr<State> state;
   __weak WKWebView *view = nil;
   detail::MediaPauseVerification verification;
+  uint64_t generation, navigation;
   bool acknowledged = false;
   bool query_inflight = false;
+  bool held_for_hide = false;
+  bool verified = false;
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
   detail::MediaPauseVerification::Clock::time_point started;
   std::shared_ptr<test::VisiblePauseObservation> visible_control;
@@ -186,7 +214,8 @@ struct PauseRequest {
                detail::MediaPauseVerification::Clock::time_point now)
       : state(source),
         view(source->view),
-        verification(generation, source->result.navigation_generation, now)
+        verification(generation, source->result.navigation_generation, now),
+        generation(generation), navigation(source->result.navigation_generation)
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
         , started(now)
 #endif
@@ -216,7 +245,8 @@ static void verify_pause(std::shared_ptr<PauseRequest> request)
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
     verify_pause(request);
   });
-  if (!request->acknowledged || request->query_inflight) {
+  if (!request->acknowledged || request->query_inflight ||
+      (request->held_for_hide && !current->suspension.ready(true))) {
     return;
   }
   request->query_inflight = true;
@@ -238,6 +268,7 @@ static void verify_pause(std::shared_ptr<PauseRequest> request)
     const bool playing = playback == WKMediaPlaybackStatePlaying;
     const auto result = request->verification.observe(
         playing, completed->media_generation, completed->result.navigation_generation, replied);
+    request->verified |= result == Check::Result::Paused;
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
     if (result != Check::Result::Ignored) {
       auto &pause = completed->test_last_pause;
@@ -253,17 +284,177 @@ static void verify_pause(std::shared_ptr<PauseRequest> request)
     if (result == Check::Result::Failed) {
       shutdown(completed, NativeViewStatus::Failed, kPauseReplyFailure);
     }
+    else if (result == Check::Result::Paused && completed->hide_pause == request) {
+      reconcile_media(completed);
+    }
   }];
+}
+
+struct ReleaseRequest {
+  std::weak_ptr<State> state;
+  __weak WKWebView *view = nil;
+  detail::MediaPauseVerification verification;
+  uint64_t visibility;
+  bool query_inflight = false;
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+  bool first_reply_recorded = false;
+#endif
+
+  ReleaseRequest(const std::shared_ptr<State> &source, detail::MediaPauseVerification::Clock::time_point started)
+      : state(source), view(source->view),
+        verification(source->media_generation, source->result.navigation_generation, started),
+        visibility(source->visibility_generation)
+  {
+  }
+};
+
+static bool continue_release(const std::shared_ptr<State> &state, const std::shared_ptr<ReleaseRequest> &request)
+{
+  if (!live(state) || state->view != request->view || state->release != request) { return false; }
+  if (state->visibility_generation == request->visibility && actually_visible(state) &&
+      state->suspension.ready(false)) { return true; }
+  // AppKit can obscure or miniaturize the view between host layout callbacks.
+  // Retire this proof so the next visible frame can verify its own release.
+  state->release.reset();
+  state->release_started.reset();
+  reconcile_media(state);
+  return false;
+}
+
+static void verify_release(std::shared_ptr<ReleaseRequest> request)
+{
+  auto state = request->state.lock();
+  if (!continue_release(state, request)) { return; }
+  using Check = detail::MediaPauseVerification;
+  const auto pending = request->verification.expire(
+      state->media_generation, state->result.navigation_generation, Check::Clock::now());
+  if (pending == Check::Result::Failed) {
+    shutdown(state, NativeViewStatus::Failed, kSuspensionFailure);
+    return;
+  }
+  if (pending != Check::Result::Waiting) { return; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+    verify_release(request);
+  });
+  if (request->query_inflight) { return; }
+  request->query_inflight = true;
+  [state->view requestMediaPlaybackStateWithCompletionHandler:^(WKMediaPlaybackState playback) {
+    request->query_inflight = false;
+    auto current = request->state.lock();
+    if (!continue_release(current, request)) { return; }
+    const auto now = Check::Clock::now();
+    const bool unpaused = playback != WKMediaPlaybackStatePaused && playback != WKMediaPlaybackStateNone;
+    const auto result = request->verification.observe(
+        unpaused, current->media_generation, current->result.navigation_generation, now);
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+    // The diagnostic owns another balanced YES/NO pair. Observe its exact hold,
+    // then require a fresh Paused/None proof when that owner submits its NO.
+    if (result == Check::Result::Waiting && playback == WKMediaPlaybackStateSuspended &&
+        current->test_owns_playback_suspension) {
+      current->test_release_waits_for_owner = true;
+      current->release.reset();
+      observe_hide_pause(current, "release-test-held", now, int(playback));
+      return;
+    }
+    if (!request->first_reply_recorded || result != Check::Result::Waiting) {
+      request->first_reply_recorded = true;
+      observe_hide_pause(current, "release-state", now, int(playback));
+    }
+#endif
+    if (result == Check::Result::Failed) {
+      shutdown(current, NativeViewStatus::Failed, kSuspensionFailure);
+    }
+    else if (result == Check::Result::Paused) {
+      current->release.reset();
+      current->release_started.reset();
+      current->hide_pause.reset();
+      current->media_interaction_blocked = false;
+      const auto focus = std::exchange(current->focus_after_media, 0);
+      NSResponder *responder = current->focus_wait_responder;
+      current->focus_wait_responder = nil;
+      if (focus && focus == current->focus_generation && current->parent.isKeyWindow &&
+          current->parent.firstResponder == responder &&
+          ![current->parent makeFirstResponder:current->view]) {
+        shutdown(current, NativeViewStatus::Failed, "Could not focus the document.");
+      }
+    }
+  }];
+}
+
+static void reconcile_media(const std::shared_ptr<State> &state)
+{
+  if (!live(state) || !state->view || !state->media_interaction_blocked) { return; }
+  using Lease = detail::MediaPlaybackSuspension;
+  const auto &pause = state->hide_pause;
+  const bool same_pause = pause && pause->generation == state->media_generation &&
+      pause->navigation == state->result.navigation_generation && pause->view == state->view;
+  const bool proved = same_pause && pause->verified;
+  const bool visible = actually_visible(state);
+  if (!visible) {
+    state->focus_after_media = 0;
+    state->focus_wait_responder = nil;
+  }
+  if (!visible || !proved) {
+    state->release.reset();
+    state->release_started.reset();
+  }
+  state->suspension.require(!visible || !proved);
+  const auto now = Lease::Clock::now();
+  if (const auto command = state->suspension.next(now)) {
+    if (!command->suspend) { state->release_started = now; }
+    const std::weak_ptr<State> weak = state;
+    __weak WKWebView *view = state->view;
+    const auto operation = *command;
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+    const auto media = state->media_generation, navigation = state->result.navigation_generation;
+#endif
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      const auto current = weak.lock();
+      if (live(current) && current->view == view && current->suspension.expired(operation, Lease::Clock::now())) {
+        shutdown(current, NativeViewStatus::Failed, kSuspensionFailure);
+      }
+    });
+    [state->view setAllMediaPlaybackSuspended:operation.suspend completionHandler:^{
+      const auto current = weak.lock();
+      if (!live(current) || current->view != view) { return; }
+      const auto reply = current->suspension.acknowledge(operation, Lease::Clock::now());
+      if (reply == Lease::Reply::Failed) {
+        shutdown(current, NativeViewStatus::Failed, kSuspensionFailure);
+        return;
+      }
+      if (reply != Lease::Reply::Accepted) { return; }
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+      if (current->media_generation == media && current->result.navigation_generation == navigation) {
+        observe_hide_pause(current, operation.suspend ? "suspend-ack" : "release-ack", Lease::Clock::now());
+      }
+#endif
+      reconcile_media(current); // Settle an old effect before applying the latest desired state.
+    }];
+    return;
+  }
+  if (visible && proved && state->suspension.ready(false) && !state->release) {
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+    if (state->test_release_waits_for_owner) { return; }
+#endif
+    state->release = std::make_shared<ReleaseRequest>(state, state->release_started.value_or(Lease::Clock::now()));
+    verify_release(state->release);
+  }
 }
 
 static void sync_visibility(const std::shared_ptr<State> &state)
 {
   const bool show = live(state) && state->visible && state->has_bounds;
-#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
   const bool visibility_transition = bool(state->view.hidden) == show;
+  if (visibility_transition) {
+    ++state->visibility_generation;
+    state->release.reset();
+  }
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
   using PauseClock = detail::MediaPauseVerification::Clock;
 #endif
   if (!show) {
+    state->focus_after_media = 0;
+    state->focus_wait_responder = nil;
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
     if (visibility_transition) { observe_hide_pause(state, "focus-release-before", PauseClock::now()); }
     if (const auto trace = state->test_visible_pause.lock()) { trace->visibility_lost = true; }
@@ -286,6 +477,15 @@ static void sync_visibility(const std::shared_ptr<State> &state)
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
   if (visibility_transition) { observe_hide_pause(state, show ? "show" : "hide", PauseClock::now()); }
 #endif
+  if (state->media_interaction_blocked && state->result.status == NativeViewStatus::Ready &&
+      (!state->hide_pause || state->hide_pause->navigation != state->result.navigation_generation)) {
+    std::string error;
+    if (!request_hidden_pause(state, error)) {
+      shutdown(state, NativeViewStatus::Failed, kSuspensionFailure);
+      return;
+    }
+  }
+  reconcile_media(state);
 }
 
 // All calls and delegate callbacks are on the main thread. The returned WKNavigation is the
@@ -308,12 +508,17 @@ static void load_requested(const std::shared_ptr<State> &state)
 static void begin_navigation(const std::shared_ptr<State> &state, std::string url)
 {
   ++state->result.navigation_generation;
+  state->release.reset();
+  state->release_started.reset();
+  state->focus_after_media = 0;
+  state->focus_wait_responder = nil;
   state->navigation = nil;
   [state->view stopLoading];
   state->requested_url = std::move(url);
   state->result.status = NativeViewStatus::Loading;
   state->result.message = state->policy_ready ? "Loading admitted document bytes." :
                                                "Preparing the offline resource policy.";
+  reconcile_media(state);
   load_requested(state);
 }
 
@@ -346,7 +551,7 @@ static bool current(const std::shared_ptr<State> &state,
 - (BOOL)canBecomeKeyView
 {
   auto state = state_.lock();
-  return stk::document_preview::cocoa::live(state) && state->visible && state->has_bounds &&
+  return stk::document_preview::cocoa::live(state) && !state->media_interaction_blocked && state->visible && state->has_bounds &&
          self.window == state->parent && !self.isHiddenOrHasHiddenAncestor;
 }
 - (NSView *)hitTest:(NSPoint)point
@@ -405,6 +610,16 @@ static bool current(const std::shared_ptr<State> &state,
 @end
 
 @implementation STKPreviewWebView
+- (BOOL)acceptsFirstResponder
+{
+  const auto state = state_.lock();
+  return state && !state->media_interaction_blocked && [super acceptsFirstResponder];
+}
+- (BOOL)canBecomeKeyView
+{
+  const auto state = state_.lock();
+  return state && !state->media_interaction_blocked && [super canBecomeKeyView];
+}
 - (NSView *)nextValidKeyView
 {
   auto state = state_.lock();
@@ -417,6 +632,8 @@ static bool current(const std::shared_ptr<State> &state,
 }
 - (NSView *)hitTest:(NSPoint)point
 {
+  const auto state = state_.lock();
+  if (!state || state->media_interaction_blocked) { return nil; }
   NSView *hit = [super hitTest:point];
   NSEvent *event = NSApp.currentEvent;
   if (hit && event.window == self.window &&
@@ -592,6 +809,7 @@ static bool current(const std::shared_ptr<State> &state,
   if (current(state, webView, navigation)) {
     state->result.status = stk::document_preview::NativeViewStatus::Ready;
     state->result.message = "WKWebView navigation completed; display and input require native acceptance.";
+    if (state->media_interaction_blocked) { sync_visibility(state); }
   }
 }
 
@@ -727,6 +945,9 @@ static void shutdown(const std::shared_ptr<State> &state, NativeViewStatus statu
     else if (failure == kPauseReplyFailure) {
       reason = "pause_reply_after_deadline";
     }
+    else if (failure == kSuspensionFailure) {
+      reason = "playback_suspension";
+    }
     else if (failure == kIsolatedPauseFailure) {
       reason = "isolated_pause_actuator_failed";
     }
@@ -744,6 +965,12 @@ static void shutdown(const std::shared_ptr<State> &state, NativeViewStatus statu
   ++state->focus_generation;
   ++state->media_generation;
   ++state->result.navigation_generation;
+  state->release.reset();
+  state->release_started.reset();
+  state->hide_pause.reset();
+  state->suspension = {};
+  state->focus_after_media = 0;
+  state->focus_wait_responder = nil;
   state->result.status = status;
   state->result.message = message;
   state->resources->close();
@@ -813,6 +1040,7 @@ class CocoaDocumentView final : public NativeDocumentView {
     cocoa::sync_visibility(state);
     if (!state->closed) {
       state->view.frame = frame;
+      cocoa::reconcile_media(state);
     }
   }
 
@@ -825,9 +1053,10 @@ class CocoaDocumentView final : public NativeDocumentView {
     }
   }
 
-  bool pause_media(std::string &error) override { return request_pause(state_, error); }
+  bool pause_media(std::string &error) override { return request_pause(state_, error, false); }
+  bool pause_media_for_hide(std::string &error) override { return request_pause(state_, error, true); }
 
-  static bool request_pause(std::shared_ptr<cocoa::State> state, std::string &error
+  static bool request_pause(std::shared_ptr<cocoa::State> state, std::string &error, bool for_hide
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
       , std::shared_ptr<test::VisiblePauseObservation> visible_control = {}
 #endif
@@ -855,6 +1084,18 @@ class CocoaDocumentView final : public NativeDocumentView {
     const auto generation = ++state->media_generation;
     const auto request = std::make_shared<cocoa::PauseRequest>(
         state, generation, detail::MediaPauseVerification::Clock::now());
+    if (for_hide || state->media_interaction_blocked) {
+      request->held_for_hide = true;
+      state->hide_pause = request;
+      state->release.reset();
+      state->media_interaction_blocked = true;
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+      state->test_release_waits_for_owner = false;
+#endif
+      // Submit the suspension before the ordinary pause while the host still
+      // shows this view. Both commands precede its synchronous focus/pixel hide.
+      cocoa::reconcile_media(state);
+    }
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
     const auto navigation = state->result.navigation_generation;
     const auto isolated_navigation = std::exchange(state->test_isolated_pause_navigation, 0);
@@ -941,6 +1182,12 @@ class CocoaDocumentView final : public NativeDocumentView {
     const auto state = state_;
     if (cocoa::live(state) && state->visible && state->has_bounds && state->parent.isKeyWindow) {
       ++state->focus_generation;
+      if (state->media_interaction_blocked) {
+        if (!cocoa::actually_visible(state)) { return; }
+        state->focus_after_media = state->focus_generation;
+        state->focus_wait_responder = state->parent.firstResponder;
+        return;
+      }
       if (![state->parent makeFirstResponder:state->view]) {
         cocoa::shutdown(state, NativeViewStatus::Failed, "Could not focus the document.");
       }
@@ -994,6 +1241,13 @@ class CocoaDocumentView final : public NativeDocumentView {
 };
 
 }  // namespace
+
+namespace cocoa {
+static bool request_hidden_pause(const std::shared_ptr<State> &state, std::string &error)
+{
+  return CocoaDocumentView::request_pause(state, error, true);
+}
+}  // namespace cocoa
 
 std::unique_ptr<NativeDocumentView> create_native_document_view(
     wm::NativeWindowHandle parent, std::shared_ptr<ResourceSession> resources, std::string &error)
@@ -1206,7 +1460,7 @@ std::shared_ptr<const VisiblePauseObservation> begin_visible_pause_control(
     return {};
   }
   auto observation = std::make_shared<VisiblePauseObservation>();
-  return CocoaDocumentView::request_pause(state, error, observation) ? observation : nullptr;
+  return CocoaDocumentView::request_pause(state, error, false, observation) ? observation : nullptr;
 }
 
 bool visible_pause_target(wm::NativeWindowHandle parent, std::string_view session_id,
@@ -1317,10 +1571,18 @@ bool set_visible_playback_suspended(wm::NativeWindowHandle parent, std::string_v
   const std::weak_ptr<cocoa::State> weak = state;
   __weak WKWebView *expected_view = state->view;
   state->test_owns_playback_suspension = suspend;
+  if (!suspend && state->media_interaction_blocked) {
+    state->release_started = detail::MediaPauseVerification::Clock::now();
+  }
   [state->view setAllMediaPlaybackSuspended:suspend completionHandler:^{
     const auto current = weak.lock();
-    callback(matches_visible_playback(current, *close->hide_pause, suspend) && current->view == expected_view &&
-             current->test_owns_playback_suspension == suspend);
+    const bool bound = matches_visible_playback(current, *close->hide_pause, suspend) && current->view == expected_view &&
+                       current->test_owns_playback_suspension == suspend;
+    if (bound && !suspend) {
+      current->test_release_waits_for_owner = false;
+      cocoa::reconcile_media(current);
+    }
+    callback(bound);
   }];
   return true;
 }
