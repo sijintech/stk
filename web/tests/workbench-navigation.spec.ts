@@ -94,6 +94,7 @@ class Hub {
   voxelFault?: 'source' | 'digest' | 'size';
   private readonly voxelBlobs = new Map<string, Buffer>();
   field = 'phi';
+  valueRange = scene.manifest.value_range;
   // 任务: `device` is the node the hub lists; `down` makes every hub call fail as an unreachable control service;
   // `review` sends a task.submit to execution review, which GET actions then lists until it is approved or refused.
   device: typeof device = device;
@@ -268,7 +269,7 @@ class Hub {
         const field = this.field;
         const source = this.reportedViewSource ?? {task_id: body.payload.task_id, path: body.payload.path};
         return json({id: body.id, state: 'succeeded',
-          result: {...scene, manifest: {...scene.manifest, field, ...(source === 'omit' ? {} : {source})}}});
+          result: {...scene, manifest: {...scene.manifest, field, value_range: this.valueRange, ...(source === 'omit' ? {} : {source})}}});
       }
       if (body.kind === 'view.probe') {
         return json({id: body.id, state: 'succeeded', result: {position: body.payload.position, values: [0.5], units: 'V'}});
@@ -1025,6 +1026,7 @@ const probeLog = (page: Page) => page.locator('section.analysis details.logs pre
 const taskRow = (page: Page, name: string) => queue(page).getByRole('button', {name: new RegExp(name)});
 const shown = (file: string, name = '解析场验证') => `节点甲 · 项目一 · ${name}，${file}`;
 const pending = (file: string) => `已选 ${file}，加载视图后显示`;
+const fileViewMode = (page: Page) => page.getByRole('combobox', {name: '视图', exact: true});
 // 来源 beside the source line opens the full source of 结果 over the page: label and value of each row, and the
 // selectable values (IDs and paths) alone.
 const sourceToggle = (page: Page) => page.locator('section.analysis .view-title').getByRole('button', {name: '来源', exact: true});
@@ -1064,6 +1066,104 @@ const clipboardUses = (page: Page) => page.evaluate(() => (window as any).__clip
 for (const viewport of viewports) {
   test.describe(`${viewport.name} 结果 source`, () => {
     test.use({viewport: {width: viewport.width, height: viewport.height}});
+
+    test('an accepted iso build preserves the chosen level for another explicit load', async ({page}) => {
+      const hub = new Hub();
+      const errors = await setup(page, hub, {scene: false});
+      await go(page, '结果');
+      await page.getByLabel('结果文件').selectOption('scalar-0.vti');
+      await fileViewMode(page).selectOption('iso');
+      const level = page.getByRole('spinbutton', {name: '等值'}), load = page.getByRole('button', {name: '加载视图'});
+      await expect(level).toHaveValue('0');  // Before any view has supplied a midpoint.
+      await level.fill('0.25');
+      const sent = posts(page);
+      await load.click();
+      await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+      await expect(footer(page)).toContainText('就绪');
+      await expect(level).toHaveValue('0.25');
+      await load.click();
+      await expect(footer(page)).toContainText('就绪');
+      expect(hub.builds.map(build => [build.task_id, build.path, build.options.mode, build.options.level]))
+        .toEqual(Array(2).fill([task, 'scalar-0.vti', 'iso', 0.25]));
+      expect(writes(sent.seen)).toEqual(Array(2).fill('/api/v1/actions view.build'));
+      sent.stop();
+      expect(errors).toEqual([]);
+    });
+
+    test('a held iso build renders its requested view and keeps the level edited meanwhile', async ({page}) => {
+      const hub = new Hub();
+      const errors = await setup(page, hub);
+      await go(page, '结果');
+      await fileViewMode(page).selectOption('iso');
+      const level = page.getByRole('spinbutton', {name: '等值'}), load = page.getByRole('button', {name: '加载视图'});
+      await expect(level).toHaveValue('0.5');  // Seeded by the accepted slice.
+      hub.field = 'held-iso';
+      const release = hub.hold('view.build');
+      try {
+        await load.click();
+        await expect.poll(() => hub.reached.has('view.build')).toBe(true);
+        await expect(title(page)).toHaveText('phi');
+        await level.fill('0.75');
+      } finally {
+        release();
+      }
+      await expect(title(page)).toHaveText('held-iso');
+      await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+      await expect(footer(page)).toContainText('就绪');
+      await expect(level).toHaveValue('0.75');
+      await load.click();
+      await expect(footer(page)).toContainText('就绪');
+      expect(hub.builds.slice(1).map(build => [build.task_id, build.path, build.options.level]))
+        .toEqual([[task, 'scalar-0.vti', 0.5], [task, 'scalar-0.vti', 0.75]]);
+      expect(errors).toEqual([]);
+    });
+
+    test('non-iso results seed only an untouched level for the chosen file', async ({page}) => {
+      const hub = new Hub();
+      hub.later = true;
+      const errors = await setup(page, hub);
+      await go(page, '结果');
+      const mode = fileViewMode(page), level = page.getByRole('spinbutton', {name: '等值'});
+      const load = page.getByRole('button', {name: '加载视图'});
+      await mode.selectOption('iso');
+      await expect(level).toHaveValue('0.5');
+      hub.valueRange = [0, 2];
+      await load.click();
+      await expect(footer(page)).toContainText('就绪');
+      await expect(level).toHaveValue('0.5');
+      expect(hub.builds[1].options.level).toBe(0.5);
+
+      await mode.selectOption('vectors');
+      await load.click();
+      await expect(footer(page)).toContainText('就绪');
+      await mode.selectOption('iso');
+      await expect(level).toHaveValue('1');
+
+      hub.valueRange = [0, 4];
+      await mode.selectOption('slice');
+      const release = hub.hold('view.build');
+      try {
+        await load.click();
+        await expect.poll(() => hub.reached.has('view.build')).toBe(true);
+        await mode.selectOption('iso');
+        await level.fill('0.75');
+      } finally {
+        release();
+      }
+      await expect(footer(page)).toContainText('就绪');
+      await expect(level).toHaveValue('0.75');
+      await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+
+      await page.getByLabel('结果文件').selectOption('scalar-1.vti');
+      await mode.selectOption('slice');
+      await load.click();
+      await expect(source(page)).toHaveText(shown('显示 scalar-1.vti'));
+      await expect(footer(page)).toContainText('就绪');
+      await mode.selectOption('iso');
+      await expect(level).toHaveValue('2');
+      expect(hub.builds.map(build => build.options.mode)).toEqual(['slice', 'iso', 'vectors', 'slice', 'slice']);
+      expect(errors).toEqual([]);
+    });
 
     test('结果 names the shown task and file; another choice stays chosen until 加载视图, and 查询原始值 asks for the shown file', async ({page}) => {
       const hub = new Hub();

@@ -96,6 +96,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const [observedTask,setObservedTask]=useState<ObservedTask|null>(null);
   const [readKinds,setReadKinds]=useState<string[]|null>(null),[taskRefresh,setTaskRefresh]=useState(0);
   const [analysis,setAnalysis]=useState<'file'|'graph'>('file'),[mode,setMode]=useState('slice'),[axis,setAxis]=useState(2),[index,setIndex]=useState(0),[level,setLevel]=useState(0),[probe,setProbe]=useState<number[]>([0,0,0]);
+  const levelEdited=useRef(false);
   // Conversations are Hub sessions, independent of the selected node, Runtime workspace and task.
   const refreshNow=useRef(()=>{});
   const conv=useConversations(disconnect,()=>refreshNow.current());
@@ -198,7 +199,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       !nodes.length?'控制服务中暂无执行节点。节点配对后，这里显示它的任务队列。':'在下方「运行环境」中选择执行节点和项目，这里显示任务队列。'):
     !tasks.length?'节点快照中暂无任务。':!queue.length?`${workspaceName(workspace)} 中暂无任务，可在下方「新建任务」中提交。`:'';
   const clearTask=useCallback(()=>{
-    generation.current++;scopeVersion.current++;activeScope.current=null;defaultPick.current=null;fileEdited.current=false;
+    generation.current++;scopeVersion.current++;activeScope.current=null;defaultPick.current=null;fileEdited.current=false;levelEdited.current=false;
     setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);show(null);setLog(null);setGraphProbe(null);setGraphSource(null);setLogRoom(false);
   },[show]);
   const selectNode=useCallback((id:string)=>{
@@ -369,8 +370,11 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       if(reported!==undefined&&(reported?.task_id!==scope.task||reported?.path!==source)){
         throw new Error('返回的结果来源与所选文件不符。');
       }
-      const level=(manifest.value_range[0]+manifest.value_range[1])/2;
-      show({scope,path:source,scene:item.result});setLevel(level);
+      const midpoint=(manifest.value_range[0]+manifest.value_range[1])/2;
+      show({scope,path:source,scene:item.result});
+      // Other views can seed an untouched threshold. An iso build used its captured value, and an edit while any
+      // build was pending belongs to the next request.
+      if(mode!=='iso'&&!levelEdited.current)setLevel(midpoint);
     },active);
   }
   // One explicit read of one stream with the published task.logs action. Standard output keeps the original payload
@@ -581,10 +585,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       {/* Both analysis modes stay mounted once shown; the inactive one keeps its size but takes no space, focus or pointer. */}
       {graphKept&&<div className={analysis==='graph'?'mode-pane graph-mode':'mode-pane graph-mode mode-hidden'} inert={analysis!=='graph'}><React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={graphKey} node={selected?node:''} scope={graphScope} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} completedTask={completedTask} canReadArtifacts={canReadArtifacts} canReadEvents={canReadEvents&&taskOnline&&graphActive} active={graphActive} onError={setGraphError} beginReading={beginReading} onProbe={setGraphProbe} onSource={setGraphSource}/></React.Suspense></div>}
       <div className={analysis==='file'?'mode-pane file-mode':'mode-pane file-mode mode-hidden'} inert={analysis!=='file'}>
-      <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{fileEdited.current=true;defaultPick.current=null;setPath(e.target.value);generation.current++;setViewError('');}}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(viewable).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
+      <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{
+        const next=e.target.value;
+        if(next!==path)levelEdited.current=false;
+        fileEdited.current=true;defaultPick.current=null;setPath(next);generation.current++;setViewError('');
+      }}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(viewable).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
       <label>视图<select value={mode} onChange={e=>setMode(e.target.value)}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>
       {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>setAxis(Number(e.target.value))}>{['X','Y','Z'].map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={index} onChange={e=>setIndex(Number(e.target.value))}/></label></>}
-      {mode==='iso'&&<label>等值<input type="number" value={level} onChange={e=>setLevel(Number(e.target.value))}/></label>}
+      {mode==='iso'&&<label>等值<input type="number" value={level} onChange={e=>{levelEdited.current=true;setLevel(Number(e.target.value));}}/></label>}
       <button disabled={busy||!taskBound||!path} onClick={loadView}>加载视图</button></div>
       <ErrorBoundary resetKey={shownScene}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}><Viewer scene={shownScene} onPick={setProbe}/></React.Suspense></ErrorBoundary>
       {shownScene&&<div className="legend"><span>{shownScene.manifest.value_range[0].toPrecision(5)}</span><i/><span>{shownScene.manifest.value_range[1].toPrecision(5)} {shownScene.manifest.units}</span><small>{shownScene.manifest.display_reduced?'显示网格已简化':'完整显示网格'} · 数值查询使用原始数据</small></div>}
