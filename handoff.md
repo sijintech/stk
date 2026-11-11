@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-11 02:48 UTC · 上一轮 Desktop 终态与 Cocoa 重显取证
+
+远端 `9ce14a5ba5701b38c6f34e98f320582f5c4bdc83` 的 Desktop `42941178087` 于 02:44:55 UTC 整轮结束，5/6 作业通过。Linux 主回归 2225/2225、打包和新环境冒烟通过。Windows CPU 1529/1529，原生 6/6，零跳过，1152.48 秒。PDF、MP4、HTML 视频各完成 20/20 轮，分别保留 160、161、161 张验收图。已核对官方工件所取成员的 CRC 与关键图摘要。PDF 的 431 次捕获请求使用一个 WGC 目标，复用 430 次并回收，已接受帧启动最长 55 ms。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42941178087) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42941178087/artifacts/13824060424)
+
+macOS Cocoa 编译、CPU 1589/1589 与 Metal 254/254 通过。必测原生 4/6。MP4 在隐藏保持中从 0.346070 秒回到最后一次 seek 的 0.234 秒，HTML 视频在首次隐藏暂停从 0.209411 秒回到 0.102 秒。两个失败的导航代次相同，已记录暂停与挂起回执。可选挂起与释放 1/1，验证回到暂停状态，仍观察到时间回退。官方工件逐成员 CRC 核对，摘要在外部 `root-delivery-20261111-153/published-platform-ci/platform-terminal-summary.json`。同一发布头 Runtime 12/13，Windows Python 3.11 夹具修正在待发布提交 `cb68a9cf`。Secret scan 与 Pages 通过。 [macOS 原生工件](https://github.com/sijintech/stk/actions/runs/42941178087/artifacts/13822179975) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42941178016)
+
+`ffcdddf6` 集成独立候选 `a617461f` 的单文件测试取证。当两个静默隐藏 HTML 对照未能重显，记录有界的原生暂停/释放轨迹、关闭原因、资源绑定和可见性、视口几何与界面阻挡。取证只在原等待失败后运行，原操作、时限及断言沿用。独立三种 C++ 条件编译与 Root 组合原生窗口目标通过，Root 文档宿主 14/14，暂存扫描零发现。目标平台新回执仍待本次推送后的 macOS 作业。
+
 ## 2026-11-11 02:44 UTC · 文献回程的旧版 Agent 执行边界
 
 `f49833f8` 集成 Claude 在独立 worktree 的专项回归。真实旧版 ProjectAgent 保存一条合成消息，因项目读取在途保留待派发 Start。项目空闲后，文献入口和回程均阻止显示会触发 Start 的 Agent 页，保持原页与会话。显式切到该 Agent 页时观察到一次 Start，严格桥在执行器或模型之前拦截。Root 将测试等待条件绑定到读取已实际挂起和 Start 已延后两个事实。Root CMake 重建通过，新增用例连续 20/20，包含原生导航与 Agent 路由的定向组 43/43，零跳过。暂存扫描无发现。证据在外部 `root-delivery-20261111-155/claude-agent-95-{repeat,related}.log`。
