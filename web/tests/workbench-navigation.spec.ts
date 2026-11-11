@@ -1608,6 +1608,76 @@ for (const viewport of viewports) {
   test.describe(`${viewport.name} conversations`, () => {
     test.use({viewport: {width: viewport.width, height: viewport.height}});
 
+    test('conversation column keeps its composer visible while the transcript scrolls', async ({page}) => {
+      const hub = new Hub();
+      conversations(hub);
+      const messages = Array.from({length: 36}, (_, i) =>
+        say(`layout-${i}`, i % 2 ? 'assistant' : 'user', i === 3 ? 'grid_index_'.repeat(45) : `核对第 ${i + 1} 个网格结果`));
+      hub.saved.set(A, messages);
+      await hub.install(page);
+      const sent = posts(page);
+      await page.goto(ORIGIN + '/');
+      await expectActive(page, '工作台');
+
+      const chat = page.locator(surfaces.工作台);
+      const log = chat.getByRole('log', {name: '对话记录'});
+      const input = draft(page), send = sendButton(page);
+      await expect.soft(chat.getByRole('heading')).toHaveText('新对话 · 未保存');
+      await expect.soft(chat.locator('.chat-intro')).toHaveText('从一个科学问题开始');
+      await expect(send).toBeDisabled();
+      const bounds = async () => ({chat: (await chat.boundingBox())!, log: (await log.boundingBox())!,
+        input: (await input.boundingBox())!, send: (await send.boundingBox())!});
+      const empty = await bounds();
+      const rail = isNarrow(page) ? 0 : 144;
+      const width = Math.min(viewport.width - rail, 880);
+      expect(empty.chat.width).toBe(width);
+      expect(empty.chat.x).toBe((viewport.width - rail - width) / 2 + rail);
+      expect(empty.log.x).toBe(empty.input.x);
+      expect(empty.log.width).toBe(empty.input.width);
+      expect.soft(empty.send.width).toBeLessThan(110);
+      expect(empty.send.x + empty.send.width).toBe(empty.input.x + empty.input.width);
+      expect.soft(empty.chat.y + empty.chat.height - empty.send.y - empty.send.height).toBeLessThanOrEqual(24);
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-conversation-empty.png`)});
+
+      await choose(page, /相场参数讨论/);
+      await shows(page, messages.map(message => message.content));
+      await expect(label(page)).toHaveText(`相场参数讨论 · ${A.slice(0, 6)}`);
+      await input.fill('待核对的网格');
+      await input.press('End');
+      await input.press('Enter');
+      await expect(input).toHaveValue('待核对的网格\n');
+      expect(sent.seen).toEqual([]);
+      await log.hover();
+      await page.mouse.wheel(0, 520);
+      const offset = () => log.evaluate(el => el.scrollTop);
+      await expect.poll(offset).toBeGreaterThan(0);
+      expect.soft(await log.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      expect(await chat.evaluate(el => el.scrollTop)).toBe(0);
+      expect(await page.evaluate(() => scrollY)).toBe(0);
+      const reading = await offset();
+      expect((await bounds()).input).toEqual(empty.input);
+      expect((await bounds()).send).toEqual(empty.send);
+      await page.screenshot({path: test.info().outputPath(`${viewport.name}-conversation-reading.png`)});
+
+      await go(page, '任务');
+      await go(page, '工作台');
+      await expect(input).toHaveValue('待核对的网格\n');
+      expect(await offset()).toBe(reading);
+      expect(sent.seen).toEqual([]);
+      await input.focus();
+      await page.keyboard.press('Tab');
+      await expect(send).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect.poll(() => hub.messages.map(message => [message.session, message.content])).toEqual([[A, '待核对的网格\n']]);
+      expect(sent.seen).toHaveLength(1);
+      sent.stop();
+      writeFileSync(test.info().outputPath('conversation-layout.json'), JSON.stringify({
+        viewport: page.viewportSize(), initial: '工作台 · 新对话 · 未保存', empty, reading,
+        historyClicks: isNarrow(page) ? 2 : 1, navigationClicks: 2, sendKey: 'Enter on focused 发送',
+        postCountBeforeSend: 0, postCountAfterSend: sent.seen.length,
+      }, null, 2));
+    });
+
     test('history sits in the navigation without moving the active section', async ({page}) => {
       const hub = new Hub();
       conversations(hub);

@@ -480,13 +480,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       <div className="probe"><strong>物理坐标探针</strong>{probe.map((v,i)=><input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={v} onChange={e=>setProbe(probe.map((n,j)=>i===j?Number(e.target.value):n))}/>)}<button disabled={busy||!shown} onClick={probeValue}>查询原始值</button></div></div>
       <details className={logRoom?'logs log-room':'logs'} ref={logPane} open><summary>日志 / 探针结果</summary><pre>{(selected&&(resultText||logs))||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
     </section>
-    <aside className={`chat panel surface${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'||overlay}><div className="section-title"><h2>AI 对话</h2><span className="muted conversation-name">{sessionLabel}</span></div>
+    <aside className={`chat surface${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'||overlay}>
+      <h2 className="conversation-name" title={sessionLabel}>{sessionLabel}</h2>
       <div className="messages" ref={messageList} tabIndex={-1} role="log" aria-label="对话记录">
         {thread.status==='loading'&&!thread.messages.length&&<p className="muted">正在读取对话…</p>}
         {thread.status==='missing'&&<div className="chat-intro"><h3>这个对话已不存在</h3><p>控制服务中没有这个对话，未创建新会话。{conv.draft.trim()?'未发送的草稿仍在这里，可以移到新对话再发送。':'可以从「新对话」重新开始。'}</p>
           {!!conv.draft.trim()&&<button type="button" onClick={moveDraft}>移到新对话</button>}</div>}
         {thread.status==='error'&&<p className="muted">读取对话失败：{thread.error} <button type="button" className="quiet" onClick={conv.retry}>重新读取</button></p>}
-        {thread.status==='ready'&&!thread.messages.length&&!pending&&<div className="chat-intro"><h3>从一个科学问题开始</h3><p>描述你要执行的任务。命令、资源与执行状态会在任务面板中明确展示。</p></div>}
+        {thread.status==='ready'&&!thread.messages.length&&!pending&&<p className="chat-intro">从一个科学问题开始</p>}
         {thread.messages.map(m=><article key={m.id} className={m.role}><small>{m.role==='user'?'你':'STK'}</small><p>{m.content}</p></article>)}
         {pending&&<article className="user pending"><small>你 · 发送中</small><p>{pending.content}</p></article>}
       </div>
@@ -495,7 +496,15 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         {conv.canResend&&conv.draft.trim()&&conv.failure.content!==conv.draft&&<p>请先重试上一条消息，当前草稿会保留。</p>}
         <button type="button" className="quiet" disabled={!conv.canResend} onClick={()=>void conv.resend()}>重新发送</button></div>}
       {conv.draftTooLong&&<p className="muted" role="status">单条消息最多 12,000 字符，请缩短后发送。</p>}
-      <form onSubmit={e=>{e.preventDefault();void conv.send();}}><label className="sr-only" htmlFor="chat-input">对话内容</label><textarea id="chat-input" ref={composer} value={conv.draft} onChange={e=>conv.setDraft(e.target.value)} placeholder="描述计算任务…"/><button className="primary wide" disabled={!conv.canSend}>发送</button></form><small className="muted">常规模板自动执行；新脚本及高资源任务需复核。</small></aside>
+      <form className="chat-composer" onSubmit={e=>{e.preventDefault();void conv.send();}}>
+        <label className="sr-only" htmlFor="chat-input">对话内容</label>
+        <textarea id="chat-input" ref={composer} value={conv.draft} onChange={e=>conv.setDraft(e.target.value)} placeholder="描述计算任务…"/>
+        <div className="chat-actions">
+          <small className="muted">常规模板自动执行。新脚本和高资源任务需复核。</small>
+          <button type="submit" className="primary" disabled={!conv.canSend}>发送</button>
+        </div>
+      </form>
+    </aside>
     </div><footer>{busy||conv.sendingCount?'正在处理请求…':'就绪'}<span>STK · 计算持续运行，视图随处可达</span></footer>
   </div>;
 }
