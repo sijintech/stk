@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <gtest/gtest.h>
+#include "stk/app/model_settings.hh"
 #include "stk/app/project_agent.hh"
 #include "stk/app/project_archive.hh"
 #include "stk/app/project_attention.hh"
@@ -677,9 +678,17 @@ class SavedConversationNavigationPython : public WorkspaceNavigationPython {
 from pathlib import Path
 from suan.desktop_bridge import server
 from suan.desktop_bridge.__main__ import main
+from suan.desktop_bridge.literature import LiteratureService
 from suan.desktop_bridge.protocol import BridgeError
 from suan.project.agent_sessions import HARNESS, digest
 from uuid import uuid4
+
+literature_call = LiteratureService.call
+def traced_literature(self, action, params):
+    with Path(__file__).with_name("literature_calls").open("a") as trace:
+        trace.write(action + "\n")
+    return literature_call(self, action, params)
+LiteratureService.call = traced_literature
 
 original = server.Bridge.__init__
 def init(self, *args, **kwargs):
@@ -797,6 +806,15 @@ main()
     ASSERT_TRUE(loop.pump_until([&] { return result.has_value(); }, 30));
     ASSERT_TRUE(result->ok()) << result->error().describe();
     ASSERT_EQ(result->value().at("request").at("status"), status == "uncertain-cancel" ? "uncertain" : status);
+  }
+
+  /** literature.* actions the bridge served, in order (traced by the fixture's wrapper). */
+  std::vector<std::string> literature_calls()
+  {
+    std::vector<std::string> calls;
+    std::ifstream trace(dir.path() / "literature_calls");
+    for (std::string line; std::getline(trace, line);) { calls.push_back(line); }
+    return calls;
   }
 
   std::string attention_key(const char *id, const char *status)
@@ -1863,6 +1881,451 @@ TEST_F(WorkspaceNavigationPython, ARefreshDoesNotOpenUncapturedConversationOrOth
   go("conversation"); EXPECT_EQ(f.screen.maximized(), &home());
   go("files"); EXPECT_EQ(f.screen.maximized(), &home());
   ASSERT_NO_FATAL_FAILURE(idle());
+}
+
+// Fixed start: two completed saved questions (the first with a long reply), the focused Workbench
+// on the AI tab of the third area, and another AI instance active in the first area. The split's
+// new Literature tab goes to the fourth area, so both conversations stay drawn there, and the
+// ordinary Workbench navigation (the first active AI tab) differs from the exact return.
+class FocusedLiteraturePython : public SavedConversationNavigationPython {
+ protected:
+  EditorArea &origin() { return f.area("a3"); }
+  EditorArea &other() { return home(); }
+  ProjectDiscussion &discussion() { return project().discussion(); }
+  void click(const std::string &key)
+  {
+    ASSERT_NE(widget(key), nullptr) << key;
+    const auto [x, y] = f.widget_center(key);
+    ASSERT_TRUE(f.drv->click(x, y)) << key;
+    f.screen.run_deferred();
+    f.drv->frame();
+  }
+  void wait_for(const char *id)
+  {
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.drv->frame();
+      return !discussion().exchange_busy() && !discussion().busy() &&
+             io::get_string(discussion().exchange_request(), "id") == id && widget("ai_transcript");
+    }, 30)) << discussion().exchange_error();
+  }
+  float position()
+  {
+    const auto *view = widget("ai_transcript");
+    EXPECT_NE(view, nullptr);
+    return view ? f.screen.ui()->scroll_of(view->id) : -1.0f;
+  }
+  std::string draft_key() { return "ai_question/" + handle(); }
+  std::string draft() { return widget(draft_key()) ? widget(draft_key())->string.value() : std::string("<missing>"); }
+  EditorArea *literature()
+  {
+    for (auto *base : f.screen.areas()) {
+      auto *area = dynamic_cast<EditorArea *>(base);
+      if (area && area->editor().type().id == kEditorLiterature) { return area; }
+    }
+    return nullptr;
+  }
+  void start(int width = 1600, int height = 1000)
+  {
+    ASSERT_NO_FATAL_FAILURE(prepare_table());
+    {
+      std::ofstream answer(dir.path() / "saved_answer");
+      for (int line = 0; line < 90; ++line) { answer << "Alpha reply row " << line << '\n'; }
+    }
+    ASSERT_NO_FATAL_FAILURE(save_question(kFirst, "Alpha", true));
+    ASSERT_NO_FATAL_FAILURE(save_question(kSecond, "Bravo", true));
+    revision = project().project()->revision;
+    ASSERT_EQ(origin().editor().type().id, kEditorAI);
+    conversation = &origin().editor();
+    ASSERT_TRUE(other().add_tab(kEditorAI));
+    ASSERT_EQ(other().editor().type().id, kEditorAI);
+    ASSERT_NE(&other().editor(), conversation);
+    f.drv->ctx.rect.xmax = 1600;
+    f.drv->ctx.rect.ymax = 1000;
+    ASSERT_NO_FATAL_FAILURE(focus_origin());
+    ASSERT_NO_FATAL_FAILURE(wait_for(kSecond));
+    ASSERT_EQ(&origin().editor(), conversation);
+    // Choose the older question from the rail, then move away from the tail of its reply.
+    const auto key = std::string("workbench_question/") + kFirst;
+    ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget(key) && widget(key)->enabled; }, 30));
+    const auto [x, y] = f.widget_center(key);
+    ASSERT_TRUE(f.drv->click(x, y));
+    f.screen.run_deferred();
+    f.drv->frame();
+    ASSERT_EQ(discussion().exchange_id(), kFirst);
+    // Loading frame: the selected question is not yet adopted, so there is no entry.
+    ASSERT_TRUE(discussion().exchange_request().empty());
+    EXPECT_EQ(widget("ai_open_literature"), nullptr);
+    ASSERT_NO_FATAL_FAILURE(wait_for(kFirst));
+    const auto [tx, ty] = f.widget_center("ai_transcript");
+    wm::Event wheel;
+    wheel.type = wm::EventType::Wheel;
+    wheel.x = tx; wheel.y = ty; wheel.wheel_y = 10;
+    ASSERT_TRUE(f.drv->send(wheel));
+    f.drv->frame();
+    ASSERT_NE(widget(draft_key()), nullptr);
+    widget(draft_key())->string.assign("Unsent question kept while reading literature");
+    f.drv->ctx.rect.xmax = width;
+    f.drv->ctx.rect.ymax = height;
+    f.drv->frame();
+    ASSERT_EQ(f.screen.maximized(), &origin());
+    ASSERT_NE(widget("ai_open_literature"), nullptr);
+  }
+  /** Focus the Workbench on the origin conversation, as its area was maximized before. */
+  void focus_origin()
+  {
+    f.screen.set_maximized(&origin());
+    f.shell->open_workbench(f.screen);
+    f.screen.run_deferred();
+    f.drv->frame();
+    ASSERT_EQ(f.screen.maximized(), &origin());
+    ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
+  }
+  /** The exact return: the same AI instance, question, reading position and draft. */
+  void expect_same_conversation(float reading, uint64_t exchange)
+  {
+    EXPECT_EQ(f.screen.maximized(), &origin());
+    EXPECT_EQ(&origin().editor(), conversation);
+    EXPECT_TRUE(f.shell->workbench_is_focused(f.screen));
+    EXPECT_EQ(discussion().exchange_id(), kFirst);
+    EXPECT_EQ(discussion().exchange_generation(), exchange);
+    EXPECT_EQ(position(), reading);
+    EXPECT_EQ(draft(), "Unsent question kept while reading literature");
+  }
+  void prepare_automatic_question(EditorArea &area, const std::string &text, std::string &request,
+                                  std::function<void()> &send)
+  {
+    auto &models = f.shell->store().models();
+    ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return models.loaded() && !models.busy(); }, 30));
+    ASSERT_TRUE(models.route_supported());
+    ASSERT_TRUE(models.add_endpoint("a-gone", "A gone", "http://127.0.0.1:9/v1", {"m"}, ""));
+    ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return !models.busy() && models.endpoint("a-gone"); }, 30));
+    const auto prefix = area.id() + "/main/";
+    ASSERT_NE(widget(prefix + draft_key()), nullptr);
+    widget(prefix + draft_key())->string.assign(text);
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.screen.run_deferred(); f.drv->frame();
+      return widget(prefix + "ai_prepare") && widget(prefix + "ai_prepare")->enabled;
+    }, 30));
+    widget(prefix + "ai_prepare")->on_click();
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.screen.run_deferred(); f.drv->frame();
+      request = io::get_string(discussion().exchange_request(), "id");
+      return !request.empty() && request != kFirst && request != kSecond && !discussion().exchange_busy() &&
+             widget(prefix + "ai_send_saved") && widget(prefix + "ai_send_saved")->enabled;
+    }, 30)) << discussion().exchange_error();
+    ASSERT_EQ(io::get_string(discussion().exchange_request().at("configuration"), "adapter"), "openai-compatible/1:a-gone");
+    ASSERT_EQ(io::get_string(discussion().exchange_request(), "status"), "pending");
+    send = widget(prefix + "ai_send_saved")->on_click;
+    ASSERT_TRUE(send);
+    revision = project().project()->revision;
+  }
+  void TearDown() override
+  {
+    if (project().project()) { EXPECT_EQ(project().project()->revision, revision); }
+    SavedConversationNavigationPython::TearDown();
+  }
+  Editor *conversation = nullptr;
+  int64_t revision = -1;
+};
+
+TEST_F(FocusedLiteraturePython, OneClickEachWayKeepsTheQuestionDraftAndReadingPositionAtBothWidths)
+{
+  ASSERT_NO_FATAL_FAILURE(start());
+  const auto areas = f.screen.areas();
+  auto *other_conversation = &other().editor();
+  for (const auto &[width, height] : {std::pair{1600, 1000}, std::pair{680, 900}}) {
+    SCOPED_TRACE(width);
+    f.drv->ctx.rect.xmax = width;
+    f.drv->ctx.rect.ymax = height;
+    f.drv->frame();
+    const bool wide = width > 700;
+    ASSERT_EQ(f.screen.maximized(), &origin());
+    EXPECT_EQ(origin().find_region("workbench_rail")->rect().empty(), !wide);
+    EXPECT_EQ(origin().find_region("workbench_strip")->rect().empty(), wide);
+    ASSERT_NE(widget("ai_open_literature"), nullptr);
+    EXPECT_EQ(widget("ai_open_literature")->text, "Open literature");
+    EXPECT_NE(widget("project_workspace"), nullptr);  // The overview entry stays beside it.
+    const float reading = position();
+    EXPECT_GE(reading, 0.0f);
+    const auto exchange = discussion().exchange_generation();
+
+    ASSERT_NO_FATAL_FAILURE(click("ai_open_literature"));
+    EXPECT_EQ(f.screen.maximized(), nullptr);
+    ASSERT_NE(literature(), nullptr);
+    EXPECT_EQ(f.screen.areas(), areas);
+    EXPECT_EQ(&origin().editor(), conversation);
+    EXPECT_EQ(&other().editor(), other_conversation);  // Both conversations stay shown, never replaced.
+    EXPECT_EQ(discussion().exchange_id(), kFirst);
+    EXPECT_NE(widget("literature_refresh"), nullptr);
+    EXPECT_TRUE(literature_calls().empty());  // Opening and drawing it is passive.
+
+    ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
+    ASSERT_NO_FATAL_FAILURE(expect_same_conversation(reading, exchange));
+    if (!wide) {
+      // The strip keeps three sections, Split view and History; the entry is not a section.
+      for (const auto *key : {"workbench_home", "workbench_tasks", "workbench_results", "workbench_split",
+                              "workbench_history"}) {
+        EXPECT_NE(widget(key), nullptr) << key;
+      }
+    }
+    EXPECT_TRUE(literature_calls().empty());
+  }
+
+  // The overview keeps its own exact return.
+  const float reading = position();
+  const auto exchange = discussion().exchange_generation();
+  ASSERT_NO_FATAL_FAILURE(click("project_workspace"));
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  EXPECT_NE(widget("workspace_project"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
+  ASSERT_NO_FATAL_FAILURE(expect_same_conversation(reading, exchange));
+
+  // An explicit refresh on the literature page keeps its original metadata reads only.
+  f.drv->ctx.rect.xmax = 1600;
+  f.drv->ctx.rect.ymax = 1000;
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("ai_open_literature"));
+  ASSERT_NE(literature(), nullptr);
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred(); f.drv->frame();
+    return widget("literature_refresh") && widget("literature_refresh")->enabled;
+  }, 30));
+  widget("literature_refresh")->on_click();  // The page's own explicit action (it may be scrolled in a small area).
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred(); f.drv->frame();
+    return literature_calls().size() >= 2 && widget("literature_refresh") && widget("literature_refresh")->enabled;
+  }, 30));
+  auto calls = literature_calls();
+  std::sort(calls.begin(), calls.end());
+  EXPECT_EQ(calls, (std::vector<std::string>{"encoder.info", "info"}));  // No library or scope is selected.
+  ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
+  EXPECT_EQ(f.screen.maximized(), &origin());
+  EXPECT_EQ(&origin().editor(), conversation);
+  EXPECT_EQ(discussion().exchange_id(), kFirst);
+  EXPECT_EQ(draft(), "Unsent question kept while reading literature");
+  EXPECT_EQ(literature_calls().size(), 2u);
+}
+
+TEST_F(FocusedLiteraturePython, ChangedIdentityReturnsByTheCurrentWorkbenchWithoutTheOldQuestion)
+{
+  ASSERT_NO_FATAL_FAILURE(start());
+  // A retained entry is stale after a tab change in its area, and after another question is shown.
+  auto stale = widget("ai_open_literature")->on_click;
+  const int tab = origin().active_tab();
+  origin().set_active_tab(tab == 0 ? 1 : 0);
+  origin().set_active_tab(tab);
+  stale();
+  f.screen.run_deferred();
+  f.drv->frame();
+  EXPECT_EQ(f.screen.maximized(), &origin());
+  EXPECT_EQ(literature(), nullptr);
+  ASSERT_NE(widget("ai_open_literature"), nullptr);
+  stale = widget("ai_open_literature")->on_click;
+  ASSERT_TRUE(discussion().load_exchange(kSecond));
+  ASSERT_NO_FATAL_FAILURE(wait_for(kSecond));
+  stale();
+  f.screen.run_deferred();
+  f.drv->frame();
+  EXPECT_EQ(f.screen.maximized(), &origin());
+  EXPECT_EQ(literature(), nullptr);
+  ASSERT_TRUE(discussion().load_exchange(kFirst));
+  ASSERT_NO_FATAL_FAILURE(wait_for(kFirst));
+
+  // The exact return first, so the following fallbacks are distinguishable from it.
+  ASSERT_NO_FATAL_FAILURE(click("ai_open_literature"));
+  ASSERT_NE(literature(), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
+  EXPECT_EQ(f.screen.maximized(), &origin());
+  EXPECT_EQ(discussion().exchange_id(), kFirst);
+
+  // Another window selects the other saved question while this one shows the literature.
+  ASSERT_NO_FATAL_FAILURE(click("ai_open_literature"));
+  ASSERT_NE(literature(), nullptr);
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return !discussion().busy() && !discussion().exchange_busy(); }, 30));
+  {
+    wm::Screen window;
+    f.shell->install(window, nullptr);
+    f.shell->build_default_layout(window);
+    struct ForgetScreen {
+      AppShell *shell; wm::Screen *screen;
+      ~ForgetScreen() { shell->forget(*screen); }
+    } cleanup{f.shell.get(), &window};
+    wmtest::ScreenDriver driver(window, 1000, 800, 1);
+    auto *area = dynamic_cast<EditorArea *>(window.find_area("a3"));
+    ASSERT_NE(area, nullptr);
+    ASSERT_TRUE(area->set_tab_type(area->active_tab(), kEditorAI));
+    driver.frame();
+    auto select = f.shell->saved_conversation_action(*area, kSecond);
+    ASSERT_TRUE(select);
+    select();
+    window.run_deferred();
+    ASSERT_TRUE(loop.pump_until([&] { driver.frame(); return !discussion().exchange_busy(); }, 30));
+    ASSERT_EQ(discussion().exchange_id(), kSecond);
+  }
+  ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
+  EXPECT_TRUE(f.shell->workbench_is_focused(f.screen));
+  EXPECT_EQ(f.screen.maximized(), &other());  // The current layout's conversation, not the recorded one.
+  EXPECT_EQ(discussion().exchange_id(), kSecond);  // The old question is not selected again.
+
+  // A manual tab change in the split supersedes the return.
+  ASSERT_NO_FATAL_FAILURE(focus_origin());
+  ASSERT_NO_FATAL_FAILURE(wait_for(kSecond));
+  ASSERT_NO_FATAL_FAILURE(click("ai_open_literature"));
+  auto *shown = literature();
+  ASSERT_NE(shown, nullptr);
+  const int literature_tab = shown->active_tab();
+  shown->set_active_tab(literature_tab == 0 ? 1 : 0);
+  shown->set_active_tab(literature_tab);
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
+  EXPECT_TRUE(f.shell->workbench_is_focused(f.screen));
+  EXPECT_EQ(f.screen.maximized(), &other());
+  EXPECT_EQ(discussion().exchange_id(), kSecond);
+
+  // Closing and reopening the project gives a new opening handle; the old record has no effect.
+  ASSERT_NO_FATAL_FAILURE(focus_origin());
+  ASSERT_NO_FATAL_FAILURE(wait_for(kSecond));
+  ASSERT_NO_FATAL_FAILURE(click("ai_open_literature"));
+  ASSERT_NE(literature(), nullptr);
+  const auto opening = handle();
+  ASSERT_TRUE(project().close());
+  ASSERT_NO_FATAL_FAILURE(idle());
+  ASSERT_TRUE(project().open(dir.str() + "/project"));
+  ASSERT_NO_FATAL_FAILURE(idle());
+  ASSERT_NE(handle(), opening);
+  ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
+  EXPECT_TRUE(f.shell->workbench_is_focused(f.screen));
+  EXPECT_EQ(f.screen.maximized(), &other());
+  EXPECT_NE(discussion().exchange_id(), kFirst);
+  EXPECT_TRUE(literature_calls().empty());
+}
+
+TEST_F(FocusedLiteraturePython, AnArmedQuestionInAnotherSplitTabKeepsTheConversationShown)
+{
+  ASSERT_NO_FATAL_FAILURE(start());
+  ASSERT_NO_FATAL_FAILURE(click("workbench_split"));
+  ASSERT_EQ(f.screen.maximized(), nullptr);
+  std::string armed;
+  std::function<void()> send;
+  ASSERT_NO_FATAL_FAILURE(prepare_automatic_question(other(), "Armed question in the other tab", armed, send));
+  send();  // Armed: sent when that tab is drawn next.
+  ASSERT_NO_FATAL_FAILURE(focus_origin());  // Draws only the origin conversation.
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return !discussion().exchange_busy(); }, 30));
+  ASSERT_EQ(discussion().exchange_id(), armed);
+  ASSERT_NE(widget("ai_open_literature"), nullptr);
+
+  // Entering the split would draw the armed tab, so the conversation stays shown.
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    ASSERT_NO_FATAL_FAILURE(click("ai_open_literature"));
+    EXPECT_EQ(f.screen.maximized(), &origin());
+    EXPECT_EQ(literature(), nullptr);
+    EXPECT_EQ(&origin().editor(), conversation);
+    EXPECT_EQ(draft(), "Unsent question kept while reading literature");
+  }
+  EXPECT_EQ(io::get_string(discussion().exchange_request(), "status"), "pending");
+  EXPECT_FALSE(std::filesystem::exists(dir.path() / "unexpected_write"));  // No start or model call.
+
+  // Once that tab is no longer shown in its area, both directions work and it stays unsent.
+  const auto exchange = discussion().exchange_generation();
+  other().set_active_tab(0);
+  f.drv->frame();
+  ASSERT_NE(widget("ai_open_literature"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("ai_open_literature"));
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  ASSERT_NE(literature(), nullptr);
+  EXPECT_NE(other().editor().type().id, kEditorAI);
+  ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
+  EXPECT_EQ(f.screen.maximized(), &origin());
+  EXPECT_EQ(&origin().editor(), conversation);
+  EXPECT_EQ(discussion().exchange_id(), armed);
+  EXPECT_EQ(discussion().exchange_generation(), exchange);
+  EXPECT_EQ(draft(), "Unsent question kept while reading literature");
+  EXPECT_EQ(io::get_string(discussion().exchange_request(), "status"), "pending");
+  EXPECT_FALSE(std::filesystem::exists(dir.path() / "unexpected_write"));
+  EXPECT_TRUE(literature_calls().empty());
+}
+
+TEST_F(FocusedLiteraturePython, WorkbenchReturnDoesNotDispatchAnArmedQuestionInItsHiddenTab)
+{
+  ASSERT_NO_FATAL_FAILURE(start());
+  ASSERT_TRUE(origin().add_tab(kEditorLiterature, false));
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("workbench_split"));
+  std::string prepared;
+  std::function<void()> send;
+  ASSERT_NO_FATAL_FAILURE(prepare_automatic_question(origin(), "Question in the hidden tab", prepared, send));
+  ASSERT_NO_FATAL_FAILURE(focus_origin());
+  ASSERT_NO_FATAL_FAILURE(click("ai_open_literature"));
+  ASSERT_EQ(literature(), &origin());
+  ASSERT_EQ(f.screen.maximized(), nullptr);
+  send();
+  const auto exchange = discussion().exchange_generation();
+  ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
+  EXPECT_EQ(literature(), &origin());
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  EXPECT_EQ(discussion().exchange_id(), prepared);
+  EXPECT_EQ(discussion().exchange_generation(), exchange);
+  EXPECT_EQ(io::get_string(discussion().exchange_request(), "status"), "pending");
+  ASSERT_NO_FATAL_FAILURE(idle());
+  EXPECT_FALSE(std::filesystem::exists(dir.path() / "unexpected_write"));
+  EXPECT_TRUE(literature_calls().empty());
+}
+
+TEST_F(FocusedLiteraturePython, HistoryAndAgentPagesHideTheEntryAndRejectRetainedCallbacks)
+{
+  ASSERT_NO_FATAL_FAILURE(start());
+  auto stale = widget("ai_open_literature")->on_click;
+  ASSERT_NO_FATAL_FAILURE(click("workbench_saved_questions"));
+  ASSERT_NE(widget("ai_close_saved_questions"), nullptr);
+  EXPECT_EQ(widget("ai_open_literature"), nullptr);
+  stale();
+  f.screen.run_deferred();
+  f.drv->frame();
+  EXPECT_NE(widget("ai_close_saved_questions"), nullptr);
+  EXPECT_EQ(literature(), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("ai_close_saved_questions"));
+  ASSERT_NE(widget("ai_open_literature"), nullptr);
+  stale = widget("ai_open_literature")->on_click;
+  ASSERT_TRUE(project().agent().supported());
+  const auto *intent = widget("ai_intent/" + handle());
+  ASSERT_NE(intent, nullptr);
+  intent->index.assign(3);
+  f.drv->frame();
+  ASSERT_NE(widget("ai_agent_text/" + handle()), nullptr);
+  EXPECT_EQ(widget("ai_open_literature"), nullptr);
+  stale();
+  f.screen.run_deferred();
+  f.drv->frame();
+  EXPECT_NE(widget("ai_agent_text/" + handle()), nullptr);
+  EXPECT_EQ(discussion().exchange_id(), kFirst);
+  EXPECT_EQ(literature(), nullptr);
+  EXPECT_TRUE(literature_calls().empty());
+}
+
+TEST_F(FocusedLiteraturePython, NoEntryWithoutAnAdoptedSavedQuestion)
+{
+  revision = project().project()->revision;
+  ASSERT_TRUE(home().add_tab(kEditorAI));
+  f.screen.set_maximized(&home());
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    return discussion().page("requests").loaded && !discussion().busy() && widget("ai_prepare");
+  }, 30));
+  ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
+  EXPECT_TRUE(discussion().exchange_id().empty());
+  EXPECT_NE(widget("project_workspace"), nullptr);
+  EXPECT_EQ(widget("ai_open_literature"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("workbench_split"));
+  ASSERT_TRUE(project().close());
+  ASSERT_NO_FATAL_FAILURE(idle());
+  ASSERT_FALSE(project().project());
+  EXPECT_EQ(widget("ai_open_literature"), nullptr);
+  ASSERT_NE(widget("tool_literature"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("tool_literature"));
+  EXPECT_NE(literature(), nullptr);
+  EXPECT_TRUE(literature_calls().empty());
 }
 
 }  // namespace

@@ -2528,6 +2528,8 @@
   "workbench.nav.split": "分栏视图",
   "workbench.nav.history": "历史",
   "workbench.project_overview": "项目概览",
+  "workbench.open_literature": "打开文献库",
+  "workbench.literature.dispatch_pending": "有问答或智能体操作正在等待启动。",
   "workbench.history.recent": "近期问答",
   "workbench.history.agent_sessions": "智能体会话",
   "workbench.history.agent_loading": "正在读取智能体会话…",

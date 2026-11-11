@@ -226,10 +226,19 @@ class AIEditor final : public Editor {
   {
     const auto *screen = ctx.area.screen();
     const bool focused = screen && screen->maximized() == &ctx.area && ctx.area.shell().workbench_is_focused(*screen);
-    workspace_link(row, ctx, focused);
-    row.button("ai_tables", ctx.tr("editor.project.title"), [ctx] { show_tables(ctx); }).width(7);
     auto &state = ctx.store.project();
     state.sync();
+    workspace_link(row, ctx, focused);
+    if (focused) {
+      auto showing_question = [this, weak = lifetime(), &state] { return !weak.expired() && shows_question_page(state); };
+      if (auto literature = ctx.area.shell().focused_literature_action(ctx.area, std::move(showing_question))) {
+        const auto label = ctx.tr("workbench.open_literature");
+        const auto &style = row.ctx().style();
+        row.button("ai_open_literature", label, std::move(literature))
+            .width((row.ctx().measurer().width(label, style.font) + 2 * style.text_margin) / style.unit);
+      }
+    }
+    row.button("ai_tables", ctx.tr("editor.project.title"), [ctx] { show_tables(ctx); }).width(7);
     if (state.project()) { row.label(state.project()->name); }
   }
 
@@ -269,7 +278,7 @@ class AIEditor final : public Editor {
     const std::string key = state.project()->directory + "\n" + state.project()->id;
     active_draft_ = key;
     auto &draft = project_draft(*state.project(), key);
-    if (focused && saved_questions_handle_ == opening && discussion.recent_requests_supported()) {
+    if (shows_saved_questions(discussion, opening, focused)) {
       opened_history_ = true; // Browsing has no implicit question selection.
       discussion.sync_archive();
       const auto &page = discussion.page("requests");
@@ -391,6 +400,31 @@ class AIEditor final : public Editor {
     SimulationTarget run_target;  // draft controls only; never restored as an active authorization
   };
   static constexpr int kAgentIntent = 3;
+
+  bool shows_saved_questions(const ProjectDiscussion &discussion, const std::string &opening, bool focused) const
+  {
+    return focused && saved_questions_handle_ == opening && discussion.recent_requests_supported();
+  }
+
+  bool shows_question_page(ProjectState &state) const
+  {
+    const auto &project = state.project();
+    const auto &discussion = state.discussion();
+    return project && state.ready() && state.loaded() && discussion.generation_supported() &&
+           !shows_saved_questions(discussion, project->handle, true) && !shows_or_opens_agent(state);
+  }
+
+  bool shows_or_opens_agent(ProjectState &state) const
+  {
+    if (!state.agent().supported()) { return false; }
+    const auto &project = *state.project();
+    if (!pending_session_.empty() && (pending_project_.empty() || pending_project_ == project.id)) { return true; }
+    if (const auto restored = workspace_drafts_.find(project.id); restored != workspace_drafts_.end()) {
+      return restored->second.intent == kAgentIntent;
+    }
+    const auto draft = drafts_.find(project.directory + "\n" + project.id);
+    return draft != drafts_.end() && draft->second.intent == kAgentIntent;
+  }
 
   Draft &project_draft(const bridge::ProjectInfo &project, const std::string &key)
   {
@@ -1401,14 +1435,22 @@ class AIEditor final : public Editor {
            (pending_session_.empty() || (!pending_project_.empty() && pending_project_ != state.project()->id));
   }
 
-  bool saved_dispatch_safe(ProjectState &state, const std::string &request_id) const
+  bool saved_dispatch_safe(ProjectState &state, const std::string &request_id,
+                           DeferredAgentStartCheck agent_start) const
   {
     const auto &project = *state.project();
+    const auto &discussion = state.discussion();
+    if (agent_start != DeferredAgentStartCheck::Skip && state.agent().deferred_start_pending() &&
+        discussion.generation_supported() &&
+        !shows_saved_questions(discussion, project.handle, agent_start == DeferredAgentStartCheck::Focused) &&
+        shows_or_opens_agent(state)) {
+      return false;
+    }
     if (!auto_ || auto_->key != project.directory + "\n" + project.id) { return true; }
     // A history link cannot resume an armed model start or an automatic fallback.
     if (auto_->prepare || (auto_->send && !auto_->sent)) { return false; }
     if (!auto_->send || auto_->request_id != request_id) { return true; }
-    const auto &request = state.discussion().exchange_request();
+    const auto &request = discussion.exchange_request();
     const auto status = io::get_string(request, "status");
     return io::get_string(request, "id") == request_id &&
            (status == "completed" || status == "cancelled" || status == "uncertain" ||
@@ -1857,10 +1899,11 @@ bool can_reveal_saved_conversation(const Editor &editor, const ProjectState &pro
   return ai && ai->can_reveal_saved(project);
 }
 
-bool saved_conversation_dispatch_safe(const Editor &editor, ProjectState &project, const std::string &request_id)
+bool saved_conversation_dispatch_safe(const Editor &editor, ProjectState &project, const std::string &request_id,
+                                      DeferredAgentStartCheck agent_start)
 {
   const auto *ai = dynamic_cast<const AIEditor *>(&editor);
-  return !ai || ai->saved_dispatch_safe(project, request_id);
+  return !ai || ai->saved_dispatch_safe(project, request_id, agent_start);
 }
 
 bool reveal_saved_conversation(Editor &editor, ProjectState &project, const std::string &request_id)

@@ -44,6 +44,8 @@ class ProjectAgent {
   /** Desktop-only preparation and one-use run approvals; older bridges keep the existing assistant. */
   bool runs_supported() const;
   bool busy() const { return busy_; }
+  /** A saved legacy message whose Start is still waiting to be dispatched. */
+  bool deferred_start_pending() const { return start_pending_; }
   uint64_t version() const { return version_; }
   const std::string &error() const { return error_; }
 

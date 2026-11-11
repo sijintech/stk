@@ -12,8 +12,10 @@ class ProjectState;
 
 /** Check a live AI editor before revealing it for an exact saved exchange. */
 bool can_reveal_saved_conversation(const Editor &editor, const ProjectState &project);
-/** Discussion selection is shared, so another active AI editor may also react to it. */
-bool saved_conversation_dispatch_safe(const Editor &editor, ProjectState &project, const std::string &request_id);
+enum class DeferredAgentStartCheck { Skip, Split, Focused };
+/** Check for automatic discussion actions. Literature routes also check the Agent pane in the resulting layout. */
+bool saved_conversation_dispatch_safe(const Editor &editor, ProjectState &project, const std::string &request_id,
+                                      DeferredAgentStartCheck agent_start = DeferredAgentStartCheck::Skip);
 /** Select the saved exchange for display, preserving the editor's compose draft. */
 bool reveal_saved_conversation(Editor &editor, ProjectState &project, const std::string &request_id);
 /** Show the existing paged question list in this AI editor. */

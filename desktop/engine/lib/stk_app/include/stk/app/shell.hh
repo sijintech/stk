@@ -130,6 +130,11 @@ class AppShell {
   bool workbench_is_focused(const wm::Screen &screen) const;
   /** Open the split project overview and allow a direct return to this conversation. */
   std::function<void()> focused_project_overview_action(EditorArea &origin);
+  /** Show the existing literature editor in the split view from a focused conversation that shows an
+   * adopted saved question, allowing Workbench to return to the same conversation while that question,
+   * its captured context and exchange generation are unchanged. Navigation only: it never reads the
+   * literature service, prepares, sends or writes. Empty when there is no such question. */
+  std::function<void()> focused_literature_action(EditorArea &origin, std::function<bool()> showing_question);
   /** Open the selected task in focused Results from this window's focused Tasks page. */
   std::function<void()> focused_task_result_action(wm::Screen &screen);
 
@@ -290,6 +295,9 @@ class AppShell {
     std::string project;
     uint64_t visibility;
     std::vector<std::pair<std::string, uint64_t>> split_activity;
+    /** Set when the return came from the literature entry: the adopted saved question shown then. */
+    std::string request, context;
+    uint64_t exchange = 0;
   };
   std::map<const wm::Screen *, OverviewReturn> overview_returns_;
   uint64_t saved_conversation_epoch_ = 0;

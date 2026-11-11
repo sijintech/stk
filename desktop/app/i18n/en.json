@@ -2529,6 +2529,8 @@
   "workbench.nav.split": "Split view",
   "workbench.nav.history": "History",
   "workbench.project_overview": "Overview",
+  "workbench.open_literature": "Open literature",
+  "workbench.literature.dispatch_pending": "A question or agent action is waiting to start.",
   "workbench.history.recent": "Recent questions",
   "workbench.history.agent_sessions": "Agent sessions",
   "workbench.history.agent_loading": "Loading agent sessions…",

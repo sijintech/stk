@@ -868,6 +868,80 @@ std::function<void()> AppShell::focused_project_overview_action(EditorArea &orig
   };
 }
 
+namespace {
+/** The adopted saved question a focused conversation shows: its request and captured context. */
+bool adopted_question(ProjectState &state, std::string *request, std::string *context)
+{
+  if (!state.project()) { return false; }
+  const auto &discussion = state.discussion();
+  const auto &id = discussion.exchange_id();
+  if (id.empty() || io::get_string(discussion.exchange_request(), "id") != id) { return false; }
+  if (request) { *request = id; }
+  if (context) { *context = io::get_string(discussion.exchange_context(), "id"); }
+  return true;
+}
+}  // namespace
+
+std::function<void()> AppShell::focused_literature_action(EditorArea &origin, std::function<bool()> showing_question)
+{
+  auto *screen = origin.screen();
+  auto &state = store_.project();
+  std::string request, context;
+  if (!screen || !showing_question || !showing_question() || !adopted_question(state, &request, &context)) { return {}; }
+  const auto handle = state.project()->handle;
+  const auto exchange = state.discussion().exchange_generation();
+  const auto editor = origin.editor().lifetime();
+  auto current = [this, screen, area = &origin, weak = lifetime(), editor,
+                  epoch = screen->visibility_epoch(), activity = origin.activity_epoch(),
+                  bridge = store_.bridge_epoch(), handle, request, context, exchange,
+                  showing_question = std::move(showing_question)] {
+    if (weak.expired() || editor.expired() || !has_screen(screen) || screen->maximized() != area ||
+        screen->visibility_epoch() != epoch || area->activity_epoch() != activity ||
+        !workbench_is_focused(*screen) || area->editor().type().id != kEditorAI || store_.bridge_epoch() != bridge ||
+        !showing_question()) { return false; }
+    auto &state = store_.project();
+    std::string shown, captured;
+    return adopted_question(state, &shown, &captured) && state.project()->handle == handle &&
+           shown == request && captured == context && state.discussion().exchange_generation() == exchange;
+  };
+  return [this, screen, area = &origin, editor, current, handle, request, context, exchange] {
+    if (!current()) { return; }
+    const std::weak_ptr<bool> weak = alive_;
+    screen->defer([this, weak, screen, area, editor, current, handle, request, context, exchange] {
+      if (weak.expired() || !current()) { return; }
+      auto &state = store_.project();
+      state.sync();
+      if (!current()) { return; }
+      if (text_input_active()) {
+        if (store_.toast) { store_.toast(std::string(store_.tr("app.focus.busy")), ui::ToastKind::Warning); }
+        return;
+      }
+      // A draw after opening the split can advance an automatic question or a deferred Agent start.
+      for (const auto *base : screen->areas()) {
+        const auto *other = dynamic_cast<const EditorArea *>(base);
+        if (other && !saved_conversation_dispatch_safe(other->editor(), state, request,
+                                                       DeferredAgentStartCheck::Split)) {
+          if (store_.toast) {
+            store_.toast(std::string(store_.tr("workbench.literature.dispatch_pending")), ui::ToastKind::Warning);
+          }
+          return;
+        }
+      }
+      const auto result = activate_editor(screen, kEditorLiterature, false);
+      if (!result) {
+        if (store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
+        return;
+      }
+      // Recorded after activation: opening the literature tab is not a later tab change by the user.
+      if (!screen->maximized() && !editor.expired() && has_area(area)) {
+        overview_returns_.insert_or_assign(screen, OverviewReturn{area->id(), editor, handle, screen->visibility_epoch(),
+                                                                 split_activity(*screen), request, context, exchange});
+      }
+      store_.changed();
+    });
+  };
+}
+
 std::function<void()> AppShell::focused_task_result_action(wm::Screen &screen)
 {
   const auto *origin = dynamic_cast<const EditorArea *>(screen.maximized());
@@ -910,22 +984,42 @@ std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, 
         }
       }
       std::optional<std::pair<EditorArea *, int>> conversation;
+      std::function<bool(const Editor &)> can_activate;
+      bool dispatch_blocked = false;
       if (editor_id && std::string_view(editor_id) == kEditorAI && !s->maximized()) {
         const auto mark = overview_returns_.find(s);
         if (mark != overview_returns_.end()) {
           const auto &back = mark->second;
-          const auto &project = store_.project().project();
+          auto &state = store_.project();
+          if (!back.request.empty()) {
+            state.sync();
+            if (!current()) { return; }
+            can_activate = [&state, &dispatch_blocked](const Editor &destination) {
+              dispatch_blocked = state.project() &&
+                  !saved_conversation_dispatch_safe(destination, state, state.discussion().exchange_id(),
+                                                     DeferredAgentStartCheck::Focused);
+              return !dispatch_blocked;
+            };
+          }
+          const auto &project = state.project();
+          // A literature return also needs the same adopted question, captured context and exchange
+          // generation; another window may have selected a different question meanwhile.
+          std::string shown, captured;
+          const bool question = back.request.empty() ||
+              (adopted_question(state, &shown, &captured) && shown == back.request && captured == back.context &&
+               state.discussion().exchange_generation() == back.exchange);
           if (s->visibility_epoch() == back.visibility && back.project == (project ? project->handle : std::string()) &&
-              back.split_activity == split_activity(*s)) {
+              back.split_activity == split_activity(*s) && question) {
             auto *area = dynamic_cast<EditorArea *>(s->find_area(back.area));
             const int tab = area ? area_tab(*area, back.editor) : -1;
             if (tab >= 0) { conversation.emplace(area, tab); }
           }
         }
       }
-      const auto result = editor_id ? activate_editor_if(s, editor_id, true, {}, conversation) :
+      const auto result = editor_id ? activate_editor_if(s, editor_id, true, can_activate, conversation) :
                                       restore_split_layout(s);
       if (result && editor_id) {
+        if (can_activate) { overview_returns_.erase(s); }
         focused_workbenches_[s] = s->visibility_epoch();
         if (request) {
           // The latest explicit open supersedes any result already queued in the split view.
@@ -945,7 +1039,10 @@ std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, 
               });
         }
       }
-      if (!result && store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
+      if (!result && store_.toast) {
+        store_.toast(dispatch_blocked ? std::string(store_.tr("workbench.literature.dispatch_pending")) :
+                                       result.error().message, ui::ToastKind::Warning);
+      }
     });
   };
 }
