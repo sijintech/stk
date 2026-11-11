@@ -247,6 +247,8 @@ class ViewerState {
 
   /** Jobs "Open in viewer" and File > Open. False (with #open_error) when nothing can be opened. */
   bool open(const OpenResultRequest &request, bool fit_initial_view = false);
+  /** Whether the focused Jobs shortcut can reveal the accepted frame without evaluating again. */
+  bool can_revisit_task_result(const OpenResultRequest &request) const;
   /** `parameters` ({name: value}) override the preset defaults of an evaluated source. */
   bool open_path(const std::string &path, const std::string &preset = {}, const io::Json &parameters = io::Json(),
                  const io::Json &source_proof = io::Json());

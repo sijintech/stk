@@ -104,11 +104,17 @@ struct UiOnFake {
   AppFixture f{"en", 1.0f, 1280, 900};
   std::unique_ptr<bridge::Client> client;
 
-  explicit UiOnFake(bool f03 = false)
+  explicit UiOnFake(bool f03 = false, bool with_viewer = false)
   {
     std::vector<std::string> args{"--jobs", dir.str() + "/model"};
     if (f03) {
       args.push_back("--f03");
+    }
+    if (with_viewer) {
+      args.insert(args.end(), {"--payload-dir", STK_DESKTOP_DIR "/tests/viewer/fixtures/muferro_domains",
+                              "--presets-dir", STK_REPO_ROOT "/suan/graph/presets",
+                              "--catalog", STK_REPO_ROOT "/docs/specs/catalog/stk-catalog-m1.json",
+                              "--blob-dir", dir.str() + "/blobs"});
     }
     client = bridge::Client::create(bridge::test::fake_options(args, loop.executor()));
     f.shell->store().set_bridge(client.get());
@@ -441,6 +447,106 @@ TEST(JobsLayout, FocusedTaskResultReturnKeepsSameAreaScrollAndLauncher)
   launcher = u.find(launcher_key);
   ASSERT_NE(launcher, nullptr);
   EXPECT_NE(u.f.screen.ui()->focused(), launcher->id);
+}
+
+TEST(JobsLayout, RevisitingAnAcceptedTaskKeepsTheDisplayedResult)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  UiOnFake u(false, true);
+  auto &jobs = u.jobs();
+  auto &viewer = u.f.shell->store().viewer();
+  viewer.prefetch_neighbours = false;
+  ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+  jobs.select_connection("runtime:lab");
+  ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty(); }));
+  const std::string task(32, 'c'), other_task(32, 'd');
+  const auto workspace = jobs.workspace();
+  const auto apply_tasks = [&] {
+    jobs.apply_snapshot(io::Json::array({
+        {{"id", task}, {"workspace_id", workspace}, {"name", "Result task"}, {"state", "succeeded"}},
+        {{"id", other_task}, {"workspace_id", workspace}, {"name", "Other task"}, {"state", "succeeded"}}}), 100.0);
+  };
+  apply_tasks();
+  jobs.select_task(task);
+  u.f.shell->open_workbench(u.f.screen);
+  u.f.drv->frame();
+  u.click("workbench_tasks");
+  const std::string base = "a1/main/focused_jobs/";
+  u.click(base + "submit");
+  u.type(base + "submit/name", "Keep the draft");
+  u.click(base + "tasks/open_viewer");
+  const auto settled = [&] { return viewer.payload() && !viewer.evaluating(); };
+  ASSERT_TRUE(u.pump(settled)) << viewer.eval_error();
+  ASSERT_TRUE(viewer.graph_inspection()->shown_configuration);
+  const auto initial_step = viewer.shown_step();
+  viewer.set_step_index(0);
+  ASSERT_TRUE(u.pump([&] { return settled() && viewer.shown_step() != initial_step; })) << viewer.eval_error();
+  app::PickInfo pick;
+  pick.probe_node = "frame";
+  pick.physical = {1, 2, 3};
+  viewer.set_pick(pick);
+  ASSERT_TRUE(u.pump([&] { return viewer.probe().status == app::ProbeState::Status::Done; }));
+  const auto step = viewer.shown_step();
+  const auto camera = viewer.camera_serial();
+  const auto payload = viewer.payload();
+  const auto probe = viewer.probe().serial;
+  const auto evaluations = viewer.evaluations_started();
+
+  u.click("workbench_tasks");
+  u.click(base + "tasks/open_viewer");
+  const auto *revisited_area = dynamic_cast<const app::EditorArea *>(u.f.screen.maximized());
+  ASSERT_NE(revisited_area, nullptr);
+  EXPECT_EQ(revisited_area->editor().type().id, app::kEditorViewer);
+  EXPECT_EQ(viewer.shown_step(), step);
+  EXPECT_EQ(viewer.camera_serial(), camera);
+  EXPECT_EQ(viewer.payload(), payload);
+  EXPECT_EQ(viewer.probe().serial, probe);
+  EXPECT_EQ(viewer.probe().status, app::ProbeState::Status::Done);
+  EXPECT_EQ(viewer.evaluations_started(), evaluations);
+  u.click("workbench_tasks");
+  ASSERT_NE(u.find(base + "submit/name"), nullptr);
+  EXPECT_EQ(u.find(base + "submit/name")->string.value(), "Keep the draft");
+  EXPECT_EQ(jobs.selected(), task);
+
+  jobs.select_task(other_task);
+  ASSERT_NE(u.find(base + "tasks/open_viewer"), nullptr);
+  u.click(base + "tasks/open_viewer");
+  ASSERT_TRUE(u.pump([&] { return settled() && viewer.source().task_id == other_task; })) << viewer.eval_error();
+  EXPECT_EQ(viewer.shown_step(), initial_step);
+  EXPECT_GT(viewer.evaluations_started(), evaluations);
+  const auto accepted_request = jobs.selected_result_request();
+  ASSERT_TRUE(accepted_request);
+  EXPECT_TRUE(viewer.can_revisit_task_result(*accepted_request));
+  bridge::ConnectionCheck check;
+  check.id = "runtime:lab";
+  check.error = bridge::Error::make(bridge::ErrorCode::Unauthorized, "Credential check denied");
+  jobs.apply_check(check);
+  EXPECT_FALSE(viewer.can_revisit_task_result(*accepted_request));
+  check.ok = true;
+  check.error.reset();
+  jobs.apply_check(check);
+  const auto after_recheck = jobs.selected_result_request();
+  ASSERT_TRUE(after_recheck);
+  EXPECT_FALSE(viewer.can_revisit_task_result(*after_recheck));
+  const auto before_recheck_open = viewer.evaluations_started();
+
+  u.click("workbench_tasks");
+  u.click(base + "tasks/open_viewer");
+  ASSERT_TRUE(u.pump(settled)) << viewer.eval_error();
+  EXPECT_GT(viewer.evaluations_started(), before_recheck_open);
+  const auto before_reselect = viewer.evaluations_started();
+
+  u.click("workbench_tasks");
+  jobs.select_connection("runtime:lab");
+  ASSERT_TRUE(u.pump([&] { return jobs.workspace() == workspace; }));
+  apply_tasks();
+  jobs.select_task(other_task);
+  ASSERT_NE(u.find(base + "tasks/open_viewer"), nullptr);
+  u.click(base + "tasks/open_viewer");
+  ASSERT_TRUE(u.pump([&] { return settled() && viewer.evaluations_started() > before_reselect; })) << viewer.eval_error();
+  EXPECT_EQ(viewer.source().task_id, other_task);
 }
 
 TEST(JobsLayout, FocusedResultSourceWrapsAndScrollsLongLocalLabels)

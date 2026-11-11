@@ -56,6 +56,8 @@ struct OpenResultRequest {
   std::vector<std::string> local_paths;
   /** Optional in-memory source fence, checked when the shell actually consumes this request. */
   std::function<bool()> still_current;
+  /** The Jobs connection, node and workspace that authorized an already displayed result. */
+  std::function<bool()> still_same_scope;
 };
 
 /** State of the Python bridge child process (driven by stk_bridge from WP8 on). */

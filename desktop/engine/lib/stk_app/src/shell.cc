@@ -930,7 +930,10 @@ std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, 
         if (request) {
           // The latest explicit open supersedes any result already queued in the split view.
           store_.take_open_result();
-          store_.viewer().open(*request, /*fit_initial_view=*/true);
+          auto &viewer = store_.viewer();
+          if (!viewer.can_revisit_task_result(*request)) {
+            viewer.open(*request, /*fit_initial_view=*/true);
+          }
         }
         auto *tasks = dynamic_cast<EditorArea *>(s->maximized());
         if (return_to_task && s->ui() && tasks) {

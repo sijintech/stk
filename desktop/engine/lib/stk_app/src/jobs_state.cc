@@ -59,6 +59,12 @@ std::string get_str(const Json &j, const char *key)
   return {};
 }
 
+std::string declared_ssh_host(const bridge::ConnectionInfo &info)
+{
+  const auto ssh = info.raw.find("ssh");
+  return ssh == info.raw.end() ? std::string() : get_str(*ssh, "host");
+}
+
 int compare_task_facts(const TaskRow &candidate, const TaskRow &known)
 {
   // On one Runtime a terminal state and an observed cancellation request do not roll back.
@@ -797,6 +803,7 @@ void JobsState::apply_check(const bridge::ConnectionCheck &check)
     if (!check.ok) {
       c.health = Health::Offline;
       c.detail = check.error ? check.error->message : std::string();
+      ++c.result_scope_epoch;
     }
     else {
       const Json &h = check.health;
@@ -2560,7 +2567,8 @@ std::optional<OpenResultRequest> JobsState::selected_result_request() const
   req.node = hub() ? node_ : std::string();
   req.workspace_id = workspace_;
   req.task_id = selected_;
-  req.still_current = [weak = std::weak_ptr<Alive>(alive_), detail = detail_epoch_, ready = ready_epoch_,
+  const std::weak_ptr<Alive> weak = alive_;
+  req.still_current = [weak, detail = detail_epoch_, ready = ready_epoch_,
                        connection = req.connection, node = req.node, workspace = req.workspace_id,
                        task = req.task_id]() {
     const auto owner = weak.lock();
@@ -2571,6 +2579,19 @@ std::optional<OpenResultRequest> JobsState::selected_result_request() const
            target.node == node && jobs.workspace_ == workspace && jobs.selected_ == task &&
            jobs.can_open_selected_result();
   };
+  if (const auto *connection = active()) {
+    req.still_same_scope = [weak, scope = epoch_, ready = ready_epoch_, bridge = store_.bridge_epoch(),
+                            connection_scope = connection->result_scope_epoch, url = connection->info.url,
+                            device = connection->info.device_id, ssh_host = declared_ssh_host(connection->info)] {
+      const auto owner = weak.lock();
+      if (!owner) { return false; }
+      const auto &jobs = *owner->self;
+      const auto *current = jobs.active();
+      return current && current->health != Health::Offline && current->result_scope_epoch == connection_scope &&
+             jobs.ready() && jobs.epoch_ == scope && jobs.ready_epoch_ == ready && jobs.store_.bridge_epoch() == bridge &&
+             current->info.url == url && current->info.device_id == device && declared_ssh_host(current->info) == ssh_host;
+    };
+  }
   return req;
 }
 

@@ -73,6 +73,7 @@ struct ConnectionRow {
   Health health = Health::Unknown;
   /** Why it is degraded or offline (the bridge's message), or the node count of a hub. */
   std::string detail;
+  uint64_t result_scope_epoch = 0;
 };
 
 struct NodeRow {
