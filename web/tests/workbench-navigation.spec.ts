@@ -2058,6 +2058,40 @@ for (const viewport of viewports) {
       sent.stop();
     });
 
+    test('the composer can return keyboard focus to the saved transcript', async ({page}) => {
+      const hub = new Hub();
+      conversations(hub);
+      const messages = Array.from({length: 60}, (_, index) =>
+        say(`read-${index}`, index % 2 ? 'assistant' : 'user', `已保存段落 ${index}`));
+      hub.saved.set(A, messages);
+      await hub.install(page);
+      const sent = posts(page);
+      await page.goto(ORIGIN + '/');
+      await choose(page, /相场参数讨论/);
+      await shows(page, messages.map(message => message.content));
+
+      const log = page.getByRole('log', {name: '对话记录'});
+      const position = () => log.evaluate(element => element.scrollTop);
+      await draft(page).fill('保留的草稿');
+      await page.keyboard.press('Shift+Tab');
+      await expect(log).toBeFocused();
+      await page.keyboard.press('PageDown');
+      await expect.poll(position).toBeGreaterThan(100);
+      await page.keyboard.press('End');
+      await expect.poll(() => log.evaluate(element =>
+        Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1);
+      await page.keyboard.press('Tab');
+      await expect(draft(page)).toBeFocused();
+      await expect(draft(page)).toHaveValue('保留的草稿');
+      const readingPosition = await position();
+      await go(page, '任务');
+      await go(page, '工作台');
+      expect(await position()).toBe(readingPosition);
+      expect(hub.calls).toEqual([`history ${A}`]);
+      expect(sent.seen).toEqual([]);
+      sent.stop();
+    });
+
     test('each conversation keeps its draft through the Tasks shortcuts and 结果', async ({page}) => {
       const hub = new Hub();
       conversations(hub);

@@ -482,7 +482,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     </section>
     <aside className={`chat surface${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'||overlay}>
       <h2 className="conversation-name" title={sessionLabel}>{sessionLabel}</h2>
-      <div className="messages" ref={messageList} tabIndex={-1} role="log" aria-label="对话记录">
+      <div className="messages" ref={messageList} tabIndex={thread.messages.length || pending ? 0 : -1} role="log" aria-label="对话记录">
         {thread.status==='loading'&&!thread.messages.length&&<p className="muted">正在读取对话…</p>}
         {thread.status==='missing'&&<div className="chat-intro"><h3>这个对话已不存在</h3><p>控制服务中没有这个对话，未创建新会话。{conv.draft.trim()?'未发送的草稿仍在这里，可以移到新对话再发送。':'可以从「新对话」重新开始。'}</p>
           {!!conv.draft.trim()&&<button type="button" onClick={moveDraft}>移到新对话</button>}</div>}
