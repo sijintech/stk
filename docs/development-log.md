@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-11 07:22 UTC · 主线发布与 Web 唯一 VTI 路径
+
+Root 将远端 main 从 `8a9da1313fd4c4cef3f01e17afef9d1285feb7d8` 快进到 `d1eb1467d1f1b1be86b423e466ffcdff59d21612`，独立复核远端完整 SHA。发布 10 个提交，范围扫描无发现。包含桌面返回原任务标签及一次打开唯一发布 VTI、Web 标准输出及错误续读、进度与原始值顺序回归。Root 定向原生 87/87，Web 269/269。既有 AOCI 与状态文档工作区修改保留。
+
+新头 Secret scan 和 Pages 已成功。Desktop `42978761506` 与 Runtime `42978761563` 已启动，待整轮终态。上一头 Desktop 的 macOS MP4 和 HTML 视频隐藏恢复两例仍失败。旧 PR #53 和 #54 分别保持 `c9f13994` 与 `2dd3e4ee`，继续开放。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42978761506) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42978761563) [Pages](https://github.com/sijintech/stk/actions/runs/42978761468) [Secret scan](https://github.com/sijintech/stk/actions/runs/42978761425)
+
+Claude 已从这次发布头在独立分支 `claude/workbench-web-single-vti-104` 开始处理 Web 成功任务的明确一步打开，范围为 Web 任务入口与对应回归。Root 负责两端行为审阅、真实 Runtime 浏览器验收、最终集成和 CI。当前发布的 Web 路径仍为预选后明确加载。任务卡在 `root-delivery-20261111-163/claude-web-single-vti-104.txt`。
+
 ## 2026-11-11 07:19 UTC · 原生任务一次打开唯一发布的 VTI
 
 本地 main 产品提交 `35ff2d1d866cad4b2f0449dc6e793c9e7b315d11` 集成 Claude 独立 worktree `claude/workbench-native-task-artifact-103` 的清单解析 `2b5341dd4b4942ebc3c02e91cecc1ab547e5177a`。Root 接上 Viewer 的固定产物绑定、打开时的页面及意图检查、Bridge 重启清单失效和对应回归。成功任务清单只含一个合格 VTI 及可忽略的日志或说明文件时，「在查看器中打开」直接显示切片。多个或其它类型结果使用既有任务入口。Web 仍从任务捷径预选唯一文件，再由用户明确加载。
