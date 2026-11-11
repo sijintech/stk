@@ -175,7 +175,8 @@ void log_last_media_observation(const Json &result) noexcept
                             "first_toolbar_pause_delay", "first_toolbar_pause_trace",
                             "first_toolbar_pause_immediate", "first_toolbar_pause_immediate_trace",
                             "repeat_verified_visible_pause", "suspend_reveal",
-                            "failed_reveal_observation", "failed_reveal_native_pause_trace"}) {
+                            "failed_reveal_observation", "failed_reveal_native_pause_trace",
+                            "failed_reshown_hold"}) {
       const auto item = result.find(key);
       if (item == result.end() || !item->is_object()) continue;
       // These objects contain only fixed phase names, hashes and numerical probe facts.
@@ -2006,28 +2007,43 @@ class Exercise {
     return observed;
   }
   Media held_media(int cycle, const std::string &phase, const std::string &session,
-                   const Media &before, double seconds)
+                   const Media &before, double seconds, bool record_failed_reshown_hold = false)
   {
     const auto start = Clock::now();
     if (hidden_media_) {
       hidden_media_->stage = "hold"; hidden_media_->hold_begin = start; hidden_media_->before = before;
     }
     Media after;
+    size_t samples = 0;
     wait([&] {
       after = media(session);
+      ++samples;
+      const auto delta = after.current_time - before.current_time;
+      const std::array<bool, 5> checks{
+          after.navigation_generation == before.navigation_generation, after.paused, !after.ended,
+          !after.seeking, std::abs(delta) <= 0.10};
+      const bool hold_ok = std::all_of(checks.begin(), checks.end(), [](bool value) { return value; });
       if (hidden_media_) {
         auto &observation = *hidden_media_;
-        observation.hold_checks = std::array<bool, 5>{
-            after.navigation_generation == before.navigation_generation, after.paused, !after.ended,
-            !after.seeking, std::abs(after.current_time - before.current_time) <= 0.10};
-        if (!std::all_of(observation.hold_checks->begin(), observation.hold_checks->end(), [](bool value) { return value; })) {
+        observation.hold_checks = checks;
+        if (!hold_ok) {
           observation.failed = after; observation.failure_kind = "hold-predicate";
           observation.failure_detected = Clock::now();
         }
       }
-      require(after.navigation_generation == before.navigation_generation && after.paused && !after.ended &&
-          !after.seeking && std::abs(after.current_time - before.current_time) <= 0.10,
-          "Paused media advanced, resumed, ended or changed navigation during " + phase);
+      if (record_failed_reshown_hold && !hold_ok) {
+        try {
+          const auto elapsed = media_seconds(start, Clock::now());
+          result_["failed_reshown_hold"] = {{"cycle", cycle}, {"phase", phase},
+              {"session_sha256", core::Sha256::hex(session)}, {"sample", samples}, {"elapsed_seconds", elapsed},
+              {"before", media_json(before)}, {"failed", media_json(after)}, {"time_delta_seconds", delta},
+              {"hold_checks", {{"navigation_equal", checks[0]}, {"paused", checks[1]},
+                  {"not_ended", checks[2]}, {"not_seeking", checks[3]}, {"abs_time_delta_le_0_10", checks[4]}}},
+              {"native_pause", native_pause_pair_json(last_native_pause())}};
+        }
+        catch (...) {} // Keep the original failed hold assertion.
+      }
+      require(hold_ok, "Paused media advanced, resumed, ended or changed navigation during " + phase);
       return std::chrono::duration<double>(Clock::now() - start).count() >= seconds;
     }, "Paused media hold " + phase, seconds + 10);
     result_["media_holds"].push_back({{"cycle", cycle}, {"phase", phase},
@@ -3112,7 +3128,8 @@ raise SystemExit(main())
         throw;
       }
 #endif
-      auto reshown = ui.held_media(cycle, "reshown-no-autoresume", session, hidden, 0.50);
+      auto reshown = ui.held_media(cycle, "reshown-no-autoresume", session, hidden, 0.50,
+                                   options.isolated_pause_control);
       ui.media_capture(cycle, "reshown-red-paused", 1, ui.media_rectangle(bounds, reshown), reshown, session);
       // Return to the earliest segment before a second explicit Play. Rewinding is
       // itself local input; showing the tab must never provide that playback action.
