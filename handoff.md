@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-11 08:24 UTC · 主线发布 Web 一步打开与进度反馈
+
+Root 将远端 main 从 `d1eb1467d1f1b1be86b423e466ffcdff59d21612` 快进到 `d4064e5124f7a81e90f257f2580af35b49c555ae`，推送后独立核对远端完整 SHA。8 个提交范围扫描无发现。发布包含 Web 一步打开唯一 VTI、可核对的清单与构建进度、新 macOS 原生暂停对照。原 AOCI 与状态文档工作区修改保留。Claude 105 已冻结、验收并集成的两个文件与当前作者工作树的 SHA 一致，作者最终收尾仍在独立工作树。
+
+新头 Desktop `42986687264`、Runtime `42986687285` 与 Pages `42986687238` 已启动，Secret scan `42986687229` 成功。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42986687264) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42986687285) [Pages](https://github.com/sijintech/stk/actions/runs/42986687238) [Secret scan](https://github.com/sijintech/stk/actions/runs/42986687229)
+
+上一头 Windows 原生工件 `13840270339` 的所选成员通过 CRC，JUnit 6/6、1321 秒。PDF、MP4、HTML 视频各 20/20 轮，图像 160、161、161 张。PDF 1 次创建、427 次复用、已释放，最长初始化 76 毫秒。上轮 macOS 的两个必测媒体失败保留。终态平台汇总在 `root-delivery-20261111-163/published-platform-ci-d1eb1467/platform-terminal-summary.json`。 [Windows 工件](https://github.com/sijintech/stk/actions/runs/42978761506/artifacts/13840270339)
+
 ## 2026-11-11 08:23 UTC · 上一主线 Desktop 终态与 Web 精确主线回放
 
 `d1eb1467d1f1b1be86b423e466ffcdff59d21612` 的 Desktop `42978761506` 于 08:22:33 UTC 整轮终止，5/6。最后结束的 Windows 原生 `130399062683` 成功，Linux 三项、Windows CPU 成功，唯一失败为已记录的 macOS。原生 Windows 的图像与 JUnit 工件 `13840270339`。上轮终态已独立核对，符合主线推送门禁。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42978761506) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42978761506/artifacts/13840270339)
