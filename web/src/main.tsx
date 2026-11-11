@@ -325,13 +325,13 @@ function Workbench({disconnect}:{disconnect:()=>void}){
        box.top>=area.top&&box.bottom<=area.bottom&&box.left>=area.left&&box.right<=area.right)launcher.focus({preventScroll:true});
   }
   // Choosing a conversation (or a new one) is one explicit action: it opens 工作台 with that conversation's own
-  // transcript, reading position and draft. On a compact page the history closes again.
-  function openConversation(id:string|null){
+  // transcript, reading position and draft. Focus follows keyboard activation and the closing compact history.
+  function openConversation(id:string|null,keyboardActivation=false){
     returnFocus.current=null;
     if(id!==conv.session&&messageList.current)transcriptOffsets.current.set(conv.session,messageList.current.scrollTop);
     flushSync(()=>{setTab('workbench');setHistoryOpen(false);if(id)conv.select(id);else conv.startNew();});
     if(!id)composer.current?.focus({preventScroll:true});
-    else if(!wide)messageList.current?.focus({preventScroll:true});
+    else if(!wide||keyboardActivation)messageList.current?.focus({preventScroll:true});
   }
   function focusHistory(){
     const panel=historyPanel.current;
@@ -426,7 +426,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     <section id="conversation-history" ref={historyPanel} aria-label="对话历史" className={`history${wide?'':' history-overlay'}${historyShown?'':' surface-hidden'}`} inert={!historyShown}>
       <div className="history-head"><h2>对话</h2><button type="button" className="new-conversation" onClick={()=>openConversation(null)}>新对话</button></div>
       <ul className="history-list">
-        {conv.entries.map(entry=><li key={entry.id}><button type="button" className="conversation" aria-current={entry.id===conv.session?'true':undefined} onClick={()=>openConversation(entry.id)}><span>{entry.name}</span><small>{entryNote(entry)}</small></button></li>)}
+        {conv.entries.map(entry=><li key={entry.id}><button type="button" className="conversation" aria-current={entry.id===conv.session?'true':undefined} onClick={e=>openConversation(entry.id,e.detail===0)}><span>{entry.name}</span><small>{entryNote(entry)}</small></button></li>)}
       </ul>
       {!conv.entries.some(entry=>entry.kind==='saved')&&<p className="muted">还没有保存的对话。</p>}
     </section>

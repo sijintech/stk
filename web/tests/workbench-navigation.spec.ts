@@ -2716,6 +2716,54 @@ test('the compact history scrolls a restored selection into view on keyboard ope
   expect(errors).toEqual([]);
 });
 
+test('wide history keyboard activation enters the transcript without tabbing through other conversations', async ({page}) => {
+  await page.setViewportSize({width: 1440, height: 900});
+  const hub = new Hub();
+  conversations(hub);
+  for (let i = 0; i < 30; i++) {
+    hub.rows.push({id: (0x100 + i).toString(16).padStart(32, '0'), name: `较早的对话 ${i}`, created: 1794830300 - i});
+  }
+  const messages = Array.from({length: 60}, (_, i) =>
+    say(`read-${i}`, i % 2 ? 'assistant' : 'user', `已保存段落 ${i}`));
+  hub.saved.set(A, messages);
+  await hub.install(page);
+  const sent = posts(page);
+  await page.goto(ORIGIN + '/');
+
+  const first = item(page, /相场参数讨论/), second = item(page, /铁电回线分析/);
+  const log = page.getByRole('log', {name: '对话记录'});
+  const position = () => log.evaluate(el => el.scrollTop);
+  const railPosition = () => historyPanel(page).evaluate(el => el.scrollTop);
+  await first.click();
+  await shows(page, messages.map(message => message.content));
+  await expect(first).toBeFocused(); // Pointer selection still lets the user browse the rail.
+  await draft(page).fill('保留的草稿');
+  await log.evaluate(el => { el.scrollTop = 560; });
+  await second.click();
+  await shows(page, ['B 的问题']);
+  await expect(entries(page)).toHaveCount(32);
+  await go(page, '任务');
+
+  await first.focus();
+  const railTop = await railPosition();
+  await page.keyboard.press('Enter');
+  await expectActive(page, '工作台');
+  await expect(log).toBeFocused();
+  await expect(draft(page)).toHaveValue('保留的草稿');
+  expect(await position()).toBe(560);
+  await page.keyboard.press('PageDown');
+  await expect.poll(position).toBeGreaterThan(560);
+  expect(await railPosition()).toBe(railTop);
+
+  await go(page, '任务');
+  await second.evaluate(element => (element as HTMLButtonElement).click()); // Activation without pointer detail.
+  await shows(page, ['B 的问题']);
+  await expect(log).toBeFocused();
+  expect(hub.calls).toEqual([A, B, A, B].map(id => `history ${id}`));
+  expect(sent.seen).toEqual([]);
+  sent.stop();
+});
+
 // 结果 analysis modes: once shown, the file Viewer and the 图谱 panel both stay mounted; the mode not shown keeps its
 // Viewer size and camera but takes no space, focus or pointer. 图谱 is first mounted (and reads its presets) when it
 // is first opened, and only for the node it was opened under. A switch sends nothing; a changed task, project or node
