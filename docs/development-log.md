@@ -1,5 +1,11 @@
 # 开发交接记录
 
+## 2026-11-11 05:07 UTC · 统一工作台发布到 main
+
+远端 `main` 从 `a184cd213477896a5dd89cb5b0b93c1ca783dccf` 快进到 `09efc0d1b783d7abf7171fc1004beea0b5145901`，发布后独立核对完整 SHA，12 个提交范围扫描无发现。包含原生 MuPRO HDF5 分量、Web 标准错误与探针顺序、同标签页任务环境恢复、原生引用页取景及 macOS 隔离对照失败取证。组合桌面、文献/UI、Reports 原生窗口目标均已构建。工作区既有 AOCI 与状态文档修改已保护。
+
+该精确头 Desktop `42963571163`、Runtime `42963571022`、Pages `42963571030` 已启动。Secret scan `42963571143` 已通过。macOS 必测仍需目标平台重测，新的隔离对照失败字段用于区分失败条件。旧 PR #53、#54 仍为已复核头，未合入。Claude 的桌面日志恢复候选在独立工作树进入 Root 验证。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42963571163) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42963571022) [Pages](https://github.com/sijintech/stk/actions/runs/42963571030) [Secret scan](https://github.com/sijintech/stk/actions/runs/42963571143)
+
 ## 2026-11-11 05:06 UTC · 组合原生验证及 macOS 保持取证
 
 Root 组合桌面、文献与 UI 目标完成构建，文献 34/34、UI 132/132，零失败或跳过。`e4f4ecdc` 的原生取景验收补充于前节。Web `c29bd628` 的组合生产产物与隔离构建相同，真实 Runtime 两种窗口验收已绑定组合提交。
