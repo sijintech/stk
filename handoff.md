@@ -1,5 +1,17 @@
 # STK 当前交接
 
+## 2026-11-11 02:14 UTC · 聚焦问答的文献入口与热日志夹具修正
+
+`7c8e3c7d` 集成实际 Claude 的 `CL-WORKBENCH-LITERATURE-94` 六路径实现与 Root 审阅修正。已加载且显示已保存问答时，页头「打开文献库」沿用现有分栏文献页。切回「工作台」按原项目打开句柄、问答、捕获上下文、交换代次和布局选择恢复原实例。完整历史与 Agent 页隐藏入口，过期回调作废。进入和回程检查将显示的问答或 Agent，阻止尚待派发的动作因切页启动。`d95368b9` 更新设计的实现与验收状态。暂存扫描零发现。
+
+固定起点为公开合成项目中九条问答的最早一条、已滚动正文、未发送草稿、隐藏文献页中已有检索文字及稳定的 Viewer。英文 1600×1000、中文 680×900，缩放 1。旧版经分栏与顶栏文献两次进入，新版均一次。返回均一次。最终二进制 `2f2ef012e0b730863c31cba6cbf892dce76120d1b3d4074302ee10f5bd5b9fb4` 与配套资源已按摘要核对。两种窗口的新旧正文、草稿、检索文字与 Viewer 比较像素差为零。新版往返桥接调用零，SQLite 字节一致。固定夹具、截图与点击收据在外部 `root-delivery-20261111-153/literature-window/candidate-final-aggregate.json`。
+
+Root 组合构建与 36/36 定向通过，零跳过，覆盖两种宽度、多窗口改选、关闭重开、历史和 Agent 页、原项目概览、明确刷新，以及隐藏标签中的自动问答在进入和回程均不启动。证据在外部 `root-delivery-20261111-154/literature-integration/verified-targeted.xml`。Claude 原独立环境的非桥接定向 24/24，Python 桥缺依赖，组合测试使用已有项目虚拟环境。已向 Claude 分派 `CL-WORKBENCH-LITERATURE-AGENT-95`，在独立 `stk-claude-literature-agent-95` 仅验证旧版 Agent 延后 Start 的专项运行边界，使用现有可用桥接解释器，避免重复全量构建测试。
+
+远端 `9ce14a5b` 的 Runtime `42941178016` 于 02:09:46 UTC 整轮结束，12/13。唯一失败在 Windows Python 3.11 的外来 SQLite 热日志测试，子进程进入 UPDATE 后在 20 秒内未返回。相同源码的上轮 Windows 3.11 和本轮 Windows 3.12 通过。`cb68a9cf` 选择集成独立候选 `b71bb953`，将同样使用 FULL 同步和两页缓存的测试夹具从 512 行缩至 16 行，保留真实热日志、崩溃写入与原文件字节断言。Linux 跟踪中子进程同步写盘从 1023 次降至 31 次，注入相同的 25 ms 延迟时，旧版复现超时，候选 1.51 秒通过。三种 Python 版本各 11/11，SQLite 真实副本回滚证明一致。Root 组合相关测试 5+6/11，零失败和跳过。新头 Windows 仍待验证。证据位于外部 `root-delivery-20261111-154/windows-hot-journal`。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/42941178016)
+
+当前远端 Desktop `42941178087` 的 macOS Cocoa 构建、Linux 打包与新环境冒烟通过，macOS 原生视频与 Windows 平台验收继续运行。本地文献与夹具提交待整轮终态后推送。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42941178087)
+
 ## 2026-11-11 01:45 UTC · 工作台与平台修正已发布至 main
 
 远端 `main` 从 `16541e8f1c41c0ed8387048e6770cd5f190c6120` 快进到 `9ce14a5ba5701b38c6f34e98f320582f5c4bdc83`，推送后独立核对完整 SHA。14 个提交范围扫描零发现。包含聚焦问答适用操作、撰写一步返回已选问答、同一任务已验证结果复用、Claude 文献入口设计、Windows HDF5 本地路径断言和 Cocoa 隐藏媒体候选。原四状态文档和 AOCI 的工作区改动已按原字节保护。
