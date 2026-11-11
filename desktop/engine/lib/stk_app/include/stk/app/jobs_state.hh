@@ -391,6 +391,24 @@ class JobsState {
   {
     return logs_ended_;
   }
+  /** Set when the selected task's log reading ended without logs.end (logs.subscribe refused or a
+   * final subscription.error). The accepted text and both streams' unfinished lines stay as they
+   * were; the bridge's own non-final errors and restart replays never set it. */
+  const std::optional<bridge::Error> &logs_failure() const
+  {
+    return log_failure_;
+  }
+  /** A retryable failure of a task this connection may still read (not denied, node not revoked). */
+  bool can_retry_logs() const;
+  /** One explicit retry: a single logs.subscribe of stdout + stderr from each stream's last accepted
+   * source byte offset (LogChunk::next_offset). Nothing else is read, submitted or refreshed. */
+  void retry_logs(uint64_t generation);
+  uint64_t log_retry_generation() const { return log_gen_; }
+  /** Source byte offset after the last accepted chunk of each stream (the retry's resume point). */
+  const std::map<std::string, int64_t> &log_offsets() const
+  {
+    return log_offsets_;
+  }
   const EventsSummary &events() const
   {
     return events_;
@@ -443,6 +461,9 @@ class JobsState {
   void connect_active();
   void rewatch();
   void resubscribe_detail();
+  void subscribe_logs();
+  void stop_logs();
+  void clear_logs();
   void clear_task_detail();
   void clear_task_observation();
   void deny_task_observation();
@@ -542,6 +563,11 @@ class JobsState {
   /* Detail. */
   ui::LogBuffer log_all_{10000}, log_out_{10000}, log_err_{10000};
   bool logs_ended_ = false;
+  /** Bumped by every logs.subscribe and stop: callbacks of an older log subscription are dropped. */
+  uint64_t log_gen_ = 0;
+  std::map<std::string, int64_t> log_offsets_;      /**< stream -> accepted next_offset */
+  std::map<std::string, std::string> log_partial_;  /**< stream -> line not yet in log_all_ */
+  std::optional<bridge::Error> log_failure_;
   bridge::Subscription logs_sub_, events_sub_;
   EventsSummary events_;
   std::vector<ArtifactRow> artifacts_;

@@ -871,8 +871,22 @@ class JobsEditor final : public Editor {
                  {std::string(ctx.tr("jobs.logs.all")), "stdout", "stderr"}, ui::bind(log_stream_));
     const bool unavailable = jobs.selected_task_observation() == TaskObservation::Unavailable ||
                              jobs.selected_task_observation() == TaskObservation::Denied;
-    row.label(ctx.tr(jobs.logs_ended() ? "jobs.logs.ended" :
-                     (unavailable ? "jobs.logs.unavailable" : "jobs.logs.live"))).disable();
+    const std::optional<bridge::Error> &failure = jobs.logs_failure();
+    if (failure && !jobs.logs_ended()) {
+      row.label(ctx.tr("jobs.logs.failed")).disable();
+      if (failure->retryable) {
+        const auto generation = jobs.log_retry_generation();
+        const auto label = ctx.tr("jobs.logs.retry");
+        row.button("retry_logs/" + std::to_string(generation), label, [&jobs, generation]() {
+          jobs.retry_logs(generation);
+        }).width(fit_units(ctx, label)).disable(!jobs.can_retry_logs()).tip(ctx.tr("jobs.logs.retry.tip"));
+      }
+      p.paragraph(failure->message);
+    }
+    else {
+      row.label(ctx.tr(jobs.logs_ended() ? "jobs.logs.ended" :
+                       (unavailable ? "jobs.logs.unavailable" : "jobs.logs.live"))).disable();
+    }
     ui::LogBuffer &log = log_stream_ == 1 ? jobs.log_stdout() : (log_stream_ == 2 ? jobs.log_stderr() : jobs.log_all());
     p.log_view("task_log", log, 10.0f);
   }

@@ -24,6 +24,12 @@
  * events (through the hub: bytes done, then action "review" until the workspace.import is
  * approved); downloads write the artifact bytes to `dest` (default DIR/downloads/...).
  * Logs: stdout and stderr lines per task (CJK), then logs.end; events: a short monitoring run.
+ * Every logs.subscribe's params are appended to DIR/logs-subscribes.jsonl. While DIR/logs-plan.json
+ * holds a non-empty JSON array, each logs.subscribe takes its first entry instead: `{refuse: error}`
+ * answers with that error; otherwise `hold?` (wait for DIR/<hold>), `chunks` [{stream, text, offset,
+ * next_offset}] sent as given, `error?` {code, message, retryable, final} as subscription.error
+ * (non-final: `resume?` waits for DIR/<resume>, then `after` chunks), `end?` sends logs.end; with
+ * `id`, DIR/logs-<id>-error and DIR/logs-<id>-done mark the stages sent.
  */
 
 #include <algorithm>
@@ -527,6 +533,104 @@ void run_logs(const std::string sub, const std::string task_id, const Json strea
     }
     event("logs.end", {{"sub", sub}, {"offsets", offs}});
   }
+}
+
+std::mutex g_logs_plan_m;
+
+/** The next entry of DIR/logs-plan.json (removed from the file), null when there is none. */
+Json take_logs_plan()
+{
+  std::lock_guard lock(g_logs_plan_m);
+  const std::string path = g_opt.dir + "/logs-plan.json";
+  std::ifstream in(path);
+  if (!in) {
+    return nullptr;
+  }
+  const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  in.close();
+  Json plan;
+  try {
+    plan = stk::io::parse_json(text);
+  }
+  catch (...) {
+    return nullptr;
+  }
+  if (!plan.is_array() || plan.empty()) {
+    return nullptr;
+  }
+  Json entry = plan[0];
+  plan.erase(plan.begin());
+  std::ofstream(path + ".next") << plan.dump();
+  fs::rename(path + ".next", path);
+  return entry;
+}
+
+void wait_for_file(const std::string &name)
+{
+  while (!g_stop.load() && !fs::exists(g_opt.dir + "/" + name)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+}
+
+void mark_logs(const Json &entry, const std::string &stage)
+{
+  if (entry.contains("id")) {
+    std::ofstream(g_opt.dir + "/logs-" + entry["id"].get<std::string>() + "-" + stage) << stage << "\n";
+  }
+}
+
+void emit_log_chunks(const std::string &sub, const Json &chunks, std::map<std::string, int64_t> &ends)
+{
+  for (const Json &c : chunks) {
+    const std::string stream = c.value("stream", std::string("stdout"));
+    const int64_t offset = c.value("offset", int64_t(0)), next = c.value("next_offset", int64_t(0));
+    event("logs.chunk", {{"sub", sub}, {"stream", stream}, {"text", c.value("text", std::string())},
+                         {"offset", offset}, {"next_offset", next}, {"bytes", next - offset}});
+    ends[stream] = next;
+  }
+}
+
+/** One scripted logs.subscribe (see handle()): chunks exactly as given, so tests control the
+ * source byte offsets (a chunk's text may hold U+FFFD for fewer source bytes). */
+void run_scripted_logs(const std::string sub, const Json entry)
+{
+  if (entry.contains("hold")) {
+    wait_for_file(entry["hold"].get<std::string>());
+  }
+  if (g_stop.load()) {
+    return;
+  }
+  std::map<std::string, int64_t> ends;
+  emit_log_chunks(sub, entry.value("chunks", Json::array()), ends);
+  if (entry.contains("error")) {
+    const Json &e = entry["error"];
+    const bool final = e.value("final", false);
+    event("subscription.error",
+          {{"sub", sub},
+           {"error", {{"code", e.value("code", std::string("unavailable"))},
+                      {"message", e.value("message", std::string("The Runtime cannot be reached"))},
+                      {"retryable", e.value("retryable", false)}}},
+           {"final", final}});
+    mark_logs(entry, "error");
+    if (final) {
+      return;
+    }
+    if (entry.contains("resume")) {
+      wait_for_file(entry["resume"].get<std::string>());
+    }
+  }
+  if (g_stop.load()) {
+    return;
+  }
+  emit_log_chunks(sub, entry.value("after", Json::array()), ends);
+  if (entry.value("end", false)) {
+    Json offs = Json::object();
+    for (const auto &[stream, at] : ends) {
+      offs[stream] = at;
+    }
+    event("logs.end", {{"sub", sub}, {"offsets", offs}});
+  }
+  mark_logs(entry, "done");
 }
 
 void run_events(const std::string sub, int64_t offset)
@@ -1172,6 +1276,19 @@ bool handle(const Json &id, const std::string &method, const Json &p)
     return true;
   }
   if (method == "logs.subscribe") {
+    std::ofstream(g_opt.dir + "/logs-subscribes.jsonl", std::ios::app) << p.dump() << "\n";
+    if (Json entry = take_logs_plan(); !entry.is_null()) {
+      if (entry.contains("refuse")) {
+        const Json &e = entry["refuse"];
+        error(id, e.value("code", std::string("unavailable")), e.value("message", std::string("Refused")), nullptr,
+              e.value("retryable", false));
+        return true;
+      }
+      const std::string sub = hex32("logs");
+      respond(id, {{"sub", sub}});
+      g_threads.emplace_back(run_scripted_logs, sub, std::move(entry));
+      return true;
+    }
     const std::string sub = hex32("logs");
     respond(id, {{"sub", sub}});
     const Json streams = p.value("streams", Json::array({"stdout", "stderr"}));

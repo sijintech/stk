@@ -72,6 +72,328 @@ class JobsFake : public ::testing::Test {
   }
 };
 
+/* ---- Scripted log subscriptions (DIR/logs-plan.json of the fake) ---- */
+
+const std::string kLogTask = "33333333333333333333333333333333";
+const std::string kOtherLogTask = "44444444444444444444444444444444";
+#define STK_FFFD "\xEF\xBF\xBD" /* U+FFFD: what one invalid source byte decodes to */
+
+void write_logs_plan(const FakeJobs &f, const Json &plan)
+{
+  const std::string path = f.jobs_dir() + "/logs-plan.json";
+  std::ofstream(path + ".tmp") << plan.dump();
+  std::filesystem::rename(path + ".tmp", path);
+}
+
+void touch(const FakeJobs &f, const std::string &name)
+{
+  std::ofstream(f.jobs_dir() + "/" + name) << "go\n";
+}
+
+/** The params of every logs.subscribe the fake received, in order. */
+std::vector<Json> logs_subscribes(const FakeJobs &f)
+{
+  std::vector<Json> out;
+  std::ifstream in(f.jobs_dir() + "/logs-subscribes.jsonl");
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty()) {
+      out.push_back(io::parse_json(line));
+    }
+  }
+  return out;
+}
+
+size_t method_count(const FakeJobs &f, const std::string &method)
+{
+  const std::vector<std::string> m = f.methods();
+  return size_t(std::count(m.begin(), m.end(), method));
+}
+
+/** Requests that a log retry must never send (anything but logs.subscribe). */
+std::map<std::string, size_t> non_log_requests(const FakeJobs &f)
+{
+  std::map<std::string, size_t> out;
+  for (const char *m : {"events.subscribe", "watch", "task.get", "task.list", "task.submit", "task.cancel",
+                        "task.artifacts", "workspace.list", "workspace.files", "download.start", "upload.start"}) {
+    out[m] = method_count(f, m);
+  }
+  return out;
+}
+
+/** Waits until the client has handled everything the fake sent before this round trip. */
+void drain(FakeJobs &f)
+{
+  bool drained = false;
+  f.client->call("connections.list").then([&](const bridge::Result<Json> &) { drained = true; });
+  ASSERT_TRUE(f.pump([&] { return drained; }));
+}
+
+Json log_chunk(const std::string &stream, const std::string &text, int64_t offset, int64_t next_offset)
+{
+  return {{"stream", stream}, {"text", text}, {"offset", offset}, {"next_offset", next_offset}};
+}
+
+/* Source bytes: stdout "开始 α\n第1步 能" (21 bytes) + "量" and one invalid byte (4 bytes, decoded as
+ * 量 U+FFFD: 6 bytes of text); stderr "警告：网" (12 bytes). Both streams stop mid-line. */
+Json partial_then_final(const std::string &code = "unavailable", bool retryable = true)
+{
+  return {{"chunks", Json::array({log_chunk("stdout", "开始 α\n第1步 能", 0, 21),
+                                  log_chunk("stdout", "量" STK_FFFD, 21, 25),
+                                  log_chunk("stderr", "警告：网", 0, 12)})},
+          {"error", {{"code", code}, {"message", "The local Runtime API is not running"},
+                     {"retryable", retryable}, {"final", true}}}};
+}
+
+/** The rest of both streams; stderr overlaps 3 already accepted bytes (the client trims them). */
+Json continuation()
+{
+  return {{"chunks", Json::array({log_chunk("stdout", " −1.5e-3\n完成\n", 25, 43),
+                                  log_chunk("stderr", "网格较粗\n", 9, 22)})},
+          {"end", true}};
+}
+
+const char *const kPartialAll = "开始 α\n";
+const char *const kPartialOut = "开始 α\n第1步 能量" STK_FFFD "\n";
+const char *const kPartialErr = "警告：网\n";
+const char *const kWholeAll = "开始 α\n第1步 能量" STK_FFFD " −1.5e-3\n完成\n[stderr] 警告：网格较粗\n";
+const char *const kWholeOut = "开始 α\n第1步 能量" STK_FFFD " −1.5e-3\n完成\n";
+const char *const kWholeErr = "警告：网格较粗\n";
+
+using Offsets = std::map<std::string, int64_t>;
+
+/** Lists synthetic failed tasks (no artifact read: nothing is selected yet) and selects the first. */
+void select_failed_task(FakeJobs &f, const Json &plan, const std::vector<std::string> &tasks = {kLogTask})
+{
+  JobsState &j = f.jobs();
+  write_logs_plan(f, plan);
+  Json rows = Json::array();
+  for (const std::string &id : tasks) {
+    rows.push_back({{"id", id}, {"name", "合成失败任务 " + id.substr(0, 4)}, {"state", "failed"},
+                    {"workspace_id", j.workspace()}});
+  }
+  ASSERT_TRUE(j.selected().empty());
+  j.apply_snapshot(rows, 100.0);
+  j.select_task(tasks.front());
+}
+
+TEST_F(JobsFake, FinalLogErrorKeepsPartialLinesAndRetriesOnceFromSourceOffsets)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  select_failed_task(f, Json::array({partial_then_final(), continuation()}));
+  ASSERT_TRUE(f.pump([&] { return j.logs_failure().has_value(); }));
+
+  /* Stopped truthfully: accepted text kept, both half lines held out of the combined view. */
+  EXPECT_EQ(j.logs_failure()->code, bridge::ErrorCode::Unavailable);
+  EXPECT_TRUE(j.logs_failure()->retryable);
+  EXPECT_FALSE(j.logs_ended());
+  EXPECT_EQ(log_text(j.log_all()), kPartialAll);
+  EXPECT_EQ(log_text(j.log_stdout()), kPartialOut);
+  EXPECT_EQ(log_text(j.log_stderr()), kPartialErr);
+  /* Source bytes, not text length (stdout's text is 27 bytes long). */
+  EXPECT_EQ(j.log_offsets(), (Offsets{{"stdout", 25}, {"stderr", 12}}));
+  ASSERT_TRUE(j.can_retry_logs());
+
+  const auto others = non_log_requests(f);
+  j.retry_logs(j.log_retry_generation());
+  j.retry_logs(j.log_retry_generation()); /* a second click before any answer sends nothing */
+  EXPECT_FALSE(j.logs_failure().has_value());
+  EXPECT_FALSE(j.can_retry_logs());
+  ASSERT_TRUE(f.pump([&] { return j.logs_ended(); }));
+
+  const std::vector<Json> subs = logs_subscribes(f);
+  ASSERT_EQ(subs.size(), 2u);
+  EXPECT_FALSE(subs[0].contains("offsets")) << subs[0].dump();
+  EXPECT_EQ(subs[1].value("task_id", std::string()), kLogTask);
+  EXPECT_EQ(subs[1].value("streams", Json()), Json::array({"stdout", "stderr"}));
+  EXPECT_EQ(subs[1].at("offsets").get<Offsets>(), (Offsets{{"stdout", 25}, {"stderr", 12}})) << subs[1].dump();
+  /* Continued exactly: no repeated or spliced line in any view. */
+  EXPECT_EQ(log_text(j.log_all()), kWholeAll);
+  EXPECT_EQ(log_text(j.log_stdout()), kWholeOut);
+  EXPECT_EQ(log_text(j.log_stderr()), kWholeErr);
+  EXPECT_EQ(j.log_offsets(), (Offsets{{"stdout", 43}, {"stderr", 22}}));
+  EXPECT_FALSE(j.logs_failure().has_value());
+  EXPECT_FALSE(j.can_retry_logs());
+  EXPECT_EQ(non_log_requests(f), others);
+  EXPECT_EQ(j.selected(), kLogTask);
+  ASSERT_NE(j.selected_task(), nullptr);
+  EXPECT_EQ(j.selected_task()->state, "failed");
+
+  j.retry_logs(j.log_retry_generation()); /* complete: nothing to retry */
+  drain(f);
+  EXPECT_EQ(logs_subscribes(f).size(), 2u);
+}
+
+TEST_F(JobsFake, RefusedLogRetryKeepsTheTextAndOffersTheRetryAgain)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  const Json refuse = {{"refuse", {{"code", "unavailable"}, {"message", "The Runtime cannot be reached"},
+                                   {"retryable", true}}}};
+  select_failed_task(f, Json::array({partial_then_final(), refuse, continuation()}));
+  ASSERT_TRUE(f.pump([&] { return j.logs_failure().has_value(); }));
+  const auto others = non_log_requests(f);
+  const auto first_failure = j.log_retry_generation();
+
+  j.retry_logs(first_failure);
+  ASSERT_TRUE(f.pump([&] { return j.logs_failure().has_value(); }));
+  EXPECT_EQ(logs_subscribes(f).size(), 2u);
+  EXPECT_EQ(j.logs_failure()->message, "The Runtime cannot be reached");
+  EXPECT_EQ(log_text(j.log_all()), kPartialAll);
+  EXPECT_EQ(log_text(j.log_stdout()), kPartialOut);
+  EXPECT_EQ(log_text(j.log_stderr()), kPartialErr);
+  EXPECT_EQ(j.log_offsets(), (Offsets{{"stdout", 25}, {"stderr", 12}}));
+  ASSERT_TRUE(j.can_retry_logs());
+  ASSERT_NE(j.log_retry_generation(), first_failure);
+  j.retry_logs(first_failure); // A cached action cannot retry a newer failure.
+  drain(f);
+  ASSERT_EQ(logs_subscribes(f).size(), 2u);
+
+  j.retry_logs(j.log_retry_generation());
+  ASSERT_TRUE(f.pump([&] { return j.logs_ended(); }));
+  const std::vector<Json> subs = logs_subscribes(f);
+  ASSERT_EQ(subs.size(), 3u);
+  EXPECT_EQ(subs[1].at("offsets").get<Offsets>(), (Offsets{{"stdout", 25}, {"stderr", 12}}));
+  EXPECT_EQ(subs[2].at("offsets").get<Offsets>(), (Offsets{{"stdout", 25}, {"stderr", 12}}));
+  EXPECT_EQ(log_text(j.log_all()), kWholeAll);
+  EXPECT_EQ(log_text(j.log_stdout()), kWholeOut);
+  EXPECT_EQ(log_text(j.log_stderr()), kWholeErr);
+  EXPECT_EQ(non_log_requests(f), others);
+}
+
+TEST_F(JobsFake, NonFinalAndUnretryableLogErrorsOfferNoRetry)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  /* Non-final: the bridge keeps polling the same subscription; nothing is shown as stopped. */
+  const Json non_final = {
+      {"id", "nf"},
+      {"chunks", Json::array({log_chunk("stdout", "开始 α\n第1步 能", 0, 21)})},
+      {"error", {{"code", "unavailable"}, {"message", "The Runtime cannot be reached"}, {"retryable", true},
+                 {"final", false}}},
+      {"resume", "nf-resume"},
+      {"after", Json::array({log_chunk("stdout", "量\n", 21, 25)})},
+      {"end", true}};
+  select_failed_task(f, Json::array({non_final, partial_then_final("unauthorized", false)}),
+                     {kLogTask, kOtherLogTask});
+  ASSERT_TRUE(f.pump([&] { return std::filesystem::exists(f.jobs_dir() + "/logs-nf-error"); }));
+  drain(f);
+  EXPECT_FALSE(j.logs_failure().has_value());
+  EXPECT_FALSE(j.can_retry_logs());
+  EXPECT_FALSE(j.logs_ended());
+  touch(f, "nf-resume");
+  ASSERT_TRUE(f.pump([&] { return j.logs_ended(); }));
+  EXPECT_EQ(log_text(j.log_all()), "开始 α\n第1步 能量\n");
+  EXPECT_FALSE(j.logs_failure().has_value());
+  EXPECT_FALSE(j.can_retry_logs());
+  EXPECT_EQ(logs_subscribes(f).size(), 1u);
+
+  /* A final, non-retryable refusal (the credential): stopped, but no retry is offered or sent. */
+  j.select_task(kOtherLogTask);
+  ASSERT_TRUE(f.pump([&] { return j.logs_failure().has_value(); }));
+  EXPECT_EQ(j.logs_failure()->code, bridge::ErrorCode::Unauthorized);
+  EXPECT_FALSE(j.logs_failure()->retryable);
+  EXPECT_FALSE(j.can_retry_logs());
+  EXPECT_EQ(log_text(j.log_all()), kPartialAll);
+  j.retry_logs(j.log_retry_generation());
+  drain(f);
+  EXPECT_EQ(logs_subscribes(f).size(), 2u);
+  EXPECT_TRUE(j.logs_failure().has_value());
+}
+
+TEST_F(JobsFake, LateLogRetryOfAnOldTaskChangesNothing)
+{
+  FakeJobs f;
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("runtime:lab"));
+  Json late = continuation();
+  late["id"] = "late";
+  late["hold"] = "release-late";
+  const Json other = {{"chunks", Json::array({log_chunk("stdout", "任务二\n", 0, 10)})}, {"end", true}};
+  select_failed_task(f, Json::array({partial_then_final(), late, other}), {kLogTask, kOtherLogTask});
+  ASSERT_TRUE(f.pump([&] { return j.logs_failure().has_value(); }));
+  j.retry_logs(j.log_retry_generation());
+  ASSERT_TRUE(f.pump([&] { return logs_subscribes(f).size() == 2u; }));
+
+  /* Another task while the retry is unanswered: its receipt must not reach the new task. */
+  j.select_task(kOtherLogTask);
+  ASSERT_TRUE(f.pump([&] { return j.logs_ended(); }));
+  touch(f, "release-late");
+  ASSERT_TRUE(f.pump([&] { return std::filesystem::exists(f.jobs_dir() + "/logs-late-done"); }));
+  drain(f);
+  EXPECT_EQ(j.selected(), kOtherLogTask);
+  EXPECT_EQ(log_text(j.log_all()), "任务二\n");
+  EXPECT_EQ(log_text(j.log_stdout()), "任务二\n");
+  EXPECT_EQ(j.log_stderr().line_count(), 0u);
+  EXPECT_EQ(j.log_offsets(), (Offsets{{"stdout", 10}}));
+  EXPECT_FALSE(j.logs_failure().has_value());
+  EXPECT_FALSE(j.can_retry_logs());
+
+  /* Back to the first task: a fresh read from the start, without its old offsets or half lines. */
+  j.select_task(kLogTask);
+  ASSERT_TRUE(f.pump([&] { return j.logs_ended(); }));
+  const std::vector<Json> subs = logs_subscribes(f);
+  ASSERT_EQ(subs.size(), 4u);
+  EXPECT_FALSE(subs[3].contains("offsets")) << subs[3].dump();
+  const std::string all = log_text(j.log_all());
+  EXPECT_NE(all.find("开始计算 333333"), std::string::npos) << all;
+  EXPECT_EQ(all.find("第1步 能量" STK_FFFD), std::string::npos) << all;
+  EXPECT_EQ(all.find("任务二"), std::string::npos) << all;
+}
+
+TEST_F(JobsFake, ScopeRevocationAndBridgeChangesDropTheLogRetry)
+{
+  {
+    SCOPED_TRACE("revoked node");
+    FakeJobs f;
+    JobsState &j = f.jobs();
+    ASSERT_TRUE(f.connect("hub:mesh"));
+    const std::string node = j.node();
+    select_failed_task(f, Json::array({partial_then_final(), continuation()}));
+    ASSERT_TRUE(f.pump([&] {
+      const auto requests = non_log_requests(f);
+      return j.logs_failure().has_value() && requests.at("task.get") == 1 && requests.at("task.artifacts") == 1;
+    }));
+    ASSERT_TRUE(j.can_retry_logs());
+    const auto others = non_log_requests(f);
+    j.apply_nodes(Json::array({{{"id", node}, {"role", "node"}, {"revoked", 1}}}));
+    EXPECT_EQ(j.selected_task_observation(), app::TaskObservation::Denied);
+    EXPECT_FALSE(j.logs_failure().has_value());
+    EXPECT_FALSE(j.can_retry_logs());
+    EXPECT_EQ(j.log_all().line_count(), 0u);
+    j.retry_logs(j.log_retry_generation());
+    drain(f);
+    EXPECT_EQ(logs_subscribes(f).size(), 1u);
+    EXPECT_EQ(non_log_requests(f), others);
+  }
+  for (const std::string_view change : {"workspace", "connection", "bridge"}) {
+    SCOPED_TRACE(change);
+    FakeJobs f;
+    JobsState &j = f.jobs();
+    ASSERT_TRUE(f.connect("runtime:lab"));
+    select_failed_task(f, Json::array({partial_then_final(), continuation()}));
+    ASSERT_TRUE(f.pump([&] { return j.logs_failure().has_value(); }));
+    if (change == "workspace") {
+      j.select_workspace("");
+    }
+    else if (change == "connection") {
+      j.select_connection("runtime:lab");
+    }
+    else {
+      j.attach(nullptr);
+    }
+    EXPECT_FALSE(j.logs_failure().has_value());
+    EXPECT_FALSE(j.can_retry_logs());
+    j.retry_logs(j.log_retry_generation());
+    drain(f);
+    EXPECT_EQ(logs_subscribes(f).size(), 1u);
+  }
+}
+
 TEST_F(JobsFake, ConnectsChecksHealthAndWatchesTheWorkspace)
 {
   FakeJobs f;

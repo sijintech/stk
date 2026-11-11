@@ -101,10 +101,11 @@ TEST(JobsLayout, DropsOnJobsAndTransfersQueueUploads)
 struct UiOnFake {
   bridge::test::ManualLoop loop;
   bridge::test::TempDir dir{"jobs-ui"};
-  AppFixture f{"en", 1.0f, 1280, 900};
+  AppFixture f;
   std::unique_ptr<bridge::Client> client;
 
-  explicit UiOnFake(bool f03 = false, bool with_viewer = false)
+  explicit UiOnFake(bool f03 = false, bool with_viewer = false, int width = 1280)
+      : f("en", 1.0f, width, 900)
   {
     std::vector<std::string> args{"--jobs", dir.str() + "/model"};
     if (f03) {
@@ -205,6 +206,90 @@ TEST(JobsLayout, OpenCancelDialogDisablesDispatchAfterItsTaskOrScopeChanges)
     ASSERT_TRUE(u.pump([&] { return drained; }));
     EXPECT_EQ(wmtest::read_text(u.dir.str() + "/model/methods.log").find("task.cancel\n"), std::string::npos);
   }
+}
+
+/** Whether a widget on screen has exactly `text` (labels have no stable key). */
+bool screen_shows(UiOnFake &u, const std::string &text)
+{
+  u.f.drv->frame();
+  for (const auto &block : u.f.screen.ui()->blocks()) {
+    for (const ui::Widget &w : block->widgets()) {
+      if (w.text == text) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+size_t methods_named(UiOnFake &u, const std::string &method)
+{
+  const std::string log = wmtest::read_text(u.dir.str() + "/model/methods.log");
+  size_t n = 0;
+  for (size_t at = log.find(method + "\n"); at != std::string::npos; at = log.find(method + "\n", at + 1)) {
+    n += at == 0 || log[at - 1] == '\n';
+  }
+  return n;
+}
+
+TEST(JobsLayout, FinalLogFailureIsShownInTheLogAreaWithOneLocalRetry)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  UiOnFake u(false, false, 680);
+  app::JobsState &jobs = u.jobs();
+  app::AppStore &store = u.f.shell->store();
+  ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+  jobs.select_connection("runtime:lab");
+  ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty() && jobs.snapshot_time() > 0.0; }));
+
+  /* A synthetic failed task: confirmed partial stdout (a half line), then a final retryable error. */
+  const std::string task = "33333333333333333333333333333333";
+  auto chunk = [](const char *stream, const char *text, int64_t offset, int64_t next_offset) {
+    return io::Json{{"stream", stream}, {"text", text}, {"offset", offset}, {"next_offset", next_offset}};
+  };
+  const std::string error = "The local Runtime API is not running. Restore the local Runtime to read the task "
+      "output. This message must wrap without reducing the width of the retry button in a narrow window.";
+  const io::Json plan = io::Json::array(
+      {{{"chunks", io::Json::array({chunk("stdout", "开始 α\n第1步 能", 0, 21)})},
+        {"error", {{"code", "unavailable"}, {"message", error},
+                   {"retryable", true}, {"final", true}}}},
+       {{"chunks", io::Json::array({chunk("stdout", "量\n完成\n", 21, 32)})}, {"end", true}}});
+  const std::string model = u.dir.str() + "/model";
+  std::ofstream(model + "/logs-plan.json.tmp") << plan.dump();
+  std::filesystem::rename(model + "/logs-plan.json.tmp", model + "/logs-plan.json");
+  jobs.apply_snapshot(io::Json::array({{{"id", task}, {"name", "合成失败任务"}, {"state", "failed"},
+                                        {"workspace_id", jobs.workspace()}}}), 100.0);
+  jobs.select_task(task);
+  ASSERT_TRUE(u.pump([&] { return jobs.logs_failure().has_value(); }));
+
+  const std::string key = "a1/main/detail/retry_logs/" + std::to_string(jobs.log_retry_generation());
+  EXPECT_FALSE(screen_shows(u, std::string(store.tr("jobs.logs.live"))));
+  EXPECT_TRUE(screen_shows(u, std::string(store.tr("jobs.logs.failed"))));
+  EXPECT_TRUE(screen_shows(u, error));
+  const ui::Widget *retry = u.find(key);
+  ASSERT_NE(retry, nullptr);
+  ASSERT_TRUE(retry->enabled);
+  EXPECT_EQ(retry->text, std::string(store.tr("jobs.logs.retry")));
+  const auto visible = retry->rect.intersect(retry->clip);
+  EXPECT_GE(visible.w, 50.0f);
+  EXPECT_EQ(jobs.log_all().line_count(), 1u);
+  EXPECT_EQ(jobs.log_stdout().line_count(), 2u);
+  EXPECT_EQ(methods_named(u, "logs.subscribe"), 1u);
+  const size_t events = methods_named(u, "events.subscribe");
+
+  u.click(key);
+  ASSERT_TRUE(u.pump([&] { return jobs.logs_ended(); }));
+  EXPECT_EQ(u.find(key), nullptr);
+  EXPECT_FALSE(screen_shows(u, error));
+  EXPECT_TRUE(screen_shows(u, std::string(store.tr("jobs.logs.ended"))));
+  EXPECT_EQ(methods_named(u, "logs.subscribe"), 2u);
+  EXPECT_EQ(methods_named(u, "events.subscribe"), events);
+  ASSERT_EQ(jobs.log_all().line_count(), 3u);
+  EXPECT_EQ(jobs.log_all().line(0), "开始 α");
+  EXPECT_EQ(jobs.log_all().line(1), "第1步 能量");
+  EXPECT_EQ(jobs.log_all().line(2), "完成");
 }
 
 TEST(JobsLayout, FocusedTasksShowTheQueueAndRequireOpeningTheDraftToSubmit)

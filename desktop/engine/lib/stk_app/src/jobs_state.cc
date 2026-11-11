@@ -409,7 +409,7 @@ void JobsState::attach(bridge::Client *client)
   state_listener_.reset();
   transfer_listener_.reset();
   watch_.unsubscribe();
-  logs_sub_.unsubscribe();
+  stop_logs();
   events_sub_.unsubscribe();
   hub_sub_.unsubscribe();
   client_ = client;
@@ -613,7 +613,7 @@ void JobsState::select_connection(const std::string &id)
   active_ = id;
   watch_.unsubscribe();
   hub_sub_.unsubscribe();
-  logs_sub_.unsubscribe();
+  clear_logs();
   events_sub_.unsubscribe();
   nodes_.clear();
   node_.clear();
@@ -627,9 +627,6 @@ void JobsState::select_connection(const std::string &id)
   snapshot_time_ = 0.0;
   selected_.clear();
   clear_task_observation();
-  log_all_.clear();
-  log_out_.clear();
-  log_err_.clear();
   events_ = {};
   artifacts_.clear();
   release_preview();
@@ -1047,7 +1044,7 @@ void JobsState::select_node(const std::string &id)
   node_ = id;
   preferred_node_ = id;
   watch_.unsubscribe();
-  logs_sub_.unsubscribe();
+  stop_logs();
   events_sub_.unsubscribe();
   workspaces_.clear();
   workspace_.clear();
@@ -1370,11 +1367,8 @@ void JobsState::select_workspace(const std::string &id)
   snapshot_time_ = 0.0;
   selected_.clear();
   clear_task_observation();
-  logs_sub_.unsubscribe();
+  clear_logs();
   events_sub_.unsubscribe();
-  log_all_.clear();
-  log_out_.clear();
-  log_err_.clear();
   events_ = {};
   artifacts_.clear();
   release_preview();
@@ -1972,14 +1966,28 @@ void JobsState::select_task(const std::string &id)
   changed();
 }
 
-void JobsState::clear_task_detail()
+void JobsState::stop_logs()
 {
+  ++log_gen_;
   logs_sub_.unsubscribe();
-  events_sub_.unsubscribe();
+  log_failure_.reset();
+}
+
+void JobsState::clear_logs()
+{
+  stop_logs();
   log_all_.clear();
   log_out_.clear();
   log_err_.clear();
   logs_ended_ = false;
+  log_offsets_.clear();
+  log_partial_.clear();
+}
+
+void JobsState::clear_task_detail()
+{
+  clear_logs();
+  events_sub_.unsubscribe();
   events_ = {};
   artifacts_.clear();
   artifacts_for_state_.clear();
@@ -2105,29 +2113,39 @@ void JobsState::refresh_selected_task()
   changed();
 }
 
-void JobsState::resubscribe_detail()
+/**
+ * stdout + stderr of the selected task from the accepted offsets (none: the start). The combined
+ * view gets whole lines only: each stream's unfinished line waits in log_partial_, also across a
+ * final error and the retry that continues it.
+ */
+void JobsState::subscribe_logs()
 {
-  if (!ready() || selected_.empty()) {
-    return;
-  }
   std::weak_ptr<Alive> weak = alive_;
   const uint64_t epoch = detail_epoch_;
+  const uint64_t gen = ++log_gen_;
+  log_failure_.reset();
   bridge::LogsParams lp;
   lp.target = target();
   lp.task_id = selected_;
   lp.streams = {"stdout", "stderr"};
-  bridge::LogsHandlers lh;
-  /* Per-stream partial lines, so the combined view never interleaves half lines. */
-  auto partial = std::make_shared<std::map<std::string, std::string>>();
-  lh.on_chunk = [weak, epoch, partial](const bridge::LogChunk &c) {
+  /* Source byte offsets (next_offset), never the decoded text's length: they differ where invalid
+   * bytes became U+FFFD. They also arm the client's duplicate / overlap guard for this stream. */
+  lp.offsets = log_offsets_;
+  auto current = [weak, epoch, gen]() -> JobsState * {
     auto a = weak.lock();
-    if (!a || a->self->detail_epoch_ != epoch) {
+    return a && a->self->detail_epoch_ == epoch && a->self->log_gen_ == gen ? a->self : nullptr;
+  };
+  bridge::LogsHandlers lh;
+  lh.on_chunk = [current](const bridge::LogChunk &c) {
+    JobsState *s = current();
+    if (!s) {
       return;
     }
-    JobsState &s = *a->self;
     const bool err = c.stream == "stderr";
-    (err ? s.log_err_ : s.log_out_).append(c.text);
-    std::string &part = (*partial)[c.stream];
+    (err ? s->log_err_ : s->log_out_).append(c.text);
+    int64_t &at = s->log_offsets_[c.stream];
+    at = std::max(at, c.next_offset);
+    std::string &part = s->log_partial_[c.stream];
     part += c.text;
     size_t nl;
     std::string lines;
@@ -2136,35 +2154,63 @@ void JobsState::resubscribe_detail()
       part.erase(0, nl + 1);
     }
     if (!lines.empty()) {
-      s.log_all_.append(lines);
+      s->log_all_.append(lines);
     }
-    s.changed();
+    s->changed();
   };
-  lh.on_end = [weak, epoch, partial](const bridge::LogsEnd &) {
-    auto a = weak.lock();
-    if (!a || a->self->detail_epoch_ != epoch) {
+  lh.on_end = [current](const bridge::LogsEnd &) {
+    JobsState *s = current();
+    if (!s) {
       return;
     }
-    JobsState &s = *a->self;
-    for (auto &[stream, part] : *partial) {
+    for (auto &[stream, part] : s->log_partial_) {
       if (!part.empty()) {
-        s.log_all_.append((stream == "stderr" ? "[stderr] " : "") + part + "\n");
+        s->log_all_.append((stream == "stderr" ? "[stderr] " : "") + part + "\n");
         part.clear();
       }
     }
-    s.logs_ended_ = true;
-    s.changed();
+    s->logs_ended_ = true;
+    s->changed();
   };
-  lh.on_error = [weak, epoch](const Error &e, bool final) {
-    auto a = weak.lock();
-    if (!a || a->self->detail_epoch_ != epoch) {
+  lh.on_error = [current](const Error &e, bool final) {
+    JobsState *s = current();
+    /* Non-final: the bridge keeps polling (and replays after its own restart) by itself. */
+    if (!s || !final) {
       return;
     }
-    if (final) {
-      a->self->fail(std::string(a->self->store_.tr("jobs.op.logs")), e);
-    }
+    /* Ended without logs.end: keep the text and the unfinished lines for an explicit retry. */
+    s->log_failure_ = e;
+    s->store_.log(s->store_.catalog().format("jobs.status.failed",
+        {{"what", std::string(s->store_.tr("jobs.op.logs"))}, {"error", e.message}}));
+    s->changed();
   };
   logs_sub_ = client_->subscribe_logs(lp, std::move(lh));
+}
+
+bool JobsState::can_retry_logs() const
+{
+  return log_failure_ && log_failure_->retryable && log_failure_->code != ErrorCode::Unauthorized &&
+         !logs_ended_ && ready() && !selected_.empty() &&
+         !(hub() && (task_observation_ == TaskObservation::Denied || node_revoked()));
+}
+
+void JobsState::retry_logs(uint64_t generation)
+{
+  if (generation != log_gen_ || !can_retry_logs()) {
+    return;
+  }
+  subscribe_logs();
+  changed();
+}
+
+void JobsState::resubscribe_detail()
+{
+  if (!ready() || selected_.empty()) {
+    return;
+  }
+  std::weak_ptr<Alive> weak = alive_;
+  const uint64_t epoch = detail_epoch_;
+  subscribe_logs();
 
   bridge::EventsParams ep;
   ep.target = target();
