@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-11 01:32 UTC · Windows HDF5 路径断言修正
+
+`5c48faa5` 选择集成独立候选 `7b34a24a0b55829183502799dbad5c3766aeaaaf`，唯一修改为 `muferro_hdf5_view_test.cc` 的本地运行目录断言。UTF-8 本地绑定先解析为文件系统路径，再比较规范化后的精确运行目录。图谱、选择器、分量、范围、发布源摘要与拒绝场景继续由原断言检查。两次暂存扫描无发现。
+
+正式 Windows CPU `16541e8f` 的 1526 项中仅这条字符串断言失败，实际和预期的两种分隔符解析到相同 Windows 路径。独立候选相关套件 15/15；Root 正常 CMake 重建后同套件 15/15，零跳过，0.30 秒。目标 Windows 的新头执行待推送后确认。外部证据在 `root-delivery-20261111-153/windows-cpu-triage`，包含正式 JUnit、日志摘要、微软路径语义、独立与组合构建记录。当前旧头 Windows 原生作业继续运行，Desktop 整轮尚未终态。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42931986988)
+
 ## 2026-11-11 01:26 UTC · 文献设计交付与当前平台回归
 
 `6dbf7cb3` 选择集成实际 Claude 文献设计提交 `072f13139d04393810d9391c910879cc41475f8d`，唯一文件为 `docs/design/workbench-literature-entry.md`。Root 与独立源码审阅确认原问答身份、跨分栏待派发动作保护、冻结引用与选中 scopes、当前授权和明确刷新计数。点击数仍是设计目标。Claude 在干净独立 `stk-claude-literature-94/claude/workbench-literature-94` 从 `6dbf7cb3` 实现已分配的六条原生导航、UI 和测试路径；Root 维护公共契约、状态、整合及发布。原 `stk-claude` 的 Web 改动在原工作树内。此次暂存扫描无发现。
