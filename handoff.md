@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-11 05:06 UTC · 组合原生验证及 macOS 保持取证
+
+Root 组合桌面、文献与 UI 目标完成构建，文献 34/34、UI 132/132，零失败或跳过。`e4f4ecdc` 的原生取景验收补充于前节。Web `c29bd628` 的组合生产产物与隔离构建相同，真实 Runtime 两种窗口验收已绑定组合提交。
+
+`12b341e0034314ed3b11149b8c45c5c0ca3a9938` 按字节集成 `c929d0798c7b79647f9a79531d1f32967bf62ae9` 的单文件候选。仅在隔离静默对照的重显暂停保持断言首次拒绝时，记已有样本、五项判定、导航基准和时间差。保持 0.50 秒观察期、0.10 秒容差与原探测次数，未加 CI 用例。Linux 普通、Linux 开启探针、Apple 条件分支三种语法检查通过。实际 Cocoa 运行待目标 CI。外部证据 `root-delivery-20261111-159/cocoa-reshown-hold`。
+
+正式 Windows 原生工件的选定成员通过 CRC 核验，6/6、1179 秒、零跳过。PDF、MP4、HTML 视频各 20/20，验收图 160、161、161 张。PDF 的捕获目标创建 1 次、复用 428 次并回收，已接受帧最长启动 53 ms。macOS 普通静默 HTML 重显暂停与明确播放的两张官方 PNG 摘要已核，隔离对照的失败样本仍缺。汇总 `root-delivery-20261111-158/published-platform-ci-a184cd21/platform-terminal-summary.json`。 [Windows 工件](https://github.com/sijintech/stk/actions/runs/42955953031/artifacts/13829259510) [macOS 工件](https://github.com/sijintech/stk/actions/runs/42955953031/artifacts/13830325253)
+
 ## 2026-11-11 05:03 UTC · 同标签任务环境与桌面文献页取景
 
 Web `c29bd628eb1d1d7abd8aec9233b92e428ce1d2ee` 集成隔离 `abb7122a4896c2395ec13f377e4c266acb121238` 的两个路径。已配对标签页只保存执行节点和项目选择，正常启动列表返回后同时恢复当前仍列出的确切节点与工作区。断开、清空及失效范围回到环境设置。首次网络故障等待原刷新流程。旧任务、Viewer 和提交状态都不恢复。生产构建与隔离产物逐文件相同，完整 Playwright 247/247、零跳过，覆盖撤销、工作区变更、明确断开和首次列表失败。
