@@ -21,7 +21,7 @@ type DefaultPick = {scope:TaskScope;open:boolean;edits:number};
 // The stage one 在查看器中打开 click is in, for the footer: waiting for the list it needs (`listing`), or for the
 // build of the exact file it chose (`loading`, with that file's path). Each stage is its own object, the identity of
 // the current operation, so a later stage or a newer click never inherits an earlier one.
-type OpenProgress = {connection:ArtifactConnection;pick:DefaultPick;stage:'listing'|'loading';path:string};
+type OpenProgress = {connection:ArtifactConnection;stage:'listing'|'loading';path:string};
 // The scene 结果 shows in file mode, bound to the task scope and artifact path of the view.build that produced it.
 // Choosing another file only edits the choice: the canvas and its source stay until a new build succeeds.
 type Displayed = {scope:TaskScope;path:string;scene:Json};
@@ -275,13 +275,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   artifactTargetNow.current=artifactTarget;
   const artifactConnectionNow=useRef(artifactConnection);
   artifactConnectionNow.current=artifactConnection;
-  // The stage of the current 在查看器中打开 holds for the same connection and task while its request can still open
-  // something: waiting for its list with the pick kept (leaving 结果, 图谱, the compact history or a file choice drop
-  // it), or loading the file it chose while that file is still the choice, not yet shown, of a task still successful.
-  // Anything else ends it for good; the requests keep their own checks. It is shown only while 结果文件 is in view
-  // with no history over it, so a build still pending on the return is named again rather than offered as 加载视图.
-  const openingHeld=opening&&busy&&opening.connection===artifactConnection&&opening.pick.scope===selection&&
-    (opening.stage==='listing'?!path&&defaultPick.current===opening.pick:
+  // The stage of the current 在查看器中打开 holds for the same connection (and so task) while its request can still
+  // open something: waiting for its list with no file chosen (dropPick ends it with the pick: leaving or reopening
+  // 结果, 图谱, the compact history, a file choice or another task), or loading the file it chose while that file is
+  // still the choice, not yet shown, of a task still successful (as the build's own check). Anything else ends it for
+  // good; the requests keep their own checks. It is shown only while 结果文件 is in view with no history over it, so a
+  // build still pending on the return is named again rather than offered as 加载视图.
+  const openingHeld=opening&&busy&&opening.connection===artifactConnection&&
+    (opening.stage==='listing'?!path:
       path===opening.path&&shown?.path!==path&&completedTaskScope===selection)?opening:null;
   if(opening&&!openingHeld)setOpening(null);
   const openProgress=openingHeld&&tab==='results'&&analysis==='file'&&!overlay?openingHeld:null;
@@ -471,7 +472,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     let progress:OpenProgress|null=null;
     const enter=(stage:OpenProgress['stage'],path='')=>{
       if(!pick)return;
-      const previous=progress,next:OpenProgress={connection,pick,stage,path};
+      const previous=progress,next:OpenProgress={connection,stage,path};
       progress=next;
       setOpening(current=>current===previous?next:current);
     };

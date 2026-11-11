@@ -6665,6 +6665,8 @@ for (const viewport of viewports) {
     const awayFromList: [string, (page: Page, hub: Hub) => Promise<void>, '结果' | '任务' | '工作台'][] = [
       ['going to 任务', async page => { await go(page, '任务'); }, '任务'],
       ['going to 工作台', async page => { await go(page, '工作台'); }, '工作台'],
+      // 结果 again, from 结果: the page stays as it is, but the click no longer opens anything.
+      ['choosing 结果 again', async page => { await go(page, '结果'); }, '结果'],
       ['switching to 图谱 and back', async page => { await modeTab(page, '图谱').click(); await modeTab(page, '结果文件').click(); }, '结果'],
       ['choosing a file', async page => { await fileList(page).selectOption('scalar-0.vti'); }, '结果'],
       ['selecting another task', async page => { await go(page, '任务'); await taskRow(page, '对照任务').click(); }, '任务'],
