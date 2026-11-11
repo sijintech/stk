@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-11 00:32 UTC · 共用工作台发布到主线
+
+远端 `main` 从 `ee0515122d2e7a565705e63c98694ad0bece0c2b` 快进至 `16541e8f1c41c0ed8387048e6770cd5f190c6120`，推送后独立查验完整 SHA。21 个提交范围扫描零发现。包含双端导航、会话列、Web 键盘阅读、桌面快速撰写、MuPRO HDF5 原始体素与双语指南。保留既有 AOCI 和状态文档工作区改动。
+
+同头 Pages 和 Secret scan 已通过。公共中英文指南实际返回 HTTP 200，均确认新撰写和体素入口。响应摘要在外部 `root-delivery-20261111-150/published-pages`。新头 Desktop 和 Runtime 继续运行，macOS 新挂起对照待正式目标结果。 [中文指南](https://stk.pages.dev/user_guide/) [英文指南](https://stk.pages.dev/en/user_guide/) [Pages](https://github.com/sijintech/stk/actions/runs/42931986851) [Secret scan](https://github.com/sijintech/stk/actions/runs/42931986854) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42931986988) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42931986868)
+
+`d70c2a2e` 原生组合二进制的 976 项完整项目回归已启动，未以该次未终态运行替代上节 37 项定向和前头 976/976。下一批继续简化当前问答的状态与专业操作，按相同真实窗口与显式准备/发送边界验收。
+
 ## 2026-11-11 00:29 UTC · 共用会话列与键盘阅读
 
 `d70c2a2e` 和 `9bddb062` 分别按逐字节相同的补丁集成独立原生 `c1325d46`、Web `5fb8d9e5`。聚焦项目问答和 Web 会话使用居中单列，宽窗上限 880 逻辑像素，窄窗使用可用宽度。常规会话正文独立滚动，输入在下方，主要按钮按所需宽度靠右。桌面「写问题」仍将原草稿放到页首并聚焦，准备与发送为显式操作。普通分栏、完整已保存问答浏览和结构化 Agent 沿各自现有布局。`b1ae4598` 更新统一工作台设计。
