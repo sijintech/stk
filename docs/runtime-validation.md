@@ -1,5 +1,17 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-11 06:08 UTC · 已收集 MuFerro DAT 在发起窗口打开
+
+原生 `4717b298` 集成独立 `df94b58e` 的发起窗口与项目运行校验。一次性标记只用于按钮发起的内部回调，Python 历史保留可重新执行的普通命令。`1e55d490` 接通 Viewer 尚未加载预设的首次明确打开，等准确预设后使用原文件校验和图请求。`f096a67d` 区分被动元数据回执与 Viewer 操作。运行、发起页或目标 Viewer 的范围失效时，取消待采纳画面。文档站 38 页构建通过。
+
+Linux X11 英文 1600×1100、中文 680×1000，固定起点是项目区最大化、选中已收集合成 DAT 的第 8 版项目、Viewer 尚未加载预设。最终头两窗均一次点击「查看收集结果」，实际严格 Bridge 读取准确预设并显示第 2 步，随后既有相邻帧预取读取第 0 步。将同一次已验证的回执延迟到点击 Python 之后，两窗均保留 Python 草稿与空白 Viewer，零图求值。旧头同一回执会启动第 2 步图及预取，空白 Viewer 被改写。测量无项目写入、任务操作或模型调用，SQLite 摘要一致。证据 `root-delivery-20261111-160/dat-origin-window/guard-*`，原生二进制 SHA256 `5bbe370434ff6ebabdd95a5c1adaf473d70161d401944ebf67edecb87f06e2aa`。
+
+最终原生 DAT、HDF5、Python Viewer 与相邻仿真 11/11，零跳过。Python 工作流与 Bridge 39 通过、1 项有许可才运行的用例跳过。测试包含另一窗口起发、求值挂起后隐藏目标、旧画面及草稿保留、正常点击以及历史命令。证据 `root-delivery-20261111-160/dAT-collection-origin`。真实 MuPRO 许可与目标系统窗口仍待验证。
+
+Claude 102 已在独立 `claude/workbench-web-log-continuation-102` worktree 从 `1e55d490` 开始 Web 任务日志续读。范围为既有日志栏、相关样式及定向回归，复用 `task.logs` 的源字节偏移。Root 负责补丁审阅、真实 Runtime 验收、主线集成与 CI。
+
+发布头 `09efc0d1` 的 macOS 已结束。CPU 1597/1597、Metal 254/254，必测原生 4/6，MP4 与 HTML 视频仍在隐藏期间的位置保持断言失败。独立静默对照两例在重显后只触发播放状态断言，约 105 和 79 毫秒时 DOM 已从暂停变为播放，其余四项断言通过。现有平台记录只证明了隐藏时的原生暂停回执。Windows 原生作业仍在运行，推送等待 Desktop 整轮终态。 [macOS 工件](https://github.com/sijintech/stk/actions/runs/42963571163/artifacts/13832491939) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42963571163)
+
 ## 2026-11-11 05:39 UTC · 真实 Runtime 重连、等值面参数及 MuPRO 试点文档
 
 原生 `48e6d422` 使用实际本机 Runtime 与生产 Bridge 再验证一键续读。固定起点为 Linux X11 英文 1600×1100、中文 680×1000 的聚焦任务页，已选同一运行中合成任务，stdout 已接受 27 源字节且包含半行。实际停止隔离 API 并保留 supervisor，原订阅先收到非最终错误。随后终止所测试桌面拥有的 Bridge 子进程，第二代实际提交携带 stdout 偏移 27 的自动重订阅，因本机 API 停止收到可重试拒绝。重启 API 后同一任务产出剩余 stdout、stderr 并退出。两窗一次点击「重试日志」即完成，测量中唯一请求为该任务的日志订阅，精确从 stdout 27 和 stderr 0 开始，半行及诊断各出现一次。旧版中文窄窗同一场景仍显示「实时」，无法续读。连接与队列走各自的「刷新」入口。实测未替换 Bridge 响应，证据 `root-delivery-20261111-160/local-runtime-reconnect`。
