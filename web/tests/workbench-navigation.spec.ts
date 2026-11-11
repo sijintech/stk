@@ -15,6 +15,7 @@ test.use({serviceWorkers: 'block', launchOptions: {args: ['--use-angle=swiftshad
 
 const ORIGIN = 'http://localhost:47883'; // secure context for crypto.randomUUID; page.route answers before any socket
 const node = 'a'.repeat(32), ws = 'b'.repeat(32), task = 'c'.repeat(32);
+const createdId = (n: number) => '7'.repeat(30) + n.toString(16).padStart(2, '0'); // synthetic created workspaces
 const row = {id: task, workspace_id: ws, name: '解析场验证', state: 'succeeded', updated_at: '2026-11-10T12:00:00.000000Z'};
 const device = {id: node, role: 'node', name: '节点甲', online: true, revoked: false, last_seen: 1794830400,
   snapshot: {tasks: [row], workspaces: [{id: ws, name: '项目一'}], features: ['read', 'task.get', 'task.artifacts', 'task.events']}};
@@ -100,6 +101,16 @@ class Hub {
   others: Record<string, any>[] = [];
   down = false;
   review = false;
+  // workspace.create answers with a new synthetic workspace (createdId(n) for the n-th create), which the target
+  // node's snapshot then lists, as its next heartbeat would. 'review' sends it to execution review instead, and
+  // The malformed replies omit or corrupt the workspace ID. `creates` records each create payload and target node.
+  // `listLater` keeps a created workspace out of the snapshot until listCreated(), as a node whose next heartbeat
+  // has not arrived yet.
+  createReply: 'normal' | 'review' | 'no-id' | 'invalid-id' = 'normal';
+  listLater = false;
+  readonly creates: {node: string; name: string}[] = [];
+  private unlisted: (() => void)[] = [];
+  listCreated() { for (const list of this.unlisted.splice(0)) list(); }
   readonly actionRows: Record<string, any>[] = [];
   logsFail = false;
   readonly viewErrors = new Map<string, string>();
@@ -261,6 +272,25 @@ class Hub {
       }
       if (body.kind === 'task.artifacts') return json({id: body.id, state: 'succeeded',
         result: await this.publishedArtifacts(body.payload.task_id)});
+      if (body.kind === 'workspace.create') {
+        this.creates.push({node: body.node_id, name: body.payload.name});
+        if (this.createReply === 'review') {
+          const item = {id: body.id, state: 'review', review_reason: '新建项目需要执行复核', request: {kind: body.kind, payload: body.payload}};
+          this.actionRows.unshift(item);
+          return json(item);
+        }
+        const made = {id: createdId(this.creates.length), name: String(body.payload.name).trim()};
+        const list = (target: Record<string, any>) => ({...target, snapshot: {...target.snapshot,
+          workspaces: [...target.snapshot.workspaces, made]}});
+        const listing = () => {
+          if (this.device.id === body.node_id) this.device = list(this.device) as typeof device;
+          else this.others = this.others.map(other => other.id === body.node_id ? list(other) : other);
+        };
+        if (this.listLater) this.unlisted.push(listing); else listing();
+        const result = this.createReply === 'no-id' ? {name: made.name} :
+          this.createReply === 'invalid-id' ? {...made, id: 'not-a-workspace'} : made;
+        return json({id: body.id, state: 'succeeded', result});
+      }
       if (body.kind === 'task.submit') {
         if (!this.review) return json({id: body.id, state: 'succeeded', result: {id: task}});
         const item = {id: body.id, state: 'review', review_reason: '新命令需要执行复核', request: {kind: body.kind, payload: body.payload}};
@@ -4577,5 +4607,267 @@ test('automatic folding leaves outside focus alone and reopens when the selected
   await page.getByLabel('执行节点').selectOption(node);
   await project(page).selectOption(ws);
   await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
+  expect(errors).toEqual([]);
+});
+
+// 新建任务 after an explicit 新建 in 运行环境: when the create receipt names its workspace and that workspace is chosen
+// for the same node and selection, the form is open by default. Its own buttons remain the only submission. An
+// ordinary choice, a reply after the scope or connection changed, a review or a receipt without an ID leave it as it
+// was, and so does an earlier manual opening or closing. A new workspace named like an existing one binds by its ID.
+const createButton = (page: Page) => settings(page, '运行环境').getByRole('button', {name: '新建', exact: true});
+const SPEC_DEFAULT = '{"argv":["python3","analysis.py"],"outputs":[]}';
+async function createWorkspace(page: Page, name: string) {
+  await page.getByLabel('项目名称').fill(name);
+  await createButton(page).click();
+}
+// 任务 with a node chosen and 运行环境 still open from first setup.
+async function nodeChosen(page: Page, hub: Hub) {
+  const errors = await start(page, hub);
+  await go(page, '任务');
+  await page.getByLabel('执行节点').selectOption(node);
+  await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
+  return errors;
+}
+
+for (const viewport of viewports) {
+  test(`${viewport.name} a confirmed new workspace shows 新建任务 with no disclosure click and no submission`, async ({page}) => {
+    await page.setViewportSize({width: viewport.width, height: viewport.height});
+    const hub = new Hub();
+    const errors = await nodeChosen(page, hub);
+    await createWorkspace(page, '项目一');
+    const made = createdId(1);
+    await expect(project(page)).toHaveValue(made);
+    await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+    await expect(disclosure(page, '运行环境')).toHaveText('运行环境 · 节点甲 · 项目一');
+    await expect(footer(page)).toContainText('就绪');
+    expect(hub.creates).toEqual([{node, name: '项目一'}]);
+    const surface = page.locator('aside.tasks');
+    await surface.evaluate(el => { el.scrollTop = 0; });
+    await pause(page);
+    // Fixed start: 任务 at offset 0, the new workspace just confirmed and chosen, 运行环境 folded by itself.
+    const sent = traffic(page), r = route(page, `created-workspace-${viewport.name}`);
+    await page.screenshot({path: test.info().outputPath(`${viewport.name}-created-workspace.png`)});
+    await expectActive(page, '任务');
+    await expect(queue(page)).toContainText('项目一 中暂无任务，可在下方「新建任务」中提交。');
+    await expect(settings(page, '新建任务')).toHaveAttribute('open', '');
+    await expect(disclosure(page, '新建任务')).toHaveText('新建任务 · 项目一');
+    const spec = page.getByLabel('TaskSpec'), example = page.getByRole('button', {name: '运行解析场示例'});
+    const review = page.getByRole('button', {name: '提交复核'});
+    await expect(spec).toHaveValue(SPEC_DEFAULT);
+    await expect(example).toBeEnabled();
+    await expect(review).toBeEnabled();
+    for (const target of [example, spec, review]) await expect(target).toBeInViewport({ratio: 1});
+    const box = async (target: Locator) => (await target.boundingBox())!;
+    const geometry = {viewport, panel: await box(surface), summary: await box(disclosure(page, '新建任务')),
+      example: await box(example), spec: await box(spec), submit: await box(review),
+      scrollTop: await surface.evaluate(el => el.scrollTop)};
+    expect(geometry.scrollTop).toBe(0);
+    sent.stop();
+    expect(sent.seen).toEqual([]);
+    expect(hub.creates).toHaveLength(1);
+    expect([hub.calls, hub.messages, hub.replies, errors]).toEqual([[], [], 0, []]);
+    expect(r.record).toMatchObject({clicks: 0, selects: 0});
+    r.save();
+    writeFileSync(test.info().outputPath('created-workspace-geometry.json'), JSON.stringify({
+      fixedStart: '任务 at offset 0, new synthetic workspace confirmed and chosen, 运行环境 folded automatically',
+      createdWorkspace: made, measuredClicks: r.record.clicks, measuredRequests: sent.seen, ...geometry,
+    }, null, 2));
+  });
+}
+
+test('the form opened for a new workspace submits only on its explicit button, for that workspace', async ({page}) => {
+  const hub = new Hub();
+  const errors = await nodeChosen(page, hub);
+  const sent = posts(page);
+  await createWorkspace(page, '项目一');
+  const made = createdId(1);
+  await expect(settings(page, '新建任务')).toHaveAttribute('open', '');
+  await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+  await expect(footer(page)).toContainText('就绪');
+  expect(writes(sent.seen)).toEqual(['/api/v1/actions workspace.create']);
+  const submitted = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/api/v1/actions') &&
+    request.postDataJSON()?.kind === 'task.submit');
+  await page.getByRole('button', {name: '运行解析场示例'}).click();
+  const body = (await submitted).postDataJSON();
+  expect(body.node_id).toBe(node);
+  expect(body.payload).toMatchObject({template: 'demo-field', spec: {workspace_id: made, name: '解析场验证'}});
+  await expect(footer(page)).toContainText('就绪');
+  sent.stop();
+  expect(writes(sent.seen)).toEqual(['/api/v1/actions workspace.create', '/api/v1/actions task.submit']);
+  await expectActive(page, '任务');
+  await expect(project(page)).toHaveValue(made);
+  await expect(settings(page, '新建任务')).toHaveAttribute('open', '');
+  expect([hub.calls, hub.messages, hub.replies, errors]).toEqual([[], [], 0, []]);
+});
+
+test('ordinary choices, late replies, reviews and malformed receipts leave 新建任务 folded', async ({page}) => {
+  const hub = new Hub();
+  hub.device = twoProjects;
+  hub.others = [{...device, id: node2, name: '节点乙', snapshot: {...device.snapshot, tasks: [], workspaces: [{id: ws2, name: '项目二'}]}}];
+  const errors = await nodeChosen(page, hub);
+  const sent = posts(page);
+  const folded = async () => {
+    await expect(footer(page)).toContainText('就绪');
+    await expect(settings(page, '新建任务')).not.toHaveAttribute('open', '');
+    await expect(page.getByLabel('TaskSpec')).toBeHidden();
+  };
+  // An ordinary choice of an existing workspace folds 运行环境 and leaves 新建任务 closed.
+  await project(page).selectOption(ws);
+  await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+  await folded();
+  await disclosure(page, '运行环境').click();
+  await project(page).selectOption(ws2);
+  await folded();
+  // A create answered after the node changed (and changed back) is not adopted.
+  let release = hub.hold('workspace.create');
+  await createWorkspace(page, '项目三');
+  await expect.poll(() => hub.reached.has('workspace.create')).toBe(true);
+  await page.getByLabel('执行节点').selectOption(node2);
+  await page.getByLabel('执行节点').selectOption(node);
+  release();
+  await expect.poll(() => hub.creates.length).toBe(1);
+  await expect(project(page).locator('option', {hasText: '项目三'})).toHaveCount(1);
+  await expect(project(page)).toHaveValue('');
+  await folded();
+  // A create answered after another task selection in the same node is not adopted either.
+  hub.reached.clear();
+  await project(page).selectOption(ws);
+  release = hub.hold('workspace.create');
+  await createWorkspace(page, '项目四');
+  await expect.poll(() => hub.reached.has('workspace.create')).toBe(true);
+  await taskRow(page, '解析场验证').click();
+  release();
+  await expect.poll(() => hub.creates.length).toBe(2);
+  await expect(project(page)).toHaveValue(ws);
+  await folded();
+  // Review and malformed create receipts leave the selected workspace in place.
+  hub.createReply = 'review';
+  await createWorkspace(page, '项目五');
+  await expect(page.locator('aside.tasks article.review')).toContainText('新建项目需要执行复核');
+  await expect(project(page)).toHaveValue(ws);
+  await folded();
+  for (const [reply, name] of [['no-id', '项目六'], ['invalid-id', '项目七']] as const) {
+    hub.createReply = reply;
+    await createWorkspace(page, name);
+    await expect(project(page).locator('option', {hasText: name})).toHaveCount(1);
+    await expect(project(page)).toHaveValue(ws);
+    await folded();
+  }
+  await expect(disclosure(page, '新建任务')).toHaveText('新建任务 · 项目一');
+  await expectActive(page, '任务');
+  sent.stop();
+  expect(writes(sent.seen).filter(s => !s.endsWith(' workspace.create'))).toEqual([]);
+  expect(writes(sent.seen)).toHaveLength(5);
+  expect(errors).toEqual([]);
+});
+
+test('a create answered after disconnecting and reconnecting is not adopted', async ({page}) => {
+  const hub = new Hub();
+  const errors = await nodeChosen(page, hub);
+  const release = hub.hold('workspace.create');
+  await createWorkspace(page, '项目三');
+  await expect.poll(() => hub.reached.has('workspace.create')).toBe(true);
+  await page.locator('header').getByRole('button', {name: '断开'}).click();
+  await page.getByText('使用已有设备凭据').click();
+  await page.getByLabel('设备凭据').fill('abcdefghijklmnopqrstu');
+  await page.getByRole('button', {name: '连接', exact: true}).click();
+  await expectActive(page, '工作台');
+  const answered = page.waitForResponse(response => response.url().endsWith('/api/v1/actions') &&
+    response.request().method() === 'POST' && response.request().postDataJSON()?.kind === 'workspace.create');
+  release();
+  expect((await (await answered).json()).result.id).toBe(createdId(1));
+  await page.waitForTimeout(200); // the former page's continuation of that reply has run
+  await go(page, '任务');
+  await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
+  await expect(page.getByLabel('执行节点')).toHaveValue('');
+  await expect(settings(page, '新建任务')).not.toHaveAttribute('open', '');
+  await expect(footer(page)).toContainText('就绪');
+  expect(errors).toEqual([]);
+});
+
+test('a 新建任务 closed by hand with a draft stays closed, with its draft, after a create', async ({page}) => {
+  const hub = new Hub();
+  hub.device = twoProjects;
+  const errors = await nodeChosen(page, hub);
+  const sent = posts(page);
+  // Opened, edited and closed by hand before any create: a new workspace leaves it closed and the draft as typed.
+  await disclosure(page, '新建任务').click();
+  await page.getByLabel('TaskSpec').fill('{"argv":["python3","draft.py"],"outputs":[]}');
+  await disclosure(page, '新建任务').click();
+  await createWorkspace(page, '项目三');
+  await expect(project(page)).toHaveValue(createdId(1));
+  await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+  await expect(footer(page)).toContainText('就绪');
+  await expect(settings(page, '新建任务')).not.toHaveAttribute('open', '');
+  await disclosure(page, '新建任务').click();
+  await expect(page.getByLabel('TaskSpec')).toHaveValue('{"argv":["python3","draft.py"],"outputs":[]}');
+  sent.stop();
+  expect(writes(sent.seen)).toEqual(['/api/v1/actions workspace.create']);
+  expect(errors).toEqual([]);
+});
+
+test('after the automatic opening, ordinary choices keep 新建任务 open and a manual close holds for later creates', async ({page}) => {
+  const hub = new Hub();
+  hub.device = twoProjects;
+  const errors = await nodeChosen(page, hub);
+  const sent = posts(page);
+  await createWorkspace(page, '项目三');
+  await expect(project(page)).toHaveValue(createdId(1));
+  await expect(settings(page, '新建任务')).toHaveAttribute('open', '');
+  await page.getByLabel('TaskSpec').fill('{"argv":["python3","draft.py"],"outputs":[]}');
+  await disclosure(page, '运行环境').click();
+  await project(page).selectOption(ws2);
+  await expect(settings(page, '新建任务')).toHaveAttribute('open', '');
+  await disclosure(page, '新建任务').click();
+  await createWorkspace(page, '项目四');
+  await expect(project(page)).toHaveValue(createdId(2));
+  await expect(footer(page)).toContainText('就绪');
+  await expect(settings(page, '新建任务')).not.toHaveAttribute('open', '');
+  await disclosure(page, '新建任务').click();
+  await expect(page.getByLabel('TaskSpec')).toHaveValue('{"argv":["python3","draft.py"],"outputs":[]}');
+  await expectActive(page, '任务');
+  sent.stop();
+  expect(writes(sent.seen)).toEqual(['/api/v1/actions workspace.create', '/api/v1/actions workspace.create']);
+  expect(errors).toEqual([]);
+});
+
+test('a new workspace the node lists only later opens 新建任务 at once, keeps it through the fold and submits to it', async ({page}) => {
+  await page.setViewportSize({width: 1440, height: 900});
+  const hub = new Hub();
+  hub.listLater = true;
+  const errors = await nodeChosen(page, hub);
+  const sent = posts(page);
+  await createWorkspace(page, '项目一');
+  const made = createdId(1);
+  await expect(footer(page)).toContainText('就绪');
+  // The receipt is the evidence; the snapshot does not list the workspace yet, so 运行环境 stays open over it and
+  // its 项目 list has no option for the chosen ID (the summaries name it by its ID).
+  await expect(project(page)).toHaveValue('');
+  await expect(settings(page, '新建任务')).toHaveAttribute('open', '');
+  await expect(settings(page, '运行环境')).toHaveAttribute('open', '');
+  await expect(disclosure(page, '新建任务')).toHaveText(`新建任务 · ${made.slice(0, 8)}`);
+  const spec = page.getByLabel('TaskSpec'), review = page.getByRole('button', {name: '提交复核'});
+  await spec.fill('{"argv":["python3","draft.py"],"outputs":[]}');
+  const before = (await review.boundingBox())!;
+  hub.listCreated();
+  hub.publish();
+  await expect(settings(page, '运行环境')).not.toHaveAttribute('open', '');
+  await expect(disclosure(page, '新建任务')).toHaveText('新建任务 · 项目一');
+  await expect(project(page)).toHaveValue(made);
+  await expect(settings(page, '新建任务')).toHaveAttribute('open', '');
+  await expect(spec).toHaveValue('{"argv":["python3","draft.py"],"outputs":[]}');
+  const after = (await review.boundingBox())!;
+  writeFileSync(test.info().outputPath('listed-later-geometry.json'), JSON.stringify({
+    viewport: {width: 1440, height: 900}, createdWorkspace: made, submitBeforeListing: before, submitAfterFold: after,
+    submitShiftY: after.y - before.y}, null, 2));
+  expect(writes(sent.seen)).toEqual(['/api/v1/actions workspace.create']);
+  const submitted = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/api/v1/actions') &&
+    request.postDataJSON()?.kind === 'task.submit');
+  await review.click();
+  expect((await submitted).postDataJSON().payload).toEqual({spec: {workspace_id: made, argv: ['python3', 'draft.py'], outputs: []}});
+  await expect(footer(page)).toContainText('就绪');
+  sent.stop();
+  expect(writes(sent.seen)).toEqual(['/api/v1/actions workspace.create', '/api/v1/actions task.submit']);
+  await expectActive(page, '任务');
   expect(errors).toEqual([]);
 });

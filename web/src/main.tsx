@@ -20,6 +20,9 @@ type Displayed = {scope:TaskScope;path:string;scene:Json};
 // Persistent sections: 工作台 is the conversation home. All three stay mounted; only the active one is shown.
 type Section='workbench'|'tasks'|'results';
 type EnvironmentDisclosure='setup'|'auto-closed'|'open'|'closed';
+// 新建任务 is closed by default. A workspace created and adopted from 运行环境 opens it once; any summary click is the
+// user's choice from then on, which later creations keep.
+type NewTaskDisclosure='default'|'open'|'closed';
 const SECTIONS:readonly (readonly [Section,string])[]=[['workbench','工作台'],['tasks','任务'],['results','结果']];
 // Up to this width the conversation history is opened on demand over the active section instead of a fixed column.
 // The native workbench switches its rail at the same logical width.
@@ -88,6 +91,8 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
   const [environmentDisclosure,setEnvironmentDisclosure]=useState<EnvironmentDisclosure>('setup');
   const environment=useRef<HTMLDetailsElement>(null);
+  const [newTaskDisclosure,setNewTaskDisclosure]=useState<NewTaskDisclosure>('default');
+  const newTaskOpen=newTaskDisclosure==='open';
   const [probeText,setProbeText]=useState(''),[graphProbeText,setGraphProbeText]=useState(''),[viewError,setViewError]=useState(''),[graphError,setGraphError]=useState('');
   const [graphSource,setGraphSource]=useState<GraphSource|null>(null);
   // The Tasks shortcut that opened 结果 and the task scope it was pressed in. The next navigation forgets it; only
@@ -182,6 +187,19 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     setArtifacts(result);
   },[]);
   function selectWorkspace(id:string){clearTask();setWorkspace(id);}
+  // 新建 in 运行环境: the receipt's workspace is chosen only while this instance and the node and selection the create
+  // was sent from are current (scopeVersion), and only by the ID the Runtime returned. Adopting it is the evidence
+  // that opens 新建任务 by default; a review, a receipt without an ID or a late reply changes nothing. Nothing is
+  // submitted, no draft is touched and the section stays as it is.
+  async function createWorkspace(){
+    const version=scopeVersion.current;
+    const a=await invoke('workspace.create',{name});
+    const id:unknown=a.result?.id;
+    if(!alive.current||scopeVersion.current!==version||a.state!=='succeeded'||
+       typeof id!=='string'||!/^[a-f0-9]{32}$/.test(id))return;
+    selectWorkspace(id);
+    setNewTaskDisclosure(current=>current==='default'?'open':current);
+  }
   const refresh=useCallback(async()=>{
     if(refreshing.current)return;refreshing.current=true;
     try{
@@ -453,9 +471,11 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       <label>执行节点<select value={node} onChange={e=>{clearTask();setNode(e.target.value);setWorkspace('');}}><option value="">选择节点</option>{nodes.map(d=><option key={d.id} value={d.id}>{d.online?'●':'○'} {d.name}</option>)}</select></label>
       {selected&&<p className="muted">{selected.online?'在线':'离线'} · 最近更新 {selected.last_seen?new Date(selected.last_seen*1000).toLocaleString():'尚未连接'}{selected.snapshot.cpu_percent!==undefined&&<><br/>CPU {selected.snapshot.cpu_percent}% · 内存 {selected.snapshot.memory_percent}%</>}</p>}
       <label>项目<select value={workspace} onChange={e=>selectWorkspace(e.target.value)}><option value="">选择项目</option>{workspaces.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
-      <div className="inline"><input aria-label="项目名称" value={name} onChange={e=>setName(e.target.value)}/><button disabled={busy||!node} onClick={()=>void run(async()=>{const version=scopeVersion.current;const a=await invoke('workspace.create',{name});if(a.result&&scopeVersion.current===version)selectWorkspace(a.result.id);})}>新建</button></div>
+      <div className="inline"><input aria-label="项目名称" value={name} onChange={e=>setName(e.target.value)}/><button disabled={busy||!node} onClick={()=>void run(createWorkspace)}>新建</button></div>
       </details>
-      <details className="setting"><summary>新建任务{workspace?` · ${workspaceName(workspace)}`:' · 先选择项目'}</summary>
+      <details className="setting" open={newTaskOpen}><summary onClick={event=>{
+        event.preventDefault();setNewTaskDisclosure(newTaskOpen?'closed':'open');
+      }}>新建任务{workspace?` · ${workspaceName(workspace)}`:' · 先选择项目'}</summary>
       <button type="button" className="primary wide" disabled={busy||!workspace} onClick={()=>void run(async()=>{const version=scopeVersion.current;const a=await invoke('task.submit',{template:'demo-field',spec:{workspace_id:workspace,name:'解析场验证',argv:['@python','-m','suan.control.demo_job'],outputs:['scalar-0.vti','scalar-1.vti','vector.vti']}});if(a.result&&scopeVersion.current===version)selectTask(a.result.id,workspace);})}>运行解析场示例</button>
       <p className="muted">自定义任务：输入 TaskSpec JSON。新命令将先进入执行复核。</p><form onSubmit={e=>{e.preventDefault();const form=new FormData(e.currentTarget);void run(async()=>{const spec=JSON.parse(String(form.get('spec')));await invoke('task.submit',{spec:{workspace_id:workspace,...spec}});});}}><textarea name="spec" aria-label="TaskSpec" defaultValue={'{"argv":["python3","analysis.py"],"outputs":[]}'}/><button disabled={busy||!workspace}>提交复核</button></form>
       </details>
