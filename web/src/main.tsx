@@ -17,6 +17,11 @@ type ObservedTask = {scope:TaskScope;name:string;state:string;cancelRequested:bo
 type ArtifactConnection = {scope:TaskScope;modern:boolean;observesTask:boolean};
 type ArtifactTarget = {connection:ArtifactConnection;succeeded:boolean;exactTerminal:boolean};
 type ArtifactRead = {target:ArtifactTarget;controller:AbortController;result:Promise<Json[]|null>;accepted?:Json[]};
+type DefaultPick = {scope:TaskScope;open:boolean;edits:number};
+// The stage one 在查看器中打开 click is in, for the footer: waiting for the list it needs (`listing`), or for the
+// build of the exact file it chose (`loading`, with that file's path). Each stage is its own object, the identity of
+// the current operation, so a later stage or a newer click never inherits an earlier one.
+type OpenProgress = {connection:ArtifactConnection;pick:DefaultPick;stage:'listing'|'loading';path:string};
 // The scene 结果 shows in file mode, bound to the task scope and artifact path of the view.build that produced it.
 // Choosing another file only edits the choice: the canvas and its source stay until a new build succeeds.
 type Displayed = {scope:TaskScope;path:string;scene:Json};
@@ -191,7 +196,12 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // The explicit Tasks shortcut 在查看器中打开 may choose the sole file from its own accepted reply for a successful
   // task, and open a sole published VTI in one step (`open`: the click was in 切片 view; `edits`: viewEdits then).
   // Leaving 结果, opening history over it, switching mode, editing the file choice or changing tasks drops the pick.
-  const defaultPick=useRef<{scope:TaskScope;open:boolean;edits:number}|null>(null),fileEdited=useRef(false);
+  const defaultPick=useRef<DefaultPick|null>(null),fileEdited=useRef(false);
+  // The current stage of that click while it is the one in progress; see openProgress below for when it is shown.
+  const [opening,setOpening]=useState<OpenProgress|null>(null);
+  // Dropping the pick ends a click still waiting for its list (that wait no longer opens anything). A build already
+  // sent keeps its stage, which the render checks against the page, connection, task and file.
+  const dropPick=useCallback(()=>{defaultPick.current=null;setOpening(current=>current?.stage==='listing'?null:current);},[]);
   const completedTaskScopeNow=useRef<TaskScope|null>(null);
   const exactCompletedTaskScopeNow=useRef<TaskScope|null>(null);
   // 结果 is shown in 结果文件 mode with no compact history over it, as of the latest render.
@@ -254,6 +264,17 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   artifactTargetNow.current=artifactTarget;
   const artifactConnectionNow=useRef(artifactConnection);
   artifactConnectionNow.current=artifactConnection;
+  // The stage of the current 在查看器中打开 holds for the same connection and task while its request can still open
+  // something: waiting for its list with the pick kept (leaving 结果, 图谱, the compact history or a file choice drop
+  // it), or loading the file it chose while that file is still the choice, not yet shown, of a task still successful.
+  // Anything else ends it for good; the requests keep their own checks. It is shown only while 结果文件 is in view
+  // with no history over it, so a build still pending on the return is named again rather than offered as 加载视图.
+  const openingHeld=opening&&busy&&opening.connection===artifactConnection&&opening.pick.scope===selection&&
+    (opening.stage==='listing'?!path&&defaultPick.current===opening.pick:
+      path===opening.path&&shown?.path!==path&&completedTaskScope===selection)?opening:null;
+  if(opening&&!openingHeld)setOpening(null);
+  const openProgress=openingHeld&&tab==='results'&&analysis==='file'&&!overlay?openingHeld:null;
+  const loadingChoice=openProgress?.stage==='loading';
   // Readable scope of 任务: the queue lists the chosen node, filtered by the chosen project; the selected task keeps its
   // own scope, which can be another project of the node while no project is chosen.
   const nodes=devices.filter(d=>d.role==='node'&&!d.revoked),workspaces:Json[]=selected?.snapshot?.workspaces||[];
@@ -276,9 +297,9 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       !nodes.length?'控制服务中暂无执行节点。节点配对后，这里显示它的任务队列。':'在下方「运行环境」中选择执行节点和项目，这里显示任务队列。'):
     !tasks.length?'节点快照中暂无任务。':!queue.length?`${workspaceName(workspace)} 中暂无任务，可在下方「新建任务」中提交。`:'';
   const clearTask=useCallback(()=>{
-    generation.current++;scopeVersion.current++;activeScope.current=null;defaultPick.current=null;fileEdited.current=false;levelEdited.current=false;
+    generation.current++;scopeVersion.current++;activeScope.current=null;dropPick();fileEdited.current=false;levelEdited.current=false;
     setSelection(null);setObservedTask(null);setPath('');setArtifacts([]);show(null);acceptLog(null);setGraphProbe(null);setGraphSource(null);setLogRoom(false);
-  },[show,acceptLog]);
+  },[show,acceptLog,dropPick]);
   const selectNode=useCallback((id:string)=>{
     restoreEnvironment.current=false;
     sessionStorage.removeItem(RUN_ENVIRONMENT);
@@ -376,7 +397,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     const focus=document.activeElement,inside=!!historyPanel.current?.contains(focus);
     keepHistoryFocus.current=!query.matches&&!!focus&&focus===historyToggle.current;
     const opensOverlay=query.matches&&inside;
-    if(opensOverlay){returnFocus.current=null;defaultPick.current=null;}
+    if(opensOverlay){returnFocus.current=null;dropPick();}
     setWide(!query.matches);setHistoryOpen(opensOverlay);
   };change();query.addEventListener('change',change);return()=>query.removeEventListener('change',change);},[]);
   useEffect(()=>{if(wide&&keepHistoryFocus.current){keepHistoryFocus.current=false;focusHistory();}},[wide]);
@@ -433,8 +454,20 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   }
   const invoke=(kind:string,payload:Json,target=node,active?:()=>boolean)=>action(target,kind,payload,
     ()=> (active?setViewError:setError)('操作等待复核，请在任务面板查看完整参数。'),{active});
-  async function files(connection:ArtifactConnection|null,pick:{scope:TaskScope;open:boolean;edits:number}|null){
+  async function files(connection:ArtifactConnection|null,pick:DefaultPick|null){
     if(!connection||artifactConnectionNow.current!==connection||activeScope.current!==connection.scope)return;
+    // The stage this click shows, replaced only while it is still the current one (see dropPick and openProgress).
+    let progress:OpenProgress|null=null;
+    const enter=(stage:OpenProgress['stage'],path='')=>{
+      if(!pick)return;
+      const previous=progress,next:OpenProgress={connection,pick,stage,path};
+      progress=next;
+      setOpening(current=>current===previous?next:current);
+    };
+    try{await openFiles(connection,pick,enter);}
+    finally{const last=progress;if(last)setOpening(current=>current===last?null:current);}
+  }
+  async function openFiles(connection:ArtifactConnection,pick:DefaultPick|null,enter:(stage:OpenProgress['stage'],path?:string)=>void){
     const scope=connection.scope;
     let result:Json[]|null;
     if(connection.modern){
@@ -443,7 +476,9 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       const accepted=modernArtifacts.current?.target===target?modernArtifacts.current.accepted:undefined;
       // A confirmed sole VTI can open from its current listing. Other uses of this action still refresh the file list.
       const reuse=pick?.open&&target.succeeded&&(!connection.observesTask||target.exactTerminal)&&accepted&&soleVti(accepted);
-      result=await readArtifacts(target,!reuse);
+      // The reused listing is already accepted: the click goes on to its build in the same turn, with no list wait.
+      if(reuse&&accepted)result=accepted;
+      else{enter('listing');result=await readArtifacts(target,true);}
       const latest=artifactTargetNow.current;
       // The exact terminal read can replace a same-connection heartbeat receipt while this click waits.
       if(latest!==target){
@@ -454,6 +489,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       }
     }else{
       const version=scopeVersion.current,request=++artifactReads.current.started;
+      enter('listing');
       const item=await invoke('task.artifacts',{task_id:scope.task},scope.node);
       result=item.state==='succeeded'&&artifactConnectionNow.current===connection&&
         acceptArtifacts(version,request,item.result)?item.result:null;
@@ -471,6 +507,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     const currentBuild=startBuild(scope);
     const active=()=>currentBuild()&&artifactConnectionNow.current===connection&&completedTaskScopeNow.current===scope;
     setViewError('');
+    enter('loading',sole.path);
     try{await buildView(scope,sole.path,{mode:'slice',axis,index},active,sole.sha256);}
     catch(error){if(lostAccess(error))throw error;if(active())setViewError(String(error));}
   }
@@ -588,7 +625,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const ignoreRepeat=(e:React.KeyboardEvent)=>{if(e.repeat&&e.key==='Enter')e.preventDefault();};
   function openSection(key:Section){
     const back=key==='tasks'&&tab==='results'&&!overlay?returnFocus.current:null;
-    returnFocus.current=null;defaultPick.current=null;
+    returnFocus.current=null;dropPick();
     if(!back||activeScope.current!==back.scope){setTab(key);setHistoryOpen(false);return;}
     flushSync(()=>setTab(key));
     const {launcher}=back,box=launcher.getBoundingClientRect(),area=launcher.closest('.surface')?.getBoundingClientRect();
@@ -598,7 +635,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // Choosing a conversation (or a new one) is one explicit action: it opens 工作台 with that conversation's own
   // transcript, reading position and draft. Focus follows keyboard activation and the closing compact history.
   function openConversation(id:string|null,keyboardActivation=false){
-    returnFocus.current=null;defaultPick.current=null;
+    returnFocus.current=null;dropPick();
     if(id!==conv.session&&messageList.current)transcriptOffsets.current.set(conv.session,messageList.current.scrollTop);
     flushSync(()=>{setTab('workbench');setHistoryOpen(false);if(id)conv.select(id);else conv.startNew();});
     if(!id)composer.current?.focus({preventScroll:true});
@@ -613,7 +650,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   function closeHistory(){setHistoryOpen(false);historyToggle.current?.focus({preventScroll:true});}
   function toggleHistory(){
     if(historyOpen){setHistoryOpen(false);return;}
-    returnFocus.current=null;defaultPick.current=null;
+    returnFocus.current=null;dropPick();
     flushSync(()=>{setSourceOpen(false);setHistoryOpen(true);});
     focusHistory();
   }
@@ -647,7 +684,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       shownGraphSource.step===null?'':`第 ${shownGraphSource.step} 步`].filter(Boolean).join(' · '):'选择数据源并计算图谱';
   const sourceTask=analysis==='graph'?graphKind:task&&selection?(taskBound?`${nodeName} · ${workspaceName(selection.workspace)} · ${taskName}`:`${nodeName} · ${workspaceName(selection.workspace)} · 正在确认任务`):'未选择任务';
   const sourceFile=analysis==='graph'?graphSummary:!task?'在「任务」中选择任务':shown?`显示 ${shown.path}`:'尚未加载结果文件';
-  const sourceNext=analysis==='file'&&taskBound&&path&&path!==shown?.path?`已选 ${path}，加载视图后显示`:'';
+  const sourceNext=analysis==='file'&&taskBound&&path&&path!==shown?.path?`已选 ${path}，${loadingChoice?'正在加载视图…':'加载视图后显示'}`:'';
   const sourceIds=analysis==='file'&&task&&selection?`节点 ${selection.node}\n项目 ${selection.workspace}\n任务 ${selection.task}${shown?`\n文件 ${shown.path}`:''}`:undefined;
   function leaveSource(e:React.FocusEvent){
     const next=e.relatedTarget;
@@ -681,7 +718,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       <div><dt>项目</dt><dd><SourceValue value={sourceNames.workspace}/><SourceValue value={selection.workspace} selectable/></dd></div>
       <div><dt>任务</dt><dd>{taskBound?<SourceValue value={sourceNames.task}/>:<span className="muted">正在确认任务</span>}<SourceValue value={selection.task} selectable/></dd></div>
       <div><dt>显示的文件</dt><dd>{shown?<SourceValue value={shown.path} selectable/>:<span className="muted">尚未加载结果文件</span>}</dd></div>
-      {sourceNext&&<div><dt>已选文件</dt><dd><SourceValue value={path} selectable/><span className="muted">尚未加载，点「加载视图」后显示</span></dd></div>}
+      {sourceNext&&<div><dt>已选文件</dt><dd><SourceValue value={path} selectable/><span className="muted">{loadingChoice?'正在加载视图…':'尚未加载，点「加载视图」后显示'}</span></dd></div>}
     </dl>:<p className="muted">未选择任务。在「任务」中选择任务后，这里显示它的节点、项目与文件。</p>}
     <div className="source-details-foot"><button type="button" className="quiet" onClick={closeSource}>收起</button></div>
   </div>;
@@ -761,14 +798,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         <span className="source-file"><span>{sourceFile}</span>{sourceNext&&<span className="source-next" title={sourceNext}>{sourceNext}</span>}</span></p>
         <button type="button" ref={sourceToggle} className="source-toggle" aria-expanded={sourceOpen} aria-controls={sourceOpen?'result-source-details':undefined} onClick={()=>setSourceOpen(open=>!open)}>来源</button></div></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span>
       {sourceOpen&&sourceDetails}</div>
-      <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>{if(key!==analysis)defaultPick.current=null;setAnalysis(key);}}>{label}</button>)}</div>
+      <div className="mode-switch" ref={modeChoice} role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>{if(key!==analysis)dropPick();setAnalysis(key);}}>{label}</button>)}</div>
       {/* Both analysis modes stay mounted once shown; the inactive one keeps its size but takes no space, focus or pointer. */}
       {graphKept&&<div className={analysis==='graph'?'mode-pane graph-mode':'mode-pane graph-mode mode-hidden'} inert={analysis!=='graph'}><React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel key={graphKey} node={selected?node:''} scope={graphScope} task={taskBound?task:''} tasks={graphTasks} artifacts={taskBound?artifacts:[]} completedTask={completedTask} canReadArtifacts={canReadArtifacts} canReadEvents={canReadEvents&&taskOnline&&graphActive} active={graphActive} onError={setGraphError} beginReading={beginReading} onProbe={setGraphProbe} onSource={setGraphSource}/></React.Suspense></div>}
       <div className={analysis==='file'?'mode-pane file-mode':'mode-pane file-mode mode-hidden'} inert={analysis!=='file'}>
       <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" ref={fileChoice} value={taskBound?path:''} onChange={e=>{
         const next=e.target.value;
         if(next!==path)levelEdited.current=false;
-        fileEdited.current=true;defaultPick.current=null;setPath(next);generation.current++;setViewError('');
+        fileEdited.current=true;dropPick();setPath(next);generation.current++;setViewError('');
       }}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(viewable).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
       <label>视图<select value={mode} onChange={e=>{viewEdits.current++;setMode(e.target.value);}}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>
       {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>{viewEdits.current++;setAxis(Number(e.target.value));}}>{['X','Y','Z'].map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={index} onChange={e=>{viewEdits.current++;setIndex(Number(e.target.value));}}/></label></>}
@@ -811,7 +848,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         </div>
       </form>
     </aside>
-    </div><footer>{busy||conv.sendingCount?'正在处理请求…':'就绪'}<span>STK · 计算持续运行，视图随处可达</span></footer>
+    </div><footer>{openProgress?(openProgress.stage==='listing'?'列出结果文件…':'正在加载视图…'):busy||conv.sendingCount?'正在处理请求…':'就绪'}<span>STK · 计算持续运行，视图随处可达</span></footer>
   </div>;
 }
 createRoot(document.getElementById('root')!).render(ExampleView?<React.Suspense fallback={null}><ExampleView/></React.Suspense>:<App/>);
