@@ -272,6 +272,7 @@ bridge::Result<io::Json> AppShell::activate_editor_if(wm::Screen *screen, const 
   screen->set_maximized(maximize ? destination : nullptr);
   rollback.committed = true;
   overview_returns_.erase(screen);
+  task_result_returns_.erase(screen);
   store_.changed();
   return io::Json{{"area_id", destination->id()}, {"editor_id", editor_id},
                   {"tab_index", tab_index}, {"maximized", maximize}};
@@ -289,6 +290,7 @@ bridge::Result<io::Json> AppShell::restore_split_layout(wm::Screen *screen)
   }
   const bool restored = screen->maximized() != nullptr;
   overview_returns_.erase(screen);
+  task_result_returns_.erase(screen);
   if (restored) { screen->set_maximized(nullptr); store_.changed(); }
   return io::Json{{"restored", restored}};
 }
@@ -965,25 +967,33 @@ std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, 
            (!origin || (!editor.expired() && s->maximized() == origin && origin->activity_epoch() == activity)) &&
            (!source_current || source_current());
   };
-  return [this, s = &screen, editor_id, current, request = std::move(request)] {
+  return [this, s = &screen, editor_id, origin, editor, current, request = std::move(request)] {
     if (!current()) { return; }
-    s->defer([this, s, editor_id, current, request] {
+    s->defer([this, s, editor_id, origin, editor, current, request] {
       if (!current()) { return; }
+      std::optional<std::pair<EditorArea *, int>> preferred;
       std::function<bool()> return_to_task;
       if (const auto *from = dynamic_cast<const EditorArea *>(s->maximized());
           editor_id && std::string_view(editor_id) == kEditorJobs && from &&
           from->editor().type().id == kEditorViewer && workbench_is_focused(*s))
       {
-        const auto &shown = store_.viewer().source();
-        auto selected = store_.jobs().selected_result_request();
-        if (shown.kind == SourceKind::Task && selected &&
-            shown.connection == selected->connection && shown.node == selected->node &&
-            shown.workspace_id == selected->workspace_id && shown.task_id == selected->task_id)
-        {
-          return_to_task = std::move(selected->still_current);
+        if (const auto mark = task_result_returns_.find(s); mark != task_result_returns_.end()) {
+          const auto &back = mark->second;
+          const auto &opened = back.request;
+          const auto &shown = store_.viewer().source();
+          if (s->visibility_epoch() == back.visibility && from->activity_epoch() == back.viewer_activity &&
+              from->editor().lifetime().lock() == back.viewer.lock() && opened.still_current() &&
+              shown.kind == SourceKind::Task && shown.connection == opened.connection && shown.node == opened.node &&
+              shown.workspace_id == opened.workspace_id && shown.task_id == opened.task_id) {
+            auto *area = dynamic_cast<EditorArea *>(s->find_area(back.area));
+            const int tab = area ? area_tab(*area, back.launcher) : -1;
+            if (tab >= 0) {
+              preferred.emplace(area, tab);
+              return_to_task = opened.still_current;
+            }
+          }
         }
       }
-      std::optional<std::pair<EditorArea *, int>> conversation;
       std::function<bool(const Editor &)> can_activate;
       bool dispatch_blocked = false;
       if (editor_id && std::string_view(editor_id) == kEditorAI && !s->maximized()) {
@@ -1012,11 +1022,11 @@ std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, 
               back.split_activity == split_activity(*s) && question) {
             auto *area = dynamic_cast<EditorArea *>(s->find_area(back.area));
             const int tab = area ? area_tab(*area, back.editor) : -1;
-            if (tab >= 0) { conversation.emplace(area, tab); }
+            if (tab >= 0) { preferred.emplace(area, tab); }
           }
         }
       }
-      const auto result = editor_id ? activate_editor_if(s, editor_id, true, can_activate, conversation) :
+      const auto result = editor_id ? activate_editor_if(s, editor_id, true, can_activate, preferred) :
                                       restore_split_layout(s);
       if (result && editor_id) {
         if (can_activate) { overview_returns_.erase(s); }
@@ -1025,8 +1035,12 @@ std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, 
           // The latest explicit open supersedes any result already queued in the split view.
           store_.take_open_result();
           auto &viewer = store_.viewer();
-          if (!viewer.can_revisit_task_result(*request)) {
-            viewer.open(*request, /*fit_initial_view=*/true);
+          const bool opened = viewer.can_revisit_task_result(*request) || viewer.open(*request, /*fit_initial_view=*/true);
+          const auto *destination = dynamic_cast<const EditorArea *>(s->maximized());
+          if (opened && origin && destination && request->still_current) {
+            task_result_returns_.insert_or_assign(s, TaskResultReturn{
+                origin->id(), editor, destination->editor().lifetime(), s->visibility_epoch(),
+                destination->activity_epoch(), *request});
           }
         }
         auto *tasks = dynamic_cast<EditorArea *>(s->maximized());
@@ -1456,6 +1470,7 @@ void AppShell::forget(wm::Screen &screen, wm::Window *window)
   work_modes_.erase(&screen);
   focused_workbenches_.erase(&screen);
   overview_returns_.erase(&screen);
+  task_result_returns_.erase(&screen);
   if (window && window == window_) {
     window_ = nullptr;
   }
@@ -1555,6 +1570,7 @@ void AppShell::build_default_layout(wm::Screen &screen)
   work_modes_.erase(&screen);
   focused_workbenches_.erase(&screen);
   overview_returns_.erase(&screen);
+  task_result_returns_.erase(&screen);
 }
 
 void AppShell::reset_layout(wm::Screen &screen)
@@ -1614,6 +1630,7 @@ bool AppShell::apply_layout(wm::Screen &screen, const wm::LayoutFile &file, std:
   screen.adopt_tree_from(prepared);
   focused_workbenches_.erase(&screen);
   overview_returns_.erase(&screen);
+  task_result_returns_.erase(&screen);
   if (workbench_focused) { focused_workbenches_[&screen] = screen.visibility_epoch(); }
   work_modes_[&screen] = std::move(modes);
   const std::vector<std::string> langs = store_.catalog().languages();

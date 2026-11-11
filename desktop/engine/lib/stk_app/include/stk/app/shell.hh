@@ -293,6 +293,13 @@ class AppShell {
   };
   std::map<const wm::Screen *, WorkModes> work_modes_;
   std::map<const wm::Screen *, uint64_t> focused_workbenches_;
+  struct TaskResultReturn {
+    std::string area;
+    std::weak_ptr<void> launcher, viewer;
+    uint64_t visibility, viewer_activity;
+    OpenResultRequest request;
+  };
+  std::map<const wm::Screen *, TaskResultReturn> task_result_returns_;
   struct OverviewReturn {
     std::string area;
     std::weak_ptr<void> editor;

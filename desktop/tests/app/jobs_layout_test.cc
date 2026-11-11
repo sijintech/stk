@@ -677,6 +677,71 @@ TEST(JobsLayout, FocusedTaskResultReturnKeepsSameAreaScrollAndLauncher)
   EXPECT_NE(u.f.screen.ui()->focused(), launcher->id);
 }
 
+TEST(JobsLayout, TaskResultReturnsToItsLauncherWhenAnotherJobsEditorIsActive)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  UiOnFake u;
+  auto &jobs = u.jobs();
+  auto &origin = u.f.area("a1");
+  auto &other = u.f.area("a2");
+  ASSERT_TRUE(origin.add_tab(app::kEditorViewer, false));
+  for (int i = 0; i < other.tab_count(); ++i) {
+    if (other.tab(i).type().id == app::kEditorViewer) {
+      ASSERT_TRUE(other.set_tab_type(i, app::kEditorFiles));
+    }
+  }
+  ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+  jobs.select_connection("runtime:lab");
+  ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty(); }));
+  const std::string task(32, 'c');
+  jobs.apply_snapshot(io::Json::array({{{"id", task}, {"workspace_id", jobs.workspace()},
+                                        {"name", "Result task"}, {"state", "succeeded"}}}), 100.0);
+  jobs.select_task(task);
+  jobs.form().name = "Keep the task draft";
+  u.f.shell->open_workbench(u.f.screen);
+  u.f.drv->frame();
+  u.click("workbench_tasks");
+  ASSERT_EQ(u.f.screen.maximized(), &origin);
+  auto *original = &origin.editor();
+  ASSERT_TRUE(other.add_tab(app::kEditorJobs, true));
+  auto *duplicate = &other.editor();
+  ASSERT_EQ(duplicate->type().id, app::kEditorJobs);
+  auto original_state = original->save_workspace_state();
+  original_state["log_stream"] = 2;
+  ASSERT_TRUE(original->load_workspace_state(original_state));
+  auto duplicate_state = duplicate->save_workspace_state();
+  duplicate_state["detail_tab"] = 2;
+  ASSERT_TRUE(duplicate->load_workspace_state(duplicate_state));
+  u.f.drv->frame();
+  const std::string launcher_key = "a1/main/focused_jobs/tasks/open_viewer";
+  const auto *launcher = u.find(launcher_key);
+  ASSERT_NE(launcher, nullptr);
+  u.click(launcher_key);
+  ASSERT_EQ(u.f.screen.maximized(), &origin);
+  ASSERT_EQ(origin.editor().type().id, app::kEditorViewer);
+  u.click("workbench_tasks");
+  EXPECT_EQ(u.f.screen.maximized(), &origin);
+  EXPECT_EQ(&origin.editor(), original);
+  launcher = u.find(launcher_key);
+  ASSERT_NE(launcher, nullptr);
+  EXPECT_EQ(u.f.screen.ui()->focused(), launcher->id);
+  EXPECT_EQ(original->save_workspace_state().at("log_stream"), 2);
+  EXPECT_EQ(duplicate->save_workspace_state().at("detail_tab"), 2);
+  EXPECT_EQ(jobs.selected(), task);
+  EXPECT_EQ(jobs.form().name, "Keep the task draft");
+
+  // A plain trip through Results should use the usual editor selection and keep navigation focus.
+  u.click("workbench_results");
+  u.click("workbench_tasks");
+  EXPECT_EQ(u.f.screen.maximized(), &other);
+  EXPECT_EQ(&other.editor(), duplicate);
+  const auto *other_launcher = u.find("a2/main/focused_jobs/tasks/open_viewer");
+  ASSERT_NE(other_launcher, nullptr);
+  EXPECT_NE(u.f.screen.ui()->focused(), other_launcher->id);
+}
+
 TEST(JobsLayout, RevisitingAnAcceptedTaskKeepsTheDisplayedResult)
 {
   if (std::string(STK_BRIDGE_FAKE).empty()) {
