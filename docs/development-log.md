@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-11 03:57 UTC · 统一工作台新片已发布到 main
+
+远端 `main` 从 `abdc57f7a8cdc648920b34fe53e54c219719d720` 快进至 `a184cd213477896a5dd89cb5b0b93c1ca783dccf`。已独立核对远端完整 SHA，13 个提交范围扫描零发现。包含新工作区直接呈现首个任务表单、Web 任务草稿目标一致性、成功任务单文件预选、中英文指南和 macOS 静默重显对照。原 AOCI 与状态文档工作区改动已保留。
+
+新头 Desktop `42955953031`、Runtime `42955953032`、Pages `42955953035` 已启动。Secret scan `42955953004` 已通过。目标 macOS 将验证菜单指针修订后的静默对照，必测位置问题继续单独跟踪。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42955953031) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42955953032) [Pages](https://github.com/sijintech/stk/actions/runs/42955953035) [Secret scan](https://github.com/sijintech/stk/actions/runs/42955953004)
+
+上一发布头 `abdc57f7` 的 Windows 原生官方工件经逐成员 CRC 核对，6/6、1164 秒、零跳过。PDF、MP4、HTML 视频各 20/20，分别保留 160、161、161 张验收图。PDF 捕获目标创建 1 次、复用 438 次并回收，已接受帧最长捕获启动 58 ms，第 5 和第 20 轮关键图摘要与报告一致。正式平台终态索引在外部 `root-delivery-20261111-155/published-platform-ci/platform-terminal-summary.json`。 [Windows 工件](https://github.com/sijintech/stk/actions/runs/42948501049/artifacts/13826463628)
+
 ## 2026-11-11 03:55 UTC · 上一轮 Desktop 达到整轮终态
 
 远端 `abdc57f7a8cdc648920b34fe53e54c219719d720` 的 Desktop `42948501049` 于 03:55:05 UTC 结束，5/6 作业通过。Linux 主回归 2233/2233、打包和新环境冒烟通过。Windows CPU 1536/1536，原生 20 轮验收作业也通过。macOS CPU 1596/1596、Metal 254/254，必测原生 4/6，仍有 MP4 和 HTML 视频隐藏位置下限失败。两条静默对照的重显阻挡和本地诊断修订见下节。Windows 官方工件已发布，逐成员详情另行核对。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42948501049) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42948501049/artifacts/13826463628) [macOS 原生工件](https://github.com/sijintech/stk/actions/runs/42948501049/artifacts/13825909265)
