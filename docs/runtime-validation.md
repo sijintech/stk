@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-11 04:57 UTC · 上一主线 Desktop 整轮终态
+
+远端 `a184cd213477896a5dd89cb5b0b93c1ca783dccf` 的 Desktop `42955953031` 在 04:57:14 UTC 结束，5/6 作业通过。Linux 主回归 2236/2236，Linux 打包和干净机冒烟通过。Windows CPU 1536/1536、零跳过，Windows 原生 20 轮作业通过。此头 Runtime 13/13，Secret scan 和 Pages 通过。已达到上一 Desktop 整轮终态的推送条件。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42955953031) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42955953031/artifacts/13829259510) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42955953032)
+
+macOS CPU 1596/1596、Metal 254/254。必测原生 4/6，MP4 和 HTML 视频均在隐藏后的位置保持失败，首轮分别为 0.350357→0.234 秒、0.221098→0.102 秒。普通静默对照 2/2，隔离暂停静默对照 0/2，独立挂起/释放对照 1/1。两条 HTML 真菜单回程都通过一次指针移动解除工具提示，原生交互阻挡在一帧内解除。普通 HTML 完成重显和明确播放，隔离 MP4 和 HTML 均到达重显保持阶段后失败。下一轮诊断需区分隐藏时的时间回退与隔离方案重显后的保持行为。原必测门槛保留。 [macOS 官方工件](https://github.com/sijintech/stk/actions/runs/42955953031/artifacts/13830325253)
+
 ## 2026-11-11 04:40 UTC · 桌面任务日志失效基线与 Claude 分工
 
 Root 已在 Linux X11 英文宽窗 1600×1100 和中文窄窗 680×1000 的真实桌面复现：从聚焦「任务」点选唯一的合成失败任务，已有一行日志可见。真实 loopback Runtime 和生产 Bridge 的首次读取接受 27 源字节，替换非法 UTF-8 后显示对应的 29 字节文本。随后注入同一订阅的最终错误。页头报告错误，任务日志区仍显示「实时」，没有重试入口。两窗各发一次日志订阅与一次事件订阅，无任务写入。固定起点截图与请求回执在外部 `root-delivery-20261111-158/native-task-log-window/red-en` 和 `red-zh`。
