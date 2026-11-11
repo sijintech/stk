@@ -1352,6 +1352,7 @@
   "simulation.hdf5_lookup_retry": "Retry HDF5 result lookup",
   "simulation.hdf5_open": "Open selected HDF5 frame",
   "simulation.hdf5_frame": "HDF5 field and step",
+  "simulation.hdf5_component": "HDF5 component index",
   "simulation.hdf5_choose": "Choose a field and step",
   "simulation.hdf5_choice": "{field} · step {step}",
   "simulation.hdf5_busy": "Reading collected HDF5…",

@@ -40,7 +40,7 @@ class SimulationRuntime:
         self._start()
 
     def _write_hdf5(self, sdk):
-        """Let the fake solver also leave a small synthetic run.h5 (Polar at steps 2 and 4) in its case."""
+        """Let the fake solver also leave a small synthetic vector and scalar run.h5 in its case."""
         import h5py
         import numpy as np
         sidecar = self.root / 'synthetic-run.h5'
@@ -49,6 +49,7 @@ class SimulationRuntime:
         with h5py.File(sidecar, 'w') as file:
             file.create_dataset('t00000002/Polar', data=polar)
             file.create_dataset('t00000004/Polar', data=polar + 100)
+            file.create_dataset('t00000002/Scalar', data=np.arange(24, dtype=np.float32).reshape(4, 3, 2, 1))
         program = sdk / 'bin/muFerro'
         solver = program.read_text()
         needle = "sys.exit(fake_muferro('ok'))"
@@ -193,6 +194,9 @@ def lookup_bridge(control):
                 nodes = (request.get('graph') or {}).get('nodes', [])
                 entry.update(outputs=request.get('outputs'),
                              nodes=[node.get('type') for node in nodes])
+                if (request.get('outputs') == ['view'] and len(nodes) >= 2
+                        and nodes[0].get('type') == 'stk.source.mupro_hdf5@1'):
+                    entry.update(frame_source=nodes[0]['params'], component=nodes[1]['params']['component'])
                 if request.get('outputs') == ['source', 'voxel']:
                     entry.update(voxel_source=nodes[0]['params'], component=nodes[1]['params']['component'],
                                  local_proofs=params.get('local_proofs'))

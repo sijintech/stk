@@ -52,7 +52,7 @@ class ProjectSimulationView {
   std::string result_key_, result_record_, result_error_;
   bool result_loading_ = false;
   struct Hdf5Panel {
-    std::string key, sha256, error;
+    std::string key, sha256, error, component_text;
     std::vector<MuFerroHdf5Frame> frames;
     int selected = 0;
     bool busy = false;

@@ -5072,7 +5072,7 @@ TEST_F(Hdf5LookupSimulationPython, CollectedHdf5LookupRetryRereadsOnlyThatRowAnd
 
   widget("simulation_hdf5_list")->on_click();
   ASSERT_TRUE(until([&] { return widget("simulation_hdf5_frame") != nullptr; }));
-  EXPECT_EQ(widget("simulation_hdf5_frame")->items.size(), 3u);  // "Choose" plus Polar at steps 2 and 4
+  EXPECT_EQ(widget("simulation_hdf5_frame")->items.size(), 4u);  // "Choose", two Polar frames and one Scalar frame.
   const auto everything = wire(start);
   const auto graphs = requests(everything, "graph.evaluate");
   ASSERT_EQ(graphs.size(), 1u);
@@ -5092,10 +5092,110 @@ TEST_F(Hdf5LookupSimulationPython, CollectedHdf5LookupRetryRereadsOnlyThatRowAnd
   EXPECT_TRUE(editor->has_unsaved_changes());
   EXPECT_EQ(client->stats().schema_violations, 0u);
 
-  // Adopt a real collected HDF5 scene and read its original component through the Source dialog.
-  widget("simulation_hdf5_frame")->index.assign(1);
+  // The frame and index are drafts. Only an explicit open can evaluate the chosen component.
+  const auto choose_frame = [&](int index) {
+    ASSERT_NE(widget("simulation_hdf5_frame"), nullptr);
+    widget("simulation_hdf5_frame")->index.assign(index);
+    f.drv->frame();
+  };
+  const auto component = [&] { return widget("simulation_hdf5_component"); };
+  const auto open = [&] { return widget("simulation_hdf5_open"); };
+  const auto edit_component = [&](const std::string &value) {
+    ASSERT_NE(component(), nullptr);
+    component()->string.assign(value);
+    f.drv->frame();
+  };
+  const auto type_component = [&](const std::string &value) {
+    const auto [x, y] = f.widget_center("a2/main/project_simulation/simulation_hdf5_component");
+    f.drv->click(x, y);
+    f.drv->key(wm::Key::Unknown, wm::ModNone, value);
+    f.drv->key(wm::Key::Enter);
+    f.drv->frame();
+  };
+  const auto before_component = wire().size();
+  ASSERT_NO_FATAL_FAILURE(choose_frame(1));
+  ASSERT_NE(component(), nullptr);
+  ASSERT_NE(open(), nullptr);
+  EXPECT_TRUE(component()->string.value().empty());
+  EXPECT_FALSE(open()->enabled);
+  ASSERT_NO_FATAL_FAILURE(type_component("000000000000000001"));
+  EXPECT_EQ(component()->string.value().size(), 17u);
+  EXPECT_FALSE(open()->enabled);
+  for (const auto *invalid : {"-1", "3", "1.5", "9007199254740992"}) {
+    ASSERT_NO_FATAL_FAILURE(edit_component(invalid));
+    EXPECT_FALSE(open()->enabled) << invalid;
+  }
+  ASSERT_NO_FATAL_FAILURE(edit_component("1"));
+  EXPECT_TRUE(open()->enabled);
+  ASSERT_NO_FATAL_FAILURE(choose_frame(2));
+  ASSERT_NE(component(), nullptr);
+  EXPECT_TRUE(component()->string.value().empty());
+  EXPECT_FALSE(open()->enabled);
+  ASSERT_NO_FATAL_FAILURE(choose_frame(1));
+  ASSERT_NO_FATAL_FAILURE(type_component("1"));
+  EXPECT_TRUE(open()->enabled);
+  EXPECT_TRUE(requests(wire(before_component), "graph.evaluate").empty());
+  EXPECT_FALSE(viewer.payload());
+
   ASSERT_NO_FATAL_FAILURE(click("simulation_hdf5_open"));
   ASSERT_TRUE(until([&] { return bool(viewer.muferro_hdf5_source()); }));
+  const auto selected_component = viewer.muferro_hdf5_source();
+  EXPECT_EQ(selected_component->frame.selector, "/t00000002/Polar");
+  EXPECT_EQ(selected_component->component, 1);
+  ASSERT_TRUE(viewer.base_payload());
+  const auto *volume = viewer.base_payload()->layer("volume");
+  ASSERT_NE(volume, nullptr);
+  EXPECT_EQ(volume->at("value_range"), Json::array({1.0, 70.0}));
+  const auto opened = requests(wire(before_component), "graph.evaluate");
+  ASSERT_EQ(opened.size(), 1u);
+  EXPECT_EQ(opened[0].at("frame_source").at("selector"), selected_component->frame.selector);
+  EXPECT_EQ(opened[0].at("frame_source").at("expected_sha256"), selected_component->sha256);
+  EXPECT_EQ(opened[0].at("component"), 1);
+
+  const auto selected_payload = viewer.base_payload();
+  const auto selected_camera = viewer.camera_serial();
+  const auto before_component_read = wire().size();
+  viewer.read_muferro_hdf5_voxel(selected_component, {2, 1, 0});
+  ASSERT_TRUE(until([&] { return !viewer.muferro_hdf5_voxel().pending; }));
+  const auto &selected_voxel = viewer.muferro_hdf5_voxel();
+  EXPECT_EQ(selected_voxel.dtype, "uint64") << selected_voxel.error;
+  EXPECT_EQ(selected_voxel.value, "43") << selected_voxel.error;
+  const auto selected_reads = requests(wire(before_component_read), "graph.evaluate");
+  ASSERT_EQ(selected_reads.size(), 1u);
+  EXPECT_EQ(selected_reads[0].at("component"), 1);
+  EXPECT_EQ(viewer.base_payload(), selected_payload);
+  EXPECT_EQ(viewer.camera_serial(), selected_camera);
+
+  // A scalar frame still opens directly. Its field selection does not alter the accepted vector.
+  f.screen.set_maximized(&area);
+  ASSERT_TRUE(until([&] { return widget("simulation_hdf5_frame") != nullptr; }));
+  const auto before_scalar = wire().size();
+  ASSERT_NO_FATAL_FAILURE(choose_frame(3));
+  EXPECT_EQ(component(), nullptr);
+  EXPECT_EQ(viewer.muferro_hdf5_source(), selected_component);
+  EXPECT_EQ(viewer.base_payload(), selected_payload);
+  EXPECT_EQ(viewer.camera_serial(), selected_camera);
+  EXPECT_TRUE(requests(wire(before_scalar), "graph.evaluate").empty());
+  ASSERT_NO_FATAL_FAILURE(click("simulation_hdf5_open"));
+  ASSERT_TRUE(until([&] {
+    const auto source = viewer.muferro_hdf5_source();
+    return source && source->frame.selector == "/t00000002/Scalar";
+  }));
+  EXPECT_EQ(viewer.muferro_hdf5_source()->component, 0);
+  const auto scalar = requests(wire(before_scalar), "graph.evaluate");
+  ASSERT_EQ(scalar.size(), 1u);
+  EXPECT_EQ(scalar[0].at("component"), 0);
+
+  // Keep the exact large uint64 and Source dialog regressions on the original vector component.
+  f.screen.set_maximized(&area);
+  ASSERT_TRUE(until([&] { return widget("simulation_hdf5_frame") != nullptr; }));
+  ASSERT_NO_FATAL_FAILURE(choose_frame(1));
+  ASSERT_NO_FATAL_FAILURE(edit_component("0"));
+  ASSERT_NO_FATAL_FAILURE(click("simulation_hdf5_open"));
+  ASSERT_TRUE(until([&] {
+    const auto source = viewer.muferro_hdf5_source();
+    return source && source->frame.selector == "/t00000002/Polar" && source->component == 0;
+  }));
   const auto origin = viewer.muferro_hdf5_source();
   ASSERT_NE(origin, nullptr);
   EXPECT_EQ(origin->project_handle, handle);

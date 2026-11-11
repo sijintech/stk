@@ -27,6 +27,7 @@ using io::Json;
 constexpr size_t kFrameByteLimit = 256 * 1024 * 1024;
 constexpr size_t kFieldsByteLimit = 256 * 1024;
 constexpr size_t kFieldChoices = 256;
+constexpr int64_t kMaxSafeInteger = (int64_t(1) << 53) - 1;
 constexpr size_t kVoxelResultByteLimit = 16 * 1024;
 constexpr size_t kVoxelBlobByteLimit = 4096;
 
@@ -216,7 +217,7 @@ std::vector<MuFerroHdf5Frame> decode_muferro_hdf5_fields(const bridge::EvaluateP
     for (size_t i = 0; i < dims.size(); ++i) {
       if (!shape[i].is_number_integer()) { throw std::runtime_error("Invalid MuFerro HDF5 field dimension"); }
       dims[i] = shape[i].get<int64_t>();
-      if (dims[i] < 1 || dims[i] > 9007199254740991LL) {
+      if (dims[i] < 1 || dims[i] > kMaxSafeInteger) {
         throw std::runtime_error("Invalid MuFerro HDF5 field dimension");
       }
     }
@@ -234,10 +235,11 @@ std::vector<MuFerroHdf5Frame> decode_muferro_hdf5_fields(const bridge::EvaluateP
 
 bridge::EvaluateParams muferro_hdf5_frame_request(std::string eval_id, std::string_view project_directory,
                                                  std::string_view run_id, std::string_view selector,
-                                                 std::string_view field, std::string_view sha256)
+                                                 std::string_view field, std::string_view sha256,
+                                                 int64_t component)
 {
-  if (eval_id.empty() || !matches_selector(selector, field) ||
-      !core::is_sha256_hex(sha256)) {
+  if (eval_id.empty() || !matches_selector(selector, field) || !core::is_sha256_hex(sha256) ||
+      component < 0 || component > kMaxSafeInteger) {
     throw std::invalid_argument("Invalid MuFerro HDF5 frame identity");
   }
   const auto path = muferro_hdf5_path(run_id);
@@ -247,7 +249,7 @@ bridge::EvaluateParams muferro_hdf5_frame_request(std::string eval_id, std::stri
       {{"id", "component"}, {"type", "stk.filter.calculator@1"},
        {"inputs", {{"in", {{"from", "src.out"}}}}},
        {"params", {{"operation", "component"}, {"field", field},
-                   {"component", kMuFerroHdf5DisplayComponent}, {"keep_input", false}}}},
+                   {"component", component}, {"keep_input", false}}}},
       {{"id", "volume"}, {"type", "stk.render.volume@1"},
        {"inputs", {{"in", {{"from", "component.out"}}}}}, {"params", {{"colormap", "coolwarm"}}}},
       {{"id", "scene"}, {"type", "stk.view.scene@1"},

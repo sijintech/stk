@@ -19,6 +19,7 @@
 #include "editor_text.hh"
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <stdexcept>
 
 namespace stk::app {
@@ -70,6 +71,21 @@ std::string hdf5_eval_id()
 {
   static std::atomic<uint64_t> sequence = 0;
   return "muferro-hdf5-" + std::to_string(++sequence);
+}
+
+constexpr size_t kHdf5IndexDigits = 16;
+
+std::optional<int64_t> hdf5_component(int64_t count, std::string_view text)
+{
+  if (count == 1) { return 0; }
+  if (text.size() > kHdf5IndexDigits) { return std::nullopt; }
+  int64_t index = 0;
+  const auto *end = text.data() + text.size();
+  const auto parsed = std::from_chars(text.data(), end, index);
+  if (parsed.ec != std::errc() || parsed.ptr != end || index < 0 || index >= count) {
+    return std::nullopt;
+  }
+  return index;
 }
 
 const Engine *run_engine(const Json &run)
@@ -433,7 +449,7 @@ void ProjectSimulationView::draw_muferro_hdf5(ui::Layout &layout, EditorContext 
        empty = std::string(ctx.tr("simulation.hdf5_empty"))] {
     if (!visible() || hdf5_.busy || hdf5_.sha256 != sha) { return; }
     const auto sequence = ++hdf5_sequence_;
-    hdf5_.error.clear(); hdf5_.frames.clear(); hdf5_.selected = 0;
+    hdf5_.error.clear(); hdf5_.frames.clear(); hdf5_.selected = 0; hdf5_.component_text.clear();
     try {
       const auto request = muferro_hdf5_fields_request(hdf5_eval_id(), directory, run, sha);
       hdf5_.busy = true;
@@ -465,29 +481,47 @@ void ProjectSimulationView::draw_muferro_hdf5(ui::Layout &layout, EditorContext 
   }
   layout.prop(ctx.tr("simulation.hdf5_frame")).dropdown("simulation_hdf5_frame", std::move(labels), {
     [this] { return hdf5_.selected; }, [this, visible](int index) {
-      if (visible() && !hdf5_.busy && index >= 0 && size_t(index) <= hdf5_.frames.size()) { hdf5_.selected = index; }
+      if (visible() && !hdf5_.busy && index >= 0 && size_t(index) <= hdf5_.frames.size() && index != hdf5_.selected) {
+        hdf5_.selected = index;
+        hdf5_.component_text.clear();
+      }
     }
   }).disable(!enabled || hdf5_.busy);
+  const int selected = hdf5_.selected;
+  const int64_t count = selected > 0 && size_t(selected) <= hdf5_.frames.size() ?
+      hdf5_.frames[size_t(selected - 1)].shape[3] : 0;
+  if (count > 1) {
+    const auto range = "0–" + std::to_string(count - 1);
+    // Keep one excess digit so a truncated paste cannot become a valid index.
+    layout.prop(ctx.tr("simulation.hdf5_component")).text_field("simulation_hdf5_component", {
+      [this] { return hdf5_.component_text; }, [this, visible, selected](std::string text) {
+        if (visible() && !hdf5_.busy && hdf5_.selected == selected) { hdf5_.component_text = std::move(text); }
+      }
+    }, {.placeholder = range, .max_length = kHdf5IndexDigits + 1}).tip(range).disable(!enabled || hdf5_.busy);
+  }
   layout.button("simulation_hdf5_open", ctx.tr("simulation.hdf5_open"),
       [this, weak, key, visible, store, client, shell, screen, handle = info.handle, directory = info.directory,
        project = info.id, revision = info.revision, project_scope, bridge_epoch, bridge_pid,
        run, sha = hdf5_.sha256, blob_dir = hello->paths.blob_dir, read] {
     if (!visible() || hdf5_.busy || hdf5_.sha256 != sha || hdf5_.selected <= 0 ||
         size_t(hdf5_.selected) > hdf5_.frames.size()) { return; }
+    const auto selected = hdf5_.selected;
+    const auto frame = hdf5_.frames[size_t(selected - 1)];
+    const auto component = hdf5_component(frame.shape[3], hdf5_.component_text);
+    if (!component) { return; }
     const auto target = shell->viewer_payload_target(screen, true);
     if (!target) { hdf5_.error = target.error().describe(); store->changed(); return; }
     const auto sequence = ++hdf5_sequence_;
-    const auto selected = hdf5_.selected;
-    const auto current = [this, visible, sequence, selected] {
-      return visible() && sequence == hdf5_sequence_ && selected == hdf5_.selected;
+    const auto current = [this, visible, sequence, selected, component, count = frame.shape[3]] {
+      return visible() && sequence == hdf5_sequence_ && selected == hdf5_.selected &&
+             component == hdf5_component(count, hdf5_.component_text);
     };
-    const auto frame = hdf5_.frames[size_t(selected - 1)];
     hdf5_.error.clear();
     try {
-      const auto request = muferro_hdf5_frame_request(hdf5_eval_id(), directory, run, frame.selector, frame.field, sha);
+      const auto request = muferro_hdf5_frame_request(hdf5_eval_id(), directory, run, frame.selector, frame.field, sha,
+                                                      *component);
       const auto source = std::make_shared<const MuFerroHdf5Source>(MuFerroHdf5Source{
-          project, handle, directory, run, sha, revision, project_scope, bridge_epoch, bridge_pid,
-          frame, kMuFerroHdf5DisplayComponent});
+          project, handle, directory, run, sha, revision, project_scope, bridge_epoch, bridge_pid, frame, *component});
       hdf5_.busy = true;
       client->graph_evaluate(request, {}, read).then(
           [this, weak, key, sequence, current, store, shell, screen, version = target.value(), blob_dir, request, source]
@@ -517,7 +551,7 @@ void ProjectSimulationView::draw_muferro_hdf5(ui::Layout &layout, EditorContext 
     }
     catch (const std::exception &error) { hdf5_.busy = false; hdf5_.error = error.what(); }
     store->changed();
-  }).disable(!enabled || hdf5_.busy || hdf5_.selected <= 0);
+  }).disable(!enabled || hdf5_.busy || !hdf5_component(count, hdf5_.component_text));
 }
 
 void ProjectSimulationView::draw_pet_studies(ui::Layout &layout, EditorContext &ctx, ProjectState &state)

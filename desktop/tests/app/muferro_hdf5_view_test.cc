@@ -316,6 +316,16 @@ TEST(MuferroHdf5ViewTest, FrameRequestIsTheExplicitPinnedFrameGraph)
   /* Another step is another graph: no reply can stand in for a different selected frame. */
   EXPECT_NE(stk::io::graph_hash(frame_request(project, "Polar", 4).request.at("graph")),
             stk::io::graph_hash(params.request.at("graph")));
+  const auto component = [&](int64_t index) {
+    return stk::app::muferro_hdf5_frame_request("hdf5-frame-1", project.str(), kRun, selector("Polar", 2),
+                                               "Polar", kSha, index);
+  };
+  auto explicit_component = expected;
+  explicit_component["graph"]["nodes"][1]["params"]["component"] = 1;
+  EXPECT_EQ(component(1).request, explicit_component);
+  EXPECT_NE(stk::io::graph_hash(component(1).request.at("graph")), stk::io::graph_hash(params.request.at("graph")));
+  EXPECT_THROW(component(-1), std::invalid_argument);
+  EXPECT_THROW(component(int64_t(1) << 53), std::invalid_argument);
 }
 
 TEST(MuferroHdf5ViewTest, FrameRequestRefusesASelectorThatIsNotTheExplicitFieldAndStep)

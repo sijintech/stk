@@ -12,8 +12,6 @@
 
 namespace stk::app {
 
-inline constexpr int kMuFerroHdf5DisplayComponent = 0;
-
 struct MuFerroHdf5Frame {
   std::string field;
   int64_t step;
@@ -30,7 +28,7 @@ struct MuFerroHdf5Source {
   uint64_t project_scope, bridge_epoch;
   int64_t bridge_pid;
   MuFerroHdf5Frame frame;
-  int component;
+  int64_t component;
 
   bool contains(const std::array<int64_t, 3> &position) const;
 };
@@ -47,11 +45,12 @@ bridge::EvaluateParams muferro_hdf5_fields_request(std::string eval_id, std::str
 std::vector<MuFerroHdf5Frame> decode_muferro_hdf5_fields(const bridge::EvaluateParams &request,
                                                        const bridge::EvaluateResult &reply);
 
-/** Build a local graph for one collected MuFerro HDF5 frame and its recorded container SHA-256.
- * The caller pins the project, result row and selected frame before submitting. */
+/** Build a local graph for one collected MuFerro HDF5 frame, component and recorded container SHA-256.
+ * The caller pins the project, result row and selected frame and validates the index against its shape. */
 bridge::EvaluateParams muferro_hdf5_frame_request(std::string eval_id, std::string_view project_directory,
                                                  std::string_view run_id, std::string_view selector,
-                                                 std::string_view field, std::string_view sha256);
+                                                 std::string_view field, std::string_view sha256,
+                                                 int64_t component = 0);
 
 /** Decode the request's exact view from the bridge's announced cache. Throws on an invalid reply.
  * The caller rechecks the project and Viewer scope before adopting the owned payload. */

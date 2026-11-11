@@ -1352,6 +1352,7 @@
   "simulation.hdf5_lookup_retry": "重试查找 HDF5 结果",
   "simulation.hdf5_open": "打开所选 HDF5 帧",
   "simulation.hdf5_frame": "HDF5 场与步号",
+  "simulation.hdf5_component": "HDF5 分量索引",
   "simulation.hdf5_choose": "选择场与步号",
   "simulation.hdf5_choice": "{field} · 第 {step} 步",
   "simulation.hdf5_busy": "正在读取已收集的 HDF5…",
