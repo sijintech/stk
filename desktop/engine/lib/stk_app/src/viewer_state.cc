@@ -3,6 +3,7 @@
 #include "stk/app/viewer_state.hh"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -10,7 +11,10 @@
 #include <filesystem>
 #include <set>
 #include <stdexcept>
+#include <utility>
 
+#include "stk/app/muferro_hdf5_view.hh"
+#include "stk/app/project_state.hh"
 #include "stk/bridge/client.hh"
 #include "stk/core/paths.hh"
 #include "stk/core/sha256.hh"
@@ -429,6 +433,10 @@ struct ViewerState::Impl {
   Json shown_params;
   std::optional<ViewerGraphConfiguration> shown_configuration;
   std::optional<ProbeOrigin> shown_probe_origin;
+  std::shared_ptr<const MuFerroHdf5Source> hdf5_source;
+  MuFerroHdf5VoxelState hdf5_voxel;
+  std::function<bool()> hdf5_voxel_visible;
+  uint64_t hdf5_voxel_sequence = 0;
   Json shown_resolved_parameters;
   mutable std::shared_ptr<const ViewerGraphInspection> inspection;
   std::string eval_error;
@@ -1927,7 +1935,8 @@ bool ViewerState::open_path(const std::string &path, const std::string &preset, 
   return false;
 }
 
-void ViewerState::open_payload(std::shared_ptr<const io::Payload> payload, std::string label)
+void ViewerState::open_payload(std::shared_ptr<const io::Payload> payload, std::string label,
+                               std::shared_ptr<const MuFerroHdf5Source> hdf5_source)
 {
   discard_opening();
   close();
@@ -1937,6 +1946,7 @@ void ViewerState::open_payload(std::shared_ptr<const io::Payload> payload, std::
   m.source.path = m.label;
   m.camera_serial++;
   m.base = std::move(payload);
+  m.hdf5_source = std::move(hdf5_source);
   m.apply_display();
   m.changed();
 }
@@ -1961,6 +1971,10 @@ void ViewerState::close()
   m.shown_params = Json();
   m.shown_configuration.reset();
   m.shown_probe_origin.reset();
+  m.hdf5_source.reset();
+  m.hdf5_voxel = {};
+  m.hdf5_voxel_visible = {};
+  ++m.hdf5_voxel_sequence;
   m.shown_resolved_parameters = Json();
   m.result.reset();
   m.last.reset();
@@ -2494,6 +2508,90 @@ void ViewerState::clear_pick()
 const ProbeState &ViewerState::probe() const
 {
   return impl_->probe;
+}
+
+std::shared_ptr<const MuFerroHdf5Source> ViewerState::muferro_hdf5_source() const
+{
+  const auto &m = *impl_;
+  const auto &source = m.hdf5_source;
+  if (!source || !m.base || m.source.kind != SourceKind::Payload || !m.bridge_ready() ||
+      source->project_scope != store_.project_scope_epoch() || source->bridge_epoch != store_.bridge_epoch() ||
+      source->bridge_pid != m.client()->bridge_pid()) {
+    return {};
+  }
+  const auto &project = store_.project().project();
+  return project && project->id == source->project_id && project->handle == source->project_handle &&
+      project->directory == source->project_directory && project->revision == source->project_revision ? source : nullptr;
+}
+
+const MuFerroHdf5VoxelState &ViewerState::muferro_hdf5_voxel() const
+{
+  static const MuFerroHdf5VoxelState empty;
+  const auto &m = *impl_;
+  if (!muferro_hdf5_source() || (m.hdf5_voxel.pending && m.hdf5_voxel_visible && !m.hdf5_voxel_visible())) {
+    return empty;
+  }
+  return m.hdf5_voxel;
+}
+
+void ViewerState::clear_muferro_hdf5_voxel(const std::shared_ptr<const MuFerroHdf5Source> &source)
+{
+  Impl &m = *impl_;
+  if (!source || m.hdf5_source != source) { return; }
+  ++m.hdf5_voxel_sequence;
+  m.hdf5_voxel = {};
+  m.hdf5_voxel_visible = {};
+  store_.changed();
+}
+
+void ViewerState::read_muferro_hdf5_voxel(const std::shared_ptr<const MuFerroHdf5Source> &source,
+                                        const std::array<int64_t, 3> &position, std::function<bool()> visible)
+{
+  Impl &m = *impl_;
+  if (!source || muferro_hdf5_source() != source || !source->contains(position) ||
+      muferro_hdf5_voxel().pending || (visible && !visible())) { return; }
+  auto *client = m.client();
+  const auto hello = client->hello_info();
+  if (!hello || !hello->has_method("graph.evaluate")) { return; }
+  const auto sequence = ++m.hdf5_voxel_sequence;
+  m.hdf5_voxel = {.position = position};
+  m.hdf5_voxel_visible = std::move(visible);
+  try {
+    static std::atomic<uint64_t> next_id = 0;
+    const auto request = muferro_hdf5_voxel_request("muferro-voxel-" + std::to_string(++next_id), *source, position);
+    bridge::CallOptions read;
+    read.retry = bridge::CallOptions::Retry::Never;
+    read.timeout_s = 330;
+    m.hdf5_voxel.pending = true;
+    const std::weak_ptr<int> weak = m.alive;
+    client->graph_evaluate(request, {}, read).then(
+        [this, weak, sequence, source, request, position, blob_dir = hello->paths.blob_dir]
+        (const bridge::Result<bridge::EvaluateResult> &reply) {
+      if (weak.expired() || sequence != impl_->hdf5_voxel_sequence || muferro_hdf5_source() != source) { return; }
+      auto &result = impl_->hdf5_voxel;
+      if (auto visible = std::exchange(impl_->hdf5_voxel_visible, {}); visible && !visible()) {
+        result = {};
+        store_.changed();
+        return;
+      }
+      result.pending = false;
+      if (!reply) { result.error = reply.error().describe(); }
+      else {
+        try {
+          auto value = decode_muferro_hdf5_voxel(request, reply.value(), blob_dir, *source, position);
+          result.dtype = std::move(value.dtype);
+          result.value = std::move(value.value);
+        }
+        catch (const std::exception &error) { result.error = error.what(); }
+      }
+      store_.changed();
+    });
+  }
+  catch (const std::exception &error) {
+    m.hdf5_voxel = {.position = position, .error = error.what()};
+    m.hdf5_voxel_visible = {};
+  }
+  store_.changed();
 }
 
 void ViewerState::request_export()

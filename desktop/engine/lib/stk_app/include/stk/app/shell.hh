@@ -40,6 +40,7 @@ class WindowManager;
 namespace stk::app {
 class EditorArea;
 class WorkspaceTransfer;
+struct MuFerroHdf5Source;
 
 /**
  * Directory of the message catalogs: `override_dir`, $STK_I18N_DIR, next to the executable
@@ -197,7 +198,7 @@ class AppShell {
   void open_viewer_payload(wm::Screen *screen, std::string handle, uint64_t expected_viewer_version,
                            std::shared_ptr<const io::Payload> payload, std::string label,
                            std::function<bool()> valid, ScriptState::Completion complete,
-                           bool replace_existing = false);
+                           bool replace_existing = false, std::shared_ptr<const MuFerroHdf5Source> hdf5_source = {});
 
   /** Explicit portable workspace actions. Import/open never execute restored programs. */
   WorkspaceTransfer &workspace_transfer();

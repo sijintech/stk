@@ -16,6 +16,7 @@
  */
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -27,6 +28,7 @@
 #include "../app_theme.hh"
 #include "stk/app/app_store.hh"
 #include "stk/app/editor_area.hh"
+#include "stk/app/muferro_hdf5_view.hh"
 #include "stk/app/shell.hh"
 #include "stk/app/viewer_export.hh"
 #include "stk/core/paths.hh"
@@ -238,11 +240,12 @@ class ViewerEditor final : public Editor {
       }
       ui::Layout &row = l.row(false);
       row.alignment(ui::LayoutAlign::Left);
-      if (focused) {
+      if (screen && (focused || (!screen->maximized() && vs.muferro_hdf5_source()))) {
         const auto label = ctx.tr("viewer.source.open_details");
         const auto scope = std::pair{screen->visibility_epoch(), ctx.area.activity_epoch()};
         auto &button = row.button("result_source", label, [this, scope]() {
           source_details_scope_ = scope;
+          ++source_details_generation_;
           source_detail_line_ = -1;
         }).width(fit_units(ctx, label)).tip(ctx.tr("viewer.source.details"));
         if (source_details_scope_ == scope && ctx.ui) {
@@ -317,6 +320,7 @@ class ViewerEditor final : public Editor {
     const auto inspection = vs_->graph_inspection();
     const auto &shown = inspection->shown_configuration;
     const auto &source = shown ? shown->source : inspection->source;
+    const auto hdf5 = vs_->muferro_hdf5_source();
     const auto &style = ctx.ui->style();
     ui::ModalOptions options;
     options.width_units = std::clamp((float(screen.rect().width()) - 2 * style.panel_margin) / style.unit,
@@ -359,8 +363,8 @@ class ViewerEditor final : public Editor {
     }
     add("viewer.source.frame", displayed_source_step(source));
 
-    const auto close = [this, ui = ctx.ui, anchor, weak = lifetime()]() {
-      if (weak.expired()) { return; }
+    const auto close = [this, ui = ctx.ui, anchor, generation = source_details_generation_, weak = lifetime()]() {
+      if (weak.expired() || source_details_generation_ != generation) { return; }
       source_details_scope_.reset();
       ui->restore_focus_next_frame(anchor);
     };
@@ -373,12 +377,71 @@ class ViewerEditor final : public Editor {
     }
     ui::ListSpec list;
     list.count = int(lines.size());
-    const float max_rows = std::clamp(float(screen.rect().height()) / style.unit - 6.0f, 2.0f, 12.0f);
+    const float max_rows = std::clamp(float(screen.rect().height()) / style.unit - (hdf5 ? 13.0f : 6.0f),
+                                      2.0f, hdf5 ? 8.0f : 12.0f);
     list.rows = std::clamp(float(list.count), 1.0f, max_rows);
     list.selected = ui::bind(source_detail_line_);
     list.text = [lines = std::move(lines)](int row) { return lines[size_t(row)]; };
     modal.virtual_list("fields", std::move(list));
+    if (hdf5) { draw_hdf5_voxel(modal, ctx, screen, hdf5); }
+    else { hdf5_voxel_source_.reset(); }
     modal.row(false).button("close", ctx.tr("ui.close"), close);
+  }
+
+  std::optional<std::array<int64_t, 3>> hdf5_voxel_position(const MuFerroHdf5Source &source) const
+  {
+    std::array<int64_t, 3> position{};
+    for (size_t axis = 0; axis < position.size(); ++axis) {
+      const auto &text = hdf5_voxel_indices_[axis];
+      const auto end = text.data() + text.size();
+      const auto parsed = std::from_chars(text.data(), end, position[axis]);
+      if (parsed.ec != std::errc() || parsed.ptr != end) { return std::nullopt; }
+    }
+    return source.contains(position) ? std::optional(position) : std::nullopt;
+  }
+
+  void draw_hdf5_voxel(ui::Layout &modal, EditorContext &ctx, wm::Screen &screen,
+                       const std::shared_ptr<const MuFerroHdf5Source> &source)
+  {
+    if (hdf5_voxel_source_.lock() != source) {
+      hdf5_voxel_source_ = source;
+      hdf5_voxel_indices_ = {"0", "0", "0"};
+    }
+    modal.paragraph(ctx.store.catalog().format("viewer.source.voxel_displayed", {{"field", source->frame.field},
+        {"step", std::to_string(source->frame.step)}, {"component", std::to_string(source->component)}}));
+    modal.label(ctx.tr("viewer.source.voxel"));
+    auto &row = modal.row(true);
+    constexpr const char *axes[] = {"X", "Y", "Z"};
+    for (size_t axis = 0; axis < hdf5_voxel_indices_.size(); ++axis) {
+      auto &column = row.column(false);
+      column.label(axes[axis]);
+      column.text_field(std::string("voxel_index_") + axes[axis], {
+          [this, axis] { return hdf5_voxel_indices_[axis]; },
+          [this, source, axis](std::string text) {
+            if (vs_->muferro_hdf5_source() != source || text == hdf5_voxel_indices_[axis]) { return; }
+            hdf5_voxel_indices_[axis] = std::move(text);
+            vs_->clear_muferro_hdf5_voxel(source);
+          }}, {.max_length = 16}).tip("0–" + std::to_string(source->frame.shape[axis] - 1));
+    }
+    const auto position = hdf5_voxel_position(*source);
+    const auto &result = vs_->muferro_hdf5_voxel();
+    const auto scope = source_details_scope_;
+    const auto visible = [this, scope, generation = source_details_generation_, screen = &screen, weak = lifetime()] {
+      return !weak.expired() && scope && source_details_scope_ == scope && source_details_generation_ == generation &&
+          area_->screen() == screen && (!screen->maximized() || screen->maximized() == area_) &&
+          *scope == std::pair{screen->visibility_epoch(), area_->activity_epoch()};
+    };
+    modal.button("voxel_read", ctx.tr("viewer.source.voxel_read"), [this, source, visible] {
+      if (!visible()) { return; }
+      if (const auto current = hdf5_voxel_position(*source)) {
+        vs_->read_muferro_hdf5_voxel(source, *current, visible);
+      }
+    }).disable(!position || result.pending);
+    if (position && result.position == position && !ctx.ui->text_input_active()) {
+      if (result.pending) { modal.label(ctx.tr("viewer.source.voxel_wait")); }
+      else if (!result.error.empty()) { modal.paragraph(result.error); }
+      else if (!result.value.empty()) { modal.label(result.value + " · " + result.dtype); }
+    }
   }
 
   void draw_sidebar(ui::Layout &l, EditorContext &ctx) override
@@ -1157,7 +1220,10 @@ class ViewerEditor final : public Editor {
   uint64_t payload_serial_ = 0, camera_serial_ = 0;
   bool camera_reset_pending_ = false;
   std::optional<std::pair<uint64_t, uint64_t>> source_details_scope_;
+  uint64_t source_details_generation_ = 0;
   int source_detail_line_ = -1;
+  std::weak_ptr<const MuFerroHdf5Source> hdf5_voxel_source_;
+  std::array<std::string, 3> hdf5_voxel_indices_;
   std::optional<viewer::CameraPose> saved_camera_;
   std::optional<viewer::CameraPose> workspace_camera_;
   std::optional<viewer::CameraPreset> pending_preset_;

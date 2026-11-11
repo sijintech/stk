@@ -774,7 +774,7 @@ void AppShell::open_viewer_payload(wm::Screen *screen, std::string handle,
                                    const uint64_t expected_viewer_version,
                                    std::shared_ptr<const io::Payload> payload, std::string label,
                                    std::function<bool()> valid, ScriptState::Completion complete,
-                                   const bool replace_existing)
+                                   const bool replace_existing, std::shared_ptr<const MuFerroHdf5Source> hdf5_source)
 {
   using bridge::Error;
   using bridge::ErrorCode;
@@ -788,7 +788,8 @@ void AppShell::open_viewer_payload(wm::Screen *screen, std::string handle,
   const std::weak_ptr<bool> weak = alive_;
   screen->defer([this, weak, screen, handle = std::move(handle), expected_viewer_version,
                  payload = std::move(payload), label = std::move(label),
-                 valid = std::move(valid), complete = std::move(complete), replace_existing]() mutable {
+                 valid = std::move(valid), complete = std::move(complete), replace_existing,
+                 hdf5_source = std::move(hdf5_source)]() mutable {
     if (!weak.lock() || !valid()) { return; }
     auto &project = store_.project();
     project.sync();
@@ -803,7 +804,7 @@ void AppShell::open_viewer_payload(wm::Screen *screen, std::string handle,
     // after successful activation, and cannot call the bridge.
     const auto activated = activate_editor(screen, kEditorViewer, false);
     if (!activated) { complete(activated.error()); return; }
-    store_.viewer().open_payload(std::move(payload), std::move(label));
+    store_.viewer().open_payload(std::move(payload), std::move(label), std::move(hdf5_source));
     complete(activated.value());
   });
 }

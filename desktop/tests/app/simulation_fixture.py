@@ -44,7 +44,8 @@ class SimulationRuntime:
         import h5py
         import numpy as np
         sidecar = self.root / 'synthetic-run.h5'
-        polar = np.arange(72, dtype=np.float32).reshape(4, 3, 2, 3)
+        polar = np.arange(72, dtype=np.uint64).reshape(4, 3, 2, 3)
+        polar[2, 1, 0, 0] = 9223372036854775931
         with h5py.File(sidecar, 'w') as file:
             file.create_dataset('t00000002/Polar', data=polar)
             file.create_dataset('t00000004/Polar', data=polar + 100)
@@ -189,8 +190,12 @@ def lookup_bridge(control):
                         refused.add(message.get('id'))
             if method == 'graph.evaluate':
                 request = params.get('request') or {}
+                nodes = (request.get('graph') or {}).get('nodes', [])
                 entry.update(outputs=request.get('outputs'),
-                             nodes=[node.get('type') for node in (request.get('graph') or {}).get('nodes', [])])
+                             nodes=[node.get('type') for node in nodes])
+                if request.get('outputs') == ['source', 'voxel']:
+                    entry.update(voxel_source=nodes[0]['params'], component=nodes[1]['params']['component'],
+                                 local_proofs=params.get('local_proofs'))
             record(entry)
             return super().handle_line(raw)
 
@@ -202,6 +207,8 @@ def lookup_bridge(control):
                 record({'kind': 'refused', 'id': message['id']})
             elif method == 'project.table.query' and (message.get('result') or {}).get('table_id') == RESULT_TABLE_ID:
                 record({'kind': 'reply', 'id': message.get('id'), 'records': len(message['result'].get('records', []))})
+            elif method == 'graph.evaluate':
+                record({'kind': 'reply', 'id': message.get('id'), 'method': method})
             return super().send(message, method)
 
     server.Bridge = LookupBridge

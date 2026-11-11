@@ -370,12 +370,17 @@ void ProjectSimulationView::draw_muferro_hdf5(ui::Layout &layout, EditorContext 
   const auto run = state.run_id();
   const auto task = io::get_string(state.run().at("status").at("task"), "id");
   if (!canonical_uuid(run) || task.empty()) { return; }
-  const auto key = info.handle + "/" + std::to_string(info.revision) + "/" + std::to_string(generation_) + "/" + run + "/" + task;
+  const auto project_scope = store->project_scope_epoch();
+  const auto bridge_epoch = store->bridge_epoch();
+  const auto bridge_pid = client->bridge_pid();
+  const auto key = info.handle + "/" + std::to_string(info.revision) + "/" + std::to_string(generation_) + "/" + run + "/" +
+      task + "/" + std::to_string(project_scope) + "/" + std::to_string(bridge_epoch) + "/" + std::to_string(bridge_pid);
   const auto project_version = state.version();
   const std::weak_ptr<bool> weak = alive_;
   const auto scope = [this, weak, store, client, &state, project = info.id, handle = info.handle, generation = generation_,
-                      revision = info.revision, project_version, run, key] {
-    return !weak.expired() && store->bridge() == client && hdf5_.key == key &&
+                      revision = info.revision, project_version, run, key, project_scope, bridge_epoch, bridge_pid] {
+    return !weak.expired() && store->bridge() == client && store->bridge_epoch() == bridge_epoch &&
+           store->project_scope_epoch() == project_scope && client->bridge_pid() == bridge_pid && hdf5_.key == key &&
            context_current(state, project, handle, generation) && state.project()->revision == revision &&
            state.version() == project_version && state.run_id() == run;
   };
@@ -465,6 +470,7 @@ void ProjectSimulationView::draw_muferro_hdf5(ui::Layout &layout, EditorContext 
   }).disable(!enabled || hdf5_.busy);
   layout.button("simulation_hdf5_open", ctx.tr("simulation.hdf5_open"),
       [this, weak, key, visible, store, client, shell, screen, handle = info.handle, directory = info.directory,
+       project = info.id, revision = info.revision, project_scope, bridge_epoch, bridge_pid,
        run, sha = hdf5_.sha256, blob_dir = hello->paths.blob_dir, read] {
     if (!visible() || hdf5_.busy || hdf5_.sha256 != sha || hdf5_.selected <= 0 ||
         size_t(hdf5_.selected) > hdf5_.frames.size()) { return; }
@@ -479,9 +485,12 @@ void ProjectSimulationView::draw_muferro_hdf5(ui::Layout &layout, EditorContext 
     hdf5_.error.clear();
     try {
       const auto request = muferro_hdf5_frame_request(hdf5_eval_id(), directory, run, frame.selector, frame.field, sha);
+      const auto source = std::make_shared<const MuFerroHdf5Source>(MuFerroHdf5Source{
+          project, handle, directory, run, sha, revision, project_scope, bridge_epoch, bridge_pid,
+          frame, kMuFerroHdf5DisplayComponent});
       hdf5_.busy = true;
       client->graph_evaluate(request, {}, read).then(
-          [this, weak, key, sequence, current, store, shell, screen, handle, version = target.value(), blob_dir, request, frame, sha]
+          [this, weak, key, sequence, current, store, shell, screen, version = target.value(), blob_dir, request, source]
           (const bridge::Result<bridge::EvaluateResult> &reply) {
         if (weak.expired() || key != hdf5_.key || sequence != hdf5_sequence_) { return; }
         hdf5_.busy = false;
@@ -490,11 +499,18 @@ void ProjectSimulationView::draw_muferro_hdf5(ui::Layout &layout, EditorContext 
         if (!reply) { hdf5_.error = reply.error().describe(); store->changed(); return; }
         try {
           auto payload = decode_muferro_hdf5_frame(request, reply.value(), blob_dir);
-          const auto label = "MuFerro · " + frame.selector + " · " + sha.substr(0, 12);
-          shell->open_viewer_payload(screen, handle, version, std::move(payload), label, current,
+          const auto &shape = source->frame.shape;
+          const auto &time = payload->manifest.at("source").at("time");
+          const auto &grid = payload->layer("volume")->at("grid");
+          if (payload->length_unit != "grid_index" || time.at("step") != source->frame.step ||
+              grid.at("dimensions") != Json::array({shape[0], shape[1], shape[2]})) {
+            throw std::runtime_error("The MuFerro HDF5 display does not match the selected step or grid");
+          }
+          const auto label = "MuFerro · " + source->frame.selector + " · " + source->sha256.substr(0, 12);
+          shell->open_viewer_payload(screen, source->project_handle, version, std::move(payload), label, current,
               [this, current, store](const bridge::Result<Json> &result) {
             if (current() && !result) { hdf5_.error = result.error().describe(); store->changed(); }
-          }, true);
+          }, true, source);
         }
         catch (const std::exception &error) { hdf5_.error = error.what(); store->changed(); }
       });

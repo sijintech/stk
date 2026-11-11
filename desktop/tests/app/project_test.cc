@@ -11,6 +11,7 @@
 #include "stk/app/model_settings.hh"
 #include "stk/app/jobs_state.hh"
 #include "stk/core/paths.hh"
+#include "stk/app/muferro_hdf5_view.hh"
 #include "stk/app/script_state.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/io/payload.hh"
@@ -5089,6 +5090,164 @@ TEST_F(Hdf5LookupSimulationPython, CollectedHdf5LookupRetryRereadsOnlyThatRowAnd
   EXPECT_EQ(viewer.source().kind, SourceKind::None);
   EXPECT_EQ(editor->save_state().at("source"), draft);
   EXPECT_TRUE(editor->has_unsaved_changes());
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+
+  // Adopt a real collected HDF5 scene and read its original component through the Source dialog.
+  widget("simulation_hdf5_frame")->index.assign(1);
+  ASSERT_NO_FATAL_FAILURE(click("simulation_hdf5_open"));
+  ASSERT_TRUE(until([&] { return bool(viewer.muferro_hdf5_source()); }));
+  const auto origin = viewer.muferro_hdf5_source();
+  ASSERT_NE(origin, nullptr);
+  EXPECT_EQ(origin->project_handle, handle);
+  EXPECT_EQ(origin->run_id, run);
+  EXPECT_EQ(origin->frame.selector, "/t00000002/Polar");
+  EXPECT_EQ(origin->frame.dtype, "uint64");
+  EXPECT_EQ(origin->component, 0);
+  const auto accepted = viewer.base_payload();
+  const auto label = viewer.source_label();
+  ASSERT_EQ(f.screen.maximized(), nullptr);
+  const auto open_source = [&] {
+    const auto [sx, sy] = f.widget_center("result_source");
+    f.drv->click(sx, sy);
+    f.drv->frame();
+  };
+  open_source();
+  const auto modal = [&](const std::string &id) { return f.screen.ui()->find("viewer_source_details/" + id); };
+  ASSERT_NE(modal("voxel_index_X"), nullptr);
+  ASSERT_NE(modal("voxel_index_Y"), nullptr);
+  const auto before_read = wire().size();
+  modal("voxel_index_X")->string.assign("4");
+  f.drv->frame();
+  ASSERT_NE(modal("voxel_read"), nullptr);
+  EXPECT_FALSE(modal("voxel_read")->enabled);
+  modal("voxel_index_X")->string.assign("2");
+  modal("voxel_index_Y")->string.assign("1");
+  f.drv->frame();
+  EXPECT_TRUE(requests(wire(before_read), "graph.evaluate").empty());
+  ASSERT_NE(modal("voxel_read"), nullptr);
+  ASSERT_TRUE(modal("voxel_read")->enabled);
+  const auto camera = viewer.camera_serial(), payload = viewer.payload_serial();
+  const auto [vx, vy] = f.widget_center("viewer_source_details/voxel_read");
+  f.drv->click(vx, vy);
+  ASSERT_TRUE(until([&] {
+    const auto &voxel = viewer.muferro_hdf5_voxel();
+    return !voxel.pending && (!voxel.value.empty() || !voxel.error.empty());
+  }));
+  const auto &voxel = viewer.muferro_hdf5_voxel();
+  EXPECT_EQ(voxel.dtype, "uint64") << voxel.error;
+  EXPECT_EQ(voxel.value, "9223372036854775931") << voxel.error;
+  f.drv->frame();
+  EXPECT_TRUE(shows("9223372036854775931 · uint64"));
+  const auto read_wire = wire(before_read);
+  const auto reads = requests(read_wire, "graph.evaluate");
+  ASSERT_EQ(reads.size(), 1u);
+  EXPECT_EQ(reads[0].at("voxel_source").at("extent"), Json::array({2, 2, 1, 1, 0, 0}));
+  EXPECT_EQ(reads[0].at("voxel_source").at("selector"), origin->frame.selector);
+  EXPECT_EQ(reads[0].at("voxel_source").at("expected_sha256"), origin->sha256);
+  EXPECT_EQ(reads[0].at("component"), 0);
+  EXPECT_EQ(reads[0].at("local_proofs").at("run").at("files"),
+            Json::array({{{"path", muferro_hdf5_path(run)}, {"sha256", origin->sha256}}}));
+  for (const auto *method : {"project.apply", "project.runs.submit", "project.runs.cancel", "script.execute", "view.probe"}) {
+    EXPECT_TRUE(requests(read_wire, method).empty()) << method;
+  }
+  EXPECT_EQ(viewer.base_payload(), accepted);
+  EXPECT_EQ(viewer.camera_serial(), camera);
+  EXPECT_EQ(viewer.payload_serial(), payload);
+  EXPECT_EQ(editor->save_state().at("source"), draft);
+  EXPECT_EQ(state().project()->revision, revision);
+
+  const auto wait_reply = [&](size_t from) {
+    return until([&] {
+      const auto events = wire(from);
+      const auto sent = requests(events, "graph.evaluate");
+      return !sent.empty() && std::any_of(events.begin(), events.end(), [&](const auto &event) {
+        return event.at("kind") == "reply" && event.at("id") == sent[0].at("id");
+      });
+    });
+  };
+  // Completed reads survive reopening this Source dialog. Dismissal fences a later in-flight read.
+  ASSERT_NE(modal("close"), nullptr);
+  modal("close")->on_click();
+  f.drv->frame();
+  open_source();
+  EXPECT_TRUE(shows("9223372036854775931 · uint64"));
+  ASSERT_NE(modal("voxel_read"), nullptr);
+  ASSERT_NE(modal("close"), nullptr);
+  const auto before_dismiss = wire().size();
+  modal("voxel_read")->on_click();
+  ASSERT_TRUE(viewer.muferro_hdf5_voxel().pending);
+  modal("close")->on_click();
+  EXPECT_FALSE(viewer.muferro_hdf5_voxel().pending);
+  f.drv->frame();
+  open_source();
+  ASSERT_TRUE(wait_reply(before_dismiss));
+  EXPECT_TRUE(viewer.muferro_hdf5_voxel().value.empty());
+  EXPECT_FALSE(shows("9223372036854775931 · uint64"));
+
+  // Maximizing the other split area hides this Viewer even if the source is still accepted.
+  ASSERT_NE(area.editor().type().id, kEditorViewer);
+  ASSERT_NE(modal("voxel_read"), nullptr);
+  const auto before_hide = wire().size();
+  modal("voxel_read")->on_click();
+  ASSERT_TRUE(viewer.muferro_hdf5_voxel().pending);
+  f.screen.set_maximized(&area);
+  EXPECT_FALSE(viewer.muferro_hdf5_voxel().pending);
+  ASSERT_TRUE(wait_reply(before_hide));
+  EXPECT_TRUE(viewer.muferro_hdf5_voxel().value.empty());
+  EXPECT_EQ(viewer.base_payload(), accepted);
+  f.screen.set_maximized(nullptr);
+  f.drv->frame();
+
+  // Even a cached voxel cannot be returned after the collected container changes on disk.
+  const auto file = core::path_from_utf8(origin->project_directory) / core::path_from_utf8(muferro_hdf5_path(run));
+  const auto mtime = std::filesystem::last_write_time(file);
+  const auto first_byte = [&](std::optional<char> replacement) {
+    std::fstream stream(file, std::ios::in | std::ios::out | std::ios::binary);
+    char value = 0;
+    stream.get(value);
+    EXPECT_TRUE(stream.good());
+    stream.seekp(0);
+    stream.put(replacement.value_or(char(value ^ 1)));
+    stream.flush();
+    EXPECT_TRUE(stream.good());
+    return value;
+  };
+  const char original = first_byte(std::nullopt);
+  std::filesystem::last_write_time(file, mtime);
+  viewer.read_muferro_hdf5_voxel(origin, {2, 1, 0});
+  ASSERT_TRUE(until([&] { return !viewer.muferro_hdf5_voxel().pending; }));
+  EXPECT_TRUE(viewer.muferro_hdf5_voxel().value.empty());
+  EXPECT_FALSE(viewer.muferro_hdf5_voxel().error.empty());
+  EXPECT_EQ(viewer.base_payload(), accepted);
+  first_byte(original);
+  std::filesystem::last_write_time(file, mtime);
+
+  // A superseded reply cannot overwrite a newer coordinate or re-arm an imported/replaced payload.
+  const auto before_edit = wire().size();
+  viewer.read_muferro_hdf5_voxel(origin, {2, 1, 0});
+  viewer.clear_muferro_hdf5_voxel(origin);
+  viewer.read_muferro_hdf5_voxel(origin, {0, 0, 0});
+  ASSERT_TRUE(until([&] { return !viewer.muferro_hdf5_voxel().pending; }));
+  ASSERT_TRUE(wait_reply(before_edit));
+  EXPECT_EQ(viewer.muferro_hdf5_voxel().value, "0");
+  const auto saved = viewer.save_workspace_state();
+  const auto before_replace = wire().size();
+  viewer.read_muferro_hdf5_voxel(origin, {2, 1, 0});
+  viewer.open_payload(accepted, "Imported display");
+  ASSERT_TRUE(wait_reply(before_replace));
+  EXPECT_FALSE(viewer.muferro_hdf5_source());
+  EXPECT_TRUE(viewer.muferro_hdf5_voxel().value.empty());
+  viewer.open_payload(accepted, label, origin);
+  ASSERT_TRUE(viewer.muferro_hdf5_source());
+  ASSERT_TRUE(viewer.load_workspace_state(saved, accepted));
+  EXPECT_FALSE(viewer.muferro_hdf5_source());
+  viewer.open_payload(accepted, label, origin);
+  const auto before_close = wire().size();
+  viewer.read_muferro_hdf5_voxel(origin, {2, 1, 0});
+  ASSERT_TRUE(state().close());
+  ASSERT_TRUE(wait_reply(before_close));
+  EXPECT_FALSE(viewer.muferro_hdf5_source());
+  EXPECT_TRUE(viewer.muferro_hdf5_voxel().value.empty());
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 TEST_F(SimulationPython, NativeBatchButtonsPersistAndSubmitEachMemberOnce)

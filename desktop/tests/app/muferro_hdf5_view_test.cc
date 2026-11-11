@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -21,6 +22,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -98,6 +100,48 @@ EvaluateParams fields_request(const Project &project)
 EvaluateParams frame_request(const Project &project, const std::string &field = "Polar", int64_t step = 2)
 {
   return stk::app::muferro_hdf5_frame_request("hdf5-frame-1", project.str(), kRun, selector(field, step), field, kSha);
+}
+
+stk::app::MuFerroHdf5Source voxel_source(const Project &project, const std::string &dtype = "uint64")
+{
+  return {"project", "handle", project.str(), kRun, kSha, 1, 2, 3, 4,
+          {"Polar", 2, selector("Polar", 2), {4, 3, 2, 3}, dtype, kSize}, 0};
+}
+
+std::vector<uint8_t> npy_scalar(std::string_view dtype, uint64_t bits, std::string_view shape = "(1, 1, 1)")
+{
+  std::string header = "{'descr': '" + std::string(dtype) + "', 'fortran_order': False, 'shape': " +
+                       std::string(shape) + ", }";
+  header.append((64 - (10 + header.size() + 1) % 64) % 64, ' ');
+  header += '\n';
+  const size_t width = size_t(dtype[2] - '0');
+  std::vector<uint8_t> bytes{0x93, 'N', 'U', 'M', 'P', 'Y', 1, 0, uint8_t(header.size()), 0};
+  bytes.reserve(bytes.size() + header.size() + width);
+  bytes.insert(bytes.end(), header.begin(), header.end());
+  for (size_t i = 0; i < width; ++i) {
+    bytes.push_back(uint8_t(bits >> (8 * (dtype[0] == '>' ? width - i - 1 : i))));
+  }
+  return bytes;
+}
+
+Json voxel_result(const EvaluateParams &request, const stk::app::MuFerroHdf5Source &source,
+                  const std::array<int64_t, 3> &position, const stk::io::BlobCache &blobs,
+                  std::span<const uint8_t> bytes)
+{
+  const auto &field = source.frame;
+  auto result = graph_result(request, "voxel", {{"type", "file"}, {"name", "voxel.npy"},
+      {"media_type", "application/x-npy"}, {"size", bytes.size()}, {"blob", blobs.put(bytes)}});
+  result["outputs"]["source"] = {{"type", "dataset"}, {"descriptor", {
+      {"schema", "stk.dataset/1"}, {"kind", "image"}, {"id", field.field},
+      {"time", {{"step", field.step}}},
+      {"geometry", {{"dimensions", {1, 1, 1}}, {"origin", position}, {"spacing", {1, 1, 1}},
+                    {"length_unit", "grid_index"}}},
+      {"fields", Json::array({{{"name", field.field}, {"dtype", field.dtype}, {"association", "point"},
+                               {"components", field.shape[3]}}})},
+      {"frames", Json::array({{{"step", field.step}, {"sources", {{field.field, {
+          {"path", "case/run.h5"}, {"reader", "mupro.hdf5@1"}, {"selector", field.selector},
+          {"sha256", source.sha256}, {"size", field.container_size}}}}}}})}}}};
+  return result;
 }
 
 std::vector<std::string> labels(const std::vector<stk::app::MuFerroHdf5Frame> &frames)
@@ -294,6 +338,77 @@ TEST(MuferroHdf5ViewTest, FrameRequestRefusesASelectorThatIsNotTheExplicitFieldA
   const std::string widest = "F" + std::string(63, 'x');
   EXPECT_NO_THROW(stk::app::muferro_hdf5_frame_request("x", project.str(), kRun, selector(widest, 99999999), widest, kSha));
   EXPECT_NO_THROW(stk::app::muferro_hdf5_frame_request("x", project.str(), kRun, "/t00000000/S_2", "S_2", kSha));
+}
+
+TEST(MuferroHdf5ViewTest, VoxelRequestPinsTheCollectedContainerAndOnlyTheDisplayedComponent)
+{
+  const Project project;
+  const auto source = voxel_source(project);
+  const auto request = stk::app::muferro_hdf5_voxel_request("voxel", source, {3, 1, 0});
+  const auto &nodes = request.request.at("graph").at("nodes");
+  EXPECT_EQ(nodes[0].at("params").at("extent"), Json::array({3, 3, 1, 1, 0, 0}));
+  EXPECT_EQ(nodes[0].at("params").at("path"), "case/run.h5");
+  EXPECT_EQ(nodes[0].at("params").at("selector"), source.frame.selector);
+  EXPECT_EQ(nodes[0].at("params").at("expected_sha256"), kSha);
+  EXPECT_EQ(nodes[1].at("params").at("component"), 0);
+  EXPECT_EQ(nodes[2].at("params").at("format"), "npy");
+  EXPECT_EQ(request.request.at("outputs"), Json::array({"source", "voxel"}));
+  const auto &proof = request.local_proofs.at("run");
+  EXPECT_EQ(proof.at("project_root"), project.str());
+  EXPECT_EQ(proof.at("case_path"), "results/muferro/" + kRun);
+  EXPECT_EQ(proof.at("files"), Json::array({{{"path", kPath}, {"sha256", kSha}}}));
+  EXPECT_EQ(request.local_bindings.at("run"), stk::core::path_to_utf8(project.root() / "results/muferro" / kRun));
+  EXPECT_THROW(stk::app::muferro_hdf5_voxel_request("voxel", source, {4, 0, 0}), std::invalid_argument);
+  EXPECT_THROW(stk::app::muferro_hdf5_voxel_request("voxel", source, {-1, 0, 0}), std::invalid_argument);
+}
+
+TEST(MuferroHdf5ViewTest, VoxelDecoderKeepsExactIntegersFloatWidthAndNonfiniteValues)
+{
+  const Project project;
+  const auto blob_dir = stk::core::path_to_utf8(project.scratch() / "blobs");
+  const stk::io::BlobCache blobs(stk::core::path_from_utf8(blob_dir));
+  const std::array<int64_t, 3> position{2, 1, 0};
+  const auto check = [&](const char *dtype, const char *descr, uint64_t bits, const char *expected) {
+    const auto source = voxel_source(project, dtype);
+    const auto request = stk::app::muferro_hdf5_voxel_request("voxel", source, position);
+    const auto result = voxel_result(request, source, position, blobs, npy_scalar(descr, bits));
+    const auto value = stk::app::decode_muferro_hdf5_voxel(request, reply(result, blob_dir), blob_dir, source, position);
+    EXPECT_EQ(value.dtype, dtype);
+    EXPECT_EQ(value.value, expected);
+  };
+  check("uint64", "<u8", UINT64_C(9223372036854775931), "9223372036854775931");
+  check("int64", ">i8", std::bit_cast<uint64_t>(INT64_C(-9007199254740993)), "-9007199254740993");
+  check("float64", "<f8", std::bit_cast<uint64_t>(1.0000000000000002), "1.0000000000000002");
+  check("float64", "<f8", std::bit_cast<uint64_t>(std::numeric_limits<double>::infinity()), "+Inf");
+  check("float32", "<f4", std::bit_cast<uint32_t>(std::numeric_limits<float>::quiet_NaN()), "NaN");
+}
+
+TEST(MuferroHdf5ViewTest, VoxelDecoderRejectsWrongOriginDtypeFileAndDigest)
+{
+  const Project project;
+  const auto blob_dir = stk::core::path_to_utf8(project.scratch() / "blobs");
+  const stk::io::BlobCache blobs(stk::core::path_from_utf8(blob_dir));
+  const auto source = voxel_source(project);
+  const std::array<int64_t, 3> position{2, 1, 0};
+  const auto request = stk::app::muferro_hdf5_voxel_request("voxel", source, position);
+  const auto decode = [&](const Json &result) {
+    return stk::app::decode_muferro_hdf5_voxel(request, reply(result, blob_dir), blob_dir, source, position);
+  };
+  const auto good = voxel_result(request, source, position, blobs, npy_scalar("<u8", 42));
+  auto wrong = good;
+  wrong["outputs"]["source"]["descriptor"]["geometry"]["origin"] = {1, 1, 0};
+  EXPECT_THROW(decode(wrong), std::exception);
+  wrong = good;
+  wrong["outputs"]["source"]["descriptor"]["fields"][0]["dtype"] = "int64";
+  EXPECT_THROW(decode(wrong), std::exception);
+  wrong = good;
+  wrong["outputs"]["voxel"]["size"] = 4097;
+  EXPECT_THROW(decode(wrong), std::exception);
+  EXPECT_THROW(decode(voxel_result(request, source, position, blobs, npy_scalar("<i8", 42))), std::exception);
+  EXPECT_THROW(decode(voxel_result(request, source, position, blobs, npy_scalar("<u8", 42, "(1, 1, 2)"))),
+               std::exception);
+  ASSERT_NO_FATAL_FAILURE(flip_first_byte(blobs.path_for(good.at("outputs").at("voxel").at("blob").get<std::string>())));
+  EXPECT_THROW(decode(good), std::exception);
 }
 
 TEST(MuferroHdf5ViewTest, FieldsDecodeTheNodeMetadataInFieldThenNumericStepOrder)

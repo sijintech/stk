@@ -47,6 +47,8 @@ class Payload;
 
 namespace stk::app {
 
+struct MuFerroHdf5Source;
+
 enum class SourceKind : uint8_t { None, Payload, ResultDir, RunDir, Task };
 const char *source_kind_name(SourceKind kind);
 
@@ -179,6 +181,12 @@ struct ProbeState {
   uint64_t serial = 0;
 };
 
+struct MuFerroHdf5VoxelState {
+  bool pending = false;
+  std::optional<std::array<int64_t, 3>> position;
+  std::string dtype, value, error;
+};
+
 struct ExportSettings {
   int width = 1600, height = 1200;
   int magnification = 1; /**< 1..8 (tiled) */
@@ -243,7 +251,8 @@ class ViewerState {
   bool open_path(const std::string &path, const std::string &preset = {}, const io::Json &parameters = io::Json(),
                  const io::Json &source_proof = io::Json());
   /** Shows an in-memory payload (tests, tools). */
-  void open_payload(std::shared_ptr<const io::Payload> payload, std::string label);
+  void open_payload(std::shared_ptr<const io::Payload> payload, std::string label,
+                    std::shared_ptr<const MuFerroHdf5Source> hdf5_source = {});
   void close();
   const ViewerSource &source() const;
   /** Optional guarded-open request identity and state; the active source stays visible until success. */
@@ -367,6 +376,13 @@ class ViewerState {
   void probe_position(const std::array<double, 3> &position);
   void clear_pick();
   const ProbeState &probe() const;
+
+  /** An explicit voxel read is available only for a live, accepted collected HDF5 frame. */
+  std::shared_ptr<const MuFerroHdf5Source> muferro_hdf5_source() const;
+  const MuFerroHdf5VoxelState &muferro_hdf5_voxel() const;
+  void read_muferro_hdf5_voxel(const std::shared_ptr<const MuFerroHdf5Source> &source,
+                              const std::array<int64_t, 3> &position, std::function<bool()> visible = {});
+  void clear_muferro_hdf5_voxel(const std::shared_ptr<const MuFerroHdf5Source> &source);
 
   /* ---- Dialogs and export ---- */
 
