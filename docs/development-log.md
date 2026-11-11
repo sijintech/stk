@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-11 04:40 UTC · 桌面任务日志失效基线与 Claude 分工
+
+Root 已在 Linux X11 英文宽窗 1600×1100 和中文窄窗 680×1000 的真实桌面复现：从聚焦「任务」点选唯一的合成失败任务，已有一行日志可见。真实 loopback Runtime 和生产 Bridge 的首次读取接受 27 源字节，替换非法 UTF-8 后显示对应的 29 字节文本。随后注入同一订阅的最终错误。页头报告错误，任务日志区仍显示「实时」，没有重试入口。两窗各发一次日志订阅与一次事件订阅，无任务写入。固定起点截图与请求回执在外部 `root-delivery-20261111-158/native-task-log-window/red-en` 和 `red-zh`。
+
+Claude 已在独立 `claude/workbench-task-log-retry-100` worktree（基线 `22a4d5ef8c1175c22cbcdabb77a0b2878cd8dfa6`）实现可恢复错误的本地提示和一次明确重试，候选尚未交回。验收目标从已确认的源字节位置继续同一任务两流，保留已显示文字与半行，发一次日志订阅。Root 持有真实窗口、审阅、整合和推送。
+
+远端 `a184cd21` 的 Windows CPU 正式工件已独立核对 1536/1536、零跳过，含 15 项 MuFerro HDF5 用例。Desktop 仍在执行 Windows 原生 20 轮和 macOS 打包及原生验收。本地已提交 HDF5 分量和 Web 日志两项交付，等待该头 Desktop 整轮终态。 [Windows CPU 工件](https://github.com/sijintech/stk/actions/runs/42955953031/artifacts/13829150908) [Desktop CI](https://github.com/sijintech/stk/actions/runs/42955953031)
+
 ## 2026-11-11 04:36 UTC · 工作台读取所选 HDF5 分量与任务标准错误
 
 桌面 `1ef5de308dbe2bf3aed81ed9da2cc76a3cac9cd0` 在已收集的 MuPRO HDF5 多分量场中接受明确的零起点分量索引。同一索引用于图计算、Viewer 来源和原始体素。单分量场直接打开。缺失、越界及过长输入保持打开按钮不可用，编辑输入期间无图请求。隔离候选和 root 集成各通过原生定向 19/19，覆盖原始 uint64 值、显示范围、选择生命周期和旧 Viewer 保护。
