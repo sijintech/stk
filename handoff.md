@@ -1,5 +1,15 @@
 # STK 当前交接
 
+## 2026-11-11 07:42 UTC · Cocoa 隐藏挂起对照与 Web 产物清单复用
+
+本地 main `c8aa0f0cff5aa80d536bef9054e01884d0888d0b` 按字节集成独立候选 `3362001000e009d69e7c13d0a5630c683a2cca18`。在同轮保留原隔离 MP4 对照，并增加一个可选诊断。生产流程确认自己持有的挂起、同一报告的隐藏暂停和原生 `Suspended` 后，在原有 1.25 秒等待内补发一次 `pauseAllMediaPlayback`。原视图、资源会话、导航、媒体和可见性均匹配且回执早于重显才计入。保留原释放、0.50 秒观察和明确 Play，成功还需原生释放回执和 Paused/None。Linux Reports 测试目标构建成功，资源、探针、宿主 44/44；Reports 测试 C++ 普通、探针与 Apple 条件分支语法检查通过。工作流的命名、选测和归档路径已核对。尚待 macOS 编译及真实运行。证据 `root-delivery-20261111-164/cocoa-suspended-pause`。WebKit 上游会在已中断的会话收到原生 Pause 时将待恢复状态置为 Paused，该代码用于提出对照假设，runner 的系统 WebKit 版本须以实测为准。 [WebKit 会话实现](https://github.com/WebKit/WebKit/blob/f6e529d2cd6c793bc85ddfb7d8c97be33cda9c35/Source/WebCore/platform/audio/PlatformMediaSession.cpp#L368-L376)
+
+真实 Web 回放以 1440×900 和 390×844、已选成功任务、空 Viewer 和两份未提交草稿为固定起点。发布头 `d1eb1467` 的同源构建六条通过。清单已到或在途时，首次点任务「结果」只预选，第二次「加载视图」才绘制。冻结的 Claude 104 未提交中间版能一步绘制，实际宽窗仍多发一次清单请求。Root 在隔离树上验证同连接和任务的现有成功清单可由显式打开复用，保留最新终态、授权和导航检查。试验提交 `e458c0a42f2ee9579e6cd877c7ddea3317d9d129`，入口 SHA256 `6b65ac65cae219c06895106b32efe87307da6839bf998a6a5eb25d88ec9633a8`。
+
+组合试验六条实窗通过。清单已到和仍在途各两窗，点击一次打开精确 `scalar-0.vti`，首次和重访均零新增清单、全程一次 `view.build`。一次返回原任务恢复启动按钮焦点及两份草稿，重访画布像素一致。两条离开路线先回工作台，释放真实清单后继续停在原页，查看结果仍为空且零构建。回执核对发布摘要 `47e88b30…`、Z=0 的 896 个样本和范围 −1…21.4；桌面默认 Z=12。全程零模型调用，真实任务和产物未变。证据 `root-delivery-20261111-164/web-vti-real` 的 `baseline-summary.json`、`claude-wip-ready.log`、`root-coalescing-summary.json`。仍待 Claude 104 定稿、旧 Hub 与权限和终态替换回归、组合全测及集成。
+
+远端 main 仍为 `d1eb1467`，Desktop `42978761506` 和 Runtime `42978761563` 整轮均在运行。Linux 打包及干净机冒烟通过，Runtime 两个 Windows Python 版本各 5503 通过。当前候选留在本地，待前轮 Desktop 整轮终态再推送。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42978761506) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42978761563)
+
 ## 2026-11-11 07:22 UTC · 主线发布与 Web 唯一 VTI 路径
 
 Root 将远端 main 从 `8a9da1313fd4c4cef3f01e17afef9d1285feb7d8` 快进到 `d1eb1467d1f1b1be86b423e466ffcdff59d21612`，独立复核远端完整 SHA。发布 10 个提交，范围扫描无发现。包含桌面返回原任务标签及一次打开唯一发布 VTI、Web 标准输出及错误续读、进度与原始值顺序回归。Root 定向原生 87/87，Web 269/269。既有 AOCI 与状态文档工作区修改保留。
