@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-11 02:49 UTC · 工作台更新已发布到 main
+
+远端 `main` 从 `9ce14a5ba5701b38c6f34e98f320582f5c4bdc83` 快进至 `abdc57f7a8cdc648920b34fe53e54c219719d720`，已独立核验完整 SHA。13 个提交范围扫描零发现。包含桌面文献一步入口与旧版 Agent 专项回归、Windows SQLite 夹具修正、桌面运行环境默认展开、Web 历史键盘焦点，以及 Cocoa 重显失败取证。原工作区 AOCI 资产与四份状态文档的既有修改已保留。
+
+同头 Desktop `42948501049`、Runtime `42948501059`、Secret scan `42948501027`、Pages `42948501043` 已启动。Runtime 验证 Windows Python 3.11 夹具，Desktop 保留 macOS 媒体必测并采集静默对照失败时的重显回执。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42948501049) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42948501059) [Secret scan](https://github.com/sijintech/stk/actions/runs/42948501027) [Pages](https://github.com/sijintech/stk/actions/runs/42948501043)
+
+下一片从刚确认的新工作区直接呈现新建任务表单。Claude 在独立工作树负责 Web 候选，Root 负责桌面候选、审阅和跨端验收。两个候选均以 `878e65f6` 为代码基线，尚无实现交付。
+
 ## 2026-11-11 02:48 UTC · 上一轮 Desktop 终态与 Cocoa 重显取证
 
 远端 `9ce14a5ba5701b38c6f34e98f320582f5c4bdc83` 的 Desktop `42941178087` 于 02:44:55 UTC 整轮结束，5/6 作业通过。Linux 主回归 2225/2225、打包和新环境冒烟通过。Windows CPU 1529/1529，原生 6/6，零跳过，1152.48 秒。PDF、MP4、HTML 视频各完成 20/20 轮，分别保留 160、161、161 张验收图。已核对官方工件所取成员的 CRC 与关键图摘要。PDF 的 431 次捕获请求使用一个 WGC 目标，复用 430 次并回收，已接受帧启动最长 55 ms。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42941178087) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/42941178087/artifacts/13824060424)
