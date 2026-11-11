@@ -2149,6 +2149,7 @@ void ViewerState::evaluate_now(const std::string &reason)
 void ViewerState::cancel_evaluation()
 {
   if (opening_) { discard_opening(); return; }
+  ++opening_revision_;
   Impl &m = *impl_;
   m.pending_reason.clear();
   m.pending_at = kInf;
@@ -3068,6 +3069,7 @@ bool ViewerState::workspace_suspended() const
 
 void ViewerState::discard_opening()
 {
+  ++opening_revision_;
   if (!opening_) {
     opening_status_ = Json();
     return;

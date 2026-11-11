@@ -412,12 +412,12 @@ std::function<void()> ProjectSimulationView::collected_view_action(EditorContext
   };
   return [shell, screen, store, result_current, origin_current, project = info.id, revision = info.revision, run] {
     if (!origin_current()) { return; }
-    const auto viewer_version = store->viewer().version();
+    const auto opening_revision = store->viewer().opening_revision();
     store->scripts().execute_collected_view([project, revision, run](const std::string &id) {
       Json params{{"project_id", project}, {"expected_revision", revision}, {"run_id", run}};
       if (!id.empty()) { params["native_collected_view"] = id; }
       return simulation_command(engines[0].id, "view", params);
-    }, [shell, screen, store, origin_current, result_current, viewer_version](const std::string &, const Json &params,
+    }, [shell, screen, store, origin_current, result_current, opening_revision](const std::string &, const Json &params,
         int64_t expires, std::function<bool()> session_current, ScriptState::Completion complete) {
       if (!session_current()) { return; }
       if (!result_current()) {
@@ -425,8 +425,8 @@ std::function<void()> ProjectSimulationView::collected_view_action(EditorContext
         return;
       }
       shell->open_collected_view(screen, params, expires,
-          [store, origin_current, viewer_version, session_current] {
-            return session_current() && origin_current() && store->viewer().version() == viewer_version;
+          [store, origin_current, opening_revision, session_current] {
+            return session_current() && origin_current() && store->viewer().opening_revision() == opening_revision;
           }, [result_current, session_current] { return session_current() && result_current(); }, std::move(complete));
     });
   };

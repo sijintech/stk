@@ -4928,6 +4928,11 @@ TEST_F(DatViewSimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndR
   const auto history_size = scripts.history().size();
   ASSERT_NO_FATAL_FAILURE(click_view(f.screen, *f.drv));
   ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred();
+    return !scripts.busy() || !viewer.opening_status().is_null();
+  }, 30));
+  ASSERT_TRUE(viewer.opening_status().is_object()) << scripts.status().dump();
+  ASSERT_TRUE(loop.pump_until([&] {
     f.screen.run_deferred(); viewer.pump();
     return !scripts.busy() && !viewer.evaluating();
   }, 60));
