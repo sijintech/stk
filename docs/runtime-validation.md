@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-13 15:49 UTC · 切片索引恢复中间层与上轮平台终态
+
+本地 main `733583194a8c292cd99c0a75a99eedfed030b964` 合入 Claude 独立 worktree 的索引清空 `b4e5ea9bdeb0745d362310a6ff7e24ee2ed45692`。清空后显示「中间层」，下次明确加载由现有 Runtime 解析。明确输入 0 仍请求第 0 层，半输入状态不发构建。此前 Claude 105 最终头 `e964d48baa596a7b61b77aec00fa7008390b9f00` 相对已发布快照的改动已由 `58cc991f` 和 `6ff29429` 集成，覆盖再次点击「结果」取消在途首开，以及授权和失败时的反馈收尾。
+
+Node 22 组合构建成功，Chromium 393/393、零跳过。1440×900 和 390×844 真实 Hub、NodeAgent 和 Runtime 从选中成功任务、空 Viewer 和两份未提交草稿开始。首开一次点击显示 Z=12，再明确加载一次第 4 层，清空本身零请求，下一次明确加载回到 Z=12。旧版同样路线清空后加载第 0 层。新候选初末网格和画布一致，全程三次明确构建、零额外清单、零模型调用。两个「结果」取消路线及两个构建中返回路线也在组合源码上通过。证据 `root-delivery-20261113-169/full.xml` 和 `root-delivery-20261111-168/clear-{baseline,candidate}`、`review-reopen`。
+
+远端 `d4064e51` 的 Runtime `42986687285` 13/13 成功，Desktop `42986687264` 于 11 月 11 日 09:33:30 UTC 完成，5/6。Linux 2253/2253，打包及干净机冒烟通过。Windows CPU 1537/1537、原生 6/6。macOS CPU 1597/1597、Metal 254/254、必测原生 4/6，MP4 与 HTML 视频仍在隐藏阶段失败。普通静默 2/2，原隔离静默 0/2，新暂停对照 1/1。在同一 MP4 中，隐藏后 82.3 ms 收到追加暂停回执；重显后先观察到 Playing，49.4 ms 观察到 Paused，原 0.50 秒保持与明确播放均通过。该结果支持继续验证播放恢复路径，必测失败仍待解决。已校验官方 ZIP 摘要和所读成员 CRC，汇总 `root-delivery-20261113-169/platform-summary.json`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/42986687264) [macOS 工件](https://github.com/sijintech/stk/actions/runs/42986687264/artifacts/13842866183) [Runtime CI](https://github.com/sijintech/stk/actions/runs/42986687285)
+
 ## 2026-11-11 08:34 UTC · Web 和桌面使用同一默认 VTI 切片
 
 本地 main `57cae4fb05bd7ebd85e9b16d94d741f127b20f59` 使 Web 的明确一步打开在未填写索引时采用桌面默认的中间网格层。省略 `view.build.options.index` 沿用已发布 Runtime 计算，按所选轴取该维度除以 2 的整数部分。显式索引含 0 保留，手动首次加载仍使用表单显示值。收到自动绘制回执后核对发布摘要、方向和实际索引。「来源」显示实际绘制的位置，后续表单编辑不会改写已显示位置。未修改运行参数、协议或模型配置。
