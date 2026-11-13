@@ -1589,7 +1589,9 @@ class Exercise {
     catch (const std::runtime_error &error) {
       result_["first_toolbar_frame_clock"] = {{"arm", arm}, {"outcome", "inconclusive"},
           {"geometry_error", error.what()}, {"navigation_generation", geometry.navigation_generation},
-          {"dom_time_at_geometry_sample", geometry.current_time}, {"samples", Json::array()}};
+          {"dom_time_at_geometry_sample", geometry.current_time},
+          {"video_rect_css", {geometry.rect_x, geometry.rect_y, geometry.rect_width, geometry.rect_height}},
+          {"viewport_size_css", {geometry.viewport_width, geometry.viewport_height}}, {"samples", Json::array()}};
       return;
     }
     std::vector<frame_clock::Capture> captures;
@@ -2737,6 +2739,11 @@ void run(const Options &options, Json &result, const fs::path &directory)
   std::fputs("STK_NATIVE_STAGE name=reports.app-shell.after\n", stdout); std::fflush(stdout);
   wm::WmOptions wm_options; wm_options.gpu.backend = backend;
   wm_options.window = {"STK public frozen report native acceptance", 1440, 1000, false};
+  // The report viewport reserves toolbar rows at the user's scale. Give both
+  // HTML marker arms room for the complete decoded 320×180 element on the CI client.
+  if (options.source == "html-video" && options.first_toolbar_frames != Options::FirstToolbarFrames::None) {
+    wm_options.user_scale = 0.75f;
+  }
   std::fputs("STK_NATIVE_STAGE name=reports.window-manager.before\n", stdout); std::fflush(stdout);
   auto manager = wm::WindowManager::create(wm_options, error);
   std::fputs("STK_NATIVE_STAGE name=reports.window-manager.after\n", stdout); std::fflush(stdout);
@@ -2745,6 +2752,7 @@ void run(const Options &options, Json &result, const fs::path &directory)
   result["system_backend"] = manager->system_backend();
   result["gpu_backend"] = manager->gpu().backend_name();
   result["initial_client_size"] = {window->width(), window->height()};
+  result["initial_ui_scale"] = window->ui_scale();
   shell.install(screen, window); shell.build_default_layout(screen);
   auto *area = dynamic_cast<app::EditorArea *>(screen.find_area("a3"));
   require(area && area->set_tabs({app::kEditorReports, app::kEditorPython}, 1), "Production Reports/Python tabs");
@@ -2867,11 +2875,8 @@ raise SystemExit(main())
   const std::string entry = pdf ? "report.pdf" : video ? html_video ? "report.html" : "clip.mp4" :
       options.source == "html" ? "report.html" : "report.md";
   const std::string body_marker = "██  ████  ███  █████\n█████  ██  ████  ███\n███  █████  ██  ████";
-  // Both first-toolbar marker arms need the whole picture inside the compact native HTML viewport.
-  const std::string html_video_size = options.first_toolbar_frames == Options::FirstToolbarFrames::None ?
-      "" : " width='208' height='117'";
   const std::string source_bytes = video ? html_video ?
-      "<!doctype html><html><body><video controls preload='none'" + html_video_size + ">"
+      "<!doctype html><html><body><video controls preload='none'>"
       "<source src='clip.mp4' type='video/mp4'></video></body></html>" : media_bytes :
       pdf ? document_preview::make_pdf_fixture() : options.source == "html" ?
       "<!doctype html><html><body><img src='marker.png' alt='Native evidence marker'><pre><code>" + body_marker +
