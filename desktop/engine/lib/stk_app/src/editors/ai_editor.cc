@@ -2004,7 +2004,20 @@ class AIEditor final : public Editor {
     const auto state_name = io::get_string(*detail, "state");
     if (state_name == "reading") { panel.paragraph(ctx.tr("ai.agent.run.detail.reading")); return; }
     if (state_name == "mismatch") { panel.paragraph(ctx.tr("ai.agent.run.detail.mismatch")); return; }
-    if (state_name != "ready") { panel.paragraph(ctx.tr("ai.agent.run.detail.unavailable")); return; }
+    if (state_name != "ready") {
+      panel.paragraph(ctx.tr("ai.agent.run.detail.unavailable"));
+      panel.button("ai_agent_run_detail_retry", ctx.tr("ai.agent.run.read_retry"),
+                   [this, weak = lifetime(), &agent, ticket, owner = run_detail_owner_epoch_] {
+        if (weak.expired() || owner != run_detail_owner_epoch_ || run_detail_.ticket != ticket) { return; }
+        const auto *current = agent.run_detail(ticket, run_detail_.item);
+        if (!current || io::get_string(*current, "state") != "unavailable") { return; }
+        if (const auto next = agent.read_run_detail(run_detail_.item)) {
+          agent.close_run_detail(ticket);
+          run_detail_.ticket = next;
+        }
+      }).disable(state.busy());
+      return;
+    }
     const auto status = io::get_string(*detail, "status");
     std::string counts;
     const auto count_map = detail->value("counts", Json::object());
@@ -2066,7 +2079,7 @@ class AIEditor final : public Editor {
       return !weak.expired() && owner == run_detail_owner_epoch_ && run_detail_.ticket == ticket &&
           page == run_detail_page_epoch_;
     };
-    panel.button("ai_agent_run_detail_files/" + std::to_string(entry), ctx.tr("ai.agent.run.files.back"),
+    const auto &back = panel.button("ai_agent_run_detail_files/" + std::to_string(entry), ctx.tr("ai.agent.run.files.back"),
                  [this, guard, &agent, ticket] {
       if (!guard()) { return; }
       ++run_detail_page_epoch_;
@@ -2085,7 +2098,18 @@ class AIEditor final : public Editor {
     const auto state_name = io::get_string(files, "state");
     if (state_name == "reading") { panel.paragraph(ctx.tr("ai.agent.run.files.reading")); return; }
     if (state_name == "mismatch") { panel.paragraph(ctx.tr("ai.agent.run.files.mismatch")); return; }
-    if (state_name != "ready") { panel.paragraph(ctx.tr("ai.agent.run.files.unavailable")); return; }
+    if (state_name != "ready") {
+      panel.paragraph(ctx.tr("ai.agent.run.files.unavailable"));
+      panel.button("ai_agent_run_files_retry", ctx.tr("ai.agent.run.read_retry"),
+                   [this, guard, &agent, ticket, item = run_detail_.item, entry, ui = ctx.ui, key = back.key] {
+        if (!guard()) { return; }
+        if (agent.read_run_files(ticket, item, size_t(entry))) {
+          ++run_detail_page_epoch_;
+          ui->focus_modal_next_frame(key);
+        }
+      }).disable(state.busy());
+      return;
+    }
     const auto listed = files.value("files", Json::array());
     for (size_t i = 0; i < listed.size(); ++i) {
       const auto &file = listed.at(i);

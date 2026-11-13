@@ -224,6 +224,8 @@ def init(self, *args, **kwargs):
                     time.sleep(0.01)
             if name == 'snapshots.resolve' and (control / 'resolve_fail').exists():
                 raise BridgeError('not_found', 'fixture resolve failure at /private/fixture/path')
+            if name == 'snapshots.get' and (control / 'snapshot_list_fail').exists():
+                raise BridgeError('not_found', 'fixture snapshot list failure')
             result = original(p, c)
             if name == 'snapshots.resolve':
                 result = dict(result)
@@ -1752,6 +1754,7 @@ TEST_F(NativeAgentRunDetailUI, ReselectingTheSessionDropsTheOpenDetailWithoutRea
 
 TEST_F(NativeAgentRunDetailUI, AFailedReadStaysInTheOpenedPanelOfSessionA)
 {
+  produce();
   marker("run_missing");
   ASSERT_NO_FATAL_FAILURE(open_rail());
   ASSERT_NO_FATAL_FAILURE(open_session_a());
@@ -1766,6 +1769,22 @@ TEST_F(NativeAgentRunDetailUI, AFailedReadStaysInTheOpenedPanelOfSessionA)
   EXPECT_EQ(agent().selected(), "session-a");
   EXPECT_TRUE(agent().error().empty()) << agent().error();
   EXPECT_EQ(count("workflow_runs.get"), 1u);
+  std::filesystem::remove(dir.path() / "run_missing");
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_retry"));
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  EXPECT_EQ(f.screen.ui()->focused(), id("ai_agent_run_detail_close"));
+  EXPECT_EQ(count("workflow_runs.get"), 2u);
+
+  marker("snapshot_list_fail");
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_files/0"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return id("ai_agent_run_files_retry") != 0; }, 30));
+  std::filesystem::remove(dir.path() / "snapshot_list_fail");
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_files_retry"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return id("ai_agent_run_detail_preview/0") != 0; }, 30));
+  EXPECT_EQ(f.screen.ui()->focused(), id("ai_agent_run_detail_files/0"));
+  EXPECT_EQ(count("snapshots.get"), 2u);
+  EXPECT_EQ(count("snapshots.resolve"), 0u);
+  EXPECT_EQ(agent().selected(), "session-a");
   expect_no_agent_actions();
 }
 

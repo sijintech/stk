@@ -2488,6 +2488,7 @@
   "ai.agent.run.detail": "关联任务",
   "ai.agent.run.detail.tip": "只读取一次这次运行记录的任务状态，不启动、保存或发送任何内容。",
   "ai.agent.run.detail.reading": "正在读取关联任务…",
+  "ai.agent.run.read_retry": "重新读取",
   "ai.agent.run.detail.unavailable": "无法读取这次运行。",
   "ai.agent.run.detail.mismatch": "这次运行的冻结计划与批准卡片不一致，不显示任务。",
   "ai.agent.run.detail.status": "{status} · {counts} · 读取时状态",

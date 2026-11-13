@@ -2489,6 +2489,7 @@
   "ai.agent.run.detail": "Linked tasks",
   "ai.agent.run.detail.tip": "Read this run’s recorded task state once. Nothing is started, saved or sent.",
   "ai.agent.run.detail.reading": "Reading linked tasks…",
+  "ai.agent.run.read_retry": "Retry read",
   "ai.agent.run.detail.unavailable": "This run cannot be read.",
   "ai.agent.run.detail.mismatch": "This run’s frozen plan does not match the approval card. Its tasks are not shown.",
   "ai.agent.run.detail.status": "{status} · {counts} · state at read time",
