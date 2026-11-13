@@ -1827,29 +1827,38 @@ for (const viewport of viewports) {
 
       const chat = page.locator(surfaces.工作台);
       const log = chat.getByRole('log', {name: '对话记录'});
-      const input = draft(page), send = sendButton(page);
+      const input = draft(page), send = sendButton(page), composer = chat.locator('.chat-composer');
       await expect.soft(chat.getByRole('heading')).toHaveText('新对话 · 未保存');
       await expect.soft(chat.locator('.chat-intro')).toHaveText('从一个科学问题开始');
       await expect(send).toBeDisabled();
       const bounds = async () => ({chat: (await chat.boundingBox())!, log: (await log.boundingBox())!,
-        input: (await input.boundingBox())!, send: (await send.boundingBox())!});
+        composer: (await composer.boundingBox())!, input: (await input.boundingBox())!, send: (await send.boundingBox())!});
       const empty = await bounds();
       const rail = isNarrow(page) ? 0 : 144;
       const width = Math.min(viewport.width - rail, 880);
       expect(empty.chat.width).toBe(width);
       expect(empty.chat.x).toBe((viewport.width - rail - width) / 2 + rail);
-      expect(empty.log.x).toBe(empty.input.x);
-      expect(empty.log.width).toBe(empty.input.width);
+      expect(empty.log.x).toBe(empty.composer.x);
+      expect(empty.log.width).toBe(empty.composer.width);
       expect.soft(empty.send.width).toBeLessThan(110);
-      expect(empty.send.x + empty.send.width).toBe(empty.input.x + empty.input.width);
-      expect(empty.chat.y + empty.chat.height - empty.send.y - empty.send.height).toBeGreaterThan(80);
-      expect(empty.input.y - empty.log.y - empty.log.height).toBeLessThan(32);
+      expect(empty.send.x + empty.send.width).toBe(empty.composer.x + empty.composer.width - 9);
+      expect(empty.send.y + empty.send.height).toBeLessThan(empty.composer.y + empty.composer.height);
+      expect(empty.chat.y + empty.chat.height - empty.composer.y - empty.composer.height).toBeGreaterThan(80);
+      expect(empty.composer.y - empty.log.y - empty.log.height).toBeLessThan(32);
       await page.screenshot({path: test.info().outputPath(`${viewport.name}-conversation-empty.png`)});
 
       await choose(page, /相场参数讨论/);
       await shows(page, messages.map(message => message.content));
       await expect(label(page)).toHaveText(`相场参数讨论 · ${A.slice(0, 6)}`);
+      const transcript = (await log.boundingBox())!;
+      const user = (await log.locator('article.user').first().boundingBox())!;
+      const assistant = (await log.locator('article.assistant').first().boundingBox())!;
+      expect(user.x + user.width).toBeCloseTo(transcript.x + transcript.width, 0);
+      expect(user.width).toBeLessThanOrEqual(transcript.width * 0.85 + 1);
+      expect(assistant.x).toBe(transcript.x);
+      expect(assistant.width).toBeGreaterThan(user.width);
       await input.fill('待核对的网格');
+      await expect(composer).toHaveCSS('border-top-color', 'rgb(126, 156, 216)');
       await input.press('End');
       await input.press('Enter');
       await expect(input).toHaveValue('待核对的网格\n');
@@ -1863,8 +1872,9 @@ for (const viewport of viewports) {
       expect(await chat.evaluate(el => el.scrollTop)).toBe(0);
       expect(await page.evaluate(() => scrollY)).toBe(0);
       const reading = await offset();
-      expect(readingBounds.chat.y + readingBounds.chat.height - readingBounds.send.y - readingBounds.send.height)
+      expect(readingBounds.chat.y + readingBounds.chat.height - readingBounds.composer.y - readingBounds.composer.height)
         .toBeLessThanOrEqual(24);
+      expect((await bounds()).composer).toEqual(readingBounds.composer);
       expect((await bounds()).input).toEqual(readingBounds.input);
       expect((await bounds()).send).toEqual(readingBounds.send);
       await page.screenshot({path: test.info().outputPath(`${viewport.name}-conversation-reading.png`)});
@@ -1873,6 +1883,7 @@ for (const viewport of viewports) {
       await go(page, '工作台');
       await expect(input).toHaveValue('待核对的网格\n');
       expect(await offset()).toBe(reading);
+      expect((await bounds()).composer).toEqual(readingBounds.composer);
       expect((await bounds()).input).toEqual(readingBounds.input);
       expect((await bounds()).send).toEqual(readingBounds.send);
       expect(sent.seen).toEqual([]);

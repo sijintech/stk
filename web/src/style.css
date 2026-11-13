@@ -170,12 +170,21 @@
   border-bottom: 1px solid #343442;
   padding: 12px 0;
 }
+.messages article.user {
+  width: fit-content;
+  max-width: 85%;
+  margin: 8px 0 8px auto;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 12px 12px 4px 12px;
+  background: #2a3144;
+}
 .messages small { color: #7e9cd8; }
 .messages p {
+  margin: 4px 0 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.messages .user p { color: #a6a69c; }
 .messages .pending { opacity: .7; }
 .chat-intro { color: #a6a69c; }
 .chat-empty { justify-content: safe center; }
@@ -233,20 +242,30 @@
 @media (max-width:700px) {
   .conversation-tasks { inset: auto 0 0; width: 100%; height: min(80dvh,100%); }
 }
-.chat-composer { flex: none; }
+.chat-composer {
+  flex: none;
+  border: 1px solid #41414f;
+  border-radius: 10px;
+  background: #1f1f28;
+}
+.chat-composer:focus-within { border-color: #7e9cd8; }
 .chat-composer textarea {
   display: block;
   min-height: 64px;
   max-height: min(220px, 32dvh);
-  background: #1f1f28;
+  border: 0;
+  border-radius: 9px 9px 0 0;
+  background: transparent;
   line-height: 1.5;
 }
+.chat-composer textarea:focus { outline: none; }
 .chat-actions {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px 16px;
-  margin-top: 8px;
+  padding: 6px 8px;
+  border-top: 1px solid #343442;
 }
 .chat-actions .primary {
   flex: none;
