@@ -726,8 +726,9 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     list.focus({preventScroll:true});
   }
   const sessionRow=conv.saved[conv.session];
-  const sessionLabel=conv.missing.has(conv.session)?`已不存在 · ${conv.session.slice(0,6)}`:sessionRow?`${conversationTitle(sessionRow)} · ${conv.session.slice(0,6)}`:
-    conv.own.has(conv.session)?'新对话 · 未保存':`正在确认 · ${conv.session.slice(0,6)}`;
+  const sessionIdHint=conv.session.slice(0,6),sessionMissing=conv.missing.has(conv.session);
+  const sessionLabel=sessionMissing?`已不存在 · ${sessionIdHint}`:sessionRow?conversationTitle(sessionRow):
+    conv.own.has(conv.session)?'新对话 · 未保存':`正在确认 · ${sessionIdHint}`;
   const thread=conv.thread,pending=conv.pending&&!thread.messages.some(m=>m.id===conv.pending!.id)?conv.pending:null;
   const emptyConversation=thread.status==='ready'&&!thread.messages.length&&!pending&&!conv.failure;
   useLayoutEffect(()=>{
@@ -920,7 +921,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     </section>
     <aside className={`chat surface${emptyConversation?' chat-empty':''}${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'||overlay}>
       <div className="chat-heading">
-        <h2 className="conversation-name" title={sessionLabel}>{sessionLabel}</h2>
+        <h2 className="conversation-name" title={sessionRow&&!sessionMissing?`${sessionLabel} · ${sessionIdHint}`:sessionLabel}>{sessionLabel}</h2>
         {!emptyConversation&&conv.saved[conv.session]&&thread.status==='ready'&&<button
           type="button" ref={conversationTasksButton} className="quiet" aria-haspopup="dialog"
           onClick={()=>setConversationTasks(conv.session)}>关联任务</button>}

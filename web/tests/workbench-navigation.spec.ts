@@ -1849,7 +1849,8 @@ for (const viewport of viewports) {
 
       await choose(page, /相场参数讨论/);
       await shows(page, messages.map(message => message.content));
-      await expect(label(page)).toHaveText(`相场参数讨论 · ${A.slice(0, 6)}`);
+      await expect(label(page)).toHaveText('相场参数讨论');
+      await expect(label(page)).toHaveAttribute('title', `相场参数讨论 · ${A.slice(0, 6)}`);
       const transcript = (await log.boundingBox())!;
       const user = (await log.locator('article.user').first().boundingBox())!;
       const assistant = (await log.locator('article.assistant').first().boundingBox())!;
@@ -2076,7 +2077,7 @@ for (const viewport of viewports) {
       await expectActive(page, '工作台');
       await shows(page, ['A 的问题', 'A 的回答']);
       await expect(item(page, /相场参数讨论/)).toHaveAttribute('aria-current', 'true');
-      await expect(page.locator('aside.chat .conversation-name')).toHaveText(`相场参数讨论 · ${A.slice(0, 6)}`);
+      await expect(page.locator('aside.chat .conversation-name')).toHaveText('相场参数讨论');
       await expect(draft(page)).toHaveValue('');
       expect(await page.evaluate(() => sessionStorage.getItem('stk-session'))).toBe(A);
       if (viewport.name === 'narrow') await expect(historyPanel(page)).toBeHidden();
@@ -2198,7 +2199,7 @@ for (const viewport of viewports) {
       release();
       await page.waitForTimeout(300);
       expect(await transcript(page)).toEqual(['B 的问题']);
-      await expect(page.locator('aside.chat .conversation-name')).toHaveText(`铁电回线分析 · ${B.slice(0, 6)}`);
+      await expect(page.locator('aside.chat .conversation-name')).toHaveText('铁电回线分析');
       await expect(page.locator('aside.chat .chat-intro')).toHaveCount(0);
       // Chosen again, the read answers 404: the conversation is reported missing and keeps its unsent draft.
       await choose(page, /旧列表中的对话/);
@@ -2240,7 +2241,7 @@ for (const viewport of viewports) {
         await expectActive(page, '工作台');
         if (stored === 'saved') {
           await expect.poll(() => transcript(page)).toEqual(['B 的问题']);
-          await expect(page.locator('aside.chat .conversation-name')).toHaveText(`铁电回线分析 · ${B.slice(0, 6)}`);
+          await expect(page.locator('aside.chat .conversation-name')).toHaveText('铁电回线分析');
         } else {
           await expect(page.locator('aside.chat .conversation-name')).toHaveText('新对话 · 未保存');
           await expect(page.locator('aside.chat .chat-intro')).toContainText('从一个科学问题开始');
@@ -2306,7 +2307,7 @@ for (const viewport of viewports) {
       await send.click();
       await shows(page, ['未发送的草稿：分析 phi 场', '回复：未发送的草稿：分析 phi 场', '更新的输入', '回复：更新的输入']);
       await expect(failure).toHaveCount(0);
-      await expect(page.locator('aside.chat .conversation-name')).toHaveText(`新会话 · ${local.slice(0, 6)}`);
+      await expect(page.locator('aside.chat .conversation-name')).toHaveText('新会话');
       expect(await page.evaluate(() => sessionStorage.getItem('stk-session'))).toBe(local);
       if (isNarrow(page)) await historyToggle(page).click();
       await expect(item(page, new RegExp(local.slice(0, 6)))).toHaveAttribute('aria-current', 'true');
@@ -2560,7 +2561,7 @@ for (const viewport of viewports) {
       await sendButton(page).click();
       await expect(footer(page)).toContainText('就绪');
       const id = hub.messages[0].session, short = id.slice(0, 6);
-      await expect(label(page)).toHaveText(`新会话 · ${short}`);
+      await expect(label(page)).toHaveText('新会话');
       await draft(page).fill('已保存对话的后续草稿');
       await choose(page, /铁电回线分析/);
       await shows(page, ['B 的问题']);
@@ -2595,14 +2596,14 @@ for (const viewport of viewports) {
       hub.historyFault = null;
       await page.getByRole('button', {name: '重新读取', exact: true}).click();
       await shows(page, ['B 的问题']);
-      await expect(label(page)).toHaveText(`铁电回线分析 · ${B.slice(0, 6)}`);
+      await expect(label(page)).toHaveText('铁电回线分析');
       await expect(sendButton(page)).toBeEnabled();
       await expect(draft(page)).toHaveValue('B 的草稿');
       // A proxy's 404 page for a listed conversation: a read failure with 重新读取, and A is not sendable yet.
       hub.historyFault = 'proxy';
       await choose(page, /相场参数讨论/);
       await expect(failed).toContainText('请求失败 (404)');
-      await expect(label(page)).toHaveText(`相场参数讨论 · ${A.slice(0, 6)}`);
+      await expect(label(page)).toHaveText('相场参数讨论');
       await draft(page).fill('A 的草稿');
       await expect(sendButton(page)).toBeDisabled();
       hub.historyFault = null;
@@ -2628,7 +2629,7 @@ for (const viewport of viewports) {
       await shows(page, ['B 的问题']);
       await choose(page, /旧列表中的对话.*有草稿/);
       await shows(page, ['X 的问题']);
-      await expect(label(page)).toHaveText(`旧列表中的对话 · ${X.slice(0, 6)}`);
+      await expect(label(page)).toHaveText('旧列表中的对话');
       await expect(page.locator('aside.chat .messages')).not.toContainText('已不存在');
       await expect(sendButton(page)).toBeEnabled();
       await sendButton(page).click();
@@ -2651,7 +2652,7 @@ for (const viewport of viewports) {
       await expect(item(page, new RegExp(`${short}.*发送中`))).toHaveCount(1, {timeout: 10_000});
       await expect(item(page, /新对话.*未保存/)).toHaveCount(0);
       await expect(entries(page)).toHaveCount(3);
-      await expect(label(page)).toHaveText(`新会话 · ${short}`);
+      await expect(label(page)).toHaveText('新会话');
       await expect(page.locator('aside.chat .pending')).toContainText('未发送的草稿：分析 phi 场');
       await draft(page).fill('N 的新草稿');
       // Away and back: N's read shows the recorded message once, with the newer draft.
@@ -2701,7 +2702,7 @@ for (const viewport of viewports) {
       hub.sendFail = false;
       await resendButton(page).click();
       await shows(page, ['未发送的草稿：分析 phi 场', '回复：未发送的草稿：分析 phi 场']);
-      await expect(label(page)).toHaveText(`新会话 · ${N.slice(0, 6)}`);
+      await expect(label(page)).toHaveText('新会话');
       await expect(draft(page)).toHaveValue('');
       // The other order: a new conversation's read that found nothing answers after its send's acknowledgement.
       if (isNarrow(page)) await historyToggle(page).click();
@@ -2719,12 +2720,12 @@ for (const viewport of viewports) {
       await expect.poll(() => hub.reached.has(`history ${M}`)).toBe(true);
       release();
       await shows(page, ['第二个对话', '回复：第二个对话']);
-      await expect(label(page)).toHaveText(`新会话 · ${M.slice(0, 6)}`);
+      await expect(label(page)).toHaveText('新会话');
       late();
       await expect(footer(page)).toContainText('就绪');
       await page.waitForTimeout(300);
       expect(await transcript(page)).toEqual(['第二个对话', '回复：第二个对话']);
-      await expect(label(page)).toHaveText(`新会话 · ${M.slice(0, 6)}`);
+      await expect(label(page)).toHaveText('新会话');
       await expect(intro).toHaveCount(0);
       await expect(sendButton(page)).toBeDisabled(); // only for want of text
       await draft(page).fill('第二个对话的追问');
