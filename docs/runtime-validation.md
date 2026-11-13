@@ -1,5 +1,9 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-13 17:13 UTC · 上一轮 Desktop 终态
+
+远端 `6ed5e920d8ecbb64a826684bd4190a0540dbbd50` 的 Desktop `43458144964` 于 17:12:42 UTC 结束，5/6 作业通过。Linux 三项、Windows CPU 1537/1537、Windows 原生文档验收均通过。macOS 作业失败，CPU 与 Metal 通过，必测原生 4/6。正式 Windows 工件 `14061160879` 已发布，详细清单待核对。此终态满足仓库推送门禁。待发布提交包括会话首页、Web 会话任务与文件下载、首次暂停取证。Claude 110 的原生详情候选仍在独立验证。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43458144964) [Windows 工件](https://github.com/sijintech/stk/actions/runs/43458144964/artifacts/14061160879)
+
 ## 2026-11-13 17:07 UTC · 首次暂停时钟诊断
 
 本地 main `88e9a82bcd20c101ef4a16ee098238b94e0870a6` 在原生报告测试的首次显式暂停段保存既有 DOM 探测的时钟和同一 250 ms 保持区间结束时的最后回执。保持断言失败时也保留最后样本。原有阈值、探测次数与暂停行为照常。Linux 报告原生测试目标构建通过，文档宿主 14/14。Apple 真机回执待下一轮 CI。
