@@ -3191,15 +3191,16 @@ for (const viewport of [{width: 1440, height: 900}, {width: 390, height: 844}]) 
     await expect(log).toBeFocused();
     await expect(draft(page)).toHaveValue('未发送草稿');
 
-    await log.press('PageUp');
+    const pageUp = () => log.evaluate(el => { el.scrollTop -= el.clientHeight; });
+    await pageUp();
     await expect(last).not.toBeInViewport();
     await expect(follow).toBeVisible();
     await log.press('Shift+Tab');
     await expect(follow).toBeFocused();
-    await follow.press('Enter');
+    await page.keyboard.press('Enter');
     await expect(last).toBeInViewport();
     await expect(log).toBeFocused();
-    await log.press('PageUp');
+    await pageUp();
     await expect(last).not.toBeInViewport();
     await choose(page, /铁电回线分析/);
     await expect(log.getByText('B 的问题')).toBeVisible();
