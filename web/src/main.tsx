@@ -187,11 +187,9 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const historyShown=wide||historyOpen,overlay=!wide&&historyOpen;
   const historyPanel=useRef<HTMLElement>(null),historyToggle=useRef<HTMLButtonElement>(null),messageList=useRef<HTMLDivElement>(null),composer=useRef<HTMLTextAreaElement>(null);
   const transcriptOffsets=useRef(new Map<string,number>());
-  // A visited transcript is cached for the life of this workbench. Restore its position only when the session
-  // changes. A history reply or a switch between workbench sections does not reapply the offset.
-  useLayoutEffect(()=>{
-    if(messageList.current)messageList.current.scrollTop=transcriptOffsets.current.get(conv.session)??0;
-  },[conv.session]);
+  const transcriptFollow=useRef(new Map<string,boolean>()),shownTranscript=useRef('');
+  const [offerFollow,setOfferFollow]=useState(false);
+  const [transcriptSend,setTranscriptSend]=useState(0);
   const [name,setName]=useState('科学项目'),[log,setLog]=useState<TaskLog|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
   const [environmentDisclosure,setEnvironmentDisclosure]=useState<EnvironmentDisclosure>('setup');
   const environment=useRef<HTMLDetailsElement>(null);
@@ -658,6 +656,10 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // A held Enter repeats on the shortcut that just got the focus back; only a fresh press opens 结果 again.
   const ignoreRepeat=(e:React.KeyboardEvent)=>{if(e.repeat&&e.key==='Enter')e.preventDefault();};
   function openSection(key:Section){
+    if(key!=='workbench'&&tab==='workbench'&&messageList.current){
+      transcriptOffsets.current.set(conv.session,messageList.current.scrollTop);
+      pauseTranscriptFollow();
+    }
     const back=key==='tasks'&&tab==='results'&&!overlay?returnFocus.current:null;
     returnFocus.current=null;dropPick();setConversationTasks(null);
     if(!back||activeScope.current!==back.scope){setTab(key);setHistoryOpen(false);return;}
@@ -670,7 +672,10 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // transcript, reading position and draft. Focus follows keyboard activation and the closing compact history.
   function openConversation(id:string|null,keyboardActivation=false){
     returnFocus.current=null;dropPick();setConversationTasks(null);
-    if(id!==conv.session&&messageList.current)transcriptOffsets.current.set(conv.session,messageList.current.scrollTop);
+    if(id!==conv.session&&tab==='workbench'&&messageList.current){
+      transcriptOffsets.current.set(conv.session,messageList.current.scrollTop);
+      pauseTranscriptFollow();
+    }
     flushSync(()=>{setTab('workbench');setHistoryOpen(false);if(id)conv.select(id);else conv.startNew();});
     if(!id)composer.current?.focus({preventScroll:true});
     else if(!wide||keyboardActivation)messageList.current?.focus({preventScroll:true});
@@ -695,16 +700,48 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   }):conv.entries;
   // The unsent text of a conversation the Hub no longer has goes to a new local conversation, ready to send there.
   function moveDraft(){flushSync(()=>conv.moveDraft());composer.current?.focus({preventScroll:true});}
-  function sendConversation(){
-    if(!conv.canSend)return;
+  function sendConversation(retry=false){
+    if(!(retry?conv.canResend:conv.canSend))return;
+    transcriptFollow.current.set(conv.session,true);
+    setTranscriptSend(previous=>previous+1);
     composer.current?.focus({preventScroll:true});
-    void conv.send();
+    void (retry?conv.resend():conv.send());
+  }
+  function pauseTranscriptFollow(){
+    if(transcriptFollow.current.get(conv.session))transcriptFollow.current.set(conv.session,false);
+  }
+  function observeTranscriptScroll(){
+    const list=messageList.current;
+    if(!list||tab!=='workbench'||overlay)return;
+    const away=list.scrollHeight-list.clientHeight-list.scrollTop>1;
+    if(away)pauseTranscriptFollow();
+    setOfferFollow(away&&transcriptFollow.current.has(conv.session));
+  }
+  function followTranscript(){
+    const list=messageList.current;
+    if(!list)return;
+    transcriptFollow.current.set(conv.session,true);
+    list.scrollTop=list.scrollHeight;
+    setOfferFollow(false);
+    list.focus({preventScroll:true});
   }
   const sessionRow=conv.saved[conv.session];
   const sessionLabel=conv.missing.has(conv.session)?`已不存在 · ${conv.session.slice(0,6)}`:sessionRow?`${conversationTitle(sessionRow)} · ${conv.session.slice(0,6)}`:
     conv.own.has(conv.session)?'新对话 · 未保存':`正在确认 · ${conv.session.slice(0,6)}`;
   const thread=conv.thread,pending=conv.pending&&!thread.messages.some(m=>m.id===conv.pending!.id)?conv.pending:null;
   const emptyConversation=thread.status==='ready'&&!thread.messages.length&&!pending&&!conv.failure;
+  useLayoutEffect(()=>{
+    const list=messageList.current;
+    if(!list||tab!=='workbench'||overlay)return;
+    if(shownTranscript.current!==conv.session){
+      shownTranscript.current=conv.session;
+      list.scrollTop=transcriptOffsets.current.get(conv.session)??0;
+    }else if(transcriptFollow.current.get(conv.session)){
+      list.scrollTop=list.scrollHeight;
+    }
+    setOfferFollow(transcriptFollow.current.has(conv.session)&&list.scrollHeight-list.clientHeight-list.scrollTop>1);
+    // Explicit sends and their receipts can move this transcript. A history read alone does not.
+  },[conv.session,conv.pending,transcriptSend,tab,overlay]);
   // 查询原始值 reads the raw data behind the displayed scene: its own task and path, whatever the file choice is now.
   // The reply is kept only while that scene is still the one shown (a new scene or another task discards it).
   function probeValue(){
@@ -886,7 +923,10 @@ function Workbench({disconnect}:{disconnect:()=>void}){
           type="button" ref={conversationTasksButton} className="quiet" aria-haspopup="dialog"
           onClick={()=>setConversationTasks(conv.session)}>关联任务</button>}
       </div>
-      <div className="messages" ref={messageList} tabIndex={thread.messages.length || pending ? 0 : -1} role="log" aria-label="对话记录">
+      <div className="conversation-transcript">
+      <div className="messages" ref={messageList} tabIndex={thread.messages.length || pending ? 0 : -1} role="log" aria-label="对话记录"
+        onScroll={observeTranscriptScroll} onWheel={e=>{if(e.deltaY<0)pauseTranscriptFollow();}}
+        onKeyDown={e=>{if(e.key==='PageUp'||e.key==='Home'||e.key==='ArrowUp')pauseTranscriptFollow();}}>
         {thread.status==='loading'&&!thread.messages.length&&<p className="muted">正在读取对话…</p>}
         {thread.status==='missing'&&<div className="chat-intro"><h3>这个对话已不存在</h3><p>控制服务中没有这个对话，未创建新会话。{conv.draft.trim()?'未发送的草稿仍在这里，可以移到新对话再发送。':'可以从「新对话」重新开始。'}</p>
           {!!conv.draft.trim()&&<button type="button" onClick={moveDraft}>移到新对话</button>}</div>}
@@ -895,10 +935,12 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         {thread.messages.map(m=><article key={m.id} className={m.role}><small>{m.role==='user'?'你':'STK'}</small><p>{m.content}</p></article>)}
         {pending&&<article className="user pending"><small>你 · 发送中</small><p>{pending.content}</p></article>}
       </div>
+      {offerFollow&&<button type="button" className="follow-conversation" onClick={followTranscript}>跟随最新</button>}
+      </div>
       {conv.failure&&<div className="send-failure" role="alert"><p>{conv.recorded?'消息已记录，回复尚未确认。':'发送未完成，草稿已保留。'}{conv.failure.error}</p>
         {!conv.recorded&&conv.failure.content!==conv.draft&&<p className="failed-text">未发送：{conv.failure.content}</p>}
         {conv.canResend&&conv.draft.trim()&&conv.failure.content!==conv.draft&&<p>请先重试上一条消息，当前草稿会保留。</p>}
-        <button type="button" className="quiet" disabled={!conv.canResend} onClick={()=>void conv.resend()}>重新发送</button></div>}
+        <button type="button" className="quiet" disabled={!conv.canResend} onClick={()=>sendConversation(true)}>重新发送</button></div>}
       {conv.draftTooLong&&<p className="muted" role="status">单条消息最多 12,000 字符，请缩短后发送。</p>}
       <form className="chat-composer" onSubmit={e=>{e.preventDefault();sendConversation();}}>
         <label className="sr-only" htmlFor="chat-input">对话内容</label>

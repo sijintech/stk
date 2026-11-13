@@ -1060,20 +1060,21 @@ class AIEditor final : public Editor {
     return digits;
   }
 
-  ui::LogViewPosition *transcript_position(const std::string &request_id)
+  using TranscriptPositions = std::list<std::pair<std::string, ui::LogViewPosition>>;
+
+  static ui::LogViewPosition *transcript_position(TranscriptPositions &positions, const std::string &id)
   {
     // A loading or failed read has no request record. Its blank view must not clamp a saved position.
-    if (request_id.empty()) { return nullptr; }
-    const auto found = std::find_if(transcript_positions_.begin(), transcript_positions_.end(),
-                                    [&](const auto &entry) { return entry.first == request_id; });
-    if (found != transcript_positions_.end()) {
-      transcript_positions_.splice(transcript_positions_.end(), transcript_positions_, found);
+    if (id.empty()) { return nullptr; }
+    const auto found = std::find_if(positions.begin(), positions.end(), [&](const auto &entry) { return entry.first == id; });
+    if (found != positions.end()) {
+      positions.splice(positions.end(), positions, found);
     }
     else {
-      if (transcript_positions_.size() >= 32) { transcript_positions_.pop_front(); }
-      transcript_positions_.emplace_back(request_id, ui::LogViewPosition{});
+      if (positions.size() >= 32) { positions.pop_front(); }
+      positions.emplace_back(id, ui::LogViewPosition{});
     }
-    return &transcript_positions_.back().second;
+    return &positions.back().second;
   }
 
   void draw_saved_questions(ui::Layout &body, EditorContext &ctx, ProjectState &state, const bool browsing = false)
@@ -1220,7 +1221,7 @@ class AIEditor final : public Editor {
       const float candidate_space = parameter_request && status == "completed" ? 4.0f : 0.0f;
       const float transcript_units = wide ? std::clamp(height / unit - 23.0f - candidate_space, 5.0f, 22.0f) :
           settings_open ? 6.0f : std::clamp(height / unit - 25.0f - candidate_space, 6.0f, 22.0f);
-      layout.log_view("ai_transcript", transcript_, transcript_units, transcript_position(id));
+      layout.log_view("ai_transcript", transcript_, transcript_units, transcript_position(transcript_positions_, id));
     }
     if (!compact_empty && (!focused || !id.empty())) {
       const bool archived = ctx.store.archive().archived("request", id);
@@ -1643,6 +1644,7 @@ class AIEditor final : public Editor {
     const std::string handle = state.project()->handle;
     if (agent_opening_ != handle) {
       agent_opening_ = handle; shown_agent_.clear(); agent_timeline_.clear(); agent_navigation_error_.clear();
+      agent_transcript_positions_.clear();
       draft.allow_prepare = false;  // reopening a project restores its text, never permission to prepare
     }
     poll_agent(ctx, agent);
@@ -1695,7 +1697,8 @@ class AIEditor final : public Editor {
         agent_timeline_ = wrapped_text(agent_steps(view, ctx), wrap_width, ctx);
       }
       const float height = ctx.draw ? float(ctx.draw->rect.height()) : 800.0f;
-      layout.log_view("ai_agent_timeline", agent_timeline_, std::clamp(height / unit - 24.0f, 6.0f, 22.0f));
+      layout.log_view("ai_agent_timeline", agent_timeline_, std::clamp(height / unit - 24.0f, 6.0f, 22.0f),
+                      transcript_position(agent_transcript_positions_, agent.selected()));
       agent_cards(layout, ctx, state, view);
       agent_run_cards(layout, ctx, state);
       const auto show_usage = [&](ui::Layout &where) {
@@ -1775,18 +1778,18 @@ class AIEditor final : public Editor {
     const bool with_target = agent.runs_supported();
     const bool can_send = enabled && !running && state_name != "ready" && state_name != "ended" && target_valid &&
         (new_session ? choice.is_object() : session_loaded);
-    const auto send = [weak = lifetime(), &agent, &state, store = &ctx.store, handle, session, &draft, with_target,
+    const auto send = [this, weak = lifetime(), &agent, &state, store = &ctx.store, handle, session, &draft, with_target,
                        simulation, connection, options, can_send, selection = agent.selection_epoch()] {
       if (weak.expired() || !can_send || !state.project() || state.project()->handle != handle || state.busy() ||
           agent.busy() || agent.running() || agent.selection_epoch() != selection || agent.selected() != session ||
           draft.intent != kAgentIntent || draft.agent_text.empty() ||
           (!session.empty() && (!selected_agent_loaded(agent) || io::get_string(agent.view(), "state") == "ready"))) { return; }
-      if (with_target) {
-        if (draft.allow_prepare != !simulation.is_null() ||
-            (!simulation.is_null() && !draft.run_target.matches(store->jobs(), connection, options))) { return; }
-        agent.ask(draft.agent_text, simulation);
+      if (with_target && (draft.allow_prepare != !simulation.is_null() ||
+          (!simulation.is_null() && !draft.run_target.matches(store->jobs(), connection, options)))) { return; }
+      const bool sent = with_target ? agent.ask(draft.agent_text, simulation) : agent.ask(draft.agent_text);
+      if (sent && !session.empty()) {
+        transcript_position(agent_transcript_positions_, session)->follow = true;
       }
-      else { agent.ask(draft.agent_text); }
     };
     auto &input = layout.text_area("ai_agent_text/" + handle, ui::bind(draft.agent_text),
                                    {.max_length = 8192, .visible_lines = 3, .on_submit = send,
@@ -2228,7 +2231,7 @@ class AIEditor final : public Editor {
   std::shared_ptr<const CapturedProjectTable> captured_;
   ProjectContextPicker picker_;
   ui::LogBuffer transcript_, raw_reply_;
-  std::list<std::pair<std::string, ui::LogViewPosition>> transcript_positions_;
+  TranscriptPositions transcript_positions_, agent_transcript_positions_;
   std::string pending_session_, pending_project_, agent_opening_, shown_agent_, agent_navigation_error_;
   ui::LogBuffer agent_timeline_;
   std::string run_plan_origin_;

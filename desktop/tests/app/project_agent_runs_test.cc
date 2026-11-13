@@ -64,6 +64,9 @@ def init(self, *args, **kwargs):
                     {'item': pending, 'decision': None, 'receipt': None}])
             if (control / 'answered').exists():
                 sessions[identity].update(state='answered', awaiting=[])
+            if (control / 'long_timeline').exists():
+                events = [{'kind': 'user_turn', 'turn': i, 'text': 'Saved message %d' % i} for i in range(50)]
+                sessions[identity].update(events=events, total=len(events))
         return sessions[identity]
     details = [0]
     def run_get(p):
@@ -1482,6 +1485,39 @@ TEST_F(NativeAgentRunDetailUI, ConversationShortcutSendsOnceThroughTheExistingAg
   ASSERT_NE(f.screen.ui()->find(input), nullptr);
   EXPECT_TRUE(f.screen.ui()->find(input)->string.value().empty());
   EXPECT_EQ(f.screen.ui()->focused(), id(input));
+}
+
+TEST_F(NativeAgentRunDetailUI, ExplicitSendFollowsTheTimelineAndOtherSessionsKeepTheirOwnPosition)
+{
+  f.drv->ctx.rect = {0, 0, 1600, 1400};
+  marker("answered"); marker("long_timeline");
+  ASSERT_NO_FATAL_FAILURE(open_rail());
+  ASSERT_NO_FATAL_FAILURE(open_session_a());
+  const auto timeline_key = "ai_agent_timeline";
+  const auto scroll = [&] {
+    const auto *timeline = f.screen.ui()->find(timeline_key);
+    return timeline ? f.screen.ui()->scroll_of(timeline->id) : -1.0f;
+  };
+  const auto tail = scroll();
+  ASSERT_GT(tail, 100.0f);
+  ASSERT_NO_FATAL_FAILURE(click(timeline_key));
+  ASSERT_TRUE(f.drv->key(wm::Key::PageUp)); frame();
+  const auto reading = scroll();
+  EXPECT_LT(reading, tail);
+  ASSERT_NO_FATAL_FAILURE(click("workbench_agent_session/session-b"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return scroll() == tail; }, 30));
+  ASSERT_NO_FATAL_FAILURE(open_session_a());
+  EXPECT_FLOAT_EQ(scroll(), reading);
+  EXPECT_EQ(count("say"), 0u);
+
+  const auto input = "ai_agent_text/" + state().project()->handle;
+  ASSERT_NO_FATAL_FAILURE(click(input));
+  ASSERT_TRUE(f.drv->key(wm::Key::Unknown, wm::ModNone, "Follow the next reply")); frame();
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_send"));
+  EXPECT_FLOAT_EQ(scroll(), tail);
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return !agent().busy() && count("start") == 1u; }, 30));
+  EXPECT_EQ(count("say"), 1u);
+  EXPECT_EQ(count("run_decide"), 0u);
 }
 
 TEST_F(NativeAgentRunDetailUI, WideWindowOpensARightPanelInTwoClicksAndReturnsFocusWithoutSideEffects)

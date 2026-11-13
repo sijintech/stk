@@ -142,12 +142,29 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.messages {
+.conversation-transcript {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: min(8rem, 20dvh);
+  margin: 12px 0;
+}
+.messages {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  margin: 12px 0;
+  overflow-anchor: none;
+}
+.follow-conversation {
+  position: absolute;
+  right: 20px;
+  bottom: 8px;
+  border-radius: 999px;
+  border-color: #7e9cd8;
+  color: #dcd7ba;
+  background: #2a3144;
 }
 .messages article {
   border-bottom: 1px solid #343442;
@@ -167,7 +184,7 @@
   font-size: 12px;
   color: #a6a69c;
 }
-.chat-empty .messages {
+.chat-empty .conversation-transcript {
   flex: none;
   min-height: 0;
   margin: 8px 0 16px;

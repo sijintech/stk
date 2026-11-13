@@ -3097,6 +3097,61 @@ for (const viewport of [{width: 1440, height: 900}, {width: 390, height: 844}]) 
 }
 
 for (const viewport of [{width: 1440, height: 900}, {width: 390, height: 844}]) {
+  test(`explicit send follows new messages until the reader scrolls away at ${viewport.width}px`, async ({page}) => {
+    await page.setViewportSize(viewport);
+    const hub = new Hub();
+    conversations(hub);
+    const long = (prefix: string) => Array.from({length: 60}, (_, index) =>
+      say(`${prefix}-${index}`, index % 2 ? 'assistant' : 'user', `${prefix} 已保存段落 ${index}`));
+    hub.saved.set(A, long('A'));
+    hub.saved.set(B, long('B'));
+    await setup(page, hub, {scene: false});
+    await choose(page, /相场参数讨论/);
+    const log = page.getByRole('log', {name: '对话记录'});
+    const follow = page.getByRole('button', {name: '跟随最新', exact: true});
+    const top = () => log.evaluate(el => el.scrollTop);
+    const remaining = () => log.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop);
+    const input = draft(page);
+    await expect(log.locator('article')).toHaveCount(60);
+    expect(await top()).toBe(0);
+    await expect(follow).toHaveCount(0);
+    await input.fill('检查本次网格');
+    const initial = await input.boundingBox();
+    const release = hub.holdNext(`send ${A}`);
+    await input.press('Control+Enter');
+    await expect.poll(remaining).toBeLessThanOrEqual(1);
+    await expect(log.getByText('检查本次网格')).toBeInViewport();
+    expect(await input.boundingBox()).toEqual(initial);
+    await log.evaluate(el => { el.scrollTop = 520; });
+    await expect(follow).toBeVisible();
+    const reading = await top();
+    expect(reading).toBe(520);
+    release();
+    await expect.poll(() => hub.messages.length).toBe(1);
+    await expect(log.locator('article')).toHaveCount(62);
+    expect(await top()).toBe(reading);
+    await follow.click();
+    await expect.poll(remaining).toBeLessThanOrEqual(1);
+    await expect(log).toBeFocused();
+    await expect(follow).toHaveCount(0);
+
+    await input.fill('等待中的下一条');
+    const releaseLater = hub.holdNext(`send ${A}`);
+    await sendButton(page).click();
+    await expect(log.getByText('等待中的下一条')).toBeInViewport();
+    const beforeSwitch = await top();
+    await choose(page, /铁电回线分析/);
+    await expect(log.locator('article')).toHaveCount(60);
+    await log.evaluate(el => { el.scrollTop = 430; });
+    releaseLater();
+    await expect.poll(() => hub.messages.length).toBe(2);
+    expect(await top()).toBe(430);
+    await expect(follow).toHaveCount(0);
+    await choose(page, /相场参数讨论/);
+    await expect(log.locator('article')).toHaveCount(64);
+    expect(await top()).toBe(beforeSwitch);
+  });
+
   test(`conversation shortcut sends once and retains composer focus at ${viewport.width}px`, async ({page}) => {
     await page.setViewportSize(viewport);
     const hub = new Hub();
