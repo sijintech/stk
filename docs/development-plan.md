@@ -1,5 +1,15 @@
 # STK 开发计划
 
+## 2026-11-13 23:00 UTC · 工作台发布与桌面正文比例字体
+
+已把 15 个提交快进推送到远端 `834f7bd4656fe197e7bc8d93a5454042a718498d`，范围 gitleaks 零发现。该头 Pages 和 Secret scan 已通过，Desktop 与 Runtime 继续运行。 [Pages](https://github.com/sijintech/stk/actions/runs/43522208435) [Desktop CI](https://github.com/sijintech/stk/actions/runs/43522208408) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43522208394)
+
+Claude 117 在独立 worktree 交付 `4f3b650b8cc8bda942cf453109c9e622e3111e64`。Root 将其集成到本地 main `15d879b20d1eb57bb7dafea42fab13a7238b62f9`。聚焦项目问答与智能体正文用比例字体，折行、行高、滚动和键盘移动与绘制一致。角色沿用文字标签。分栏、原始回复、日志、计划与文件预览保留等宽字体。Claude 在基线上复现三项项目用例的字体断言失败，候选项目组 1566/1566。Root 主线 UI 核心 136/136，相关定向 30/30，包含实际 Xvfb 组件画廊，桌面与项目测试可执行文件均重新链接。
+
+Linux X11 固定起点是已打开合成智能体会话甲、正文已上滚且有未发送草稿。1600×1100 英文宽窗选乙再回甲共两次点击，680×1000 中文窄窗各次经过「历史」，共四次点击。两个窗口恢复的正文区域与出发时像素一致。草稿字样及其位置一致，亮像素掩膜重合 95.8% 和 95.9%，出发时输入框保有焦点，返回时未获焦。最初按整块颜色比较受焦点背景影响，复验用实际字形判定。每轮两次 `project.agent.get`，零发送、模型调用及项目写入，数据库与两条会话链摘要一致。重新折行时仍以像素偏移恢复，宽度变化可能落在不同文字行。证据 `root-delivery-20261113-192/{typography-wide-verified/receipt.json,typography-narrow-verified/receipt.json,typography-focused.xml,typography-ui.xml,typography-build.log}`。
+
+Claude 118 已在 `claude/native-conversation-composer-118` 从 `15d879b2` 开始桌面输入卡片，负责聚焦工作台的问答与智能体输入布局和对应回归。Root 继续处理平台验收和集成。保存副本候选仍待目标平台验证。原七份工作区修改保留。
+
 ## 2026-11-13 22:47 UTC · 上一主线 Desktop 已到终态
 
 远端 `413a283379e032f64b857d53844612fbc1b705bc` Desktop 于 22:44:52 UTC 完成。Linux 三项及 Windows CPU 成功。macOS 必测预览 4/6，MP4 和 HTML 两项隐藏后时间回退，CPU、Metal 及独立暂停恢复用例通过。Windows 原生预览 5/6，包括 20 轮 WebView2 合成、HTML、PDF、MP4 和 HTML 视频。Markdown 第 13 轮第二次 OS 捕获在 `capture.create-for-window` 返回 `0x8007041d`，耗时约 120 秒，超出可见像素等待期限。此前样本已定位第一页正文，计数为一，要求连续两次。Runtime 13/13、Pages 和 Secret scan 均成功。证据 `root-delivery-20261113-192/413-windows-api.log`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43511133797) [Windows 工件](https://github.com/sijintech/stk/actions/runs/43511133797/artifacts/14083665425) [macOS 工件](https://github.com/sijintech/stk/actions/runs/43511133797/artifacts/14081159332)
