@@ -174,6 +174,9 @@ def test_local_conversation_search_spans_history_and_reads_only_bound_titles(inp
     assert all(method not in operations for operations in TOOL_USES.values())
     assert method not in h.call("script.catalog")["operations"]
     assert h.error(method, {"handle": "0" * 32, "query": "STK"})["code"] == "not_found"
+    other = ProjectStore.create(store.directory.parent / "unrelated-conversation-search", "Separate project")
+    other_handle = h.call("project.open", {"directory": str(other.directory)})["project"]["handle"]
+    assert h.call(method, {"handle": other_handle, "query": "晶格 STK"}) == {"items": [], "next": None}
     assert h.error(method, {**params, "query": " \t"})["code"] == "invalid_params"
     assert h.error(method, {**params, "limit": 51})["code"] == "invalid_params"
     assert h.error(method, {**params, "after": {**first["next"], "created_at": "invalid"}})["code"] == "invalid_params"
