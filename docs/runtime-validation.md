@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-13 19:17 UTC · macOS 会话夹具修正与视频工件复核
+
+远端 `19998d12` 的 macOS 工件 `14067998655` 中，CPU 1612/1614，两个失败均停在窄窗历史菜单，尚未打开任务面板。当前界面在历史条目变更时关闭菜单，原测试点击前只等到智能体列表，未等问答历史。Root 本地 `3ebbb4cd6fc63f2086384d5ea201a6ba07f15558` 固定为已加载历史后再起步，直接核对展开的菜单项，仍验证原 3 次与 5 次点击。Linux 连续 5 轮共 10/10，智能体和已保存会话联合 48/48。此前同批本地 project 全量 1560/1562，余两项首跑缺已安装 peer helper 路径，设置既有安装路径后定向 2/2。暂存 gitleaks 零发现。新头 macOS 待验。
+
+同一官方 macOS 工件 Metal 254/254，必测原生 4/6。MP4 与 HTML 视频均在首轮工具栏暂停低于验收下限，分别由 0.10777 到 0.03657 秒和由 0.11394 到 0.04708 秒。可选帧号对照的 MP4 持续播放取到帧 1，暂停取到帧 0、0，来自独立会话且取图时延不同。HTML 两组都因 320×180 元素超出 385×159 视口无有效帧号。`3ebbb4cd` 仅对首次工具栏的两个 HTML 帧号夹具设置 208×117，保留必测验收和采样判据。Linux 原生报告测试目标构建通过，修正后的 macOS 截图待跑。证据 `root-delivery-20261113-184/{macos-receipt.json,settled-history-v2.log,agent-final.xml,project-full.xml,project-peer-retry.xml,marker-geometry-build.log}`。 [官方 macOS 工件](https://github.com/sijintech/stk/actions/runs/43481451563/artifacts/14067998655)
+
+上一远端的 Linux 三项、Windows CPU 与 Runtime 通过，最后一项 Windows 原生文档仍在运行。Claude 113 保存副本候选还未提交，隔离构建的全量运行正在暴露缺 `psutil` 的本地配置，Root 继续以真实窗口与明确文件边界验收。发布前 AOCI 0.1.0-rc21 返回 `stopped/blocked`、零候选、94 条待复核观察，无 Recovery。三份既有 AOCI 改动摘要一致。 [桌面 CI](https://github.com/sijintech/stk/actions/runs/43481451563)
+
 ## 2026-11-13 19:05 UTC · 聚焦智能体会话默认收起会话管理
 
 本地 main `e2fd284c61b41ce65d18b40604b3a0951f60c4a9` 将完整会话选择器、刷新及规划模型信息收进「智能体会话」展开区。当前会话标题与正文直接显示，模型不可用原因在输入和发送附近，用量移入「记录」。定向 48/48，桌面与项目测试目标构建通过，暂存 gitleaks 零发现。
