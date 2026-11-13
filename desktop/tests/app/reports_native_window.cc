@@ -2766,8 +2766,9 @@ void run(const Options &options, Json &result, const fs::path &directory)
   require(redraw_timer.id != 0, "Cannot install bounded-wait redraw timer");
   Exercise ui(*manager, *window, result, directory);
 #ifdef _WIN32
-  // Isolate the lease to the Windows PDF gate, which has exhibited repeated target startup stalls.
-  if (options.source == "pdf") { ui.lease_capture_item(); }
+  // Both sources have seen the OS stall while opening a new capture target mid-run. Retain the
+  // window's target while continuing to create a fresh capture session for each pixel sample.
+  if (options.source == "pdf" || options.source == "markdown") { ui.lease_capture_item(); }
 #endif
 #if defined(STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES) && defined(__APPLE__)
   // Confirm activation before the first layout mouseDown, not only after a
