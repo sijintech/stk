@@ -12,6 +12,7 @@
 
 #include <cstdlib>
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -23,6 +24,22 @@
 namespace stk::app {
 namespace {
 using io::Json;
+
+/** The focused composer card: the box drawn exactly around the field and the action row below it (box padding
+ * on every side, as Layout::box places its children). Null when no such surface was drawn. */
+const ui::DrawCmd *composer_card(const ui::Context &ui, const ui::Widget &input, const ui::Widget &action)
+{
+  const float pad = ui.style().box_space;
+  const auto near = [](float a, float b) { return std::abs(a - b) <= 1.0f; };
+  for (const auto &command : ui.draw_list().cmds) {
+    if (command.type == ui::CmdType::RoundBox && near(command.rect.x, input.rect.x - pad) &&
+        near(command.rect.x1(), input.rect.x1() + pad) && near(command.rect.y, input.rect.y - pad) &&
+        near(command.rect.y1(), action.rect.y1() + pad) && command.rect.contains(ui::Vec2{action.rect.cx(), action.rect.cy()})) {
+      return &command;
+    }
+  }
+  return nullptr;
+}
 
 // Wire fixture only: every agent method is replaced; no model, executable, connection or Runtime is used.
 // The real bridge still owns project opening and protocol dispatch. New-method schemas are tested in Python.
@@ -1462,6 +1479,43 @@ class NativeAgentRunDetailUI : public NativeAgentRuns {
     EXPECT_EQ(count("run_decide"), 0u);
   }
   std::string entry() { return "ai_agent_run_detail/approve:session-a"; }
+  /** Wheel the region (at its left margin, away from the timeline) until the control is fully drawn, as a reader would. */
+  void scroll_into_view(const std::string &key)
+  {
+    for (int i = 0; i < 60; ++i) {
+      const auto *control = f.screen.ui()->find(key);
+      ASSERT_NE(control, nullptr) << key;
+      if (control->rect.intersect(control->clip) == control->rect) { return; }
+      wm::Event wheel; wheel.type = wm::EventType::Wheel;
+      wheel.x = int(control->clip.x) + 2;
+      wheel.y = f.screen.rect().ymax - 1 - int(control->clip.cy());
+      wheel.wheel_y = control->rect.y > control->clip.y ? -2 : 2;
+      ASSERT_TRUE(f.drv->send(wheel)) << key; frame();
+    }
+    FAIL() << key << " stays outside its region";
+  }
+  /** The focused agent composer: field and Send on one card as wide as the timeline, Send right-aligned and
+   * unclipped. The card is checked where the field is drawn. */
+  void expect_composer_card()
+  {
+    ASSERT_NO_FATAL_FAILURE(scroll_into_view("ai_agent_text/" + state().project()->handle));
+    ASSERT_NO_FATAL_FAILURE(scroll_into_view("ai_agent_send"));
+    const auto &ui = *f.screen.ui();
+    const auto &style = ui.style();
+    const auto *input = ui.find("ai_agent_text/" + state().project()->handle);
+    const auto *send = ui.find("ai_agent_send");
+    const auto *timeline = ui.find("ai_agent_timeline");
+    ASSERT_NE(input, nullptr); ASSERT_NE(send, nullptr); ASSERT_NE(timeline, nullptr);
+    ASSERT_EQ(input->rect.intersect(input->clip), input->rect) << "the field must be drawn for the check to count";
+    ASSERT_EQ(send->rect.intersect(send->clip), send->rect);
+    const auto *card = composer_card(ui, *input, *send);
+    ASSERT_NE(card, nullptr) << "no card drawn around the agent field and Send";
+    EXPECT_EQ(card->rect.x, timeline->rect.x);
+    EXPECT_EQ(card->rect.w, timeline->rect.w);
+    EXPECT_EQ(send->rect.x1(), input->rect.x1());
+    EXPECT_LT(send->rect.w, input->rect.w * 0.5f);
+    EXPECT_GE(send->rect.w, f.measurer.width(send->text, style.font) + 2 * style.text_margin);
+  }
   /** Texts of the open panel's labels and paragraphs, in drawing order. */
   std::vector<std::string> panel_labels()
   {
@@ -1567,6 +1621,7 @@ TEST_F(NativeAgentRunDetailUI, ConversationShortcutSendsOnceThroughTheExistingAg
   const auto *send = f.screen.ui()->find("ai_agent_send");
   ASSERT_NE(send, nullptr);
   ASSERT_TRUE(send->enabled);
+  ASSERT_NO_FATAL_FAILURE(expect_composer_card());  // while the field is being edited
 #ifdef __APPLE__
   constexpr auto primary = wm::ModOS;
 #else
@@ -1580,6 +1635,7 @@ TEST_F(NativeAgentRunDetailUI, ConversationShortcutSendsOnceThroughTheExistingAg
   ASSERT_NE(f.screen.ui()->find(input), nullptr);
   EXPECT_TRUE(f.screen.ui()->find(input)->string.value().empty());
   EXPECT_EQ(f.screen.ui()->focused(), id(input));
+  ASSERT_NO_FATAL_FAILURE(expect_composer_card());
 }
 
 TEST_F(NativeAgentRunDetailUI, ExplicitSendFollowsTheTimelineAndOtherSessionsKeepTheirOwnPosition)
@@ -1995,6 +2051,7 @@ TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseTimelineUsesTheRegularFontWith
   ASSERT_NO_FATAL_FAILURE(open_narrow_session_a());
   ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
   ASSERT_NO_FATAL_FAILURE(expect_proportional_timeline([&] { open_narrow_session_a(); }));
+  ASSERT_NO_FATAL_FAILURE(expect_composer_card());
 
   // Ordinary maximization of the same editor is not the focused workbench: at this width both wrap to
   // the same width, so only the font tells the cached lines apart. It returns to monospace lines.
@@ -2010,12 +2067,25 @@ TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseTimelineUsesTheRegularFontWith
     EXPECT_LE(f.measurer.width(timeline->log->line(i), style.mono), timeline->rect.w - 2 * style.text_margin)
         << timeline->log->line(i);
   }
+  {
+    // The split view's composer stays stacked: no card, and Send as wide as the field.
+    ASSERT_NO_FATAL_FAILURE(scroll_into_view("ai_agent_text/" + state().project()->handle));
+    const auto &ui = *f.screen.ui();
+    const auto *input = ui.find("ai_agent_text/" + state().project()->handle);
+    const auto *send = ui.find("ai_agent_send");
+    ASSERT_NE(input, nullptr); ASSERT_NE(send, nullptr);
+    ASSERT_EQ(input->rect.intersect(input->clip), input->rect) << "the field must be drawn for the check to count";
+    EXPECT_EQ(composer_card(ui, *input, *send), nullptr);
+    EXPECT_EQ(send->rect.x, input->rect.x);
+    EXPECT_EQ(send->rect.w, input->rect.w);
+  }
   f.shell->open_workbench(f.screen);
   f.screen.run_deferred();
   frame();
   ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
   ASSERT_NE(f.screen.ui()->find("ai_agent_timeline"), nullptr);
   EXPECT_FALSE(f.screen.ui()->find("ai_agent_timeline")->mono);
+  ASSERT_NO_FATAL_FAILURE(expect_composer_card());
   EXPECT_EQ(agent().selected(), "session-a");
   EXPECT_EQ(count("say"), 0u);
 }

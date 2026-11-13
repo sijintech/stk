@@ -1396,15 +1396,18 @@ class AIEditor final : public Editor {
         proposal_navigation_error_.clear();
       }
     };
+    // The focused workbench draws the field, why preparing is blocked and the action on one card, like the Web
+    // composer; a box only nests the layout, so keys, IDs and focus order stay those of the split view.
+    auto &composer = focused ? layout.box() : layout;
     // Active toolkit edits must disappear on project switch before a new binding is installed.
-    auto &input = layout.text_area("ai_question/" + handle, ui::bind(draft.text),
-                                   {.max_length = 65536, .visible_lines = 4, .on_submit = prepare,
-                                    .submit_when_focused = true, .preserve_on_escape = true});
+    auto &input = composer.text_area("ai_question/" + handle, ui::bind(draft.text),
+                                     {.max_length = 65536, .visible_lines = 4, .on_submit = prepare,
+                                      .submit_when_focused = true, .preserve_on_escape = true});
     const bool has_question = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
         !ctx.ui->edit_state()->text().empty() : !draft.text.empty();
-    layout.paragraph(ctx.tr(focused && discussion.context().empty() ? "ai.no_context" : "ai.prepare_hint"));
-    if (picker_.active()) { layout.paragraph(ctx.tr("ai.scope.finish_first")); }
-    auto &actions = focused ? layout.row().alignment(ui::LayoutAlign::Right) : layout;
+    composer.paragraph(ctx.tr(focused && discussion.context().empty() ? "ai.no_context" : "ai.prepare_hint"));
+    if (picker_.active()) { composer.paragraph(ctx.tr("ai.scope.finish_first")); }
+    auto &actions = focused ? composer.row().alignment(ui::LayoutAlign::Right) : layout;
     actions.button("ai_prepare", ctx.tr("ai.prepare"), prepare).disable(!can_prepare || !has_question)
         .tip(ctx.tr("ai.prepare.shortcut"));
     return input;
@@ -1835,13 +1838,16 @@ class AIEditor final : public Editor {
         transcript_position(agent_transcript_positions_, session)->follow = true;
       }
     };
-    auto &input = layout.text_area("ai_agent_text/" + handle, ui::bind(draft.agent_text),
-                                   {.max_length = 8192, .visible_lines = 3, .on_submit = send,
-                                    .submit_when_focused = true, .preserve_on_escape = true});
-    if (focused && !choice.is_object()) { layout.paragraph(planner); }
+    // Focused: the field, why sending is unavailable and the right-aligned action share one card (as the question).
+    auto &composer = focused ? layout.box() : layout;
+    auto &input = composer.text_area("ai_agent_text/" + handle, ui::bind(draft.agent_text),
+                                     {.max_length = 8192, .visible_lines = 3, .on_submit = send,
+                                      .submit_when_focused = true, .preserve_on_escape = true});
+    if (focused && !choice.is_object()) { composer.paragraph(planner); }
     const bool has_text = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
         !ctx.ui->edit_state()->text().empty() : !draft.agent_text.empty();
-    layout.button("ai_agent_send", ctx.tr(new_session ? "ai.agent.start" : "ai.agent.say"), send)
+    auto &actions = focused ? composer.row().alignment(ui::LayoutAlign::Right) : layout;
+    actions.button("ai_agent_send", ctx.tr(new_session ? "ai.agent.start" : "ai.agent.say"), send)
         .disable(!can_send || !has_text).tip(ctx.tr("ai.agent.send.shortcut"));
   }
 

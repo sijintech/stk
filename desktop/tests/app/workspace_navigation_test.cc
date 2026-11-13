@@ -14,6 +14,7 @@
 #include "../wm/support.hh"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -54,6 +55,33 @@ bool shows(const wmtest::AppFixture &f, const std::string &text)
     for (const auto &widget : block->widgets()) { if (widget.text == text) { return true; } }
   }
   return false;
+}
+
+/** The focused composer card: the box drawn exactly around the field and the action row below it (box padding
+ * on every side, as Layout::box places its children). Null when no such surface was drawn. */
+const ui::DrawCmd *composer_card(const ui::Context &ui, const ui::Widget &input, const ui::Widget &action)
+{
+  const float pad = ui.style().box_space;
+  const auto near = [](float a, float b) { return std::abs(a - b) <= 1.0f; };
+  for (const auto &command : ui.draw_list().cmds) {
+    if (command.type == ui::CmdType::RoundBox && near(command.rect.x, input.rect.x - pad) &&
+        near(command.rect.x1(), input.rect.x1() + pad) && near(command.rect.y, input.rect.y - pad) &&
+        near(command.rect.y1(), action.rect.y1() + pad) && command.rect.contains(ui::Vec2{action.rect.cx(), action.rect.cy()})) {
+      return &command;
+    }
+  }
+  return nullptr;
+}
+
+/** The split view and ordinary maximization keep the stacked composer: no card, the action as wide as the field. */
+void expect_split_composer(const ui::Context &ui, const ui::Widget *input, const ui::Widget *action)
+{
+  ASSERT_NE(input, nullptr);
+  ASSERT_NE(action, nullptr);
+  ASSERT_EQ(input->rect.intersect(input->clip), input->rect) << "the field must be drawn for the check to count";
+  EXPECT_EQ(composer_card(ui, *input, *action), nullptr);
+  EXPECT_EQ(action->rect.x, input->rect.x);
+  EXPECT_EQ(action->rect.w, input->rect.w);
 }
 
 TEST(WorkspaceNavigation, GuidedWorkspaceRemainsAvailableAndOpensJobsAndViewerWithoutAProject)
@@ -327,6 +355,22 @@ TEST_F(WorkspaceNavigationPython, FocusedConversationKeepsDataAndModelControlsOn
       EXPECT_GE(control->rect.y, control->clip.y);
       EXPECT_LE(control->rect.y1(), control->clip.y1());
     }
+    // The field, why preparing is blocked and Prepare share one card, Prepare on its right and unclipped.
+    const auto &ui = *f.screen.ui();
+    const auto *input = widget(question), *prepare = widget("ai_prepare");
+    const auto *card = composer_card(ui, *input, *prepare);
+    ASSERT_NE(card, nullptr) << "no card drawn around the question and Prepare";
+    EXPECT_EQ(prepare->rect.x1(), input->rect.x1());
+    EXPECT_LT(prepare->rect.w, input->rect.w * 0.5f);
+    EXPECT_GE(prepare->rect.w, ui.measurer().width(prepare->text, ui.style().font) + 2 * ui.style().text_margin);
+    bool status_on_card = false;
+    for (const auto &block : ui.blocks()) {
+      for (const auto &item : block->widgets()) {
+        status_on_card |= item.text == f.shell->store().tr("ai.no_context") && item.rect.y > input->rect.y1() &&
+            item.rect.y1() <= prepare->rect.y && item.rect.x >= card->rect.x && item.rect.x1() <= card->rect.x1();
+      }
+    }
+    EXPECT_TRUE(status_on_card) << "the reason Prepare is unavailable sits on the card above it";
     EXPECT_EQ(widget("ai_transcript"), nullptr);
     EXPECT_EQ(widget("ai_send_saved"), nullptr);
     EXPECT_EQ(widget("ai_history"), nullptr);
@@ -1697,13 +1741,17 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
     const float scrollbar = input->block->content_height() > block.h ? style.scrollbar : 0.0f;
     const float available = block.w - 2 * style.panel_margin;
     const float cap = 880.0f * style.scale;
-    EXPECT_NEAR(input->rect.w, std::min(available, cap) - scrollbar, 2.0f);
-    EXPECT_LE(input->rect.w, cap);
-    EXPECT_NEAR(input->rect.cx(), block.cx() - scrollbar * 0.5f, 1.0f);
-    EXPECT_EQ(transcript->rect.x, input->rect.x);
-    EXPECT_EQ(transcript->rect.w, input->rect.w);
+    // The field, its status and the right-aligned action share one card as wide as the transcript column.
+    const auto *card = composer_card(ui, *input, *prepare);
+    ASSERT_NE(card, nullptr) << "no card drawn around the question and Prepare";
+    EXPECT_NEAR(card->rect.w, std::min(available, cap) - scrollbar, 2.0f);
+    EXPECT_LE(card->rect.w, cap);
+    EXPECT_NEAR(card->rect.cx(), block.cx() - scrollbar * 0.5f, 1.0f);
+    EXPECT_EQ(transcript->rect.x, card->rect.x);
+    EXPECT_EQ(transcript->rect.w, card->rect.w);
     EXPECT_EQ(prepare->rect.x1(), input->rect.x1());
     EXPECT_LT(prepare->rect.w, input->rect.w * 0.5f);
+    EXPECT_GE(prepare->rect.w, ui.measurer().width(prepare->text, style.font) + 2 * style.text_margin);
     ASSERT_NE(transcript->log, nullptr);
     ASSERT_NO_FATAL_FAILURE(expect_proportional_transcript(*transcript, ui));
   };
@@ -1875,6 +1923,9 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
     EXPECT_LE(f.screen.ui()->measurer().width(maximized->log->line(line), style.mono),
               maximized->rect.w - 2 * style.text_margin) << maximized->log->line(line);
   }
+  // Ordinary maximization keeps the split view's composer: no card, and Prepare as wide as the field.
+  ASSERT_NO_FATAL_FAILURE(expect_split_composer(*f.screen.ui(), widget(draft), widget("ai_prepare")));
+  EXPECT_EQ(widget(draft)->string.value(), "Unsent question ab");
   EXPECT_EQ(discussion.exchange_request(), selected);
   EXPECT_EQ(project().project()->revision, 1);
 }
