@@ -2867,8 +2867,11 @@ raise SystemExit(main())
   const std::string entry = pdf ? "report.pdf" : video ? html_video ? "report.html" : "clip.mp4" :
       options.source == "html" ? "report.html" : "report.md";
   const std::string body_marker = "██  ████  ███  █████\n█████  ██  ████  ███\n███  █████  ██  ████";
+  // Both first-toolbar marker arms need the whole picture inside the compact native HTML viewport.
+  const std::string html_video_size = options.first_toolbar_frames == Options::FirstToolbarFrames::None ?
+      "" : " width='208' height='117'";
   const std::string source_bytes = video ? html_video ?
-      "<!doctype html><html><body><video controls preload='none'>"
+      "<!doctype html><html><body><video controls preload='none'" + html_video_size + ">"
       "<source src='clip.mp4' type='video/mp4'></video></body></html>" : media_bytes :
       pdf ? document_preview::make_pdf_fixture() : options.source == "html" ?
       "<!doctype html><html><body><img src='marker.png' alt='Native evidence marker'><pre><code>" + body_marker +

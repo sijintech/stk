@@ -1332,7 +1332,11 @@ class NativeAgentRunDetailUI : public NativeAgentRuns {
     f.shell->open_workbench(f.screen);
     f.screen.run_deferred();
     ASSERT_TRUE(loop.pump_until([&] {
-      frame(); return f.screen.ui()->find(ready) != nullptr && agent().sessions().size() == 2;
+      frame();
+      const auto &discussion = state().discussion();
+      const bool history_ready = !discussion.recent_requests_supported() || discussion.recent_requests();
+      return history_ready && agent().list_loaded() && agent().sessions().size() == 2 &&
+             f.screen.ui()->find(ready) != nullptr;
     }, 30)) << agent().error();
   }
   void open_session_a()
@@ -1752,6 +1756,28 @@ TEST_F(NativeAgentRunDetailUI, ReselectingTheSessionDropsAnOpenPreviewAndCloseRe
 class NativeAgentRunDetailNarrowUI : public NativeAgentRunDetailUI {
  protected:
   NativeAgentRunDetailNarrowUI() : NativeAgentRunDetailUI("zh_CN", 680, 1000) {}
+
+  void open_narrow_session_a()
+  {
+    // History popups close if a different set of rows arrives. The measured route starts with settled history.
+    ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+    ASSERT_TRUE(f.screen.ui()->popup_open());
+    std::string items;
+    for (const auto &block : f.screen.ui()->blocks()) {
+      if (block->kind() != ui::Block::Kind::Popup) { continue; }
+      for (const auto &candidate : block->widgets()) {
+        if (candidate.type != ui::WidgetType::MenuItem) { continue; }
+        if (candidate.enabled && candidate.text.ends_with("session-a")) {
+          const auto key = candidate.key;
+          ASSERT_NO_FATAL_FAILURE(click(key));
+          ASSERT_NO_FATAL_FAILURE(wait_for(entry()));
+          return;
+        }
+        items += candidate.text + (candidate.enabled ? "\n" : " (off)\n");
+      }
+    }
+    FAIL() << "Enabled session-a is missing from settled history\n" << items;
+  }
 };
 
 TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseWindowOpensABottomSheetFromHistoryInThreeClicks)
@@ -1761,29 +1787,7 @@ TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseWindowOpensABottomSheetFromHis
   const auto layout = f.screen.arrangement();
   const auto viewer = f.shell->store().viewer().save_workspace_state();
   clicks = 0;
-  ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
-  std::string session;
-  loop.pump_until([&] {  // the open menu fills in as the saved history arrives
-    frame();
-    for (const auto &block : f.screen.ui()->blocks()) {
-      for (const auto &candidate : block->widgets()) {
-        if (candidate.type == ui::WidgetType::MenuItem && candidate.enabled && candidate.text.ends_with("session-a")) {
-          session = candidate.key;
-        }
-      }
-    }
-    return !session.empty();
-  }, 15);
-  std::string items;
-  for (const auto &block : f.screen.ui()->blocks()) {
-    for (const auto &candidate : block->widgets()) {
-      if (candidate.type == ui::WidgetType::MenuItem) { items += candidate.key + " = " + candidate.text + (candidate.enabled ? "\n" : " (off)\n"); }
-    }
-  }
-  ASSERT_FALSE(session.empty()) << items;
-  ASSERT_NO_FATAL_FAILURE(click(session));
-  f.screen.run_deferred();
-  ASSERT_TRUE(loop.pump_until([&] { frame(); return f.screen.ui()->find(entry()) != nullptr; }, 30)) << agent().error();
+  ASSERT_NO_FATAL_FAILURE(open_narrow_session_a());
   EXPECT_FALSE(f.screen.ui()->popup_open());
   EXPECT_EQ(f.screen.ui()->find(entry())->text, "关联任务");
   ASSERT_NO_FATAL_FAILURE(click(entry()));
@@ -1821,23 +1825,7 @@ TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseBottomSheetPreviewsAFileInFive
   const auto layout = f.screen.arrangement();
   const auto viewer = f.shell->store().viewer().save_workspace_state();
   clicks = 0;
-  ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
-  std::string session;
-  loop.pump_until([&] {
-    frame();
-    for (const auto &block : f.screen.ui()->blocks()) {
-      for (const auto &candidate : block->widgets()) {
-        if (candidate.type == ui::WidgetType::MenuItem && candidate.enabled && candidate.text.ends_with("session-a")) {
-          session = candidate.key;
-        }
-      }
-    }
-    return !session.empty();
-  }, 15);
-  ASSERT_FALSE(session.empty());
-  ASSERT_NO_FATAL_FAILURE(click(session));
-  f.screen.run_deferred();
-  ASSERT_NO_FATAL_FAILURE(wait_for(entry()));
+  ASSERT_NO_FATAL_FAILURE(open_narrow_session_a());
   ASSERT_NO_FATAL_FAILURE(click(entry()));
   ASSERT_NO_FATAL_FAILURE(wait_ready());
   EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/0")->text, "查看文件 · 第 3 行 · simulate evil line");
