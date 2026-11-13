@@ -11,6 +11,7 @@ type TaskReference={
 type TaskList={tasks:TaskReference[];more:boolean};
 type PublishedFile={path:string;size:number;sha256:string};
 type FileList={files:PublishedFile[];more:boolean};
+type FilePreview={path:string;text:string};
 const DOWNLOAD_LIMIT=64*1024*1024;
 const TEXT_PREVIEW_LIMIT=256*1024;
 const canPreviewText=(file:PublishedFile)=>file.size<=TEXT_PREVIEW_LIMIT&&
@@ -38,18 +39,18 @@ function fileList(value:Json,session:string,task:TaskReference):FileList {
   return value as FileList;
 }
 
-function ConversationFiles({session,task,onAccessLost}:{
-  session:string;task:TaskReference;onAccessLost:()=>void;
+function ConversationFiles({session,task,preview,onPreview,onAccessLost}:{
+  session:string;task:TaskReference;preview:FilePreview|null;onPreview:(preview:FilePreview|null)=>void;
+  onAccessLost:()=>void;
 }){
   const [list,setList]=useState<FileList|null>(null),[error,setError]=useState('');
   const [reading,setReading]=useState<{path:string;mode:'preview'|'download'}|null>(null);
   const [fileError,setFileError]=useState('');
-  const [preview,setPreview]=useState<{path:string;text:string}|null>(null);
   const activeRead=useRef<AbortController|null>(null);
   const previewHeading=useRef<HTMLHeadingElement>(null);
   const previewLauncher=useRef<HTMLButtonElement|null>(null);
   const filesScroll=useRef(0);
-  useEffect(()=>()=>activeRead.current?.abort(),[]);
+  useLayoutEffect(()=>()=>activeRead.current?.abort(),[]);
   useLayoutEffect(()=>{
     if(preview)previewHeading.current?.focus();
     else if(previewLauncher.current){
@@ -74,7 +75,7 @@ function ConversationFiles({session,task,onAccessLost}:{
         let text:string;
         try{text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}
         catch{throw new Error('此文件无法按 UTF-8 文本预览。');}
-        setPreview({path:file.path,text});
+        onPreview({path:file.path,text});
         return;
       }
       const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
@@ -101,8 +102,8 @@ function ConversationFiles({session,task,onAccessLost}:{
     });
     return ()=>request.abort();
   },[session,task,onAccessLost]);
-  return <section aria-label="发布文件">
-    <p className="muted">任务 {task.task_id}</p>
+  return <section aria-label={preview?undefined:'发布文件'}>
+    {!preview&&<p className="muted">任务 {task.task_id}</p>}
     {error?<p role="alert">{error}</p>:!list?<p role="status">正在读取文件…</p>:
       !list.files.length?<p className="muted">此任务暂无发布文件。</p>:
       <ul hidden={preview!==null}>{list.files.map(file=><li key={file.path}><bdi>{visiblePath(file.path)}</bdi>
@@ -121,7 +122,7 @@ function ConversationFiles({session,task,onAccessLost}:{
           </button></div>}</li>)}</ul>}
     {preview&&<div>
       <h3 ref={previewHeading} tabIndex={-1}><bdi>{visiblePath(preview.path)}</bdi></h3>
-      <button type="button" className="quiet" onClick={()=>setPreview(null)}>返回发布文件</button>
+      <button type="button" className="quiet" onClick={()=>onPreview(null)}>返回发布文件</button>
       {preview.text?<pre className="conversation-file-preview" tabIndex={0} aria-label="文件内容">{preview.text}</pre>:
         <p className="muted">空文件</p>}
     </div>}
@@ -136,6 +137,7 @@ export function ConversationTasks({session,onClose,onAccessLost}:{
   const dialog=useRef<HTMLDialogElement>(null);
   const [list,setList]=useState<TaskList|null>(null),[error,setError]=useState('');
   const [fileTask,setFileTask]=useState<TaskReference|null>(null);
+  const [preview,setPreview]=useState<FilePreview|null>(null);
   const fileLauncher=useRef<HTMLButtonElement|null>(null);
   const back=useRef<HTMLButtonElement>(null);
   const tasksScroll=useRef(0);
@@ -163,11 +165,12 @@ export function ConversationTasks({session,onClose,onAccessLost}:{
   return <dialog className="conversation-tasks" ref={dialog} aria-labelledby="conversation-tasks-title"
     onCancel={event=>{event.preventDefault();onClose();}}>
     <div className="conversation-tasks-head">
-      <h2 id="conversation-tasks-title">{fileTask?'发布文件':'关联任务'}</h2>
+      <h2 id="conversation-tasks-title">{preview?'文件预览':fileTask?'发布文件':'关联任务'}</h2>
       <button type="button" className="quiet" autoFocus onClick={onClose}>关闭</button>
     </div>
-    {fileTask&&<button type="button" className="quiet" ref={back} onClick={()=>setFileTask(null)}>返回关联任务</button>}
-    {fileTask&&<ConversationFiles key={fileTask.action_id} session={session} task={fileTask} onAccessLost={onAccessLost}/>}
+    {fileTask&&!preview&&<button type="button" className="quiet" ref={back} onClick={()=>setFileTask(null)}>返回关联任务</button>}
+    {fileTask&&<ConversationFiles key={fileTask.action_id} session={session} task={fileTask}
+      preview={preview} onPreview={setPreview} onAccessLost={onAccessLost}/>}
     <div hidden={fileTask!==null}>
       {error?<p role="alert">{error}</p>:!list?<p role="status">正在读取关联任务…</p>:
       !list.tasks.length?<p className="muted">此对话暂无关联任务。</p>:

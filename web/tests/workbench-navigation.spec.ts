@@ -1952,10 +1952,14 @@ for (const viewport of viewports) {
       await expect(files.getByRole('button', {name: '预览 case/result.h5'})).toHaveCount(0);
       const preview = files.getByRole('button', {name: '预览 case/run.log'});
       await preview.click();
-      await expect(files.getByRole('heading', {name: 'case/run.log'})).toBeFocused();
-      expect(await files.getByLabel('文件内容').textContent()).toBe(log.toString());
-      await expect(files.locator('img')).toHaveCount(0);
-      await files.getByRole('button', {name: '返回发布文件'}).click();
+      const previewPanel = page.getByRole('dialog', {name: '文件预览'});
+      await expect(previewPanel.getByRole('heading', {name: 'case/run.log'})).toBeFocused();
+      expect(await previewPanel.getByLabel('文件内容').textContent()).toBe(log.toString());
+      await expect(previewPanel.locator('img')).toHaveCount(0);
+      await expect(previewPanel.getByRole('button', {name: '返回关联任务'})).toHaveCount(0);
+      await expect(previewPanel.getByRole('button', {name: '关闭'})).toBeVisible();
+      await previewPanel.screenshot({path: test.info().outputPath('conversation-file-preview.png')});
+      await previewPanel.getByRole('button', {name: '返回发布文件'}).click();
       await expect(preview).toBeFocused();
       expect(downloadQueries[2]).toBe('?' + new URLSearchParams({path: 'case/run.log', sha256: logDigest}));
       await files.screenshot({path: test.info().outputPath('conversation-files.png')});
@@ -1995,7 +1999,8 @@ for (const viewport of viewports) {
       expect(sent.seen).toEqual([]);
       sent.stop();
       writeFileSync(test.info().outputPath('conversation-files.json'), JSON.stringify({
-        viewport: page.viewportSize(), openTasksClicks: 1, openFilesClicks: 1, returnToTasksClicks: 1,
+        viewport: page.viewportSize(), openTasksClicks: 1, openFilesClicks: 1, openPreviewClicks: 1,
+        returnToFilesClicks: 1, returnToTasksClicks: 1,
         closeTasksKey: 'Escape', requests: hub.calls, posts: sent.seen,
       }, null, 2));
     });
