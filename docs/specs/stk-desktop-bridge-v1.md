@@ -601,6 +601,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.requests.progress` | `{handle, request_id}` | `{request, progress: {executor_id, sequence, text, text_bytes}\|null}` (bounded unsaved text; no send) |
 | `project.requests.list` | `{handle, offset?, limit?}` | `{requests: [request], next_offset: integer|null}` |
 | `project.requests.recent` | `{handle, limit?}` | `{requests: [{request_id, status, created_at, label}]}` (local desktop, read only) |
+| `project.conversations.search` | `{handle, query, after?, limit?}` | `{items: [{kind, id, created_at, label}], next: cursor\|null}` (local desktop, read only) |
 | `project.requests.cancel` | `{handle, request_id}` | `{request}` |
 | `project.requests.provider` | `{handle}` | `{provider}` (local configuration presence only) |
 | `project.requests.usage` | `{handle}` | `{requests, completed, reported, input_tokens, output_tokens, models: [{model, requests, input_tokens, output_tokens}]}` (read-only sum of provider receipts with completed replies; failed, cancelled and uncertain requests are not counted; no amounts of money) |
@@ -1218,6 +1219,22 @@ for native navigation, explicit import into an empty shared Viewer, and project-
   code points or when no text remains. This read is local to the desktop project store. The
   script and agent catalogs retain their existing scope. `project.requests.list` keeps its
   oldest-first order, pagination and metadata-only response.
+- `project.conversations.search` is an optional desktop-only protocol 1 capability advertised in
+  `hello.methods`. It searches active saved request titles in project format 8 and above and agent
+  titles in format 13 and above. A title is a single-line excerpt of the request's bound user message
+  or of the first user turn of the agent session. Control and bidirectional formatting characters
+  become spaces, whitespace collapses, and excerpts are bounded to 80 Unicode code points with a
+  clipping ellipsis. `query` contains 1–200 code points. NFKC case-folded whitespace-separated terms
+  must all occur in the normalized excerpt. The read verifies the title's record and its binding;
+  unreadable title records are omitted. Later turns and assistant messages are excluded from title
+  matching. Full provenance and chain validation still occur when a user opens a result.
+  The result contains up to `limit` items (1–50, default 20), sorted by creation instant, then by
+  `kind` and `id`, all descending. `kind` is `question` or `agent`. An `after` cursor is the returned
+  `next` object `{kind, id, created_at}` from the same query and project opening. The next page reads
+  the current snapshot strictly below that boundary, so new titles above it appear after a fresh
+  search. Archived requests are reachable through existing saved-question browsing. Search neither
+  opens a conversation nor writes to a project, calls a model, or invokes a tool. The method is absent
+  from script and agent catalogs. Older bridges keep their existing history routes.
 - Provider returns exactly `{adapter, base_url, key_env, model_env, configured, model}` inside
   `{provider}`. The built-in adapter is `aliyun-token-plan/1`, with fixed base URL
   `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`, key environment variable

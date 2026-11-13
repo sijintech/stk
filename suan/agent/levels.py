@@ -222,6 +222,7 @@ DESKTOP_ONLY = {"project.agent.decide": ("project_edit", "a person approves a dr
                 "project.agent.run_decide": ("submit_run", "a person consumes a single first-start approval"),
                 "project.agent.run_observe": ("read", "observe the original approval without dispatch"),
                 "project.requests.recent": ("read", "local conversation navigation; not an agent tool"),
+                "project.conversations.search": ("read", "local saved conversation title search"),
                 "workspace.export": ("project_edit", "a person exports a portable workspace from the desktop"),
                 "workspace.preview": ("read", "the desktop previews a local workspace package"),
                 "workspace.import": ("project_edit", "the desktop imports to a new local directory"),

@@ -123,6 +123,63 @@ def test_recent_requests_is_optional_desktop_only_and_strictly_bounded(inproc, m
     assert not h.violations
 
 
+def test_local_conversation_search_spans_history_and_reads_only_bound_titles(inproc, model, monkeypatch):
+    from suan.project.agent_sessions import HARNESS, digest
+
+    h = inproc()
+    store, _ = model
+    method = "project.conversations.search"
+    context = capture(model)
+    handle = h.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+
+    def question(text):
+        message = store.discussion.add(text, message_id=str(uuid4()), context_id=context["id"])
+        return store.requests.create(message["id"], request_id=str(uuid4()),
+                                     configuration={"adapter": "controlled/1", "model": "text-fixture"})
+
+    old = question("ＳＴＫ　晶格\nCafé")
+    archive = question("STK 晶格 archived")
+    store.archive.set([{"kind": "request", "id": archive["id"]}], archived=True)
+    recent = question("STK 晶格" + "x" * 90 + " hidden_suffix")
+    for index in range(22):
+        question(f"Separate record {index}")
+    session = str(uuid4())
+    store.agent_sessions.create(session, {"id": session, "harness": HARNESS}, "STK 晶格 agent",
+                                turn_id=str(uuid4()), request_sha256=digest(session))
+    store.agent_sessions.append(session, "stopped", {"reason": "final"}, turn=0)
+    store.agent_sessions.say(session, "Follow-up is never a title", turn_id=str(uuid4()))
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Title search must not load a full conversation, context or call a provider")
+
+    monkeypatch.setattr(type(store.agent_sessions), "_read", forbidden)
+    monkeypatch.setattr(type(store.requests), "_decode", forbidden)
+    monkeypatch.setattr(h.bridge.projects._executor, "start", forbidden)
+    monkeypatch.setattr(h.bridge.projects.agents, "start", forbidden)
+    before = store.path.read_bytes()
+    params = {"handle": handle, "query": "晶格 stK", "limit": 1}
+    first = h.call(method, params)
+    assert first["items"] == [{"id": session, "kind": "agent", "label": "STK 晶格 agent",
+                               "created_at": first["next"]["created_at"]}]
+    second = h.call(method, {**params, "after": first["next"]})
+    assert second["items"][0]["id"] == recent["id"] and second["items"][0]["label"].endswith("…")
+    third = h.call(method, {**params, "after": second["next"]})
+    assert third == {"items": [{"id": old["id"], "kind": "question", "label": "ＳＴＫ 晶格 Café",
+                               "created_at": old["created_at"]}], "next": None}
+    for query in ("hidden_suffix", "archived", "follow-up"):
+        assert h.call(method, {"handle": handle, "query": query}) == {"items": [], "next": None}
+    assert h.call(method, {"handle": handle, "query": "CAFE\u0301"})["items"] == third["items"]
+    assert method in h.call("hello", {"protocol": 1, "resume_transfers": False})["methods"]
+    assert method in DESKTOP_ONLY and method not in OPERATIONS
+    assert all(method not in operations for operations in TOOL_USES.values())
+    assert method not in h.call("script.catalog")["operations"]
+    assert h.error(method, {"handle": "0" * 32, "query": "STK"})["code"] == "not_found"
+    assert h.error(method, {**params, "query": " \t"})["code"] == "invalid_params"
+    assert h.error(method, {**params, "limit": 51})["code"] == "invalid_params"
+    assert h.error(method, {**params, "after": {**first["next"], "created_at": "invalid"}})["code"] == "invalid_params"
+    assert store.path.read_bytes() == before and not h.events_of("project.changed") and not h.violations
+
+
 def test_parameter_reply_requires_explicit_conversion_and_separate_apply(inproc, model):
     h = inproc()
     p, saved = prepare(h, model, prompt_version='stk.parameter-edits/1')

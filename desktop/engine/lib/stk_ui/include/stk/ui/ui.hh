@@ -260,6 +260,8 @@ struct TextFieldOptions {
   bool multiline = false;
   int visible_lines = 8;
   std::function<void()> on_submit;
+  /** Opt a single-line field into calling on_submit when Enter commits its edit. */
+  bool submit_single_line = false;
   /** Allow the submit shortcut on a focused multiline field outside of text editing. */
   bool submit_when_focused = false;
   /** Escape ends editing and commits the local text binding without submitting. */

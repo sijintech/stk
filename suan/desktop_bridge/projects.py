@@ -22,6 +22,7 @@ from suan.project.workflow_runs import WorkflowRunNotFound
 from suan.models import LocalModels, ModelGateway, PolicyDenied
 from suan.project.aliyun import TokenPlanCredentials, provider_info
 from suan.project.agent_sessions import AgentSessionNotFound
+from suan.project.conversation_search import search_conversations
 from suan.agent.executor import AgentBusy
 from suan.project.request_executor import RequestBusy, RequestExecutor
 from suan.project.requests import RECENT_DEFAULT
@@ -567,6 +568,12 @@ class ProjectSessions:
         # Its original store remains pinned; a closed handle is never rebound to another project.
         with self._errors():
             return self._analysis_executor.result(store, params["run_id"])
+
+    def conversation_search(self, params):
+        with self._operation():
+            store = self._get(params["handle"])
+        with self._errors():
+            return search_conversations(store, params["query"], after=params.get("after"), limit=params.get("limit", 20))
 
     def requests(self, action, params):
         with self._operation():

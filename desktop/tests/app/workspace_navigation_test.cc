@@ -761,7 +761,7 @@ def init(self, *args, **kwargs):
                 trace.write(method + "\n")
             return original_read(params, call)
         return read
-    for method in ("project.requests.list", "project.requests.get", "project.requests.progress"):
+    for method in ("project.requests.list", "project.requests.get", "project.requests.progress", "project.conversations.search"):
         self.methods[method] = observe(method, self.methods[method])
     for method in ("project.requests.start", "project.agent.create", "project.agent.say",
                    "project.agent.start", "project.agent.run_target", "project.agent.run_decide",
@@ -1065,6 +1065,67 @@ TEST_F(SavedConversationNavigationPython, RecentQuestionsOpenFromTasksAndResults
     return page.loaded && page.items.size() == 1 && io::get_string(page.items.front(), "id") == kSecond;
   }, 30)) << discussion.error();
   EXPECT_EQ(widget(question)->string.value(), "Draft stays in the workbench");
+}
+
+TEST_F(SavedConversationNavigationPython, SearchOpensAnOlderQuestionWithoutWritingOrLosingTheDraft)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_table());
+  ASSERT_NO_FATAL_FAILURE(save_question(kFirst, "Old lattice comparison"));
+  for (int index = 0; index < 9; ++index) {
+    const auto id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc" + std::to_string(index);
+    ASSERT_NO_FATAL_FAILURE(save_question(id.c_str(), "Newer temperature result"));
+  }
+  std::ofstream(dir.path() / "forbid_question_preparation").put('\n');
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  const auto click = [&](const std::string &key) {
+    ASSERT_NE(widget(key), nullptr) << key;
+    const auto [x, y] = f.widget_center(key);
+    ASSERT_TRUE(f.drv->click(x, y)) << key;
+    f.screen.run_deferred(); f.drv->frame();
+  };
+  auto &discussion = project().discussion();
+  const auto input = "ai_question/" + handle();
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return discussion.recent_requests() && widget(input); }, 30));
+  ASSERT_EQ(widget(std::string("workbench_question/") + kFirst), nullptr);
+  widget(input)->string.assign("Keep this local draft");
+  const auto camera = f.shell->store().viewer().camera_serial();
+
+  for (bool narrow : {false, true}) {
+    ASSERT_NO_FATAL_FAILURE(click("workbench_tasks"));
+    const auto visible = discussion.exchange_id();
+    f.drv->ctx.rect.xmax = narrow ? 680 : 1600;
+    f.drv->frame();
+    if (narrow) {
+      ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+      std::string launcher;
+      for (const auto &block : f.screen.ui()->blocks()) {
+        for (const auto &item : block->widgets()) {
+          if (item.type == ui::WidgetType::MenuItem && item.text == "Search conversations") { launcher = item.key; }
+        }
+      }
+      ASSERT_FALSE(launcher.empty());
+      ASSERT_NO_FATAL_FAILURE(click(launcher));
+    }
+    else { ASSERT_NO_FATAL_FAILURE(click("workbench_search_conversations")); }
+    const auto *query = widget("conversation_search/query");
+    ASSERT_NE(query, nullptr);
+    EXPECT_EQ(f.screen.ui()->focused(), query->id);
+    ASSERT_TRUE(f.drv->key(wm::Key::Unknown, wm::ModNone, "comparison lattice"));
+    ASSERT_TRUE(f.drv->key(wm::Key::Enter)); f.drv->frame();
+    const auto match = std::string("conversation_search/open/question/") + kFirst;
+    ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget(match) && widget(match)->enabled; }, 30));
+    EXPECT_EQ(discussion.exchange_id(), visible);
+    ASSERT_NO_FATAL_FAILURE(click(match));
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.drv->frame(); return !discussion.exchange_busy() && widget(input) && discussion.exchange_id() == kFirst;
+    }, 30));
+    EXPECT_EQ(io::get_string(discussion.exchange_question(), "text"), "Old lattice comparison");
+    EXPECT_EQ(widget(input)->string.value(), "Keep this local draft");
+    EXPECT_EQ(f.shell->store().viewer().camera_serial(), camera);
+    EXPECT_EQ(project().project()->revision, 1);
+    EXPECT_FALSE(std::filesystem::exists(dir.path() / "unexpected_write"));
+  }
 }
 
 TEST_F(SavedConversationNavigationPython, BrowseSavedQuestionsBeyondTheRecentRailWithoutSelectingOrWriting)

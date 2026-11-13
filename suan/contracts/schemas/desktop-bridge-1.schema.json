@@ -6555,6 +6555,135 @@
           "additionalProperties": false
         }
       },
+      "project.conversations.search": {
+        "description": "Search saved conversation titles in the current local desktop project.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "after": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "question",
+                    "agent"
+                  ]
+                },
+                "id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "created_at": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 40
+                }
+              },
+              "required": [
+                "kind",
+                "id",
+                "created_at"
+              ],
+              "additionalProperties": false
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "required": [
+            "handle",
+            "query"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "question",
+                      "agent"
+                    ]
+                  },
+                  "id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "created_at": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]+(?![\\s\\S])"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id",
+                  "created_at",
+                  "label"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 50
+            },
+            "next": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "question",
+                        "agent"
+                      ]
+                    },
+                    "id": {
+                      "$ref": "#/$defs/projectUuid"
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 40
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "created_at"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "items",
+            "next"
+          ],
+          "additionalProperties": false
+        }
+      },
       "project.requests.usage": {
         "description": "Provider-reported token counts of completed requests, in total and per model (read-only; the provider's console is authoritative).",
         "params": {

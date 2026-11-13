@@ -1124,10 +1124,135 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
                                                         shell_.store_.tr("script.no_project");
       nav.label(name).tip(name);
     }
-    build_history(nav, project, static_cast<EditorArea &>(*area()));
+    auto &origin = static_cast<EditorArea &>(*area());
+    build_history(nav, project, origin);
+    draw_conversation_search(ui, origin, project);
   }
 
  private:
+  struct ConversationSearch {
+    std::string query, requested;
+    io::Json items = io::Json::array(), next = nullptr;
+    std::string error;
+    uint64_t scope = 0, bridge = 0, visibility = 0, activity = 0;
+    std::string launcher;
+    bool focus = true;
+    bool busy = false, loaded = false;
+  };
+
+  bool can_search_conversations(ProjectState &project) const
+  {
+    const auto *client = shell_.store_.bridge();
+    const auto hello = client ? client->hello_info() : std::nullopt;
+    return project.discussion().generation_supported() && hello && hello->has_method("project.conversations.search");
+  }
+
+  void search_conversations(const std::shared_ptr<ConversationSearch> &state, const io::Json &after = nullptr)
+  {
+    if (state->busy || state->query.find_first_not_of(" \t\r\n") == std::string::npos) { return; }
+    auto &store = shell_.store_;
+    if (!store.project().project() || !store.bridge()) { return; }
+    state->busy = true;
+    state->error.clear();
+    if (after.is_null()) {
+      state->requested = state->query;
+      state->items.clear(); state->next = nullptr; state->loaded = false;
+    }
+    io::Json params = {{"handle", store.project().project()->handle}, {"query", state->requested}};
+    if (!after.is_null()) { params["after"] = after; }
+    bridge::CallOptions options;
+    options.retry = bridge::CallOptions::Retry::Never;
+    store.bridge()->call("project.conversations.search", params, options).then(
+        [state = std::weak_ptr<ConversationSearch>(state), weak = shell_.lifetime(), scope = store.project_scope_epoch(),
+         bridge = store.bridge_epoch(), app = &store](bridge::Result<io::Json> result) {
+      const auto search = state.lock();
+      if (!search || weak.expired() || app->project_scope_epoch() != scope || app->bridge_epoch() != bridge) { return; }
+      search->busy = false;
+      if (!result) { search->error = result.error().describe(); }
+      else if (result.value().is_object() && result.value().contains("items") && result.value()["items"].is_array() &&
+               result.value().contains("next")) {
+        search->items = result.value().at("items");
+        search->next = result.value().at("next");
+        search->loaded = true;
+      }
+      else { search->error = std::string(app->tr("workbench.history.unavailable")); }
+      app->changed();
+    });
+    store.changed();
+  }
+
+  void draw_conversation_search(ui::Context &ui, EditorArea &origin, ProjectState &project)
+  {
+    if (!conversation_search_) { return; }
+    const auto state = conversation_search_;
+    if (!can_search_conversations(project) || state->scope != shell_.store_.project_scope_epoch() ||
+        state->bridge != shell_.store_.bridge_epoch() || state->visibility != screen()->visibility_epoch() ||
+        state->activity != origin.activity_epoch()) {
+      conversation_search_.reset();
+      return;
+    }
+    const auto current = [this, weak = std::weak_ptr<bool>(search_alive_), state = std::weak_ptr<ConversationSearch>(state)] {
+      if (weak.expired()) { return false; }
+      const auto search = state.lock();
+      return search && search == conversation_search_ && search->scope == shell_.store_.project_scope_epoch() &&
+             search->bridge == shell_.store_.bridge_epoch() && search->visibility == screen()->visibility_epoch() &&
+             search->activity == static_cast<EditorArea &>(*area()).activity_epoch();
+    };
+    const auto close = [this, &ui, current, launcher = state->launcher](bool restore) {
+      if (!current()) { return; }
+      conversation_search_.reset();
+      if (restore) { ui.restore_focus_next_frame(launcher); }
+      shell_.store_.changed();
+    };
+    const auto window = ui.window_size();
+    const float row_count = 1.0f + float(state->items.size()) + (state->next.is_null() ? 0.0f : 1.0f) +
+                            (state->busy || state->loaded || !state->error.empty() ? 1.0f : 0.0f);
+    const float unit = ui.style().unit;
+    auto &panel = ui.modal("conversation_search", shell_.store_.tr("workbench.history.search"), [close] { close(true); },
+        {.width_units = std::min(28.0f, (window.x - 2.0f * ui.style().panel_margin) / unit),
+         .height = std::min((row_count * 1.15f + 3.0f) * unit, window.y * 0.8f)});
+    auto &row = panel.row();
+    const auto start = [this, state = std::weak_ptr<ConversationSearch>(state), current] {
+      if (const auto search = state.lock(); search && current()) { search_conversations(search); }
+    };
+    auto &input = row.text_field("query", {[state] { return state->query; },
+                                          [state](const std::string &value) { state->query = value; }},
+        {.placeholder = std::string(shell_.store_.tr("workbench.history.search.placeholder")), .max_length = 200,
+         .on_submit = start, .submit_single_line = true});
+    row.button("search", shell_.store_.tr("workspace.search.button"), start).width(5).disable(state->busy);
+    row.button("close", shell_.store_.tr("ui.close"), [close] { close(true); }).width(4);
+    if (std::exchange(state->focus, false)) { ui.focus_modal_next_frame(input.key); }
+    const auto query = ui.editing() == input.id && ui.edit_state() ? ui.edit_state()->text() : state->query;
+    const bool current_results = state->requested == query;
+    if (state->busy) { panel.label(shell_.store_.tr("workspace.search.searching")); }
+    if (!state->error.empty()) { panel.paragraph(state->error); }
+    if (current_results && state->loaded && state->items.empty()) { panel.label(shell_.store_.tr("workbench.history.search.empty")); }
+    for (const auto &item : state->items) {
+      const auto id = io::get_string(item, "id"), kind = io::get_string(item, "kind");
+      const auto label = io::get_string(item, "label");
+      const bool agent = kind == "agent";
+      const auto kind_label = shell_.store_.tr(agent ? "workbench.history.search.agent" : "workbench.history.search.question");
+      const auto open = shell_.saved_conversation_action(origin, id,
+          agent ? SavedConversationKind::AgentSession : SavedConversationKind::Question);
+      panel.button("open/" + kind + "/" + id, label + " · " + std::string(kind_label) + " · " + id.substr(0, 8),
+          [state = std::weak_ptr<ConversationSearch>(state), close, current, open] {
+            const auto search = state.lock();
+            if (search && current() && !search->busy && search->requested == search->query && open) {
+              close(false); open();
+            }
+          })
+          .disable(state->busy || !current_results || !open).tip(label);
+    }
+    if (!state->next.is_null()) {
+      panel.button("next", shell_.store_.tr("workbench.history.search.next"),
+          [this, state = std::weak_ptr<ConversationSearch>(state), current] {
+        if (const auto search = state.lock(); search && current() && search->query == search->requested) {
+          search_conversations(search, search->next);
+        }
+      }).disable(state->busy || !current_results);
+    }
+  }
+
   void build_history(ui::Layout &nav, ProjectState &project, EditorArea &origin)
   {
     auto &discussion = project.discussion();
@@ -1186,6 +1311,27 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
     const bool can_compose = !project.busy() && !discussion.busy() && !discussion.exchange_busy() && bool(compose);
     if (rail) { rail->button("workbench_write_question", compose_label, std::move(compose)).disable(!can_compose); }
     else { menu.push_back({std::string(compose_label), std::move(compose), can_compose}); }
+    std::function<void(std::string)> open_search;
+    if (can_search_conversations(project)) {
+      const auto label = shell_.store_.tr("workbench.history.search.short");
+      open_search = [this, weak = std::weak_ptr<bool>(search_alive_), scope, bridge = shell_.store_.bridge_epoch(),
+                     visibility = screen()->visibility_epoch(), activity = origin.activity_epoch()](std::string launcher) {
+        if (weak.expired() || shell_.store_.project_scope_epoch() != scope || shell_.store_.bridge_epoch() != bridge ||
+            screen()->visibility_epoch() != visibility || static_cast<EditorArea &>(*area()).activity_epoch() != activity) { return; }
+        conversation_search_ = std::make_shared<ConversationSearch>();
+        conversation_search_->scope = scope;
+        conversation_search_->bridge = bridge;
+        conversation_search_->visibility = visibility;
+        conversation_search_->activity = activity;
+        conversation_search_->launcher = std::move(launcher);
+        shell_.store_.changed();
+      };
+      if (rail) {
+        auto &button = rail->button("workbench_search_conversations", label, {})
+            .tip(shell_.store_.tr("workbench.history.search"));
+        button.on_click = [open_search, key = button.key] { open_search(key); };
+      }
+    }
     if (questions_supported) {
       auto browse = shell_.saved_conversation_action(origin, {}, SavedConversationKind::QuestionHistory);
       const auto label = shell_.store_.tr("ai.history");
@@ -1228,14 +1374,24 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
       else { menu.push_back({refresh_label, refresh}); }
     }
     if (!rail) {
+      if (open_search) {
+        menu.push_back({std::string(shell_.store_.tr("workbench.history.search")),
+                        [this, weak = std::weak_ptr<bool>(search_alive_), open_search] {
+          if (!weak.expired()) { open_search(history_key_); }
+        }});
+      }
       // A popup dispatches by row index. Close it when a refresh or project switch replaces the rows.
-      nav.scope(identity).menu_button("workbench_history", shell_.store_.tr("workbench.nav.history"), std::move(menu))
-          .tip(info.name);
+      auto &history = nav.scope(identity).menu_button("workbench_history", shell_.store_.tr("workbench.nav.history"),
+                                                     std::move(menu)).tip(info.name);
+      history_key_ = history.key;
     }
   }
 
   AppShell &shell_;
   bool rail_;
+  std::string history_key_;
+  std::shared_ptr<ConversationSearch> conversation_search_;
+  std::shared_ptr<bool> search_alive_ = std::make_shared<bool>(true);
 };
 
 void AppShell::attach_workbench_navigation(EditorArea &area)
