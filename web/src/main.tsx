@@ -188,7 +188,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const historyPanel=useRef<HTMLElement>(null),historyToggle=useRef<HTMLButtonElement>(null),messageList=useRef<HTMLDivElement>(null),composer=useRef<HTMLTextAreaElement>(null);
   const transcriptOffsets=useRef(new Map<string,number>());
   const transcriptFollow=useRef(new Map<string,boolean>()),shownTranscript=useRef('');
-  const [offerFollow,setOfferFollow]=useState(false);
+  const [transcriptAway,setTranscriptAway]=useState(false);
   const [transcriptSend,setTranscriptSend]=useState(0);
   const [name,setName]=useState('科学项目'),[log,setLog]=useState<TaskLog|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState<Section>('workbench'),[online,setOnline]=useState(navigator.onLine);
   const [environmentDisclosure,setEnvironmentDisclosure]=useState<EnvironmentDisclosure>('setup');
@@ -715,14 +715,15 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     if(!list||tab!=='workbench'||overlay)return;
     const away=list.scrollHeight-list.clientHeight-list.scrollTop>1;
     if(away)pauseTranscriptFollow();
-    setOfferFollow(away&&transcriptFollow.current.has(conv.session));
+    setTranscriptAway(away);
   }
   function followTranscript(){
     const list=messageList.current;
     if(!list)return;
     transcriptFollow.current.set(conv.session,true);
-    list.scrollTop=list.scrollHeight;
-    setOfferFollow(false);
+    // Cancel a PageUp or wheel animation still in flight before returning focus to the transcript.
+    list.scrollTo({top:list.scrollHeight,behavior:'instant'});
+    setTranscriptAway(false);
     list.focus({preventScroll:true});
   }
   const sessionRow=conv.saved[conv.session];
@@ -740,9 +741,22 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     }else if(transcriptFollow.current.get(conv.session)){
       list.scrollTop=list.scrollHeight;
     }
-    setOfferFollow(transcriptFollow.current.has(conv.session)&&list.scrollHeight-list.clientHeight-list.scrollTop>1);
     // Explicit sends and their receipts can move this transcript. A history read alone does not.
   },[conv.session,conv.pending,transcriptSend,tab,overlay]);
+  // A first history response or a change in viewport height can change whether the latest message is in view
+  // without scrolling. Refresh the control in either case without moving the reader.
+  useLayoutEffect(()=>{
+    const list=messageList.current;
+    if(!list||tab!=='workbench'||overlay)return;
+    const observer=new ResizeObserver(()=>setTranscriptAway(list.scrollHeight-list.clientHeight-list.scrollTop>1));
+    observer.observe(list);
+    return()=>observer.disconnect();
+  },[tab,overlay]);
+  useLayoutEffect(()=>{
+    const list=messageList.current;
+    if(!list||tab!=='workbench'||overlay)return;
+    setTranscriptAway(list.scrollHeight-list.clientHeight-list.scrollTop>1);
+  },[conv.session,thread.messages,thread.status,pending,transcriptSend,tab,overlay]);
   // 查询原始值 reads the raw data behind the displayed scene: its own task and path, whatever the file choice is now.
   // The reply is kept only while that scene is still the one shown (a new scene or another task discards it).
   function probeValue(){
@@ -927,6 +941,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
           onClick={()=>setConversationTasks(conv.session)}>关联任务</button>}
       </div>
       <div className="conversation-transcript">
+      {transcriptAway&&(thread.messages.length>0||pending)&&<button type="button" className="follow-conversation" onClick={followTranscript}>跟随最新</button>}
       <div className="messages" ref={messageList} tabIndex={thread.messages.length || pending ? 0 : -1} role="log" aria-label="对话记录"
         onScroll={observeTranscriptScroll} onWheel={e=>{if(e.deltaY<0)pauseTranscriptFollow();}}
         onKeyDown={e=>{if(e.key==='PageUp'||e.key==='Home'||e.key==='ArrowUp')pauseTranscriptFollow();}}>
@@ -938,7 +953,6 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         {thread.messages.map(m=><article key={m.id} className={m.role}><small>{m.role==='user'?'你':'STK'}</small><p>{m.content}</p></article>)}
         {pending&&<article className="user pending"><small>你 · 发送中</small><p>{pending.content}</p></article>}
       </div>
-      {offerFollow&&<button type="button" className="follow-conversation" onClick={followTranscript}>跟随最新</button>}
       </div>
       {conv.failure&&<div className="send-failure" role="alert"><p>{conv.recorded?'消息已记录，回复尚未确认。':'发送未完成，草稿已保留。'}{conv.failure.error}</p>
         {!conv.recorded&&conv.failure.content!==conv.draft&&<p className="failed-text">未发送：{conv.failure.content}</p>}

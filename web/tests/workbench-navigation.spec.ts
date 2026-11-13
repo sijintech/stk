@@ -3130,7 +3130,7 @@ for (const viewport of [{width: 1440, height: 900}, {width: 390, height: 844}]) 
     const input = draft(page);
     await expect(log.locator('article')).toHaveCount(60);
     expect(await top()).toBe(0);
-    await expect(follow).toHaveCount(0);
+    await expect(follow).toBeVisible();
     await input.fill('检查本次网格');
     const initial = await input.boundingBox();
     const release = hub.holdNext(`send ${A}`);
@@ -3162,10 +3162,55 @@ for (const viewport of [{width: 1440, height: 900}, {width: 390, height: 844}]) 
     releaseLater();
     await expect.poll(() => hub.messages.length).toBe(2);
     expect(await top()).toBe(430);
-    await expect(follow).toHaveCount(0);
+    await expect(follow).toBeVisible();
     await choose(page, /相场参数讨论/);
     await expect(log.locator('article')).toHaveCount(64);
     expect(await top()).toBe(beforeSwitch);
+  });
+
+  test(`a saved conversation can jump to its latest message before any send at ${viewport.width}px`, async ({page}) => {
+    await page.setViewportSize(viewport);
+    const hub = new Hub();
+    conversations(hub);
+    const messages = Array.from({length: 60}, (_, index) =>
+      say(`jump-${index}`, index % 2 ? 'assistant' : 'user', `已保存段落 ${index}`));
+    hub.saved.set(A, messages);
+    await setup(page, hub, {scene: false});
+    const sent = posts(page);
+    const log = page.getByRole('log', {name: '对话记录'});
+    const follow = page.getByRole('button', {name: '跟随最新', exact: true});
+    const last = log.getByText('已保存段落 59', {exact: true});
+
+    await choose(page, /相场参数讨论/);
+    await expect(log.locator('article')).toHaveCount(messages.length);
+    await expect(last).not.toBeInViewport();
+    await draft(page).fill('未发送草稿');
+    await follow.click();
+    await expect(last).toBeInViewport();
+    await expect(follow).toHaveCount(0);
+    await expect(log).toBeFocused();
+    await expect(draft(page)).toHaveValue('未发送草稿');
+
+    await log.press('PageUp');
+    await expect(last).not.toBeInViewport();
+    await expect(follow).toBeVisible();
+    await log.press('Shift+Tab');
+    await expect(follow).toBeFocused();
+    await follow.press('Enter');
+    await expect(last).toBeInViewport();
+    await expect(log).toBeFocused();
+    await log.press('PageUp');
+    await expect(last).not.toBeInViewport();
+    await choose(page, /铁电回线分析/);
+    await expect(log.getByText('B 的问题')).toBeVisible();
+    await expect(follow).toHaveCount(0);
+    await choose(page, /相场参数讨论/);
+    await expect(follow).toBeVisible();
+    await expect(last).not.toBeInViewport();
+    await expect(draft(page)).toHaveValue('未发送草稿');
+    expect(hub.calls).toEqual([`history ${A}`, `history ${B}`, `history ${A}`]);
+    expect(sent.seen).toEqual([]);
+    sent.stop();
   });
 
   test(`conversation shortcut sends once and retains composer focus at ${viewport.width}px`, async ({page}) => {
