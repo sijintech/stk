@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-13 22:39 UTC · 保存副本键盘复验与 macOS 工件
+
+Root 在桌面隔离候选中复现路径字段获焦后直接输入会追加到建议名称。候选修订 `b1417391f905cda31e4424057cf6caaeac0b146a` 进入表单和路径被拒后选中当前文本，下一次输入可替换。Linux X11 680×1000 中文从已打开合成项目的工作台起步，五次点击进入保存路径。输入路径，按 Tab 和 Enter 明确确认。取消、已有名称和成功路径合测共七次点击、两次路径输入、两组 Tab 与 Enter，最后 Esc。内容解析累计零、零、一次。保存的 60 字节摘要、0600 权限、原有文件和项目数据库已核对。最终桌面构建与 UI 135/135 通过。证据 `root-delivery-20261113-191/{native-save-keyboard.log,native-save-fallback-keyboard-final/receipt.json,save-keyboard-ui.xml}`。
+
+远端 `413a2833` 的 macOS 官方工件显示 CPU 1621/1621、Metal 254/254，必测预览 4/6。MP4 和 HTML 视频暂停且未结束，失败谓词是隐藏后播放时间相对隐藏前回退超过 50 毫秒，实际分别约 120 和 107 毫秒。安静隐藏对照两种媒体均成功，独立的原生暂停、隐藏、重新显示与继续播放测试 1/1。Linux 三项和 Windows CPU 已成功，Windows 原生预览仍在运行。证据 `root-delivery-20261113-191/413-macos-observation.json`。 [macOS 工件](https://github.com/sijintech/stk/actions/runs/43511133797/artifacts/14081159332) [Desktop CI](https://github.com/sijintech/stk/actions/runs/43511133797)
+
 ## 2026-11-13 22:22 UTC · 会话标题对齐与桌面保存候选复核
 
 本地 main `c7e0408985cd2835dba9775d6d982208a03392a8` 将 Web 已保存对话的可见页头简化为会话名。历史条目和标题提示仍可查短 ID，缺失会话仍保留识别提示。Chromium 连接真实 Hub，固定起点为已配对工作台、32 条合成会话。1440×900 从左栏一次点击，390×844 经「历史」两次点击，进入同一已保存会话。每窗各一次原会话历史 GET，零写请求和模型调用，Hub 会话摘要一致。Web 生产构建及 Playwright 401/401 通过，零跳过。更新 Synthrix 逐区对照的交付状态。证据 `root-delivery-20261113-191/{web-build.log,web-full.xml,live-title-final/browser-receipt.json,live-title-final/hub-receipt.json}`。
