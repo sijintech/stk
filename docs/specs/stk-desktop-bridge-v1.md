@@ -388,6 +388,11 @@ on every state change and at most every 250 ms while bytes move.
   continues on `transfer.resume` or `hello` (`resume_transfers`, default true). One bridge runs a
   transfer at a time (a lock file per transfer; `conflict` otherwise). Finished journals are kept 7
   days.
+- **Retry ordering.** A terminal event can reach the client while its worker is releasing the journal lock
+  and concurrency slot. `transfer.resume` waits for that worker before launching the next attempt, up to
+  five seconds. If cleanup is still in progress it returns a retryable `busy` error. Resumes of queued or
+  running transfers return their current state. Concurrent resumes waiting on the same worker reuse the
+  successor if another caller already launched it. Completed transfers remain completed.
 - **Uploads** use the Runtime's resumable sessions: `begin` returns the byte offset the Runtime
   holds, 1 MiB chunks are appended from there, and `finish` checks size and sha256. A folder upload
   sends every regular file below it (symbolic links are never followed) under `remote/…`, or at the
