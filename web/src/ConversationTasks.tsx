@@ -1,5 +1,6 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
-import {api,ApiError,type Json} from './api';
+import {api,ApiError,downloadConversationFile,type Json} from './api';
+import {sha256Hex} from './payload';
 
 const states:Record<string,string>={
   review:'等待复核',queued:'等待执行节点',succeeded:'已提交',failed:'提交失败',rejected:'复核未通过',
@@ -10,6 +11,7 @@ type TaskReference={
 type TaskList={tasks:TaskReference[];more:boolean};
 type PublishedFile={path:string;size:number;sha256:string};
 type FileList={files:PublishedFile[];more:boolean};
+const DOWNLOAD_LIMIT=64*1024*1024;
 const id=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{32}$/.test(value);
 const visiblePath=(path:string)=>path.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu,
   char=>`\\u{${char.codePointAt(0)!.toString(16)}}`);
@@ -37,6 +39,35 @@ function ConversationFiles({session,task,onAccessLost}:{
   session:string;task:TaskReference;onAccessLost:()=>void;
 }){
   const [list,setList]=useState<FileList|null>(null),[error,setError]=useState('');
+  const [download,setDownload]=useState('');
+  const [downloadError,setDownloadError]=useState('');
+  const activeDownload=useRef<AbortController|null>(null);
+  useEffect(()=>()=>activeDownload.current?.abort(),[]);
+  async function save(file:PublishedFile){
+    if(activeDownload.current)return;
+    const request=new AbortController();
+    activeDownload.current=request;
+    setDownload(file.path);setDownloadError('');
+    try{
+      const bytes=await downloadConversationFile(session,task.action_id,file.path,file.sha256,file.size,request.signal);
+      if(bytes.byteLength!==file.size)throw new Error('文件大小与发布记录不符。');
+      const digest=await sha256Hex(new Uint8Array(bytes));
+      if(request.signal.aborted)return;
+      if(digest===null)throw new Error('浏览器需要安全连接才能校验文件。');
+      if(digest!==file.sha256)throw new Error('文件摘要与发布记录不符。');
+      const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
+      const link=document.createElement('a');
+      link.href=url;link.download=visiblePath(file.path.split('/').at(-1)!);
+      link.click();
+      setTimeout(()=>URL.revokeObjectURL(url),5000);
+    }catch(error){
+      if(request.signal.aborted)return;
+      if(error instanceof ApiError&&(error.status===401||error.status===403)){onAccessLost();return;}
+      setDownloadError(error instanceof Error?error.message:'无法下载发布文件。');
+    }finally{
+      if(!request.signal.aborted){activeDownload.current=null;setDownload('');}
+    }
+  }
   useEffect(()=>{
     const request=new AbortController();
     void api(`sessions/${session}/tasks/${task.action_id}/files`,'GET',undefined,request.signal).then(value=>{
@@ -53,7 +84,13 @@ function ConversationFiles({session,task,onAccessLost}:{
     {error?<p role="alert">{error}</p>:!list?<p role="status">正在读取文件…</p>:
       !list.files.length?<p className="muted">此任务暂无发布文件。</p>:
       <ul>{list.files.map(file=><li key={file.path}><bdi>{visiblePath(file.path)}</bdi>
-        <span>{file.size.toLocaleString()} 字节</span></li>)}</ul>}
+        <span>{file.size.toLocaleString()} 字节</span>
+        {file.size>DOWNLOAD_LIMIT?<span>会话下载上限为 64 MiB</span>:
+          <button type="button" className="quiet conversation-files-button" aria-disabled={!!download}
+            aria-label={`下载 ${visiblePath(file.path)}`} onClick={()=>void save(file)}>
+            {download===file.path?'正在下载…':'下载'}
+          </button>}</li>)}</ul>}
+    {downloadError&&<p role="alert">{downloadError}</p>}
     {list?.more&&<p className="muted">显示前 200 个发布文件。</p>}
   </section>;
 }

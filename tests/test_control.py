@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import hashlib
 import sys
 import time
 import uuid
@@ -205,6 +207,37 @@ def test_agent_runtime_roundtrip_reconnect_and_original_probe(runtime, tmp_path)
                 {"path": "../other.h5", "size": 8, "sha256": "a" * 64},
             ]})
             assert pending.result(timeout=10).status_code == 502
+            selected = next(row for row in artifacts if row["path"] == "scalar-0.vti")
+            download_path = files_path.removesuffix("s")
+            def download_listing(digest):
+                future = pool.submit(c.get, download_path, headers=AUTH,
+                                     params={"path": selected["path"], "sha256": digest})
+                listing = ws.receive_json()
+                assert listing["kind"] == "task.artifacts"
+                ws.send_json({"type": "read_result", "id": listing["id"], "result": artifacts})
+                return future
+
+            assert download_listing("0" * 64).result(timeout=10).status_code == 404
+            for corrupt in (False, True):
+                pending = download_listing(selected["sha256"])
+                read = ws.receive_json()
+                assert read["kind"] == "file.read" and read["payload"] == {
+                    "task_id": task["id"], "path": selected["path"], "offset": 0,
+                }
+                chunk = agent.execute({"id": read["id"], "node_id": node["device_id"],
+                                       "kind": read["kind"], "payload": read["payload"]})
+                raw = base64.b64decode(chunk["data"])
+                if corrupt:
+                    chunk["data"] = base64.b64encode(bytes([raw[0] ^ 1]) + raw[1:]).decode()
+                ws.send_json({"type": "read_result", "id": read["id"], "result": chunk})
+                response = pending.result(timeout=10)
+                if corrupt:
+                    assert response.status_code == 409
+                else:
+                    assert response.status_code == 200
+                    assert response.content == raw
+                    assert response.headers["content-disposition"] == "attachment"
+            assert app.state.store.events() == events
         assert c.get(files_path, headers=AUTH).status_code == 503
         again = NodeAgent(runtime_client, tmp_path / "another-cache").execute(submit)
         assert again["id"] == task["id"]
@@ -214,6 +247,52 @@ def test_agent_runtime_roundtrip_reconnect_and_original_probe(runtime, tmp_path)
         probe = agent.execute(operation(node["device_id"], "view.probe", {"task_id": task["id"], "path": "scalar-0.vti", "position": [-1.9,3.15,10.2]}))
         assert probe["values"][0] == pytest.approx(-.7)
         assert len(runtime_client.tasks()) == 1
+
+
+def test_conversation_download_verifies_multichunk_offsets_and_revocation(tmp_path, monkeypatch):
+    monkeypatch.setattr("suan.control.app.CHUNK_SIZE", 3)
+    data = b"several chunks"
+    sha = hashlib.sha256(data).hexdigest()
+    session, task = "a" * 32, "b" * 32
+
+    with TestClient(create_app(tmp_path, OWNER)) as c:
+        node, _ = paired(c)
+        client, _ = paired(c, "client")
+        headers = {"Authorization": "Bearer " + client["token"]}
+        node_headers = {"Authorization": "Bearer " + node["token"]}
+        store = c.app.state.store
+        store.session(session)
+        spec = {"workspace_id": "c" * 32}
+        submit = operation(node["device_id"], "task.submit", {"spec": spec})
+        store.publish_reply("d" * 32, session, "Task created", [(submit, "")])
+        store.complete(submit["id"], node["device_id"], {"id": task, "spec": spec})
+        store.heartbeat(node["device_id"], {"features": ["read", "task.artifacts", "file.read"]})
+        path = f"/api/v1/sessions/{session}/tasks/{submit['id']}/file"
+        params = {"path": "result.dat", "sha256": sha}
+        with c.websocket_connect("/api/v1/nodes/connect", headers=node_headers) as ws, ThreadPoolExecutor(1) as pool:
+            for mode in ("complete", "bad-offset", "revoked"):
+                pending = pool.submit(c.get, path, headers=headers, params=params)
+                read = ws.receive_json()
+                assert read["kind"] == "task.artifacts"
+                ws.send_json({"type": "read_result", "id": read["id"], "result": [
+                    {"path": "result.dat", "size": len(data), "sha256": sha},
+                ]})
+                for offset in range(0, len(data), 3):
+                    read = ws.receive_json()
+                    assert read["kind"] == "file.read" and read["payload"]["offset"] == offset
+                    raw = data[offset:offset+3]
+                    if offset and mode == "revoked":
+                        store.revoke(client["device_id"])
+                    next_offset = offset + len(raw) + (1 if offset and mode == "bad-offset" else 0)
+                    ws.send_json({"type": "read_result", "id": read["id"], "result": {
+                        "data": base64.b64encode(raw).decode(), "offset": next_offset,
+                    }})
+                    if offset and mode != "complete":
+                        break
+                result = pending.result(timeout=10)
+                assert result.status_code == {"complete": 200, "bad-offset": 502, "revoked": 401}[mode]
+                if mode == "complete":
+                    assert result.content == data
 
 
 def test_chat_fake_model_policy_session_restore(tmp_path):

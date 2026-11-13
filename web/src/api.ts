@@ -47,6 +47,21 @@ export async function blob(sha256:string,signal?:AbortSignal,maxBytes?:number):P
   if(!/^[0-9a-f]{64}$/.test(sha256))throw new Error('无效的数据块标识');
   const response=await fetch(`/api/v1/blobs/${sha256}`,{headers:{Authorization:`Bearer ${credential}`},signal});
   if(!response.ok)throw new Error(response.status===404?'数据块尚未上传到控制服务':`数据块读取失败 (${response.status})`);
+  return readBytes(response,maxBytes);
+}
+export async function downloadConversationFile(session:string,action:string,path:string,digest:string,
+  size:number,signal:AbortSignal):Promise<ArrayBuffer>{
+  const query=new URLSearchParams({path,sha256:digest});
+  const response=await fetch(`/api/v1/sessions/${session}/tasks/${action}/file?${query}`,{
+    headers:{Authorization:`Bearer ${credential}`},cache:'no-store',signal,
+  });
+  if(!response.ok){
+    await response.body?.cancel();
+    throw new ApiError(response.status,`下载失败 (${response.status})`);
+  }
+  return readBytes(response,size);
+}
+async function readBytes(response:Response,maxBytes?:number):Promise<ArrayBuffer>{
   if(maxBytes===undefined)return response.arrayBuffer();
   const tooLarge=()=>new Error('数据块超过声明的大小');
   if(Number(response.headers.get('content-length'))>maxBytes){

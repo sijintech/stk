@@ -1911,8 +1911,18 @@ for (const viewport of viewports) {
       const before = await state(page);
       await expect(launcher).toBeVisible();
       expect(hub.calls).toEqual([`history ${A}`]);
+      const bytes = Buffer.alloc(327, 42);
+      const sha256 = createHash('sha256').update(bytes).digest('hex');
       hub.conversationFiles.set(`${A} ${actionId}`, {id: A, action_id: actionId, task_id: taskId, more: false,
-        files: [{path: 'case/result.h5', size: 327, sha256: 'a'.repeat(64)}]});
+        files: [{path: 'case/result.h5', size: 327, sha256}]});
+      let wrongBytes = true;
+      const downloadQueries: string[] = [];
+      await page.route(`**/api/v1/sessions/${A}/tasks/${actionId}/file?*`, route => {
+        const url = new URL(route.request().url());
+        downloadQueries.push(url.search);
+        return route.fulfill({status: 200, contentType: 'application/octet-stream',
+          body: wrongBytes ? Buffer.alloc(327, 41) : bytes});
+      });
       await launcher.click();
       const panel = page.getByRole('dialog', {name: '关联任务'});
       await expect(panel).toContainText(taskId);
@@ -1924,9 +1934,20 @@ for (const viewport of viewports) {
       const files = page.getByRole('dialog', {name: '发布文件'});
       await expect(files).toContainText('case/result.h5');
       await expect(files).toContainText('327 字节');
-      await files.screenshot({path: test.info().outputPath('conversation-files.png')});
       const back = files.getByRole('button', {name: '返回关联任务'});
       await expect(back).toBeFocused();
+      const download = files.getByRole('button', {name: '下载 case/result.h5'});
+      await download.click();
+      await expect(files.getByRole('alert')).toContainText('文件摘要与发布记录不符');
+      wrongBytes = false;
+      const downloaded = page.waitForEvent('download');
+      await download.click();
+      const saved = await downloaded;
+      expect(saved.suggestedFilename()).toBe('result.h5');
+      expect(readFileSync((await saved.path())!)).toEqual(bytes);
+      expect(downloadQueries).toEqual(Array(2).fill('?' + new URLSearchParams({path: 'case/result.h5', sha256})));
+      await files.screenshot({path: test.info().outputPath('conversation-files.png')});
+      await expect(download).toBeFocused();
       await back.click();
       await expect(filesLauncher).toBeFocused();
       const releaseFiles = hub.holdNext(`files ${A} ${actionId}`);

@@ -1,5 +1,7 @@
 """Authenticated control API. Deploy behind HTTPS; workers connect outbound."""
 import asyncio
+import base64
+import hashlib
 import hmac
 import json
 from pathlib import Path
@@ -7,11 +9,12 @@ import re
 import uuid
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from suan.runtime.models import relative_path
+from suan.runtime.service import CHUNK_SIZE
 
 from .blobs import BlobError, BlobMismatch, BlobTooLarge
 from .limits import (ACTION_BODY_BYTES, ACTION_REQUEST_BYTES, FRAME_LIMIT, IMPORT_MAX_FILES, IMPORT_REQUEST_BYTES,
@@ -26,6 +29,7 @@ from .uploads import (CHUNK_MAX, DEFAULT_MIN_FREE_BYTES, DEFAULT_QUOTA_BYTES, DE
 FEATURES = ["blobs", "graph", "task.events", "desktop.profile", "graph.cancel", "node.read", "uploads",
             "workspace.import", "federation", "fl.message"]
 READ_INFLIGHT = 16
+CONVERSATION_DOWNLOAD_BYTES = 64 * 1024 * 1024
 BLOB_HEADERS = {"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff",
                 "Content-Security-Policy": "default-src 'none'; sandbox"}
 
@@ -626,15 +630,16 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
             raise HTTPException(404, "Session not found")
         return tasks
 
-    @app.get("/api/v1/sessions/{session_id}/tasks/{action_id}/files", dependencies=[Depends(client)])
-    async def session_task_files(session_id: str, action_id: str, request: Request):
+    def conversation_task_source(session_id, action_id):
         validate_session_id(session_id)
         if not re.fullmatch(r"[a-f0-9]{32}", action_id):
             raise HTTPException(400, "Invalid action ID")
         source = store.session_task_source(session_id, action_id)
         if source is None:
             raise HTTPException(404, "Conversation task not found")
-        node_id, task_id = source
+        return source
+
+    async def conversation_artifacts(node_id, task_id, request):
         reply = await forward_read(node_id, "task.artifacts", {"task_id": task_id}, request)
         files = reply["result"]
         if not isinstance(files, list):
@@ -655,8 +660,50 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
                 raise HTTPException(502, "Invalid task file listing")
             paths.add(path)
             visible.append({"path": path, "size": size, "sha256": digest})
-        return {"id": session_id, "action_id": action_id, "task_id": task_id,
-                "files": visible, "more": len(files) > 200}
+        return visible, len(files) > 200
+
+    @app.get("/api/v1/sessions/{session_id}/tasks/{action_id}/files", dependencies=[Depends(client)])
+    async def session_task_files(session_id: str, action_id: str, request: Request):
+        node_id, task_id = conversation_task_source(session_id, action_id)
+        files, more = await conversation_artifacts(node_id, task_id, request)
+        return {"id": session_id, "action_id": action_id, "task_id": task_id, "files": files, "more": more}
+
+    @app.get("/api/v1/sessions/{session_id}/tasks/{action_id}/file", dependencies=[Depends(client)])
+    async def session_task_file(session_id: str, action_id: str, path: str, sha256: str, request: Request):
+        node_id, task_id = conversation_task_source(session_id, action_id)
+        files, _ = await conversation_artifacts(node_id, task_id, request)
+        file = next((item for item in files if item["path"] == path and item["sha256"] == sha256), None)
+        if file is None:
+            raise HTTPException(404, "Published file not found")
+        if file["size"] > CONVERSATION_DOWNLOAD_BYTES:
+            raise HTTPException(413, "File exceeds the conversation download limit")
+        data = bytearray()
+        digest = hashlib.sha256()
+        while len(data) < file["size"]:
+            if await request.is_disconnected():
+                raise HTTPException(499, "Download interrupted")
+            reply = await forward_read(node_id, "file.read",
+                                       {"task_id": task_id, "path": file["path"], "offset": len(data)}, request)
+            chunk = reply["result"]
+            limit = min(CHUNK_SIZE, file["size"] - len(data))
+            try:
+                if not isinstance(chunk, dict) or not isinstance(chunk.get("data"), str):
+                    raise ValueError("Missing file bytes")
+                if len(chunk["data"]) > 4 * ((limit + 2) // 3):
+                    raise ValueError("Oversized file chunk")
+                raw = base64.b64decode(chunk["data"], validate=True)
+                if (len(raw) != limit or type(chunk.get("offset")) is not int
+                        or chunk["offset"] != len(data) + len(raw)):
+                    raise ValueError("Invalid file offset")
+            except ValueError as exc:
+                raise HTTPException(502, "Invalid file chunk") from exc
+            data.extend(raw)
+            digest.update(raw)
+        if digest.hexdigest() != sha256:
+            raise HTTPException(409, "Published file checksum mismatch")
+        return Response(bytes(data), media_type="application/octet-stream", headers={
+            "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Disposition": "attachment",
+        })
 
     @app.post("/api/v1/sessions/{session_id}/messages")
     async def message(session_id: str, body: Chat, who=Depends(client)):
