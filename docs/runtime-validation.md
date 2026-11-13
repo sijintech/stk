@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-13 21:28 UTC · 会话搜索键盘验收与发布门禁
+
+本地 main `1108d4061f9cd421f134958c25400ba29c2c82d5` 支持桌面按 Enter 提交标题搜索，首批唯一匹配显示后再按 Enter 打开。多条匹配及键盘长按仍留在搜索中。Linux X11 固定起点为任务页、已打开合成项目、32 条已保存问答。1600×1100 一次点击、680×1000 两次点击，两窗各两次 Enter，打开超出近期列表的第一条问答。每窗一次标题查询和一次原请求、数据范围、消息读取，数据库摘要与修订一致，零发送或运行。定向 69/69、UI 核心 135/135，桌面构建通过。实窗夹具需等待 Bridge 的近期项目读取和首屏绘制后再点打开项目。证据 `root-delivery-20261113-188/{search-keyboard.xml,search-keyboard-ui.xml,native-keyboard-ready-wide/receipt.json,native-keyboard-ready-narrow/receipt.json}`。
+
+上一远端 `f3c666eb8ad28fac9dc923065efc7e3feee6b4df` 的 Desktop 于 21:25:49 UTC 完成，五项成功。Linux 三项和 Windows 两项通过。macOS CPU 1618/1618，Metal 254/254，必测 WKWebView 4/6。MP4 在隐藏暂停时间边界失败，HTML 在隐藏暂停已通过后等待重新显示超时。Runtime 13/13、Pages、Secret scan 通过。证据 `root-delivery-20261113-188/f3c-macos-job.log`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43500121086) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43500120670) [macOS 工件](https://github.com/sijintech/stk/actions/runs/43500121086/artifacts/14077324907)
+
+更早 `13d32015` 的官方工件分段复核。MP4 持续播放对照取到帧 1，立即暂停对照取到帧 0、0，分别来自独立会话。两组 HTML 元素均为 320×180，垂直超出 385×159 的视口，无有效帧号。必测 MP4 和 HTML 隐藏时暂停保持，时间分别回退约 110、137 毫秒。尺寸属性被预览净化器移除。`4b5a6c0452ce71904d1b4a6ca1ec4f786c4de06e` 改用 75% 用户缩放为两组可选 HTML 对照腾出空间，并记录失败几何。Linux 原生报告测试目标编译通过，实际 Cocoa 取图待新头验证。证据 `root-delivery-20261113-186/macos-frame-and-hide-receipt.json`。 [上一 macOS 工件](https://github.com/sijintech/stk/actions/runs/43491122224/artifacts/14073253397)
+
+Claude 113 在独立 worktree 交付 `f3131c344b0e5dd866038edfccf19ff88743191f`，报告 Linux 2267/2267 和旧回退竞态复现已无法留下外来最终名称。Mac 仅桩语法核对，Windows 未编译，候选待 Root 复核。Claude 116 已在 `claude/synthrix-primary-pages-116` 从 `4b5a6c04` 开始梳理 Synthrix 主页面与两端视觉、交互验收，Root 继续负责主线、集成和实测。AOCI 0.1.0-rc21 发布检查返回 `stopped/blocked`，零候选，94 条观察待复核，无 Recovery 或第三方冲突，正式索引和既有工作区修改保持原字节。
+
 ## 2026-11-13 21:00 UTC · 会话搜索最终 Bridge 投影验收
 
 `d005cce1dbb76ec1b8526e8f903f97d57531273f` 将 SQLite 请求读取限定为标题绑定所需的身份列，新增助手回复独有词的反证。最终 Bridge、脚本、智能体、请求、归档和项目搜索联跑 177/177。远端到该提交的 12 个提交执行 gitleaks，零发现。证据 `root-delivery-20261113-188/{bridge-release.xml,combined-scan.log}`。远端 Desktop `43500121086` 的 Linux 三项、macOS CPU 已通过，macOS Metal 及 Windows CPU 正在运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43500121086)
