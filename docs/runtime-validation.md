@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-13 22:22 UTC · 会话标题对齐与桌面保存候选复核
+
+本地 main `c7e0408985cd2835dba9775d6d982208a03392a8` 将 Web 已保存对话的可见页头简化为会话名。历史条目和标题提示仍可查短 ID，缺失会话仍保留识别提示。Chromium 连接真实 Hub，固定起点为已配对工作台、32 条合成会话。1440×900 从左栏一次点击，390×844 经「历史」两次点击，进入同一已保存会话。每窗各一次原会话历史 GET，零写请求和模型调用，Hub 会话摘要一致。Web 生产构建及 Playwright 401/401 通过，零跳过。更新 Synthrix 逐区对照的交付状态。证据 `root-delivery-20261113-191/{web-build.log,web-full.xml,live-title-final/browser-receipt.json,live-title-final/hub-receipt.json}`。
+
+Claude 113 在独立 worktree 交付跨平台保存修订 `50b7c683c31f03c4e7114c67db89e25dad89da33`。Root 在隔离 worktree 审阅集成，补 Windows 保留名转换，包括 COM¹、CONOUT$ 及扩展名前的空格，形成候选 `d6faafff1bdee2272000c3582e6704bbb37f354d`。Linux 构建通过，文件暂存 20/20、回退 9/9、智能体运行 49/49。Claude 的 Linux 全量 2271/2272，单次历史计时失败在独立复测 5/5 和三个相关用例中通过。Mac 与 Windows 暂有接口或桩核对，原生验收待执行。
+
+Linux X11 候选验证的固定起点为已打开合成项目的工作台，选中保存的智能体会话后由关联任务查看冻结文件。英文 1600×1100 使用测试选择器，连续取消、选择已有名称和确认新名称，应用内累计六次点击，另有三次选择器结果。干净路径到「保存副本」是四次点击，再确认新名称。中文 680×1000 使用应用内路径输入，连续取消、拒绝已有名称和保存共十一次点击、两次路径输入。干净路径是七次点击，包含路径字段与显式保存确认。两轮均以 Esc 退出，依次累计零、零、一次快照内容解析。保存的 60 字节与冻结快照摘要一致，权限 0600。原文件、修订、会话与运行记录核对一致。证据 `root-delivery-20261113-191/{save-unit.xml,save-fallback.xml,save-project.xml,native-save-chooser-final/receipt.json,native-save-fallback-final/receipt.json}`。
+
+远端 `413a283379e032f64b857d53844612fbc1b705bc` 的 Desktop Linux 三项和 Windows CPU 已通过，macOS 及 Windows 原生预览仍运行。Runtime 13/13、Pages 与 Secret scan 已成功。待整轮 Desktop 终态后推送。Claude 117 在独立 worktree 继续验证原生会话正文。原七份工作区修改保留。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43511133797) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43511133680)
+
 ## 2026-11-13 22:01 UTC · 搜索随窗口缩放保留，补齐 macOS 视频恢复对照
 
 本地 main `907b35b02c4c9ce156bc97f8723674b8c507ce46` 让桌面聚焦工作台的宽栏与窄窗导航共用当前搜索。切换宽窄时保留编辑中的文字、搜索结果与焦点，关闭后焦点回到当前布局的入口。Linux X11 固定起点是任务页、合成项目有 32 条已保存问答。1600×1100 起步一次点击、680×1000 起步两次点击。两轮各在输入后跨断点缩放、按 Enter 搜索、结果显示后缩回、再按 Enter 打开旧问答。每轮一次标题查询、各一次原请求与上下文和消息读取，数据库摘要及修订一致，零写入。定向 69/69、UI 核心 135/135、桌面构建成功。首轮定向测试持有跨帧 widget 指针导致断言失败，按新帧读取控件后通过。证据 `root-delivery-20261113-190/{native-wide-final/receipt.json,native-narrow-final/receipt.json,search-resize-final.xml,ui.xml}`。
