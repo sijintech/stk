@@ -5846,6 +5846,18 @@ const openInViewer = (page: Page) => shortcut(page, '在查看器中打开');
 const built = (hub: Hub) => hub.builds.map(b => [b.task_id, b.path, b.options]);
 const sliceOf = (path: string, axis = 2, index?: number) =>
   [task, path, {mode: 'slice', axis, ...(index === undefined ? {} : {index})}];
+// The index each view.build actually sent, or 中间层 where the payload had no index key at all.
+const sentIndex = (hub: Hub) => hub.builds.map(b => Object.hasOwn(b.options, 'index') ? b.options.index : '中间层');
+const indexBox = (page: Page) => page.getByRole('spinbutton', {name: '索引', exact: true});
+const unfinished = (box: Locator) => box.evaluate(el => (el as HTMLInputElement).validity.badInput);
+// The plane 来源 details name for the shown Viewer, read by opening and closing them.
+async function slicePlace(page: Page) {
+  await page.getByRole('button', {name: '来源', exact: true}).click();
+  const row = page.getByRole('region', {name: '来源详情', exact: true}).locator('div').filter({has: page.locator('dt', {hasText: '显示的切片'})});
+  const place = await row.count() ? await row.locator('dd').textContent() : null;
+  await page.getByRole('button', {name: '收起', exact: true}).click();
+  return place;
+}
 const LIST_READ = '/api/v1/nodes/{node}/read task.artifacts', LIST_ACTION = '/api/v1/actions task.artifacts';
 const REVIEW_NOTE = '操作等待复核，请在任务面板查看完整参数。';
 async function settled(page: Page) {
@@ -6166,6 +6178,143 @@ for (const viewport of viewports) {
       await page.getByRole('button', {name: '来源', exact: true}).click();
       await expect(page.getByRole('region', {name: '来源详情', exact: true})).toContainText('Z · 索引 0');
       expect(built(hub)).toEqual([sliceOf('scalar-0.vti', 2, 0)]);
+      expect(errors).toEqual([]);
+    });
+
+    // 索引 has three states: untouched (a manual load sends the 0 it shows), a typed integer (0 included) sent as
+    // typed, and cleared to 中间层, which sends no index so Runtime takes the selected axis's middle plane (the mock's
+    // grid is 32 × 28 × 24: X 16, Y 14, Z 12). Editing it sends nothing, and an accepted receipt never refills it.
+    test('a cleared 索引 asks Runtime for the middle plane of the selected axis, and a typed 0 asks for 0 again', async ({page}) => {
+      const hub = new Hub();
+      const errors = await setup(page, hub);
+      const index = indexBox(page);
+      await go(page, '结果');
+      // The untouched first manual load (in setup) sent the 0 the box showed.
+      await expect(index).toHaveValue('0');
+      expect(sentIndex(hub)).toEqual([0]);
+      const controls = await page.locator('section.analysis .view-controls').boundingBox();
+      const sent = posts(page);
+      await index.fill('');
+      await expect(index).toHaveValue('');
+      await expect(index).toHaveAttribute('placeholder', '中间层');
+      expect(await page.locator('section.analysis .view-controls').boundingBox()).toEqual(controls);
+      await page.waitForTimeout(300);
+      expect(sent.seen).toEqual([]);
+      sent.stop();
+      // The shown Viewer and its 来源 stay until a later build succeeds.
+      await expect(slicePlace(page)).resolves.toBe('Z · 索引 0');
+      await loadButton(page).click();
+      await expect.poll(() => slicePlace(page)).toBe('Z · 索引 12');
+      await expect(index).toHaveValue('');
+      await page.getByRole('combobox', {name: '方向', exact: true}).selectOption('0');
+      await expect(index).toHaveValue('');
+      await loadButton(page).click();
+      await expect.poll(() => slicePlace(page)).toBe('X · 索引 16');
+      await expect(index).toHaveValue('');
+      await index.fill('0');
+      await loadButton(page).click();
+      await expect.poll(() => slicePlace(page)).toBe('X · 索引 0');
+      await expect(index).toHaveValue('0');
+      await index.fill('');
+      await loadButton(page).click();
+      await expect.poll(() => slicePlace(page)).toBe('X · 索引 16');
+      await settled(page);
+      await expect(index).toHaveValue('');
+      await expect(page.locator('section.analysis .viewport canvas')).toHaveCount(1);
+      expect(sentIndex(hub)).toEqual([0, '中间层', '中间层', 0, '中间层']);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti', 2, 0), sliceOf('scalar-0.vti', 2), sliceOf('scalar-0.vti', 0),
+        sliceOf('scalar-0.vti', 0, 0), sliceOf('scalar-0.vti', 0)]);
+      expect(errors).toEqual([]);
+    });
+
+    test('a cleared 索引 opens the middle plane in one step and stays cleared through an in-flight edit and a failed build', async ({page}) => {
+      const hub = new Hub();
+      const errors = await setup(page, hub, {scene: false});
+      const index = indexBox(page);
+      await go(page, '结果');
+      await index.fill('3');
+      await index.fill('');
+      await go(page, '任务');
+      await openInViewer(page).click();
+      await expect(source(page)).toHaveText(shown('显示 scalar-0.vti'));
+      await settled(page);
+      await expect.poll(() => slicePlace(page)).toBe('Z · 索引 12');
+      await expect(index).toHaveValue('');
+      await index.fill('5');
+      const release = hub.hold('view.build');
+      try {
+        await loadButton(page).click();
+        await expect.poll(() => hub.reached.has('view.build')).toBe(true);
+        // Edits while the build is in flight belong to the next request; the Viewer keeps the current plane.
+        await index.fill('');
+        await page.getByRole('combobox', {name: '方向', exact: true}).selectOption('1');
+        await expect(slicePlace(page)).resolves.toBe('Z · 索引 12');
+      } finally {
+        release();
+      }
+      await expect.poll(() => slicePlace(page)).toBe('Z · 索引 5');
+      await settled(page);
+      await expect(index).toHaveValue('');
+      await expect(page.getByRole('combobox', {name: '方向', exact: true})).toHaveValue('1');
+      hub.viewErrors.set('view.build', '切片构建失败');
+      await loadButton(page).click();
+      await expect(page.getByRole('alert')).toContainText('切片构建失败');
+      await settled(page);
+      await expect(slicePlace(page)).resolves.toBe('Z · 索引 5');
+      await expect(page.locator('section.analysis .viewport canvas')).toHaveCount(1);
+      await expect(index).toHaveValue('');
+      hub.viewErrors.delete('view.build');
+      await loadButton(page).click();
+      await expect.poll(() => slicePlace(page)).toBe('Y · 索引 14');
+      await settled(page);
+      await expect(index).toHaveValue('');
+      expect(sentIndex(hub)).toEqual(['中间层', 5, '中间层', '中间层']);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti', 2), sliceOf('scalar-0.vti', 2, 5), sliceOf('scalar-0.vti', 1),
+        sliceOf('scalar-0.vti', 1)]);
+      expect(errors.filter(e => !e.includes('502'))).toEqual([]);
+    });
+
+    // A half-typed number reads as '' in the box; typed into an emptied box it fires no change at all.
+    test('an unfinished 索引 is neither an index nor 中间层: no build until it is finished or cleared', async ({page}) => {
+      const hub = new Hub();
+      const errors = await setup(page, hub, {scene: false});
+      const index = indexBox(page);
+      await go(page, '结果');
+      await index.fill('3');
+      await index.fill('');
+      await page.keyboard.type('-');
+      expect(await unfinished(index)).toBe(true);
+      await go(page, '任务');
+      // The click reuses the list 结果 accepted, so it would build at once.
+      await openInViewer(page).click();
+      await expect(fileList(page)).toHaveValue('scalar-0.vti');
+      expect(await unfinished(index)).toBe(true);
+      await settled(page);
+      expect(hub.builds).toEqual([]);
+      await expect(page.locator('section.analysis .viewport canvas')).toHaveCount(0);
+      const sent = posts(page);
+      await loadButton(page).click();
+      await expect(index).toBeFocused();
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      await page.waitForTimeout(300);
+      expect(sent.seen).toEqual([]);
+      sent.stop();
+      await page.keyboard.press('Backspace');
+      expect(await unfinished(index)).toBe(false);
+      await expect(index).toHaveValue('');
+      await loadButton(page).click();
+      await expect.poll(() => slicePlace(page)).toBe('Z · 索引 12');
+      await settled(page);
+      // From a typed index, the half-typed value is again refused and the shown plane is kept.
+      await index.fill('4');
+      await index.selectText();
+      await page.keyboard.type('-');
+      expect(await unfinished(index)).toBe(true);
+      await loadButton(page).click();
+      await page.waitForTimeout(300);
+      await expect(slicePlace(page)).resolves.toBe('Z · 索引 12');
+      expect(sentIndex(hub)).toEqual(['中间层']);
+      expect(built(hub)).toEqual([sliceOf('scalar-0.vti', 2)]);
       expect(errors).toEqual([]);
     });
 

@@ -18,6 +18,7 @@ type ArtifactConnection = {scope:TaskScope;modern:boolean;observesTask:boolean};
 type ArtifactTarget = {connection:ArtifactConnection;succeeded:boolean;exactTerminal:boolean};
 type ArtifactRead = {target:ArtifactTarget;controller:AbortController;result:Promise<Json[]|null>;accepted?:Json[]};
 type DefaultPick = {scope:TaskScope;open:boolean;edits:number};
+type SliceIndexChoice = number|'middle'|null; // 索引: untouched, typed, or cleared to 中间层
 // The stage one 在查看器中打开 click is in, for the footer: waiting for the list it needs (`listing`), or for the
 // build of the exact file it chose (`loading`, with that file's path). Each stage is its own object, the identity of
 // the current operation, so a later stage or a newer click never inherits an earlier one.
@@ -165,10 +166,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const [selection,setSelection]=useState<TaskScope|null>(null),[artifacts,setArtifacts]=useState<Json[]>([]),[path,setPath]=useState(''),[displayed,setDisplayed]=useState<Displayed|null>(null);
   const [observedTask,setObservedTask]=useState<ObservedTask|null>(null);
   const [readKinds,setReadKinds]=useState<string[]|null>(null),[taskRefresh,setTaskRefresh]=useState(0);
-  const [analysis,setAnalysis]=useState<'file'|'graph'>('file'),[mode,setMode]=useState('slice'),[axis,setAxis]=useState(2),[sliceIndexOverride,setSliceIndexOverride]=useState<number|null>(null),[level,setLevel]=useState(0),[probe,setProbe]=useState<number[]>([0,0,0]);
+  const [analysis,setAnalysis]=useState<'file'|'graph'>('file'),[mode,setMode]=useState('slice'),[axis,setAxis]=useState(2),[sliceIndexChoice,setSliceIndexChoice]=useState<SliceIndexChoice>(null),[level,setLevel]=useState(0),[probe,setProbe]=useState<number[]>([0,0,0]);
   const levelEdited=useRef(false);
   // Edits of 视图, 方向, 索引 and 等值: one made while 在查看器中打开 waits for its list leaves the open to 加载视图.
   const viewEdits=useRef(0);
+  const indexInput=useRef<HTMLInputElement>(null);
+  // A number box reports '' for a half-typed value such as '-' or '1e' (and typing one into an empty box fires no
+  // change), so the browser's own flag decides at send time. Such a value is neither an index nor 中间层.
+  const indexUnfinished=()=>mode==='slice'&&indexInput.current?.validity.badInput===true;
   // Conversations are Hub sessions, independent of the selected node, Runtime workspace and task.
   const refreshNow=useRef(()=>{});
   const conv=useConversations(disconnect,()=>refreshNow.current());
@@ -255,7 +260,9 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   }
   const shown=taskBound&&displayed?.scope===selection?displayed:null,shownScene=shown?.scene??null;
   const shownSlice=displayedSlice(shownScene?.manifest);
-  const sliceIndex=sliceIndexOverride??(shown?.path===path&&shownSlice?.axis===axis?shownSlice.index:0);
+  // 索引 untouched shows the displayed plane of this file and axis (else 0) and sends what it shows; a typed integer
+  // (0 included) is sent as typed; a cleared box sends no index, so Runtime takes the selected axis's middle plane.
+  const sliceIndex=typeof sliceIndexChoice==='number'?sliceIndexChoice:shown?.path===path&&shownSlice?.axis===axis?shownSlice.index:0;
   // The scope 图谱 works in: the chosen project, and the selected task with its own project once it is bound. Any change
   // (another project with no task selected included) starts the panel afresh and drops its late replies.
   const graphScope=JSON.stringify([workspace,task&&selection?selection.workspace:'',taskBound?task:'']);
@@ -515,14 +522,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     const sole=soleVti(result);
     if(!sole||sole.path!==choices[0].path||!pick.open||viewEdits.current!==pick.edits||!filesShown.current||
        artifactConnectionNow.current!==connection||
-       (connection.observesTask&&exactCompletedTaskScopeNow.current!==scope))return;
+       (connection.observesTask&&exactCompletedTaskScopeNow.current!==scope)||indexUnfinished())return;
     const currentBuild=startBuild(scope);
     const active=()=>currentBuild()&&artifactConnectionNow.current===connection&&completedTaskScopeNow.current===scope;
     setViewError('');
     enter('loading',sole.path);
     // With no explicit index, Runtime resolves the same middle grid plane as the desktop slice preset.
     const options:Json={mode:'slice',axis};
-    if(sliceIndexOverride!==null)options.index=sliceIndexOverride;
+    if(typeof sliceIndexChoice==='number')options.index=sliceIndexChoice;
     try{await buildView(scope,sole.path,options,active,sole.sha256);}
     catch(error){if(lostAccess(error))throw error;if(active())setViewError(String(error));}
   }
@@ -563,8 +570,10 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     if(options.mode!=='iso'&&!levelEdited.current)setLevel(midpoint);
   }
   function loadView(){const scope=activeScope.current,source=path;if(!scope)return;
+    // An unfinished 索引 sends nothing and keeps any build in progress; the browser names the problem at the box.
+    if(indexUnfinished()){indexInput.current?.reportValidity();return;}
     const active=startBuild(scope);
-    const options:Json={mode,axis};if(mode==='slice')options.index=sliceIndex;if(mode==='iso')options.level=level;if(mode==='vectors')options.component='magnitude';
+    const options:Json={mode,axis};if(mode==='slice'&&sliceIndexChoice!=='middle')options.index=sliceIndex;if(mode==='iso')options.level=level;if(mode==='vectors')options.component='magnitude';
     void run(()=>buildView(scope,source,options,active),active);
   }
   // One explicit read of one stream with the published task.logs action. Standard output keeps the original payload
@@ -830,7 +839,8 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         fileEdited.current=true;dropPick();setPath(next);generation.current++;setViewError('');
       }}><option value="">选择数据文件</option>{(taskBound?artifacts:[]).filter(viewable).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
       <label>视图<select value={mode} onChange={e=>{viewEdits.current++;setMode(e.target.value);}}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>
-      {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>{viewEdits.current++;setAxis(Number(e.target.value));}}>{SLICE_AXES.map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={sliceIndex} onChange={e=>{viewEdits.current++;setSliceIndexOverride(Number(e.target.value));}}/></label></>}
+      {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>{viewEdits.current++;setAxis(Number(e.target.value));}}>{SLICE_AXES.map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" ref={indexInput} placeholder="中间层" value={sliceIndexChoice==='middle'?'':sliceIndex} onChange={e=>{
+        viewEdits.current++;setSliceIndexChoice(e.target.value===''?'middle':Number(e.target.value));}}/></label></>}
       {mode==='iso'&&<label>等值<input type="number" value={level} onChange={e=>{viewEdits.current++;levelEdited.current=true;setLevel(Number(e.target.value));}}/></label>}
       <button disabled={busy||!taskBound||!path} onClick={loadView}>加载视图</button></div>
       <ErrorBoundary resetKey={shownScene}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}><Viewer scene={shownScene} onPick={setProbe}/></React.Suspense></ErrorBoundary>
