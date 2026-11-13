@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-13 18:25 UTC · macOS 官方工件与桌面预览全量回归
+
+上一远端 `57f3601a` 的 macOS 工件已取回。CPU 1597/1597、Metal 254/254、原生必测 4/6。MP4 与 HTML 视频的首次显式暂停均通过当次下限及保持，保持末尾分别为 0.05307 秒和 0.06400 秒。MP4 完成第一轮，在第二轮第一次向早段 seek 时未找到可见原生子视图，未发送该次 seek。HTML 在第一轮隐藏后的首个暂停样本由播放时 0.20708 秒降到 0.102 秒，等于此前 seek 的落点，只失败于隐藏时间下限。立即暂停的独立对照中，MP4 三个样本稳定在 0.04219 秒，HTML 稳定在 0.10863 秒。延迟对照两项通过。这些分支分别保留为取证目标。
+
+本地 main `182506b803f94c4a5d364ff23b1fff2ce666dc6e` 在 Cocoa 原生时间轴操作失败时记录实际和预期视口、裁切、当前覆盖层、输入状态以及导航所用布局和会话是否仍有效。沿用原来的查询次数、预算、输入目标与验收门。Linux 报告测试目标构建通过，文档宿主和原生 AX CPU 15/15。Cocoa 条件 C++ 语法检查通过，真实目标平台复现仍待跑。暂存 gitleaks 零发现。证据 `root-delivery-20261113-179/{macos-57f3601a-receipt.json,report-host.xml,cocoa-syntax.log}`。 [官方 macOS 工件](https://github.com/sijintech/stk/actions/runs/43470699822/artifacts/14065611207)
+
+Claude 112 独立交付 `be12e26dff099b45e2f0b275e74efd1b5d43b24a`。六份源码与已集成候选一致，完整项目回归 1000/1000。原生预览已在远端 `19998d12`，其 Pages 与 Secret scan 成功，Desktop 与 Runtime 仍在运行。Claude 113 继续在独立 worktree 开发显式保存副本。 [Pages](https://github.com/sijintech/stk/actions/runs/43481451519) [Desktop CI](https://github.com/sijintech/stk/actions/runs/43481451563) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43481451605)
+
 ## 2026-11-13 18:19 UTC · 发布双端会话详情与文件预览
 
 Root 将 `main` 从 `57f3601a1c214db81e0e8a80aa26b86f85c666ed` 快进至 `19998d12097685138b555904fbe880e1a91750f0`，推送后单独核对远端。16 个提交 gitleaks 零发现。发布包含 Web 文本预览、桌面关联任务与冻结文本预览、居中会话和键盘焦点、传输重试契约以及 macOS 首次暂停帧标记诊断。仓库中原七份未提交内容保留。
