@@ -1,5 +1,11 @@
 # 开发交接记录
 
+## 2026-11-13 19:51 UTC · Linux 实窗核对双端快捷键
+
+`fa748646e0e885ffa137046a8d969a0e388ded1d` 补验原生项目问答在键盘准备后仍聚焦原输入框，实际项目 Bridge 定向用例 1/1，暂存 gitleaks 零发现。Linux X11 实窗使用 `b076c2a31d0a35ec2f7828b7b134c5065bd93ab7` 的桌面二进制。1600×1100 和 680×1000 都从已打开的本地智能体会话、已聚焦且写有两行草稿起步，零鼠标点击、一次 Ctrl+Enter。每窗收到一次 `project.agent.say`，仅新增一条文本完全匹配的用户消息，项目修订号为 0，零运行审批。界面显示这条消息并清空输入框。模型未配置，已有的尝试以本地提示结束。项目问答实窗和目标平台快捷键仍待补验。证据 `root-delivery-20261113-186/{native-wide-b/receipt.json,native-narrow/receipt.json,question-focus.xml}`。
+
+远端 `13d32015` 的三个 Linux Desktop 作业和 macOS CPU 步骤已通过，macOS Metal 与后续原生实窗、Windows 作业仍运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43491122224)
+
 ## 2026-11-13 19:45 UTC · 双端会话共用主操作快捷键
 
 本地 main `b076c2a31d0a35ec2f7828b7b134c5065bd93ab7` 采用 Ctrl+Enter（macOS 为 ⌘+Enter）触发当前会话的主操作。Web 发送后回到输入框。原生智能体会话沿用原发送动作。原生项目问答只准备并保存待发送问题，保留输入区焦点，发送由用户单独触发。Enter 继续换行。已整合 Claude 114 的最终对照稿 `1ef7632212a217f742e63afa2f91b60c60508e2d`，记录本次取舍，正文跟随和原生 Esc 草稿保留待接。桌面历史继续使用近期和分页入口，跨页标题搜索待覆盖权限和分页边界。 [统一工作台](design/unified-workbench.md)
