@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-13 20:58 UTC · 搜索项目隔离、旧 Bridge 和全量回归
+
+本地 main `ca63ea02915b0255b332b1c345e4c0a070f19809` 核对两个同时有效的项目句柄，另一项目的查询不返回当前项目的匹配，定向 1/1。`fab1ab230cf05ae5404e7665bc101fc5402e067a` 用真实 Bridge 去掉可选搜索方法，验证桌面仍显示原近期历史和分页入口，搜索入口隐藏，联合定向 2/2。Linux 项目标签全量 1565/1565，新增旧 Bridge 用例单独通过。合成 1000 条问答的本机查询测了各三次，唯一旧标题约 100–111 毫秒，广泛匹配的首批 20 条约 100 毫秒，实际合作方规模的时延待验证。证据 `root-delivery-20261113-188/{project-full.xml,bridge-scope.xml,legacy.xml,search-scale.log}`。远端 Desktop 仍运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43500121086)
+
 ## 2026-11-13 20:54 UTC · 桌面历史可按标题跨页查找
 
 本地 main `e9e6ef119644703499a20412718e74e7a292f31a` 增加「搜索对话」。从左栏或窄窗历史打开，在输入后按 Enter 或点击搜索。统一的可选桌面 Bridge 读取在当前项目分页返回活跃问答及智能体会话的标题。结果明确激活前不打开正文。标题按 NFKC、Unicode 大小写折叠与分词匹配。单次查询扫描候选标题，输出分页。归档问答从既有浏览入口打开，旧 Bridge 继续显示原来的历史。Claude 115 最终稿 `f82275331b3249669f7ee4205fbe29a31f4bd759` 已审阅并整合，采用单个方法和独立历史入口的取舍已写入设计。 [Bridge 契约](specs/stk-desktop-bridge-v1.md) [设计](design/native-conversation-search.md)
