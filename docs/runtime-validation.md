@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-13 20:33 UTC · 双端发送后跟随最新消息
+
+本地 main `edfde0ef61c85fdb3292d3bb9cb8bcb8bb00fd33` 和 `88f3f038aeea0a63aa9a3cd55ece7921dd2f2538` 让 Web 与桌面智能体会话在明确发送后回到末尾。向上阅读后，后续回复保留阅读位置，可按「跟随最新」返回末尾。两端切换会话后恢复各自阅读位置。Web 首次阅读从顶部开始，原生智能体会话首次从末尾开始。 [统一工作台](design/unified-workbench.md)
+
+真实本地 Hub 与 Chromium 1440×900、390×844，从已打开的 60 条合成消息会话顶部、输入框聚焦且已写草稿起步。零鼠标点击，按一次 Ctrl+Enter，待发送消息进入视野。回复前上滚到 520 像素，真实回执到达后仍为 520。点击一次「跟随最新」回到末尾，每窗恰好一条消息 POST，零模型调用。Web 构建与全量 401/401 通过。定向初跑受 Chromium PageUp 平滑滚动影响，最终在固定位置验收，另保留原键盘滚动回归。
+
+Linux X11 1600×1100、680×1000，从 32 条用户消息的合成项目智能体会话、正文已翻到开头、输入框聚焦且已写两行草稿起步。零鼠标点击、一次 Ctrl+Enter，立即回到末尾，可见新消息。每窗一次 `project.agent.say`，零运行审批，项目修订号仍为 0。原生定向 54/54 含另一会话的迟到回复，UI 核心 135/135，桌面二进制构建通过，暂存 gitleaks 零发现。证据 `root-delivery-20261113-187/{web-full.xml,live/browser-receipt.json,live/hub-receipt.json,native-final.xml,ui-final.xml,native-final-wide/receipt.json,native-final-narrow/receipt.json}`。
+
+已从 `f3c666eb` 在独立 worktree 启动 Claude 115，提交桌面跨页会话标题搜索的接口与验收方案。Root 负责代码、合入和验证。Claude 113 修订 `96a2da9e6a32f459302a6b02c53f3d26334bce28` 已提交，后续仍在运行。Root 初审发现命名临时文件的无替换回退仍依赖先按名字发布、再校验身份，候选继续留在独立 worktree。上一头 macOS 完整工件下载多次在 TLS 传输中断，官方作业日志已核对。现远端 `f3c666eb` Pages、Secret scan 与两个 Linux 打包作业通过，完整 Desktop 和 Runtime 仍运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43500121086) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43500120670)
+
 ## 2026-11-13 20:18 UTC · 会话快捷键、草稿保护和 Web 历史搜索已发布
 
 Root 已从 `13d32015` 快进推送到 `f3c666eb8ad28fac9dc923065efc7e3feee6b4df`，远端完整 SHA 一致。14 个提交的发布范围经 gitleaks 零发现。新头 Pages 与 Secret scan 已通过，Desktop 与 Runtime 已启动。Claude 的保存副本修订仍在 `claude/native-conversation-file-save-113`。 [新头 Desktop CI](https://github.com/sijintech/stk/actions/runs/43500121086) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43500120670) [Pages](https://github.com/sijintech/stk/actions/runs/43500120769) [Secret scan](https://github.com/sijintech/stk/actions/runs/43500121013)
