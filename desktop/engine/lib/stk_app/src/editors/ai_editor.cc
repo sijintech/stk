@@ -190,6 +190,7 @@ std::optional<ui::LogBuffer> frozen_plan_text(const std::string &text, const flo
 class AIEditor final : public Editor {
  public:
   explicit AIEditor(const EditorType &type) : Editor(type) {}
+  void on_area_removed() override { ++run_detail_owner_epoch_; }
 
   nlohmann::json save_workspace_state() const override
   {
@@ -248,6 +249,13 @@ class AIEditor final : public Editor {
     const bool focused = screen && screen->maximized() == &ctx.area && ctx.area.shell().workbench_is_focused(*screen);
     auto &state = ctx.store.project();
     state.sync();
+    // Any page of this editor that does not draw the open linked-task detail (another purpose, project, session or
+    // a card that is gone) closes it, so it never reappears later over another state.
+    struct DetailFrame {
+      AIEditor &self; ProjectState &state;
+      ~DetailFrame() { if (!self.run_detail_drawn_) { self.close_run_detail(state, false); } }
+    } detail_frame{*this, state};
+    run_detail_drawn_ = false;
     if (!state.ready()) { layout.paragraph(ctx.tr("project.bridge_required")); return; }
     if (!state.project()) {
       layout.paragraph(ctx.tr("ai.open_project"));
@@ -1754,6 +1762,14 @@ class AIEditor final : public Editor {
     if (run_plan_origin_ != origin) {
       run_plan_origin_ = origin; run_plan_text_.clear(); run_plan_logs_.clear(); run_plan_readable_.clear();
     }
+    // A linked-task detail belongs to this editor, opening, session selection and card (switching away and back
+    // to the same session ID is another selection); hiding and showing the page again also closes it.
+    const auto selection = agent.selection_epoch();
+    const auto *screen = ctx.area.screen();
+    const auto detail_origin = origin + "\n" + std::to_string(selection) + "\n" +
+        std::to_string(reinterpret_cast<uintptr_t>(screen)) + "\n" +
+        std::to_string(screen ? screen->visibility_epoch() : 0) + "\n" + std::to_string(ctx.area.activity_epoch()) +
+        "\n" + std::to_string(run_detail_owner_epoch_);
     for (const auto &entry : agent.run_cards()) {
       const auto item = entry.at("item");
       const auto id = io::get_string(item, "item_id"), sha = io::get_string(item, "plan_sha256");
@@ -1803,6 +1819,24 @@ class AIEditor final : public Editor {
         card.button("ai_agent_run_observe/" + id, ctx.tr("ai.agent.run.observe"), [&agent, bound, item] {
           if (bound()) { agent.observe_run(item); }
         }).disable(!enabled);
+        if (agent.can_read_run_detail(item)) {
+          // The detail can be read during another agent call. Project transitions disable the entry.
+          auto &entry_button = card.button("ai_agent_run_detail/" + id, ctx.tr("ai.agent.run.detail"), {});
+          entry_button.on_click = [this, weak = lifetime(), &agent, bound, item, detail_origin, selection, ui = ctx.ui,
+                                   area = &ctx.area, screen, activity = ctx.area.activity_epoch(),
+                                   visibility = screen ? screen->visibility_epoch() : 0, store = &ctx.store,
+                                   project_scope = ctx.store.project_scope_epoch(), entry = entry_button.key,
+                                   owner = run_detail_owner_epoch_] {
+            if (weak.expired() || owner != run_detail_owner_epoch_ || !bound() || run_detail_.ticket ||
+                agent.selection_epoch() != selection ||
+                area->screen() != screen || area->activity_epoch() != activity ||
+                (screen && screen->visibility_epoch() != visibility) || store->project_scope_epoch() != project_scope) {
+              return;
+            }
+            if (const auto ticket = agent.read_run_detail(item)) { run_detail_ = {ticket, detail_origin, item, entry, ui}; }
+          };
+          entry_button.disable(state.busy()).tip(ctx.tr("ai.agent.run.detail.tip"));
+        }
       }
       else {
         if (io::get_int(item, "expected_revision", -1) != state.project()->revision) { hint(card, ctx, "ai.agent.run.stale"); }
@@ -1815,6 +1849,115 @@ class AIEditor final : public Editor {
         }).disable(!agent.can_decide_run(item, "decline"));
       }
     }
+    run_detail_panel(ctx, state, detail_origin);
+  }
+
+  /** The open linked-task detail as a positioned modal, like the Web 「关联任务」 dialog: a right-side panel of
+   * 420 px on wide windows, a full-width bottom sheet at or below 700 px. Esc or Close return to the card's entry. */
+  void run_detail_panel(EditorContext &ctx, ProjectState &state, const std::string &origin)
+  {
+    if (!run_detail_.ticket || !ctx.ui || run_detail_.ui != ctx.ui || run_detail_.origin != origin) { return; }
+    auto &agent = state.agent();
+    const auto *detail = agent.run_detail(run_detail_.ticket, run_detail_.item);
+    if (!detail) { return; }  // closed by the frame guard in draw_main
+    run_detail_drawn_ = true;
+    const auto &catalog = ctx.store.catalog();
+    const auto &style = ctx.ui->style();
+    const auto window = ctx.ui->window_size();
+    const bool narrow = window.x <= 700.0f * ctx.ui->scale();
+    ui::ModalOptions options;
+    options.has_pos = true;  // the modal clamps its frame into the window: x = right edge, y = bottom edge
+    if (narrow) { options.width_units = std::max(8.0f, window.x / style.unit); options.pos = {0, window.y}; }
+    else { options.width_units = std::min(21.0f, window.x / style.unit); options.pos = {window.x, 0}; }
+    const auto close = [this, weak = lifetime(), &state, ticket = run_detail_.ticket, owner = run_detail_owner_epoch_] {
+      if (!weak.expired() && owner == run_detail_owner_epoch_ && run_detail_.ticket == ticket) {
+        close_run_detail(state, true);
+      }
+    };
+    auto &panel = ctx.ui->modal("ai_agent_run_detail_panel", ctx.tr("ai.agent.run.detail"), close, options);
+    // First in the panel, so the first Tab lands on it (the modal itself takes no initial focus).
+    panel.row().alignment(ui::LayoutAlign::Right).button("ai_agent_run_detail_close", ctx.tr("ui.close"), close).width(5);
+    panel.paragraph(catalog.format("ai.agent.run.card", {{"run", io::get_string(run_detail_.item, "run_id")}}));
+    const auto state_name = io::get_string(*detail, "state");
+    if (state_name == "reading") { panel.paragraph(ctx.tr("ai.agent.run.detail.reading")); return; }
+    if (state_name == "mismatch") { panel.paragraph(ctx.tr("ai.agent.run.detail.mismatch")); return; }
+    if (state_name != "ready") { panel.paragraph(ctx.tr("ai.agent.run.detail.unavailable")); return; }
+    const auto status = io::get_string(*detail, "status");
+    std::string counts;
+    const auto count_map = detail->value("counts", Json::object());
+    for (const auto &[name, count] : count_map.items()) {
+      counts += (counts.empty() ? "" : " · ") + std::string(catalog.tr_or("workflow.run.task." + name, name)) + " " +
+          std::to_string(count.get<int64_t>());
+    }
+    panel.paragraph(catalog.format("ai.agent.run.detail.status", {
+        {"status", std::string(io::get_bool(*detail, "complete", false) ? ctx.tr("workflow.run.complete") :
+                                   catalog.tr_or("workflow.run.status." + status, status))},
+        {"counts", counts}}));
+    if (io::get_bool(*detail, "stop_error", false)) { panel.paragraph(ctx.tr("ai.agent.run.detail.stop_error")); }
+    const float width = options.width_units * style.unit - 2 * style.panel_margin - 2 * style.text_margin -
+        style.scrollbar - 2 * style.pixel;
+    // A ticket's projection is set once (reading, then its result): rewrap only for another ticket, width, font or
+    // language.
+    const auto signature = std::to_string(run_detail_.ticket) + "/" + state_name + "/" + std::to_string(width) + "/" +
+        std::to_string(style.mono.size_px) + "/" + std::string(ctx.tr("ai.agent.run.detail.task"));
+    if (run_detail_text_ != signature) {
+      run_detail_text_ = signature;
+      run_detail_log_ = wrapped_text(run_detail_lines(*detail, ctx), width, ctx);
+    }
+    const float rows = std::clamp(window.y * (narrow ? 0.8f : 1.0f) / style.unit - 10.0f, 4.0f, 30.0f);
+    panel.log_view("ai_agent_run_detail_tasks", run_detail_log_,
+                   std::min(rows, float(std::max<size_t>(run_detail_log_.line_count(), 1)) + 0.5f));
+  }
+
+  static std::string run_detail_lines(const Json &detail, EditorContext &ctx)
+  {
+    const auto &catalog = ctx.store.catalog();
+    std::string text;
+    for (const auto &task : detail.value("tasks", Json::array())) {
+      const auto status = io::get_string(task, "status"), task_id = io::get_string(task, "task_id");
+      const auto row = io::get_int(task, "row", -1);
+      text += catalog.format("ai.agent.run.detail.task", {{"row", row < 0 ? std::string("?") : std::to_string(row)},
+          {"step", io::get_string(task, "step")}, {"attempt", std::to_string(io::get_int(task, "attempt", 0))},
+          {"status", std::string(catalog.tr_or("workflow.run.task." + status, status))}});
+      if (!task_id.empty()) { text += " · " + catalog.format("ai.agent.run.detail.task_id", {{"id", task_id}}); }
+      text += "\n";
+      const auto produced = task.value("produced", Json());
+      if (!produced.is_object()) { continue; }
+      if (const auto snapshot = io::get_string(produced, "snapshot_id"); !snapshot.empty()) {
+        text += "  " + (produced.contains("file_count") ?
+            catalog.format("ai.agent.run.detail.snapshot", {{"id", snapshot},
+                           {"count", std::to_string(io::get_int(produced, "file_count", 0))}}) :
+            catalog.format("ai.agent.run.detail.snapshot_only", {{"id", snapshot}})) + "\n";
+      }
+      if (const auto files = produced.value("files", Json::array()); !files.empty()) {
+        std::string names;
+        for (const auto &name : files) { names += (names.empty() ? "" : ", ") + name.get<std::string>(); }
+        const auto hidden = io::get_int(produced, "file_count", 0) - int64_t(files.size());
+        if (hidden > 0) { names += " " + catalog.format("ai.agent.run.detail.more_files", {{"count", std::to_string(hidden)}}); }
+        text += "  " + catalog.format("ai.agent.run.detail.files", {{"names", names}}) + "\n";
+      }
+      if (const auto directory = io::get_string(produced, "directory"); !directory.empty()) {
+        text += "  " + catalog.format("ai.agent.run.detail.directory", {{"directory", directory}}) + "\n";
+      }
+      if (const auto analysis = io::get_string(produced, "analysis_run_id"); !analysis.empty()) {
+        text += "  " + catalog.format("ai.agent.run.detail.analysis", {{"id", analysis}}) + "\n";
+      }
+    }
+    if (const auto more = io::get_int(detail, "more", 0); more > 0) {
+      text += catalog.format("ai.agent.run.detail.more_tasks", {{"count", std::to_string(more)}}) + "\n";
+    }
+    if (text.empty()) { text = std::string(ctx.tr("ai.agent.run.detail.no_tasks")) + "\n"; }
+    return text;
+  }
+
+  /** Forget the open detail; ``restore`` returns focus to the exact entry of the card that opened it. */
+  void close_run_detail(ProjectState &state, const bool restore)
+  {
+    if (!run_detail_.ticket) { return; }
+    state.agent().close_run_detail(run_detail_.ticket);
+    if (restore && run_detail_.ui) { run_detail_.ui->restore_focus_next_frame(run_detail_.entry); }
+    run_detail_ = {};
+    run_detail_text_.clear(); run_detail_log_.clear();
   }
 
   /** What the session waits for: a draft to review and apply (through the session, project.agent.decide), then the
@@ -1892,6 +2035,18 @@ class AIEditor final : public Editor {
   std::map<std::string, std::string> run_plan_text_;
   std::map<std::string, ui::LogBuffer> run_plan_logs_;
   std::map<std::string, bool> run_plan_readable_;
+  // The open linked-task detail (memory only; never in save_workspace_state, a draft or a request).
+  struct OpenRunDetail {
+    uint64_t ticket = 0;
+    std::string origin;  // opening handle, session, selection epoch, screen and its visibility/activity epochs
+    Json item;           // the exact card
+    std::string entry;   // the full key of the card's entry, for focus restore
+    ui::Context *ui = nullptr;
+  } run_detail_;
+  uint64_t run_detail_owner_epoch_ = 0;
+  bool run_detail_drawn_ = false;
+  std::string run_detail_text_;
+  ui::LogBuffer run_detail_log_;
 };
 }  // namespace
 

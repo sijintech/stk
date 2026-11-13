@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include "stk/app/project_agent.hh"
+#include "stk/app/project_discussion.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/bridge/process.hh"
@@ -36,7 +37,8 @@ control = Path(sys.argv.pop(1))
 original_init = server.Bridge.__init__
 original_send = server.Bridge.send
 original_validate = server.bridge_schema.validate_params
-server.bridge_schema.validate_params = lambda m, p: [] if m.startswith('project.agent.') else original_validate(m, p)
+server.bridge_schema.validate_params = lambda m, p: ([] if m.startswith('project.agent.') or m == 'project.workflow_runs.get'
+                                                      else original_validate(m, p))
 
 def init(self, *args, **kwargs):
     original_init(self, *args, **kwargs)
@@ -50,7 +52,51 @@ def init(self, *args, **kwargs):
             sessions[identity] = {'session': {'id': identity}, 'state': 'awaiting', 'running': False,
                 'total': 1, 'events': [], 'chain_sha256': identity, 'run_target': None, 'awaiting': [item],
                 'run_approvals': [{'item': item, 'decision': None, 'receipt': None}]}
+            if (control / 'consumed').exists():
+                # The first card has its decision and receipt; a second card still waits for a decision.
+                pending = dict(item, item_id='approve2:' + identity, run_id='run2:' + identity, plan_sha256='f' * 64)
+                sessions[identity].update(state='ready', awaiting=[pending], run_approvals=[
+                    {'item': item, 'decision': {'decision': 'start'},
+                     'receipt': {'outcome': 'started', 'ok': True, 'run_status': 'stopped'}},
+                    {'item': pending, 'decision': None, 'receipt': None}])
         return sessions[identity]
+    details = [0]
+    def run_get(p):
+        with calls_lock, (control / 'calls.jsonl').open('a', encoding='utf-8') as out:
+            out.write(json.dumps({'method': 'workflow_runs.get', 'params': p}) + '\n')
+            details[0] += 1
+            serial = details[0]
+        # Tokens as for get: detail N is held while hold_detail existed, until detail_release_N.
+        if (control / 'hold_detail').exists():
+            (control / ('detail_held_%d' % serial)).write_text('held')
+            deadline = time.monotonic() + 10
+            while not (control / ('detail_release_%d' % serial)).exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+        if (control / 'run_missing').exists():
+            raise BridgeError('not_found', 'fixture run missing %d at /private/fixture/path' % serial)
+        rows = [{'id': 'row-1', 'number': 3, 'values': {'secret_value': 'row-secret'}},
+                {'id': 'row-2', 'number': 7, 'values': {}}]
+        tasks = [
+            {'step': 'simulate\u202eevil\nline', 'row': 'row-1', 'attempt': 2, 'status': 'succeeded', 'error': None,
+             'updated_at': 'now', 'progress': {'attempt': 2, 'stage': 'collecting', 'state': 'done',
+                                               'task_id': '0123456789abcdef0123', 'simulation_run_id': 'sim-secret'},
+             'produced': {'directory': 'results/run/simulate/row-1', 'snapshot_id': 'fedcba9876543210',
+                          'files': {'输出🙂' + '长' * 300 + '-tail': 'record-1', 'scalar.vti': 'record-2'}}},
+            {'step': 'analyse', 'row': 'row-1', 'attempt': 1, 'status': 'failed', 'error': 'error-secret',
+             'updated_at': 'now', 'progress': None,
+             'produced': {'analysis_run_id': 'abcdef0123456789', 'snapshot_id': '1111222233334444',
+                          'directory': '../escape-secret'}},
+            {'step': 'collect', 'row': 'row-2', 'attempt': 1, 'status': 'succeeded', 'error': None, 'updated_at': 'now',
+             'progress': None, 'produced': {'directory': '/absolute-secret/dir', 'files': {}}},
+        ] + [{'step': 'simulate', 'row': 'row-2', 'attempt': 0, 'status': 'pending', 'error': None, 'updated_at': None,
+              'progress': None, 'produced': None} for _ in range(198)]
+        run = {'id': p['run_id'], 'project_id': 'project-secret', 'plan_sha256': 'e' * 64 if (control / 'run_mismatch').exists()
+               else ('a' * 64 if p['run_id'].startswith('run:') else 'f' * 64),
+               'status': 'stopped', 'complete': False, 'stop_error': 'stop-secret', 'executor_id': 'executor-secret',
+               'owner': {'host': 'host-secret', 'pid': 4242}, 'simulation': {'connection': 'endpoint-secret'},
+               'directory': '/private/results-secret', 'parameters': {'x': 'parameter-secret'}, 'rows': rows,
+               'counts': {'succeeded': 2, 'failed': 1, 'pending': 198}, 'tasks': tasks}
+        return {'run': run, 'fixture_serial': serial}
     def action(method, p):
         serial = None
         with calls_lock, (control / 'calls.jsonl').open('a', encoding='utf-8') as out:
@@ -135,6 +181,7 @@ def init(self, *args, **kwargs):
             self.methods.pop('project.agent.' + name, None)
     for name in names:
         self.methods['project.agent.' + name] = lambda p, c, n=name: action(n, p)
+    self.methods['project.workflow_runs.get'] = lambda p, c: run_get(p)
 
 def send(self, message, method=None):
     flushed = original_send(self, message, method)
@@ -146,6 +193,14 @@ def send(self, message, method=None):
             serial = int(failure[len(prefix):])
         if serial is not None:
             (control / ('replied_%d' % serial)).write_text('replied')
+    if flushed and method == 'project.workflow_runs.get':
+        serial = message.get('result', {}).get('fixture_serial')
+        failure = message.get('error', {}).get('message', '')
+        prefix = 'fixture run missing '
+        if serial is None and failure.startswith(prefix):
+            serial = int(failure[len(prefix):].split(' ')[0])
+        if serial is not None:
+            (control / ('detail_replied_%d' % serial)).write_text('replied')
     return flushed
 
 server.Bridge.__init__ = init
@@ -155,6 +210,9 @@ main()
 
 class NativeAgentRuns : public ::testing::Test {
  protected:
+  NativeAgentRuns() = default;
+  /** Another shell language and window (the narrow Chinese row of the acceptance). */
+  NativeAgentRuns(const char *language, int width, int height) : f{language, 1, width, height} {}
   bridge::test::ManualLoop loop;
   bridge::test::TempDir dir{"native-agent-runs"};
   wmtest::AppFixture f{"en", 1, 1280, 1000};
@@ -249,6 +307,30 @@ class NativeAgentRuns : public ::testing::Test {
         .then([answer](bridge::Result<Json> result) { *answer = std::move(result); });
     ASSERT_TRUE(loop.pump_until([&] { return answer->has_value(); }, 10));
     ASSERT_TRUE(answer->value().ok()) << answer->value().error().describe();
+  }
+  /** Let held linked-task read ``n`` answer, then make sure its reply reached the controller (a later reply). */
+  void detail_release(int n)
+  {
+    marker(("detail_release_" + std::to_string(n)).c_str());
+    ASSERT_TRUE(bridge::test::wait_until([&] { return exists("detail_replied_" + std::to_string(n)); }, 5));
+    auto answer = std::make_shared<std::optional<bridge::Result<Json>>>();
+    client->call("project.agent.list", {{"handle", state().project()->handle}, {"limit", 1}})
+        .then([answer](bridge::Result<Json> result) { *answer = std::move(result); });
+    ASSERT_TRUE(loop.pump_until([&] { return answer->has_value(); }, 10));
+  }
+  void detail_held(int n)
+  {
+    ASSERT_TRUE(bridge::test::wait_until([&] { return exists("detail_held_" + std::to_string(n)); }, 5));
+  }
+  /** The consumed card (first) and the card that still waits for a decision (second). */
+  Json consumed_item() { return agent().run_cards().at(0).at("item"); }
+  Json pending_item() { return agent().run_cards().at(1).at("item"); }
+  /** Every agent action the detail must never send. */
+  void expect_no_agent_actions()
+  {
+    for (const auto *method : {"run_plan", "run_decide", "run_observe", "run_target", "create", "say", "start"}) {
+      EXPECT_EQ(count(method), 0u) << method;
+    }
   }
   void list_ready()
   {
@@ -659,12 +741,447 @@ TEST_F(NativeAgentRuns, TwoPointerClicksReadAndApproveTheOriginalPlanWithoutChan
   EXPECT_EQ(f.shell->store().viewer().save_workspace_state(), viewer);
 }
 
+TEST_F(NativeAgentRuns, LinkedTasksReadOnlyABoundedProjectionOfTheExactConsumedCard)
+{
+  marker("consumed");
+  select();
+  ASSERT_EQ(agent().run_cards().size(), 2u);
+  const auto consumed = consumed_item(), pending = pending_item();
+  EXPECT_TRUE(agent().can_read_run_detail(consumed));
+  EXPECT_FALSE(agent().can_read_run_detail(pending));  // a card waiting for a decision has no linked tasks
+  EXPECT_EQ(agent().read_run_detail(pending), 0u);
+  auto other = consumed; other["plan_sha256"] = std::string(64, 'd');
+  EXPECT_EQ(agent().read_run_detail(other), 0u);  // not a card of this session
+  const auto chain = io::get_string(agent().view(), "chain_sha256");
+  const auto total = io::get_int(agent().view(), "total", -1);
+  const auto revision = state().project()->revision;
+  const auto decline = agent().can_decide_run(pending, "decline");
+  const auto session_reads = gets().size();
+  const auto ticket = agent().read_run_detail(consumed);
+  ASSERT_NE(ticket, 0u);
+  EXPECT_FALSE(agent().busy());  // a passive read keeps every other control as it was
+  EXPECT_EQ(agent().can_decide_run(pending, "decline"), decline);
+  ASSERT_NE(agent().run_detail(ticket, consumed), nullptr);
+  EXPECT_EQ(io::get_string(*agent().run_detail(ticket, consumed), "state"), "reading");
+  EXPECT_EQ(agent().run_detail(ticket, pending), nullptr);
+  ASSERT_TRUE(loop.pump_until([&] {
+    const auto *detail = agent().run_detail(ticket, consumed);
+    return detail && io::get_string(*detail, "state") != "reading";
+  }));
+  const auto detail = *agent().run_detail(ticket, consumed);
+  ASSERT_EQ(io::get_string(detail, "state"), "ready") << detail.dump();
+  ASSERT_EQ(count("workflow_runs.get"), 1u);
+  for (const auto &call : calls()) {
+    if (call.at("method") != "workflow_runs.get") { continue; }
+    EXPECT_EQ(call.at("params").at("run_id"), consumed.at("run_id"));
+    EXPECT_EQ(call.at("params").at("handle"), state().project()->handle);
+    EXPECT_EQ(call.at("params").size(), 2u);
+  }
+  EXPECT_EQ(io::get_string(detail, "status"), "stopped");
+  EXPECT_TRUE(detail.at("stop_error").get<bool>());  // only that it stopped with an error, not the text
+  EXPECT_EQ(detail.at("counts").size(), 3u);
+  EXPECT_EQ(detail.at("counts").at("succeeded"), 2); EXPECT_EQ(detail.at("counts").at("failed"), 1);
+  EXPECT_EQ(detail.at("counts").at("pending"), 198);
+  const auto &tasks = detail.at("tasks");
+  ASSERT_EQ(tasks.size(), 200u);
+  EXPECT_EQ(detail.at("more"), 1);
+  EXPECT_EQ(tasks[0].at("row"), 3);
+  EXPECT_EQ(tasks[0].at("attempt"), 2);
+  EXPECT_EQ(tasks[0].at("step"), "simulate evil line");  // controls and the bidirectional override become spaces
+  EXPECT_EQ(tasks[0].at("task_id"), "01234567");
+  EXPECT_EQ(tasks[0].at("stage"), "collecting");
+  const auto &produced = tasks[0].at("produced");
+  EXPECT_EQ(produced.at("snapshot_id"), "fedcba98");
+  EXPECT_EQ(produced.at("file_count"), 2);
+  EXPECT_EQ(produced.at("directory"), "results/run/simulate/row-1");
+  ASSERT_EQ(produced.at("files").size(), 2u);
+  bool long_name = false;
+  for (const auto &name : produced.at("files")) {
+    const auto text = name.get<std::string>();
+    if (text.starts_with("输出🙂")) {
+      long_name = true;
+      EXPECT_TRUE(text.ends_with("…")) << text;
+      EXPECT_EQ(text.find("-tail"), std::string::npos);
+      EXPECT_LE(text.size(), 80u * 4);
+    }
+  }
+  EXPECT_TRUE(long_name);
+  EXPECT_FALSE(tasks[1].contains("task_id"));  // no progress: no Runtime task ID
+  EXPECT_EQ(tasks[1].at("produced").at("analysis_run_id"), "abcdef01");
+  EXPECT_FALSE(tasks[1].at("produced").contains("directory"));  // a parent step is never shown
+  EXPECT_FALSE(tasks[2].at("produced").contains("directory"));  // nor an absolute path
+  EXPECT_EQ(tasks[2].at("row"), 7);
+  const auto dumped = detail.dump();
+  for (const auto *hidden : {"secret", "4242", "/private", "0123456789abcdef", "fedcba9876543210", "record-"}) {
+    EXPECT_EQ(dumped.find(hidden), std::string::npos) << hidden;
+  }
+  EXPECT_TRUE(agent().error().empty()) << agent().error();
+  EXPECT_EQ(io::get_string(agent().view(), "chain_sha256"), chain);
+  EXPECT_EQ(io::get_int(agent().view(), "total", -1), total);
+  EXPECT_EQ(state().project()->revision, revision);
+  EXPECT_EQ(gets().size(), session_reads);
+  agent().close_run_detail(ticket);
+  EXPECT_EQ(agent().run_detail(ticket, consumed), nullptr);
+  loop.run_ready();
+  EXPECT_EQ(count("workflow_runs.get"), 1u);  // closing reads nothing
+  expect_no_agent_actions();
+}
+
+TEST_F(NativeAgentRuns, LateLinkedTaskRepliesAreDroppedAfterCloseReopenReselectionReopeningOrALostCard)
+{
+  marker("consumed"); marker("hold_detail");
+  select();
+  const auto card = consumed_item();
+  const auto settled = [&](uint64_t ticket) {
+    const auto *detail = agent().run_detail(ticket, card);
+    return detail ? io::get_string(*detail, "state") : std::string("closed");
+  };
+  // Close then reopen the same card (ABA): only the newest ticket takes its own reply.
+  const auto first = agent().read_run_detail(card); ASSERT_NE(first, 0u);
+  ASSERT_NO_FATAL_FAILURE(detail_held(1));
+  agent().close_run_detail(first);
+  const auto second = agent().read_run_detail(card); ASSERT_NE(second, 0u); ASSERT_NE(second, first);
+  ASSERT_NO_FATAL_FAILURE(detail_held(2));
+  ASSERT_NO_FATAL_FAILURE(detail_release(1));
+  EXPECT_EQ(settled(first), "closed");
+  EXPECT_EQ(settled(second), "reading");
+  ASSERT_NO_FATAL_FAILURE(detail_release(2));
+  EXPECT_EQ(settled(second), "ready");
+  // Switching away and back to the same session is another selection.
+  const auto third = agent().read_run_detail(card); ASSERT_NE(third, 0u);
+  ASSERT_NO_FATAL_FAILURE(detail_held(3));
+  EXPECT_EQ(settled(second), "ready");  // another ticket of the same card keeps its own result
+  agent().select("session-b"); agent().select("session-a"); agent().pump(0);
+  ASSERT_TRUE(loop.pump_until([&] { return !agent().view().empty(); }));
+  EXPECT_EQ(settled(second), "closed"); EXPECT_EQ(settled(third), "closed");
+  ASSERT_NO_FATAL_FAILURE(detail_release(3));
+  EXPECT_EQ(settled(third), "closed");
+  // Reopening the project replaces the opening.
+  const auto fourth = agent().read_run_detail(card); ASSERT_NE(fourth, 0u);
+  ASSERT_NO_FATAL_FAILURE(detail_held(4));
+  ASSERT_TRUE(state().open(dir.str() + "/project"));
+  EXPECT_EQ(settled(fourth), "closed");  // The old handle is still present while the open request is in flight.
+  EXPECT_EQ(agent().read_run_detail(card), 0u);
+  ASSERT_TRUE(loop.pump_until([&] { return !state().busy(); }));
+  ASSERT_NO_FATAL_FAILURE(detail_release(4));
+  ASSERT_NO_FATAL_FAILURE(select());
+  EXPECT_EQ(settled(fourth), "closed");
+  // The card leaves the session's cards while its read is held.
+  const auto fifth = agent().read_run_detail(card); ASSERT_NE(fifth, 0u);
+  ASSERT_NO_FATAL_FAILURE(detail_held(5));
+  marker("omit_cards");
+  const auto serial = io::get_int(agent().view(), "get_serial", 0);
+  agent().draft_changed(""); agent().pump(0);
+  ASSERT_TRUE(loop.pump_until([&] { return io::get_int(agent().view(), "get_serial", 0) > serial; }));
+  EXPECT_FALSE(agent().can_read_run_detail(card));
+  EXPECT_EQ(settled(fifth), "closed");
+  ASSERT_NO_FATAL_FAILURE(detail_release(5));
+  EXPECT_EQ(settled(fifth), "closed");
+  EXPECT_EQ(agent().read_run_detail(card), 0u);
+  EXPECT_EQ(count("workflow_runs.get"), 5u);
+  EXPECT_TRUE(agent().error().empty()) << agent().error();
+  expect_no_agent_actions();
+}
+
+TEST_F(NativeAgentRuns, AMissingOrDifferentRunStaysOnItsCardWithoutTouchingTheSession)
+{
+  marker("consumed"); marker("run_missing");
+  select();
+  const auto card = consumed_item(), pending = pending_item();
+  const auto session_reads = gets().size(), lists = count("list");
+  const auto decline = agent().can_decide_run(pending, "decline");
+  const auto missing = agent().read_run_detail(card);
+  ASSERT_TRUE(loop.pump_until([&] {
+    const auto *detail = agent().run_detail(missing, card);
+    return detail && io::get_string(*detail, "state") != "reading";
+  }));
+  const auto failed = *agent().run_detail(missing, card);
+  EXPECT_EQ(failed, Json({{"state", "unavailable"}}));  // never the service's message or path
+  EXPECT_TRUE(agent().error().empty()) << agent().error();
+  EXPECT_FALSE(agent().busy());
+  EXPECT_EQ(agent().can_decide_run(pending, "decline"), decline);
+  EXPECT_EQ(agent().selected(), "session-a");
+  std::filesystem::remove(dir.path() / "run_missing"); marker("run_mismatch");
+  agent().close_run_detail(missing);
+  const auto mismatch = agent().read_run_detail(card);
+  ASSERT_TRUE(loop.pump_until([&] {
+    const auto *detail = agent().run_detail(mismatch, card);
+    return detail && io::get_string(*detail, "state") != "reading";
+  }));
+  EXPECT_EQ(*agent().run_detail(mismatch, card), Json({{"state", "mismatch"}}));  // no tasks of another plan
+  loop.run_ready();
+  EXPECT_EQ(gets().size(), session_reads); EXPECT_EQ(count("list"), lists);
+  EXPECT_EQ(count("workflow_runs.get"), 2u);
+  expect_no_agent_actions();
+}
+
+/** The acceptance rows of docs/design/native-conversation-references.md 5.2 from the workbench rail. */
+class NativeAgentRunDetailUI : public NativeAgentRuns {
+ protected:
+  using NativeAgentRuns::NativeAgentRuns;
+  int clicks = 0;
+  void click(const std::string &key)
+  {
+    const auto *control = f.screen.ui()->find(key);
+    ASSERT_NE(control, nullptr) << key; ASSERT_TRUE(control->enabled) << key;
+    const auto [x, y] = f.widget_center(key);
+    ++clicks; ASSERT_TRUE(f.drv->click(x, y)) << key; frame();
+  }
+  const ui::Block *panel()
+  {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      if (block->kind() == ui::Block::Kind::Modal) { return block.get(); }
+    }
+    return nullptr;
+  }
+  /** Both sessions exist in the fixture, none is selected, and the workbench rail lists them. */
+  void open_rail(const char *ready = "workbench_agent_session/session-a")
+  {
+    marker("consumed");
+    select("session-b"); select("session-a");
+    agent().select("");
+    agent().draft_changed("");
+    f.shell->open_workbench(f.screen);
+    f.screen.run_deferred();
+    ASSERT_TRUE(loop.pump_until([&] {
+      frame(); return f.screen.ui()->find(ready) != nullptr && agent().sessions().size() == 2;
+    }, 30)) << agent().error();
+  }
+  void open_session_a()
+  {
+    ASSERT_NO_FATAL_FAILURE(click("workbench_agent_session/session-a"));
+    ASSERT_TRUE(loop.pump_until([&] {
+      frame(); return f.screen.ui()->find("ai_agent_run_detail/approve:session-a") != nullptr;
+    }, 30)) << agent().error();
+  }
+  /** The panel's wrapped lines joined without spaces (a wrap may drop the space it breaks at). */
+  std::string panel_text()
+  {
+    const auto *tasks = f.screen.ui()->find("ai_agent_run_detail_tasks");
+    std::string text;
+    for (size_t i = 0; tasks && tasks->log && i < tasks->log->line_count(); ++i) { text += std::string(tasks->log->line(i)); }
+    text.erase(std::remove(text.begin(), text.end(), ' '), text.end());
+    return text;
+  }
+  void wait_ready()
+  {
+    ASSERT_TRUE(loop.pump_until([&] {
+      frame(); return f.screen.ui()->find("ai_agent_run_detail_tasks") != nullptr;
+    }, 30));
+  }
+  std::string entry() { return "ai_agent_run_detail/approve:session-a"; }
+  ui::WidgetId id(const std::string &key)
+  {
+    const auto *found = f.screen.ui()->find(key); return found ? found->id : 0;
+  }
+};
+
+TEST_F(NativeAgentRunDetailUI, WideWindowOpensARightPanelInTwoClicksAndReturnsFocusWithoutSideEffects)
+{
+  f.drv->ctx.rect = {0, 0, 1600, 1100};
+  ASSERT_NO_FATAL_FAILURE(open_rail());
+  const auto layout = f.screen.arrangement();
+  const auto viewer = f.shell->store().viewer().save_workspace_state();
+  const auto camera = f.shell->store().viewer().camera_serial();
+  const auto exchange = state().discussion().exchange_id();
+  clicks = 0;
+  ASSERT_NO_FATAL_FAILURE(open_session_a());
+  const auto agent_text = "ai_agent_text/" + state().project()->handle;
+  ASSERT_NE(f.screen.ui()->find(agent_text), nullptr);
+  f.screen.ui()->find(agent_text)->string.assign("Unsent agent words");
+  frame();
+  // The card that still waits for a decision has no linked tasks, and approval stays locked as before.
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail/approve2:session-a"), nullptr);
+  ASSERT_NE(f.screen.ui()->find("ai_agent_run_start/approve2:session-a"), nullptr);
+  EXPECT_FALSE(f.screen.ui()->find("ai_agent_run_start/approve2:session-a")->enabled);
+  const auto chain = io::get_string(agent().view(), "chain_sha256");
+  const auto total = io::get_int(agent().view(), "total", -1);
+  const auto revision = state().project()->revision;
+  const auto *timeline = f.screen.ui()->find("ai_agent_timeline");
+  ASSERT_NE(timeline, nullptr);
+  const auto reading = f.screen.ui()->scroll_of(timeline->id);
+  ASSERT_NO_FATAL_FAILURE(click(entry()));
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  EXPECT_EQ(clicks, 2);
+  EXPECT_EQ(count("workflow_runs.get"), 1u);
+  const auto *modal = panel(); ASSERT_NE(modal, nullptr);
+  EXPECT_FLOAT_EQ(modal->frame().x1(), 1600.0f);  // right-anchored, 420 px like the Web dialog
+  EXPECT_FLOAT_EQ(modal->frame().w, 420.0f);
+  EXPECT_FLOAT_EQ(modal->frame().y, 0.0f);
+  EXPECT_TRUE(f.screen.ui()->native_view_interaction_blocked());  // the Viewer below takes no input
+  const auto *tasks = f.screen.ui()->find("ai_agent_run_detail_tasks");
+  ASSERT_NE(tasks, nullptr); ASSERT_NE(tasks->log, nullptr);
+  const auto text = panel_text();
+  EXPECT_NE(text.find("Row3·simulateevilline·attempt2·Done·task01234567Frozensnapshotfedcba98·2files"), std::string::npos) << text;
+  EXPECT_NE(text.find("Frozensnapshot11112222Analysisrunabcdef01Row7·collect"), std::string::npos) << text;
+  EXPECT_NE(text.find("Projectfiles:输出🙂长"), std::string::npos);
+  EXPECT_NE(text.find("…,scalar.vti"), std::string::npos);
+  EXPECT_NE(text.find("Projectdirectory:results/run/simulate/row-1"), std::string::npos);
+  EXPECT_NE(text.find("1moretasksarenotshown."), std::string::npos);
+  EXPECT_EQ(text.find("secret"), std::string::npos);
+  // The long list scrolls inside the panel.
+  wm::Event wheel; wheel.type = wm::EventType::Wheel; wheel.x = int(tasks->rect.cx());
+  wheel.y = f.screen.rect().ymax - 1 - int(tasks->rect.cy()); wheel.wheel_y = -3;
+  ASSERT_TRUE(f.drv->send(wheel)); frame();
+  EXPECT_GT(f.screen.ui()->scroll_of(f.screen.ui()->find("ai_agent_run_detail_tasks")->id), 0.0f);
+  const auto first_close = f.screen.ui()->find("ai_agent_run_detail_close")->on_click;
+  // Keyboard: Tab enters the panel's Close, Esc closes and focus returns to the card's entry.
+  ASSERT_TRUE(f.drv->key(wm::Key::Tab)); frame();
+  ASSERT_NE(id("ai_agent_run_detail_close"), 0u);
+  EXPECT_EQ(f.screen.ui()->focused(), id("ai_agent_run_detail_close"));
+  ASSERT_TRUE(f.drv->key(wm::Key::Esc)); frame(); frame();
+  EXPECT_EQ(panel(), nullptr);
+  ASSERT_NE(id(entry()), 0u);
+  EXPECT_EQ(f.screen.ui()->focused(), id(entry()));
+  // Enter on the entry opens again (one more read); the Close button closes and restores focus too.
+  ASSERT_TRUE(f.drv->key(wm::Key::Enter)); frame();
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  EXPECT_EQ(count("workflow_runs.get"), 2u);
+  first_close(); frame();
+  ASSERT_NE(panel(), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_close")); frame();
+  EXPECT_EQ(panel(), nullptr);
+  ASSERT_NE(id(entry()), 0u);
+  EXPECT_EQ(f.screen.ui()->focused(), id(entry()));
+  EXPECT_EQ(count("workflow_runs.get"), 2u);
+  EXPECT_EQ(f.screen.ui()->scroll_of(f.screen.ui()->find("ai_agent_timeline")->id), reading);
+  EXPECT_EQ(io::get_string(agent().view(), "chain_sha256"), chain);
+  EXPECT_EQ(io::get_int(agent().view(), "total", -1), total);
+  EXPECT_EQ(agent().selected(), "session-a");
+  EXPECT_EQ(state().project()->revision, revision);
+  EXPECT_EQ(state().discussion().exchange_id(), exchange);
+  EXPECT_EQ(f.screen.arrangement(), layout);
+  EXPECT_EQ(f.shell->store().viewer().save_workspace_state(), viewer);
+  EXPECT_EQ(f.shell->store().viewer().camera_serial(), camera);
+  EXPECT_EQ(f.screen.ui()->find(agent_text)->string.value(), "Unsent agent words");
+  for (auto *area : f.screen.areas()) {
+    const auto *editor_area = dynamic_cast<const EditorArea *>(area);
+    if (!editor_area) { continue; }
+    const auto saved = editor_area->editor().save_workspace_state().dump();
+    for (const auto *hidden : {"run:session-a", "\"tasks\"", "snapshot_id", "fedcba98"}) {
+      EXPECT_EQ(saved.find(hidden), std::string::npos) << hidden;
+    }
+  }
+  expect_no_agent_actions();
+}
+
+TEST_F(NativeAgentRunDetailUI, ReselectingTheSessionDropsTheOpenDetailWithoutReadingAgain)
+{
+  ASSERT_NO_FATAL_FAILURE(open_rail());
+  ASSERT_NO_FATAL_FAILURE(open_session_a());
+  ASSERT_NO_FATAL_FAILURE(click(entry()));
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  ASSERT_TRUE(agent().select_history_session("session-b"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return io::get_string(agent().view().value("session", Json::object()), "id") == "session-b"; }));
+  EXPECT_EQ(panel(), nullptr);
+  ASSERT_TRUE(agent().select_history_session("session-a"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return f.screen.ui()->find(entry()) != nullptr; }));
+  frame();
+  EXPECT_EQ(panel(), nullptr);  // returning does not reopen or read again
+  EXPECT_EQ(count("workflow_runs.get"), 1u);
+  // A page change that hides the conversation (here the workbench's result page) closes it as well.
+  ASSERT_NO_FATAL_FAILURE(click(entry()));
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  f.shell->open_workbench(f.screen, true); f.screen.run_deferred(); frame(); frame();
+  EXPECT_EQ(panel(), nullptr);
+  f.shell->open_workbench(f.screen); f.screen.run_deferred();
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return f.screen.ui()->find(entry()) != nullptr; }, 30));
+  frame();
+  EXPECT_EQ(panel(), nullptr);
+  EXPECT_EQ(count("workflow_runs.get"), 2u);
+  expect_no_agent_actions();
+}
+
+TEST_F(NativeAgentRunDetailUI, AFailedReadStaysInTheOpenedPanelOfSessionA)
+{
+  marker("run_missing");
+  ASSERT_NO_FATAL_FAILURE(open_rail());
+  ASSERT_NO_FATAL_FAILURE(open_session_a());
+  ASSERT_NO_FATAL_FAILURE(click(entry()));
+  ASSERT_TRUE(loop.pump_until([&] {
+    frame();
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &w : block->widgets()) { if (w.text == "This run cannot be read.") { return true; } }
+    }
+    return false;
+  }, 30));
+  EXPECT_EQ(agent().selected(), "session-a");
+  EXPECT_TRUE(agent().error().empty()) << agent().error();
+  EXPECT_EQ(count("workflow_runs.get"), 1u);
+  expect_no_agent_actions();
+}
+
+class NativeAgentRunDetailNarrowUI : public NativeAgentRunDetailUI {
+ protected:
+  NativeAgentRunDetailNarrowUI() : NativeAgentRunDetailUI("zh_CN", 680, 1000) {}
+};
+
+TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseWindowOpensABottomSheetFromHistoryInThreeClicks)
+{
+  ASSERT_NO_FATAL_FAILURE(open_rail("workbench_history"));
+  ASSERT_NE(f.screen.ui()->find("workbench_history"), nullptr);
+  const auto layout = f.screen.arrangement();
+  const auto viewer = f.shell->store().viewer().save_workspace_state();
+  clicks = 0;
+  ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+  std::string session;
+  loop.pump_until([&] {  // the open menu fills in as the saved history arrives
+    frame();
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &candidate : block->widgets()) {
+        if (candidate.type == ui::WidgetType::MenuItem && candidate.enabled && candidate.text.ends_with("session-a")) {
+          session = candidate.key;
+        }
+      }
+    }
+    return !session.empty();
+  }, 15);
+  std::string items;
+  for (const auto &block : f.screen.ui()->blocks()) {
+    for (const auto &candidate : block->widgets()) {
+      if (candidate.type == ui::WidgetType::MenuItem) { items += candidate.key + " = " + candidate.text + (candidate.enabled ? "\n" : " (off)\n"); }
+    }
+  }
+  ASSERT_FALSE(session.empty()) << items;
+  ASSERT_NO_FATAL_FAILURE(click(session));
+  f.screen.run_deferred();
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return f.screen.ui()->find(entry()) != nullptr; }, 30)) << agent().error();
+  EXPECT_FALSE(f.screen.ui()->popup_open());
+  EXPECT_EQ(f.screen.ui()->find(entry())->text, "关联任务");
+  ASSERT_NO_FATAL_FAILURE(click(entry()));
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  EXPECT_EQ(clicks, 3);
+  const auto *modal = panel(); ASSERT_NE(modal, nullptr);
+  EXPECT_FLOAT_EQ(modal->frame().x, 0.0f);  // a full-width bottom sheet, like the Web dialog below 700 px
+  EXPECT_FLOAT_EQ(modal->frame().w, 680.0f);
+  EXPECT_FLOAT_EQ(modal->frame().y1(), 1000.0f);
+  const auto *tasks = f.screen.ui()->find("ai_agent_run_detail_tasks");
+  ASSERT_NE(tasks, nullptr);
+  const auto &style = f.screen.ui()->style();
+  const float available = tasks->rect.w - 2 * style.text_margin - style.scrollbar - 2 * style.pixel;
+  for (size_t i = 0; i < tasks->log->line_count(); ++i) {
+    EXPECT_LE(f.measurer.width(tasks->log->line(i), style.mono), available);
+  }
+  const auto text = panel_text();
+  EXPECT_NE(text.find("第3行·simulateevilline·第2次尝试·完成·任务01234567冻结快照fedcba98·2个文件"), std::string::npos) << text;
+  EXPECT_NE(text.find("项目文件：输出🙂长"), std::string::npos) << text;
+  ASSERT_TRUE(f.drv->key(wm::Key::Esc)); frame(); frame();
+  EXPECT_EQ(panel(), nullptr);
+  ASSERT_NE(id(entry()), 0u);
+  EXPECT_EQ(f.screen.ui()->focused(), id(entry()));
+  EXPECT_EQ(count("workflow_runs.get"), 1u);
+  EXPECT_EQ(f.screen.arrangement(), layout);
+  EXPECT_EQ(f.shell->store().viewer().save_workspace_state(), viewer);
+  expect_no_agent_actions();
+}
+
 class NativeAgentRunsLegacy : public NativeAgentRuns { bool legacy() const override { return true; } };
 TEST_F(NativeAgentRunsLegacy, MissingCapabilitiesKeepTheOldAssistantAndHidePreparationControls)
 {
   EXPECT_TRUE(agent().supported()); EXPECT_FALSE(agent().runs_supported());
   open_ui();
   EXPECT_EQ(widget("ai_agent_allow_prepare"), nullptr);
+  EXPECT_TRUE(agent().run_cards().empty());  // no card, so no linked-task entry or read
   EXPECT_FALSE(agent().ask("Unavailable preparation", Json()));
   EXPECT_EQ(count("run_target"), 0u);
   ASSERT_TRUE(agent().ask("Old assistant")); settle();

@@ -4,6 +4,8 @@
 #include "stk/app/app_store.hh"
 #include "stk/app/jobs_spec.hh"
 #include "stk/app/project_state.hh"
+#include "stk/core/utf8.hh"
+#include "stk/ui/utf8.hh"
 
 #include <algorithm>
 #include <limits>
@@ -30,6 +32,115 @@ bool same_run_item(const Json &a, const Json &b)
   return io::get_string(a, "kind") == "start_run" && !io::get_string(a, "item_id").empty() &&
       !io::get_string(a, "plan_sha256").empty();
 }
+
+// Linked-task detail limits: the reply holds the complete frozen plan (up to 16 MiB); only this much is kept.
+constexpr size_t kDetailTasks = 200, kDetailFiles = 20, kDetailTickets = 8;
+
+const Json &member(const Json &object, const char *key)
+{
+  static const Json none;
+  return object.is_object() && object.contains(key) ? object.at(key) : none;
+}
+
+/** One display line of untrusted text: controls and bidirectional overrides become spaces, at most ``columns``. */
+std::string plain(const Json &value, const int columns)
+{
+  if (!value.is_string()) { return {}; }
+  const auto &text = value.get_ref<const std::string &>();
+  const size_t budget = size_t(columns) * 4 + 16;  // enough to exceed ``columns`` and show the ellipsis
+  std::string out;
+  for (size_t pos = 0; pos < text.size() && out.size() < budget;) {
+    size_t length = 0;
+    const auto cp = ui::utf8::decode(text, pos, &length);
+    pos += std::max<size_t>(length, 1);
+    if (cp < 0x20 || (cp >= 0x7f && cp <= 0x9f) || ui::utf8::is_space(cp) || cp == 0x61c || cp == 0x200e ||
+        cp == 0x200f || (cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069)) {
+      if (!out.empty() && out.back() != ' ') { out += ' '; }
+    }
+    else { ui::utf8::append(out, cp); }
+  }
+  while (!out.empty() && out.back() == ' ') { out.pop_back(); }
+  return core::utf8::truncate_display(out, columns);
+}
+
+std::string prefix(const Json &value) { return core::utf8::truncate_display(plain(value, 64), 8, ""); }
+
+/** A directory inside the project only (never absolute, a drive, a backslash path or a parent step). */
+std::string relative_directory(const Json &value)
+{
+  if (!value.is_string()) { return {}; }
+  const auto &text = value.get_ref<const std::string &>();
+  if (text.empty() || text.size() > 4096 || text.front() == '/' || text.find('\\') != std::string::npos ||
+      text.find(':') != std::string::npos) { return {}; }
+  for (size_t begin = 0; begin <= text.size();) {
+    const auto end = std::min(text.find('/', begin), text.size());
+    if (text.compare(begin, end - begin, "..") == 0) { return {}; }
+    begin = end + 1;
+  }
+  return plain(value, 120);
+}
+
+/** The bounded projection of project.workflow_runs.get for the card ``item`` (design 4.3). Throws on a reply
+ * that is not this card's run; a different frozen plan keeps only the mismatch. */
+Json run_detail_projection(const Json &result, const Json &item)
+{
+  const auto &run = member(result, "run");
+  if (!run.is_object() || io::get_string(run, "id") != io::get_string(item, "run_id") ||
+      !member(run, "tasks").is_array()) {
+    throw std::runtime_error("The workflow run reply is not this card's run");
+  }
+  if (io::get_string(run, "plan_sha256") != io::get_string(item, "plan_sha256")) { return {{"state", "mismatch"}}; }
+  std::map<std::string, int64_t> numbers;  // row record ID -> its row number in the frozen plan
+  if (const auto &rows = member(run, "rows"); rows.is_array()) {
+    for (const auto &row : rows) {
+      if (row.is_object()) { numbers[io::get_string(row, "id")] = io::get_int(row, "number", -1); }
+    }
+  }
+  Json counts = Json::object();
+  if (member(run, "counts").is_object()) {
+    for (const auto &[status, count] : run.at("counts").items()) {
+      if (counts.size() < 16 && count.is_number_integer()) { counts[plain(Json(status), 24)] = count.get<int64_t>(); }
+    }
+  }
+  const auto &all = run.at("tasks");
+  Json tasks = Json::array();
+  for (size_t i = 0; i < std::min(all.size(), kDetailTasks); ++i) {
+    const auto &task = all.at(i);
+    const auto row = numbers.find(io::get_string(task, "row"));
+    Json line = {{"step", plain(member(task, "step"), 48)}, {"row", row == numbers.end() ? -1 : row->second},
+                 {"attempt", io::get_int(task, "attempt", 0)}, {"status", plain(member(task, "status"), 24)}};
+    if (const auto &progress = member(task, "progress"); progress.is_object()) {
+      line["stage"] = plain(member(progress, "stage"), 24);
+      line["state"] = plain(member(progress, "state"), 24);
+      line["task_id"] = prefix(member(progress, "task_id"));
+    }
+    if (const auto &produced = member(task, "produced"); produced.is_object()) {
+      Json out = Json::object();
+      if (const auto snapshot = prefix(member(produced, "snapshot_id")); !snapshot.empty()) { out["snapshot_id"] = snapshot; }
+      if (const auto &files = member(produced, "files"); files.is_object()) {
+        Json names = Json::array();
+        for (const auto &[name, record] : files.items()) {
+          if (names.size() == kDetailFiles) { break; }
+          names.push_back(plain(Json(name), 80));
+        }
+        out["file_count"] = files.size();
+        out["files"] = std::move(names);
+      }
+      if (const auto directory = relative_directory(member(produced, "directory")); !directory.empty()) {
+        out["directory"] = directory;
+      }
+      if (const auto analysis = prefix(member(produced, "analysis_run_id")); !analysis.empty()) {
+        out["analysis_run_id"] = analysis;
+      }
+      if (!out.empty()) { line["produced"] = std::move(out); }
+    }
+    tasks.push_back(std::move(line));
+  }
+  return {{"state", "ready"}, {"status", plain(member(run, "status"), 24)},
+          {"complete", io::get_bool(run, "complete", false)}, {"stop_error", !member(run, "stop_error").is_null()},
+          {"counts", std::move(counts)}, {"tasks", std::move(tasks)},
+          {"more", all.size() - std::min(all.size(), kDetailTasks)}};
+}
 }  // namespace
 
 void ProjectAgent::reset()
@@ -42,7 +153,7 @@ void ProjectAgent::reset()
   view_reading_ = view_pending_ = owner_reading_ = session_reading_ = was_running_ = start_pending_ = false;
   pending_targets_.clear();
   selected_.clear(); sent_.clear();
-  owners_.clear(); session_views_.clear(); run_plans_.clear(); run_actions_.clear();
+  owners_.clear(); session_views_.clear(); run_plans_.clear(); run_actions_.clear(); run_details_.clear();
   ++selection_;
   attempt_ = {};
   due_ = wake_scheduled = 0;
@@ -222,7 +333,7 @@ void ProjectAgent::select(const std::string &session_id)
   ++selection_;
   start_pending_ = false;
   attempt_ = {};
-  run_plans_.clear();
+  run_plans_.clear(); run_details_.clear();
   view_ = Json::object(); verification_ = Json::object();
   was_running_ = false;
   view_reading_ = false;  // an earlier selection's read no longer holds the guard; its reply is dropped
@@ -409,6 +520,69 @@ bool ProjectAgent::observe_run(const Json &item)
     action["receipt"] = result.at("receipt"); action["observed"] = true;
     view_pending_ = true; list_asked_ = false;
   });
+}
+
+bool ProjectAgent::can_read_run_detail(const Json &item) const
+{
+  if (!runs_supported() || selected_.empty() || !same_run_item(item, item)) { return false; }
+  const auto hello = store_.bridge()->hello_info();
+  if (!hello || !hello->has_method("project.workflow_runs.get")) { return false; }
+  for (const auto &card : run_cards()) {
+    if (same_run_item(card.at("item"), item)) {
+      return card.value("decision", Json()).is_object() || card.value("receipt", Json()).is_object();
+    }
+  }
+  return false;
+}
+
+uint64_t ProjectAgent::read_run_detail(const Json &item)
+{
+  if (project_.busy() || !can_read_run_detail(item)) { return 0; }
+  const auto ticket = ++run_detail_ticket_;
+  run_details_[ticket] = {item, {{"state", "reading"}}, store_.project_scope_epoch()};
+  while (run_details_.size() > kDetailTickets) { run_details_.erase(run_details_.begin()); }
+  const auto handle = project_.project()->handle;
+  const std::weak_ptr<bool> weak = alive_;
+  const auto epoch = epoch_;
+  const auto selection = selection_;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  options.timeout_s = 15;
+  // A passive read: neither busy_ nor error_ changes, so no other control's enablement or message moves.
+  store_.bridge()->call("project.workflow_runs.get", {{"handle", handle}, {"run_id", item.at("run_id")}}, options)
+      .then([this, weak, epoch, selection, handle, ticket](bridge::Result<Json> result) {
+    if (!weak.lock() || epoch != epoch_ || selection != selection_ || !project_.project() ||
+        project_.project()->handle != handle) { return; }
+    const auto found = run_details_.find(ticket);
+    if (found == run_details_.end()) { return; }  // closed, reopened (a new ticket) or evicted
+    if (found->second.project_scope != store_.project_scope_epoch() ||
+        !can_read_run_detail(found->second.item)) { run_details_.erase(found); }
+    else if (!result.ok()) { found->second.view = {{"state", "unavailable"}}; }  // the remote message is not shown
+    else {
+      try { found->second.view = run_detail_projection(result.value(), found->second.item); }
+      catch (const std::exception &) { found->second.view = {{"state", "unavailable"}}; }
+    }
+    ++version_;
+    store_.changed();
+  });
+  ++version_;
+  store_.changed();
+  return ticket;
+}
+
+const Json *ProjectAgent::run_detail(const uint64_t ticket, const Json &item) const
+{
+  const auto found = run_details_.find(ticket);
+  if (found == run_details_.end() || found->second.project_scope != store_.project_scope_epoch() ||
+      !same_run_item(found->second.item, item) || !can_read_run_detail(item)) {
+    return nullptr;
+  }
+  return &found->second.view;
+}
+
+void ProjectAgent::close_run_detail(const uint64_t ticket)
+{
+  if (run_details_.erase(ticket)) { ++version_; store_.changed(); }
 }
 
 bool ProjectAgent::start()

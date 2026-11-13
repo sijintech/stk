@@ -88,6 +88,17 @@ class ProjectAgent {
   bool can_decide_run(const io::Json &item, const std::string &decision) const;
   bool decide_run(const io::Json &item, const std::string &decision);
   bool observe_run(const io::Json &item);
+  /** Read-only linked-task detail of a consumed run card (docs/design/native-conversation-references.md 4.3): the
+   * selected session shows ``item`` with a decision or receipt, and the service reads workflow runs. */
+  bool can_read_run_detail(const io::Json &item) const;
+  /** Send one project.workflow_runs.get for the card's run. Returns the ticket that owns its reply (0: not sent).
+   * Never plans, observes, decides, starts, saves or sends; never sets busy() or error(). */
+  uint64_t read_run_detail(const io::Json &item);
+  /** A bounded local projection while ``ticket`` still belongs to the current card: {state: reading | ready |
+   * unavailable | mismatch, ...}; nullptr once closed, superseded, reselected or reopened. Memory only. */
+  const io::Json *run_detail(uint64_t ticket, const io::Json &item) const;
+  /** Forget ``ticket``; its late reply is then dropped. */
+  void close_run_detail(uint64_t ticket);
   /** Answer the message that waits (after a refusal, or when a run was lost). */
   bool start();
   bool cancel();
@@ -146,6 +157,10 @@ class ProjectAgent {
   std::map<std::string, io::Json> session_views_;   // session ID -> its view (the sessions of tracked drafts)
   // Transient only: never restored as execution permission or a reviewed plan.
   std::map<std::string, io::Json> run_plans_, run_actions_;
+  // Linked-task details by ticket: the exact card that asked and its projection (never a full plan or a path).
+  struct RunDetail { io::Json item, view; uint64_t project_scope; };
+  std::map<uint64_t, RunDetail> run_details_;
+  uint64_t run_detail_ticket_ = 0;  // never repeats within a controller, so a closed ticket cannot come back
   struct Attempt { std::string text, session_id, turn_id; bool create = false; } attempt_;
   double due_ = 0;
 };

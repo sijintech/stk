@@ -1,8 +1,8 @@
 # 原生会话内的任务与文件引用
 
-2026-11-13 起草，基线 STK `2390a099`。上位设计见[统一研究工作台](unified-workbench.md)第 11 段与[统一首页跨端验收矩阵](unified-home-acceptance.md) H5。本地桌面部分处于设计阶段。Web 的 Hub 关联见统一工作台。
+2026-11-13 起草，基线 STK `2390a099`。上位设计见统一研究工作台与跨端验收矩阵 H5。桌面首片已实现智能体运行卡片的只读详情。 [统一研究工作台](unified-workbench.md) [统一首页跨端验收矩阵](unified-home-acceptance.md#h5-会话内的任务与文件详情条件)
 
-标注规则如下。「现有」指基线源码已有的字段、方法或界面，「计划」指本文提出、尚未实现的改动。
+第二节的「现有」指基线源码已有的字段、方法或界面。
 
 ## 1. 结论
 
@@ -52,36 +52,36 @@
 
 左栏最多列 5 个会话（`shell.cc` 的 `max_recent_sessions`）。会话视图中的运行卡片由 `ProjectAgent::run_cards()` 组装，服务最多返回 20 张，待决定的在前，随后是最近已消费的。更早的卡片要等后续分页设计，首片不处理。
 
-### 4.2 新控件（计划）
+### 4.2 关联任务入口
 
 位置在 `desktop/engine/lib/stk_app/src/editors/ai_editor.cc` 的 `agent_run_cards`，紧接「查看原决定的回执」按钮。
 
-- 控件键 `ai_agent_run_detail/<item_id>`。控件文字为「关联任务」，打开后焦点进入面板。
+- 控件键 `ai_agent_run_detail/<item_id>`。控件文字为「关联任务」。打开后按 Tab 可聚焦关闭按钮。
 - 只在卡片已消费时出现，即 `decision` 或 `receipt` 为对象。待决定卡片不显示，避免与「读取完整计划」混淆。批准仍只由完整计划解锁。
 - 显示条件还包括 `ProjectAgent::runs_supported()` 为真，以及 Bridge 握手中有 `project.workflow_runs.get`。项目格式 13 已满足该方法所需的格式 10。
 - 新增中英文文案键放在 `desktop/app/i18n/en.json` 与 `zh_CN.json` 的 `ai.agent.run.detail*` 下。
 
-### 4.3 读取（计划）
+### 4.3 读取
 
 在 `ProjectAgent` 增加以下接口。
 
 ```cpp
-bool read_run_detail(const io::Json &item);
-const io::Json *run_detail(const io::Json &item) const;
-void close_run_detail(const io::Json &item);
+uint64_t read_run_detail(const io::Json &item);
+const io::Json *run_detail(uint64_t ticket, const io::Json &item) const;
+void close_run_detail(uint64_t ticket);
 ```
 
 - 只发 `project.workflow_runs.get {handle, run_id}`，`run_id` 取自卡片条目。重试策略为 `Retry::Never`，超时 15 秒。
-- 沿用 `ProjectAgent::read` 的围栏，回复时核对 `alive_`、`epoch_`、项目句柄和 `selection_`。失败只写入该卡片的详情条目，不覆盖 `error()`。
-- 结果按 `run_key(item)` 存在新的 `run_details_` 中，只在内存里保留。`reset()` 与 `select()` 时和 `run_plans_` 一起清除。
+- 回复时核对 `alive_`、`epoch_`、项目句柄、项目作用域、会话选择和当前卡片。失败只写入该次详情的条目。项目切换发出后即丢弃旧详情，切换期间入口禁用。
+- 每次打开分配独立票据。结果只保留在 `run_details_` 的内存中，关闭时清除对应票据。`reset()` 与 `select()` 时和 `run_plans_` 一起清除。
 - 回复须满足 `run.id` 等于条目的 `run_id`，`tasks` 为数组。`run.plan_sha256` 与条目的 `plan_sha256` 不同时，只保留不一致标记，不显示任务。
 - 只保留有限投影，不保留完整计划。投影包括运行 `status`、`counts`、`complete`、是否有 `stop_error`，以及前 200 个任务的 `step`、行号（由计划 `rows` 的 `number` 换算）、`attempt`、`status`、`progress` 的 `stage`、`state`、`task_id` 前缀，还有 `produced` 的 `snapshot_id` 前缀、`files` 的输出名、相对 `directory` 和 `analysis_run_id` 前缀。超过 200 个时显示剩余数量。
 - 不使用工作流编辑器自己的 `ProjectWorkflows` 实例，也不调用其 `load_run`，以免改动工作流页已选的运行和编译证据。
 - 不调用 `project.agent.run_plan`，它会登记计划检查并解锁批准。不调用 `project.agent.run_observe`，它可能追加回执事件。也不调用 `project.runs.refresh`、`project.files.resolve`、`project.files.refresh`、`project.snapshots.verify` 或 `project.snapshots.resolve`。
 
-### 4.4 显示（计划）
+### 4.4 显示
 
-详情通过统一的「关联任务」入口打开。宽窗用右侧面板，窄窗用覆盖层。面板绑定发起卡片，关闭时焦点回到该卡片入口。
+详情通过统一的「关联任务」入口打开。宽窗用右侧面板，宽度为 700 逻辑像素及以下时用底部覆盖层。面板绑定发起卡片和窗口，关闭时焦点回到该卡片入口。
 
 - 第一行为运行状态，沿用现有 `workflow.run.status.<status>` 文案，后接各状态任务数与「读取时状态」。
 - 每个任务一行，写行号、步骤、第几次尝试、状态和 Runtime 任务 ID 前 8 位。没有进度时不写任务 ID。
@@ -116,21 +116,21 @@ void close_run_detail(const io::Json &item);
 - 原有「读取完整计划」「批准」「拒绝」「查看原决定的回执」的行为与次数不变。
 - Root 的 Hub 会话关联与本片互不依赖。原生端不读取 Hub 会话，按双端统一工作台的布局验收。
 
-## 5. 验收（计划）
+## 5. 验收
 
 ### 5.1 固定起点
 
-沿用矩阵第 1 节的窗口。宽窗 Linux X11 英文 1600×1100，窄窗 Linux X11 中文 680×1000，缩放均为 1。已打开本地项目，Bridge 就绪，聚焦工作台显示项目问答且有未发送问题，会话 A 有未发送的智能体文字，A 含一张已消费的运行卡片和一张待决定卡片。结果页已显示文件且相机已移动。
+自动化使用桌面界面驱动、Bridge 替身和合成项目。宽窗英文 1600×1100，窄窗中文 680×1000，缩放均为 1。从已打开本地项目且 Bridge 就绪的聚焦工作台起步。界面驱动检查问答与智能体草稿、原会话焦点和 Viewer 状态。真实 Linux X11 窗口留待验证。
 
 ### 5.2 操作与次数
 
 | 行 | 操作 | 次数 | 结果与焦点 |
 | --- | --- | --- | --- |
-| 宽窗打开 | 左栏会话 A，再点「关联任务」 | 2 | 显示所选卡片的详情，焦点进入面板的关闭按钮 |
+| 宽窗打开 | 左栏会话 A，再点「关联任务」 | 2 | 显示所选卡片的详情，首个 Tab 聚焦关闭按钮 |
 | 宽窗收起 | 「关闭」或 Esc | 1 | 焦点返回原卡片入口，会话阅读位置不变 |
 | 窄窗打开 | 「历史」，会话 A，「关联任务」 | 3 | 同宽窗，历史菜单关闭后查看器不接收输入 |
 | 窄窗收起 | 「关闭」或 Esc | 1 | 同宽窗 |
-| 键盘 | 焦点在该控件时 Enter 打开，Esc 关闭 | 各 1 | 焦点先进入面板，再返回原入口 |
+| 键盘 | 焦点在该控件时 Enter 打开，Esc 关闭 | 各 1 | Esc 后焦点返回原入口 |
 | 待决定卡片 | 无操作 | 0 | 没有「关联任务」，「批准」的启用状态与基线一致 |
 | 失效 | 先打开详情，再切到会话 B 并回到 A | 2 | 详情已丢弃，回到 A 不自动重读 |
 | 读取失败 | 运行不存在时点「关联任务」 | 1 | 卡片内显示不可用，留在会话 A |
@@ -156,7 +156,7 @@ void close_run_detail(const io::Json &item);
 - 放在 `desktop/tests/app/project_agent_runs_test.cc`，扩展现有 `kRunWire` 替身。替身登记 `project.workflow_runs.get` 并写入 `calls.jsonl`，参数校验绕过范围与 `project.agent.*` 相同。
 - 新增标记文件 `consumed`、`run_missing` 和 `run_mismatch`。`consumed` 让第一张卡片带决定与回执并另加一张待决定卡片，`run_missing` 返回 `not_found`，`run_mismatch` 返回不同的 `plan_sha256`。回复的任务中含 `progress.task_id`、`produced.snapshot_id`、`produced.files` 和超长 Unicode 输出名。
 - 入口用 `f.shell->open_workbench(f.screen)` 和左栏条目 `workbench_agent_session/session-a`，不用 `open_ui()` 中的 `set_maximized` 和意图下拉。替身的 `list` 只返回已读过的会话，须预先建立 `session-a` 与 `session-b`。窄窗 680×1000 另建中文夹具，语言参数沿用壳层选项的 `zh_CN`。
-- 构建 `stk-project-tests`，用 `--gtest_filter=NativeAgentRuns.*` 运行。在本 worktree 自己的构建目录编译，`STK_TOKEN_PLAN_API_KEY` 置空，`STK_TOKEN_PLAN_MODEL` 不设置。
+- 构建 `stk-project-tests`，用 CTest `-R NativeAgentRun` 运行。在本工作树自己的构建目录编译，`STK_TOKEN_PLAN_API_KEY` 置空，`STK_TOKEN_PLAN_MODEL` 不设置。
 - 实窗只用合成项目，次数与结果由 Root 记入 `docs/runtime-validation.md`。
 
 ## 6. 限制与交给 Root 的事项
@@ -167,4 +167,3 @@ void close_run_detail(const io::Json &item);
 - 报告请求的 `report_selection` 已持久保存运行、快照和文件引用，但属私有字段，不经 Bridge 返回。若要在问答中显示，须先确定公开范围与契约。
 - 矩阵 H5 的失效行写「零请求」。服务端才能发现的情形（运行缺失或计划损坏）需要 1 次只读请求，建议 Root 把该行拆成客户端失效与服务端拒绝两类。
 - 下一片可按同一规则补文件详情。从产物的文件记录 ID 经现有文件页或查看器打开，打开前须明确点击，并保持文件页选择不变。之后再补任务页跳转，用 `task_id` 匹配任务页实时列表，并处理找不到该任务的情形。
-- 本文未编译或运行任何代码。所有「计划」项须在实现时按源码与实测核对。
