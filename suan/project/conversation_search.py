@@ -33,7 +33,9 @@ def _dated(value):
 
 def _questions(db, store):
     where, params = archive.where(db, "request", False, column="r.id")
-    for row in db.execute("SELECT r.* FROM project_requests AS r" + where, params):
+    rows = db.execute("SELECT r.id, r.project_id, r.context_id, r.message_id, r.payload, r.request_sha256, r.sha256 "
+                      "FROM project_requests AS r" + where, params)
+    for row in rows:
         try:
             if len(row["payload"].encode("utf-8")) > MAX_REPORT_REQUEST_BYTES:
                 continue

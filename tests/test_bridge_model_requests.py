@@ -141,6 +141,10 @@ def test_local_conversation_search_spans_history_and_reads_only_bound_titles(inp
     archive = question("STK 晶格 archived")
     store.archive.set([{"kind": "request", "id": archive["id"]}], archived=True)
     recent = question("STK 晶格" + "x" * 90 + " hidden_suffix")
+    completed = question("Read only the user title")
+    owner = str(uuid4())
+    assert store.requests._claim(completed["id"], executor_id=owner)[1]
+    store.requests._complete(completed["id"], executor_id=owner, text="Assistant-exclusive search word")
     for index in range(22):
         question(f"Separate record {index}")
     session = str(uuid4())
@@ -166,7 +170,7 @@ def test_local_conversation_search_spans_history_and_reads_only_bound_titles(inp
     third = h.call(method, {**params, "after": second["next"]})
     assert third == {"items": [{"id": old["id"], "kind": "question", "label": "ＳＴＫ 晶格 Café",
                                "created_at": old["created_at"]}], "next": None}
-    for query in ("hidden_suffix", "archived", "follow-up"):
+    for query in ("hidden_suffix", "archived", "follow-up", "assistant-exclusive"):
         assert h.call(method, {"handle": handle, "query": query}) == {"items": [], "next": None}
     assert h.call(method, {"handle": handle, "query": "CAFE\u0301"})["items"] == third["items"]
     assert method in h.call("hello", {"protocol": 1, "resume_transfers": False})["methods"]
