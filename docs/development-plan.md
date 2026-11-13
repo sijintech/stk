@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-13 19:18 UTC · 工作台发布前核验
+
+上一远端 `19998d12097685138b555904fbe880e1a91750f0` 的 Desktop 于 19:18:35 UTC 完成，六项作业中五项通过。Linux 三项、Windows CPU、Windows WebView2 原生文档均成功。macOS CPU 两条窄窗会话测试和必测视频两项失败，具体工件与本地修订见下一节。Runtime 13/13、Pages 和 Secret scan 通过。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43481451563) [Windows 工件](https://github.com/sijintech/stk/actions/runs/43481451563/artifacts/14069047795) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43481451605)
+
+本次待发布范围截至 `7a78d94916441a298e1fd00a710abe8656f2d5be`，包含双端逐级返回、固定会话详情面板、聚焦智能体会话简化，以及 macOS 测试和诊断修订。Claude 的保存候选仍留在独立 worktree。原四份状态文档与三份 AOCI 工作区改动保留。新发布头的目标平台结果待 CI。
+
 ## 2026-11-13 19:17 UTC · macOS 会话夹具修正与视频工件复核
 
 远端 `19998d12` 的 macOS 工件 `14067998655` 中，CPU 1612/1614，两个失败均停在窄窗历史菜单，尚未打开任务面板。当前界面在历史条目变更时关闭菜单，原测试点击前只等到智能体列表，未等问答历史。Root 本地 `3ebbb4cd6fc63f2086384d5ea201a6ba07f15558` 固定为已加载历史后再起步，直接核对展开的菜单项，仍验证原 3 次与 5 次点击。Linux 连续 5 轮共 10/10，智能体和已保存会话联合 48/48。此前同批本地 project 全量 1560/1562，余两项首跑缺已安装 peer helper 路径，设置既有安装路径后定向 2/2。暂存 gitleaks 零发现。新头 macOS 待验。
