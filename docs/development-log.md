@@ -1,5 +1,11 @@
 # 开发交接记录
 
+## 2026-11-13 前序桌面 CI 终态与发布检查
+
+远端 `834f7bd4656fe197e7bc8d93a5454042a718498d` 的 Desktop 于 23:51:05 UTC 结束，五个作业通过。Windows 原生预览 6/6，含 WebView2 与 Reports 的 Markdown、HTML、PDF、MP4 和内嵌视频。Windows CPU 1561/1561，零跳过。Linux 三项与 Runtime 13/13 通过。macOS CPU 1621/1621、Metal 测试 254/254，必测原生组 4/6。MP4 与内嵌视频在切到后台的暂停检查失败，分别是隐藏期间的保持检查和颜色转换或自然结束前的暂停检查。可见首次与第二次暂停对照 2/2，重复核验对照 0/2。前序 Desktop 已到终态。日志 `root-delivery-20261113-194/408-{macos,windows-native}-job.log`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43522208408) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/43522208408/artifacts/14086897145) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43522208394)
+
+AOCI 0.1.0-rc21 批量发布检查为 `stopped/blocked`，194 项计划目标、零签发候选。范围为 `observed_evidence_review_required`，94 条观察待复核，其中 9 项标为人工复核。正式索引与原有工作区改动保留。证据 `root-delivery-20261113-194/release-aoci-scope.json`。待推代码包含桌面比例字体、两端回到最新与任务文件清单原地重试，以及桌面输入卡片。保存副本候选另行等待目标平台验证。
+
 ## 2026-11-13 聚焦会话输入卡片
 
 Claude 118 在独立 worktree 提交 `8a1f0efe`。Root 在隔离副本审阅并合入本地 main `dd3c8a02d92c4be1730601b111c1ddff0be2fa14`。聚焦项目问答和智能体会话将输入框、适用提示及准备或发送按钮收进与正文同宽的一张卡片，动作按文案宽度靠右。原有明确发送、键盘、草稿和分栏绑定沿用。共同设计与 Synthrix 对照更新于 `45886d40`。Linux 原生构建与定向 CTest 71/71 通过，零跳过，覆盖绘制边界、宽窄窗、项目问答焦点、分栏以及一次显式快捷键请求。 [统一设计](docs/design/unified-workbench.md)
