@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-13 17:49 UTC · 桌面智能体会话居中与真实窗口验收
+
+本地 main `cfaf8c1816f5e66c81ef1cab97239206eaf06aa4` 让聚焦工作台中的智能体会话复用项目问答的 880 逻辑像素居中正文列，文本按实际列宽折行。窄窗随可用宽度排列。桌面应用和项目测试目标构建完成，导航、智能体和文献入口联合 51/51，暂存 gitleaks 零发现。首轮新增布局断言未计入 7 像素滚动条，修正验收容差后通过。
+
+Linux X11/Xvfb、llvmpipe OpenGL、缩放 1、真实桌面与项目 Bridge。固定起点为已打开合成项目的聚焦工作台，左栏或历史菜单已有一条已消费的智能体会话，Viewer 预置公开网格。英文 1600×1100 从左栏到关联任务 2 次点击，右侧面板用关闭按钮收起 1 次。中文 680×1000 从「历史」到关联任务 3 次点击，底部覆盖层用 Esc 收起 1 次。两窗都显示该项目的冻结快照及 `metrics.json`，收起前后正文取样像素一致。各一次 `project.workflow_runs.get`，另有进入会话所需的 route/get。数据库字节、项目修订 5、会话哈希链、任务状态和产物摘要一致，测量内零执行、零发送。焦点与 Viewer 状态另由同头界面驱动验证。证据 `root-delivery-20261113-175/{centered-final.xml,native-linked-en-centered/verified-receipt.json,native-linked-zh_CN-centered/verified-receipt.json}`。
+
+Claude 111 的独立 `228af77d` 纳入 `46f405f3`，Root 在 `3cc959a4` 明确跨会话和离散采样只能支持假设。该文记录 macOS 官方工件取证与下一项帧标记对照。真实 macOS 验证待跑。Claude 112 已在独立 worktree 实现同一详情面板中的冻结文件清单和文本预览，尚未交付。下载仍待接入。
+
+远端 `57f3601a` 的 Runtime 13/13 成功，Desktop 的 Linux 三项及 Windows CPU 通过，macOS 与 Windows 原生文档验收仍在运行。PR #53 和 #54 复核后仍分别为 DIRTY、UNSTABLE。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/43470699712) [Desktop CI](https://github.com/sijintech/stk/actions/runs/43470699822)
+
 ## 2026-11-13 17:36 UTC · 原生会话关联任务
 
 本地 main `5ae6507372adde77bae2b495bec9ac30fb8e0772` 纳入 Claude 独立工作树的 `ca4ea773`、`a415e414`。已消费的智能体运行卡片可以打开「关联任务」。详情只读当前项目的工作流状态、冻结快照与产物名称。宽窗沿用 Web 的右侧面板，700 逻辑像素及以下为底部覆盖层。Root 补齐项目打开或关闭发出后的作用域校验、编辑器移动与重开详情后的过期回调围栏。
