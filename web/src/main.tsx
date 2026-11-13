@@ -180,6 +180,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const conv=useConversations(disconnect,()=>refreshNow.current());
   const {mergeList}=conv;
   const [wide,setWide]=useState(()=>!matchMedia(COMPACT).matches),[historyOpen,setHistoryOpen]=useState(false);
+  const [historyQuery,setHistoryQuery]=useState('');
   const [conversationTasks,setConversationTasks]=useState<string|null>(null);
   const conversationTasksButton=useRef<HTMLButtonElement>(null);
   // overlay: the compact history is open over the active section, which then takes no input until it closes.
@@ -687,6 +688,11 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     flushSync(()=>{setSourceOpen(false);setHistoryOpen(true);});
     focusHistory();
   }
+  const historyTerms=historyQuery.normalize('NFKC').toLocaleLowerCase().trim().split(/\s+/u).filter(Boolean);
+  const historyEntries=historyTerms.length?conv.entries.filter(entry=>{
+    const name=entry.name.normalize('NFKC').toLocaleLowerCase();
+    return historyTerms.every(term=>name.includes(term));
+  }):conv.entries;
   // The unsent text of a conversation the Hub no longer has goes to a new local conversation, ready to send there.
   function moveDraft(){flushSync(()=>conv.moveDraft());composer.current?.focus({preventScroll:true});}
   const sessionRow=conv.saved[conv.session];
@@ -780,10 +786,19 @@ function Workbench({disconnect}:{disconnect:()=>void}){
       {!wide&&<button type="button" ref={historyToggle} className={historyOpen?'history-toggle open':'history-toggle'} aria-expanded={historyOpen} aria-controls="conversation-history" aria-label="对话历史" onClick={toggleHistory}>历史</button>}</nav>
     <section id="conversation-history" ref={historyPanel} aria-label="对话历史" className={`history${wide?'':' history-overlay'}${historyShown?'':' surface-hidden'}`} inert={!historyShown}>
       <div className="history-head"><h2>对话</h2><button type="button" className="new-conversation" onClick={()=>openConversation(null)}>新对话</button></div>
+      {(conv.entries.length>1||historyQuery)&&<form className="history-search" role="search" onSubmit={e=>{
+        e.preventDefault();
+        if(historyTerms.length&&historyEntries.length===1)openConversation(historyEntries[0].id,true);
+      }}>
+        <input type="search" aria-label="搜索对话" placeholder="搜索对话" value={historyQuery} maxLength={200}
+          onKeyDown={e=>{if(e.key==='Enter'&&(e.repeat||e.nativeEvent.isComposing))e.preventDefault();}}
+          onChange={e=>setHistoryQuery(e.target.value)}/>
+      </form>}
       <ul className="history-list">
-        {conv.entries.map(entry=><li key={entry.id}><button type="button" className="conversation" aria-current={entry.id===conv.session?'true':undefined} onClick={e=>openConversation(entry.id,e.detail===0)}><span>{entry.name}</span><small>{entryNote(entry)}</small></button></li>)}
+        {historyEntries.map(entry=><li key={entry.id}><button type="button" className="conversation" aria-current={entry.id===conv.session?'true':undefined} onClick={e=>openConversation(entry.id,e.detail===0)}><span>{entry.name}</span><small>{entryNote(entry)}</small></button></li>)}
       </ul>
-      {!conv.entries.some(entry=>entry.kind==='saved')&&<p className="muted">还没有保存的对话。</p>}
+      {historyTerms.length&&!historyEntries.length?<p className="muted" role="status">没有匹配的对话。</p>:
+        !conv.entries.some(entry=>entry.kind==='saved')&&<p className="muted">还没有保存的对话。</p>}
     </section>
     {overlay&&<div className="history-backdrop" aria-hidden="true" onClick={closeHistory}/>}
     <aside className={`tasks panel surface${tab==='tasks'?'':' surface-hidden'}`} inert={tab!=='tasks'||overlay}><div className="section-title"><h2>项目与任务</h2><button className="quiet" onClick={()=>{setTaskRefresh(value=>value+1);void refresh();}}>刷新</button></div>

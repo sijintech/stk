@@ -3043,6 +3043,59 @@ test('the compact history scrolls a restored selection into view on keyboard ope
   expect(errors).toEqual([]);
 });
 
+for (const viewport of [{width: 1440, height: 900}, {width: 390, height: 844}]) {
+  test(`history search opens an older conversation from its title at ${viewport.width}px`, async ({page}) => {
+    await page.setViewportSize(viewport);
+    const hub = new Hub();
+    conversations(hub);
+    for (let i = 0; i < 30; i++) {
+      hub.rows.push({id: (0x100 + i).toString(16).padStart(32, '0'), name: `近期记录 ${i}`, created: 1794830600 + i});
+    }
+    await setup(page, hub);
+    await choose(page, /铁电回线分析/);
+    await shows(page, ['B 的问题']);
+    await draft(page).fill('当前未发送草稿');
+    const before = await work(page);
+    const sent = posts(page);
+    await go(page, '任务');
+    if (isNarrow(page)) await historyToggle(page).click();
+    const initialCount = await entries(page).count();
+    expect(initialCount).toBe(33); // 32 saved conversations and the initial local draft.
+    const search = historyPanel(page).getByRole('searchbox', {name: '搜索对话'});
+    await search.click();
+    await search.fill('没有匹配的标题');
+    await expect(historyPanel(page).getByRole('status')).toContainText('没有匹配的对话');
+    await search.press('Enter');
+    await search.fill('近期');
+    await expect(entries(page)).toHaveCount(30);
+    await search.press('Enter');
+    await expectActive(page, '任务', {covered: isNarrow(page)});
+    expect(hub.calls).toEqual([`history ${B}`]);
+    await search.fill('相场 讨论');
+    await expect(entries(page)).toHaveCount(1);
+    await page.screenshot({path: test.info().outputPath('history-search.png')});
+    await search.press('Enter');
+    await expectActive(page, '工作台');
+    await expect(page.getByRole('log', {name: '对话记录'})).toBeFocused();
+    await expect(label(page)).toContainText('相场参数讨论');
+    expect(hub.calls).toEqual([`history ${B}`, `history ${A}`]);
+    expect(await work(page)).toEqual(before);
+    if (isNarrow(page)) await historyToggle(page).click();
+    await expect(search).toHaveValue('相场 讨论');
+    await search.fill('');
+    await expect(entries(page)).toHaveCount(initialCount);
+    await item(page, /铁电回线分析/).click();
+    await expect(draft(page)).toHaveValue('当前未发送草稿');
+    expect(sent.seen).toEqual([]);
+    sent.stop();
+    writeFileSync(test.info().outputPath('history-search.json'), JSON.stringify({
+      viewport, initial: '任务页 · 已打开 B · B 有未发送草稿 · 历史含 32 条',
+      openHistoryClicks: isNarrow(page) ? 1 : 0, searchClicks: 1, selectKeys: ['Enter'],
+      historyReads: hub.calls, posts: sent.seen,
+    }, null, 2));
+  });
+}
+
 test('wide history keyboard activation enters the transcript without tabbing through other conversations', async ({page}) => {
   await page.setViewportSize({width: 1440, height: 900});
   const hub = new Hub();
