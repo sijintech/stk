@@ -12,6 +12,9 @@ type TaskList={tasks:TaskReference[];more:boolean};
 type PublishedFile={path:string;size:number;sha256:string};
 type FileList={files:PublishedFile[];more:boolean};
 const DOWNLOAD_LIMIT=64*1024*1024;
+const TEXT_PREVIEW_LIMIT=256*1024;
+const canPreviewText=(file:PublishedFile)=>file.size<=TEXT_PREVIEW_LIMIT&&
+  /\.(?:txt|log|out|err|csv|tsv|json|md)$/i.test(file.path);
 const id=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{32}$/.test(value);
 const visiblePath=(path:string)=>path.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu,
   char=>`\\u{${char.codePointAt(0)!.toString(16)}}`);
@@ -39,15 +42,27 @@ function ConversationFiles({session,task,onAccessLost}:{
   session:string;task:TaskReference;onAccessLost:()=>void;
 }){
   const [list,setList]=useState<FileList|null>(null),[error,setError]=useState('');
-  const [download,setDownload]=useState('');
-  const [downloadError,setDownloadError]=useState('');
-  const activeDownload=useRef<AbortController|null>(null);
-  useEffect(()=>()=>activeDownload.current?.abort(),[]);
-  async function save(file:PublishedFile){
-    if(activeDownload.current)return;
+  const [reading,setReading]=useState<{path:string;mode:'preview'|'download'}|null>(null);
+  const [fileError,setFileError]=useState('');
+  const [preview,setPreview]=useState<{path:string;text:string}|null>(null);
+  const activeRead=useRef<AbortController|null>(null);
+  const previewHeading=useRef<HTMLHeadingElement>(null);
+  const previewLauncher=useRef<HTMLButtonElement|null>(null);
+  const filesScroll=useRef(0);
+  useEffect(()=>()=>activeRead.current?.abort(),[]);
+  useLayoutEffect(()=>{
+    if(preview)previewHeading.current?.focus();
+    else if(previewLauncher.current){
+      const dialog=previewLauncher.current.closest('dialog');
+      if(dialog)dialog.scrollTop=filesScroll.current;
+      previewLauncher.current.focus({preventScroll:true});
+    }
+  },[preview]);
+  async function readFile(file:PublishedFile,mode:'preview'|'download'){
+    if(activeRead.current)return;
     const request=new AbortController();
-    activeDownload.current=request;
-    setDownload(file.path);setDownloadError('');
+    activeRead.current=request;
+    setReading({path:file.path,mode});setFileError('');
     try{
       const bytes=await downloadConversationFile(session,task.action_id,file.path,file.sha256,file.size,request.signal);
       if(bytes.byteLength!==file.size)throw new Error('文件大小与发布记录不符。');
@@ -55,6 +70,13 @@ function ConversationFiles({session,task,onAccessLost}:{
       if(request.signal.aborted)return;
       if(digest===null)throw new Error('浏览器需要安全连接才能校验文件。');
       if(digest!==file.sha256)throw new Error('文件摘要与发布记录不符。');
+      if(mode==='preview'){
+        let text:string;
+        try{text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}
+        catch{throw new Error('此文件无法按 UTF-8 文本预览。');}
+        setPreview({path:file.path,text});
+        return;
+      }
       const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
       const link=document.createElement('a');
       link.href=url;link.download=visiblePath(file.path.split('/').at(-1)!);
@@ -63,9 +85,9 @@ function ConversationFiles({session,task,onAccessLost}:{
     }catch(error){
       if(request.signal.aborted)return;
       if(error instanceof ApiError&&(error.status===401||error.status===403)){onAccessLost();return;}
-      setDownloadError(error instanceof Error?error.message:'无法下载发布文件。');
+      setFileError(error instanceof Error?error.message:'无法读取发布文件。');
     }finally{
-      if(!request.signal.aborted){activeDownload.current=null;setDownload('');}
+      if(!request.signal.aborted){activeRead.current=null;setReading(null);}
     }
   }
   useEffect(()=>{
@@ -83,15 +105,28 @@ function ConversationFiles({session,task,onAccessLost}:{
     <p className="muted">任务 {task.task_id}</p>
     {error?<p role="alert">{error}</p>:!list?<p role="status">正在读取文件…</p>:
       !list.files.length?<p className="muted">此任务暂无发布文件。</p>:
-      <ul>{list.files.map(file=><li key={file.path}><bdi>{visiblePath(file.path)}</bdi>
+      <ul hidden={preview!==null}>{list.files.map(file=><li key={file.path}><bdi>{visiblePath(file.path)}</bdi>
         <span>{file.size.toLocaleString()} 字节</span>
-        {file.size>DOWNLOAD_LIMIT?<span>会话下载上限为 64 MiB</span>:
-          <button type="button" className="quiet conversation-files-button" aria-disabled={!!download}
-            aria-label={`下载 ${visiblePath(file.path)}`} onClick={()=>void save(file)}>
-            {download===file.path?'正在下载…':'下载'}
-          </button>}</li>)}</ul>}
-    {downloadError&&<p role="alert">{downloadError}</p>}
-    {list?.more&&<p className="muted">显示前 200 个发布文件。</p>}
+        {file.size>DOWNLOAD_LIMIT?<span>会话下载上限为 64 MiB</span>:<div className="conversation-file-actions">
+          {canPreviewText(file)&&<button type="button" className="quiet" aria-disabled={!!reading}
+            aria-label={`预览 ${visiblePath(file.path)}`} onClick={event=>{
+              if(reading)return;
+              previewLauncher.current=event.currentTarget;
+              filesScroll.current=event.currentTarget.closest('dialog')?.scrollTop??0;
+              void readFile(file,'preview');
+            }}>{reading?.path===file.path&&reading.mode==='preview'?'正在读取…':'预览'}</button>}
+          <button type="button" className="quiet" aria-disabled={!!reading}
+            aria-label={`下载 ${visiblePath(file.path)}`} onClick={()=>void readFile(file,'download')}>
+            {reading?.path===file.path&&reading.mode==='download'?'正在下载…':'下载'}
+          </button></div>}</li>)}</ul>}
+    {preview&&<div>
+      <h3 ref={previewHeading} tabIndex={-1}><bdi>{visiblePath(preview.path)}</bdi></h3>
+      <button type="button" className="quiet" onClick={()=>setPreview(null)}>返回发布文件</button>
+      {preview.text?<pre className="conversation-file-preview" tabIndex={0} aria-label="文件内容">{preview.text}</pre>:
+        <p className="muted">空文件</p>}
+    </div>}
+    {fileError&&<p role="alert">{fileError}</p>}
+    {!preview&&list?.more&&<p className="muted">显示前 200 个发布文件。</p>}
   </section>;
 }
 
