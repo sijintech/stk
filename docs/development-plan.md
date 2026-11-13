@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-13 23:34 UTC · 会话关联任务与文件原地重试
+
+本地 main `fdd0d2fb30d12f5661eac075e5136086d44adca7` 在 Web 关联任务和发布文件列表读取失败时提供「重新读取」。重试各使用原会话和原任务的 GET，保持当前面板。任务层等待时焦点移到「关闭」，文件层移到「返回关联任务」。退出后焦点回到会话入口。自动化覆盖任务失败后键盘重试、文件失败后点击重试、精确请求和草稿。生产构建、定向 4/4、全量 Playwright 405/405，零跳过。
+
+真实 Hub 与受控 WebSocket 节点的固定起点为原会话有未发送草稿、关联任务面板首次 GET 返回注入的 503。Chromium 1440×900 和 390×844 各一次点击重试任务并恢复原任务 ID，再一次点击「查看文件」和一次点击文件重试，恢复原发布清单。最终 Esc 回到会话入口，两窗草稿保持，零写请求、零模型调用。每窗一个真实节点 `task.artifacts` 读取，原会话与任务摘要一致。证据 `root-delivery-20261113-194/{web-build.log,web-full.xml,live-retry/browser-receipt.json,live-retry/hub-receipt.json}`。该试验注入临时故障并使用受控节点，覆盖 Hub 客户端与转发的恢复路径。
+
+远端 `834f7bd4` 的 Linux 三项和 Windows CPU 均通过，macOS 和 Windows 原生预览仍运行。Claude 118 在独立 worktree 对桌面输入卡片进行回归，最终提交待回。保存副本仍待目标平台运行。原七份工作区修改保留。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43522208408) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43522208394)
+
 ## 2026-11-13 23:27 UTC · Web 全量通过，保存副本合成候选通过 Linux
 
 Web 最终生产构建和全量 Playwright 403/403，零跳过。较早一轮在并行构建负载下出现三项定期任务读取误判与两项 Viewer 截图超时，修订与复验后通过。最新消息定向测试用静态偏移验证 Tab 和 Enter 的焦点顺序。真实 Hub 回执另用实际 PageUp、Shift+Tab 和 Enter，宽窄窗均回到末尾且保持草稿。证据 `root-delivery-20261113-193/{web-exact.xml,web-recheck.xml,live-follow-acceptance/browser-receipt.json,live-follow-acceptance/hub-receipt.json}`。
