@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-13 15:54 UTC · 主线发布与 macOS 生产候选
+
+Root 将远端 main 从 `d4064e5124f7a81e90f257f2580af35b49c555ae` 快进到 `c04b48a02e41185a7baf97ce1798415d94c74269`，推送后独立核对完整 SHA。7 个提交范围扫描无发现。包括 Web 与桌面默认切片一致、Claude 105 进度提示的最终补充及 Claude 106 清空索引后恢复中间层。本次差异是 Web 与文档，Desktop 路径过滤未触发。Runtime `43456596317` 已排队，Secret scan `43456596165` 通过。Pages `43456596160` 首次构建成功，发布阶段收到 Cloudflare API 格式异常，已重跑失败作业。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/43456596317) [Pages](https://github.com/sijintech/stk/actions/runs/43456596160) [Secret scan](https://github.com/sijintech/stk/actions/runs/43456596165)
+
+同一旧头 macOS 工件中，原隔离 MP4 和 HTML 视频均在重显保持中只因 paused 条件失败，退出前最新原生状态为 Playing。追加暂停对照已在同一 runner 通过；仍观察到短暂 Playing，随后转为 Paused。Root 独立候选 `7d3c45bb3acff5d160a9a25ea5c3c369d364f62a` 让生产隐藏暂停在已持有挂起且收到 Suspended 后追加一次原生 Pause，沿原请求、原看门狗及原发布握手。隔离对照继续独立。现有 Linux 文档宿主及资源回归 44/44；此本机环境无法编译或运行 Cocoa，候选仍待 macOS 真机验收。Claude 107 在独立 `claude/macos-media-diagnostics-107` 编写真实工件复现说明，Root 负责生产候选、审阅和发布。旧 PR #53/#54 头不变，状态分别为 DIRTY 与 UNSTABLE。 [旧头 macOS 工件](https://github.com/sijintech/stk/actions/runs/42986687264/artifacts/13842866183)
+
 ## 2026-11-13 15:49 UTC · 切片索引恢复中间层与上轮平台终态
 
 本地 main `733583194a8c292cd99c0a75a99eedfed030b964` 合入 Claude 独立 worktree 的索引清空 `b4e5ea9bdeb0745d362310a6ff7e24ee2ed45692`。清空后显示「中间层」，下次明确加载由现有 Runtime 解析。明确输入 0 仍请求第 0 层，半输入状态不发构建。此前 Claude 105 最终头 `e964d48baa596a7b61b77aec00fa7008390b9f00` 相对已发布快照的改动已由 `58cc991f` 和 `6ff29429` 集成，覆盖再次点击「结果」取消在途首开，以及授权和失败时的反馈收尾。
