@@ -57,6 +57,7 @@ class Hub {
   rows: {id: string; name: string; created: number; label?: string}[] = [];
   readonly saved = new Map<string, Said[]>();
   readonly calls: string[] = [];
+  readonly conversationTasks = new Map<string, unknown[]>();
   readonly messages: {session: string; id: string; content: string}[] = [];
   replies = 0;
   sendFail: false | 'before' | 'recorded' | 'lost' = false;
@@ -224,10 +225,16 @@ class Hub {
       const file = join(EXAMPLE, `${stored[1]}.bin`);
       return existsSync(file) ? route.fulfill({status: 200, contentType: 'application/octet-stream', body: readFileSync(file)}) : json({detail: 'no blob'}, 404);
     }
-    const conversation = /^sessions\/([^/]+)(\/history|\/messages)?$/.exec(path);
+    const conversation = /^sessions\/([^/]+)(\/history|\/messages|\/tasks)?$/.exec(path);
     if (conversation) {
       const [, id, tail] = conversation;
       if (!tail) { this.calls.push(`legacy ${id}`); return json({detail: 'legacy GET would create a session'}, 500); }
+      if (tail === '/tasks' && request.method() === 'GET') {
+        this.calls.push(`tasks ${id}`);
+        const tasks = this.conversationTasks.get(id);
+        await this.gateOnce(`tasks ${id}`);
+        return tasks ? json({id, tasks, more: false}) : json({detail: 'Not Found'}, 404);
+      }
       if (tail === '/history' && request.method() === 'GET') {
         this.calls.push(`history ${id}`);
         const messages = this.saved.get(id), fault = this.historyFault;
@@ -1871,6 +1878,58 @@ for (const viewport of viewports) {
         historyClicks: isNarrow(page) ? 2 : 1, navigationClicks: 2, sendKey: 'Enter on focused 发送',
         postCountBeforeSend: 0, postCountAfterSend: sent.seen.length,
       }, null, 2));
+    });
+
+    test('associated tasks read only the current conversation and return focus to its entry', async ({page}) => {
+      const hub = new Hub();
+      conversations(hub);
+      const taskId = '1'.repeat(32), actionId = '2'.repeat(32);
+      hub.conversationTasks.set(A, [{
+        message_id: '3'.repeat(32), action_id: actionId, node_id: '4'.repeat(32),
+        workspace_id: '5'.repeat(32), state: 'succeeded', task_id: taskId,
+      },{
+        message_id: '3'.repeat(32), action_id: '6'.repeat(32), node_id: '4'.repeat(32),
+        workspace_id: '5'.repeat(32), state: 'rejected', task_id: null,
+      }]);
+      await setup(page, hub);
+      const sent = posts(page);
+      await go(page, '工作台');
+      const launcher = page.getByRole('button', {name: '关联任务'});
+      await expect(launcher).toHaveCount(0);
+      await choose(page, /相场参数讨论/);
+      await draft(page).fill('保留未发送草稿');
+      const before = await state(page);
+      await expect(launcher).toBeVisible();
+      expect(hub.calls).toEqual([`history ${A}`]);
+      await launcher.click();
+      const panel = page.getByRole('dialog', {name: '关联任务'});
+      await expect(panel).toContainText(taskId);
+      await expect(panel).toContainText('复核未通过');
+      await expect(panel.getByRole('button', {name: '关闭'})).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(panel).toHaveCount(0);
+      await expect(launcher).toBeFocused();
+      await expect(draft(page)).toHaveValue('保留未发送草稿');
+      expect(await state(page)).toEqual(before);
+      await choose(page, /铁电回线分析/);
+      await launcher.click();
+      await expect(panel.getByRole('alert')).toContainText('未提供此对话的任务列表');
+      await expect(panel).not.toContainText(taskId);
+      await panel.getByRole('button', {name: '关闭'}).click();
+      await expect(launcher).toBeFocused();
+      expect(hub.calls).toEqual([`history ${A}`, `tasks ${A}`, `history ${B}`, `tasks ${B}`]);
+      const release = hub.holdNext(`tasks ${B}`);
+      await launcher.click();
+      await expect(panel.getByRole('status')).toContainText('正在读取');
+      await expect.poll(() => hub.reached.has(`tasks ${B}`)).toBe(true);
+      await page.keyboard.press('Escape');
+      release();
+      await expect(launcher).toBeFocused();
+      await choose(page, /相场参数讨论/);
+      await expect(panel).toHaveCount(0);
+      await expect(draft(page)).toHaveValue('保留未发送草稿');
+      expect(sent.seen).toEqual([]);
+      sent.stop();
     });
 
     test('history sits in the navigation without moving the active section', async ({page}) => {

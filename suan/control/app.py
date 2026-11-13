@@ -613,6 +613,14 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
             raise HTTPException(404, "Session not found")
         return history
 
+    @app.get("/api/v1/sessions/{session_id}/tasks", dependencies=[Depends(client)])
+    def session_tasks(session_id: str):
+        validate_session_id(session_id)
+        tasks = store.session_tasks(session_id)
+        if tasks is None:
+            raise HTTPException(404, "Session not found")
+        return tasks
+
     @app.post("/api/v1/sessions/{session_id}/messages")
     async def message(session_id: str, body: Chat, who=Depends(client)):
         get_session(session_id)

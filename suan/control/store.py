@@ -9,6 +9,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 from pathlib import Path
+import re
 import secrets
 import sqlite3
 import time
@@ -72,6 +73,10 @@ class ControlStore:
                 CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, name TEXT, created REAL);
                 CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, session_id TEXT,
                     role TEXT, content TEXT, created REAL);
+                CREATE TABLE IF NOT EXISTS session_task_actions(session_id TEXT NOT NULL,
+                    message_id TEXT NOT NULL, action_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL, task_id TEXT);
+                CREATE INDEX IF NOT EXISTS session_task_actions_session ON session_task_actions(session_id);
             """)
             # Additive migration of databases created before result offloading.
             if "result_ref" not in {row["name"] for row in db.execute("PRAGMA table_info(actions)")}:
@@ -347,15 +352,26 @@ class ControlStore:
                 return
             data = body.encode("utf-8")
             reference = None
-            if json.loads(row["request"]).get("kind") == "fl.message" and len(data) > RESULT_INLINE_LIMIT:
+            kind = json.loads(row["request"]).get("kind")
+            if kind == "fl.message" and len(data) > RESULT_INLINE_LIMIT:
                 # Federation results must never enter the general, client-readable blob CAS.
                 body, data, error = "null", b"null", "Federation result exceeds the inline receipt limit"
             if len(data) > RESULT_INLINE_LIMIT:
                 # Large results (views, catalogs) move out of the row; listings stay cheap.
                 reference, body = self.blobs.put(data), None
                 self.forget_client_blob(reference, db)
-            db.execute("UPDATE actions SET state=?,result=?,result_ref=?,error=?,updated=? WHERE id=?",
-                       ("failed" if error else "succeeded", body, reference, error[:2000], time.time(), identity))
+            changed = db.execute("UPDATE actions SET state=?,result=?,result_ref=?,error=?,updated=? "
+                                 "WHERE id=? AND state='queued'",
+                                 ("failed" if error else "succeeded", body, reference, error[:2000], time.time(), identity))
+            if not changed.rowcount:
+                return
+            if kind == "task.submit" and not error and isinstance(result, dict):
+                task_id, spec = result.get("id"), result.get("spec")
+                if isinstance(task_id, str) and re.fullmatch(r"[a-f0-9]{32}", task_id) and isinstance(spec, dict):
+                    workspace = spec.get("workspace_id")
+                    if isinstance(workspace, str):
+                        db.execute("UPDATE session_task_actions SET task_id=? WHERE action_id=? AND workspace_id=?",
+                                   (task_id, identity, workspace))
             self.event(db, "actions.changed", {"action_id": identity})
 
     def events(self, after=0):
@@ -401,6 +417,22 @@ class ControlStore:
             return None
         return {"id": identity, "messages": [dict(r) for r in rows if r["id"] is not None]}
 
+    def session_tasks(self, identity):
+        """Read only task submissions bound to an assistant reply by the Hub."""
+        with self.db() as db:
+            db.execute("BEGIN")
+            if db.execute("SELECT 1 FROM sessions WHERE id=?", (identity,)).fetchone() is None:
+                return None
+            rows = db.execute("""
+                SELECT link.message_id, a.id AS action_id, a.node_id, link.workspace_id, a.state, link.task_id
+                FROM session_task_actions link
+                JOIN actions a ON a.id=link.action_id
+                JOIN devices d ON d.id=a.node_id AND d.role='node' AND d.revoked=0
+                WHERE link.session_id=?
+                ORDER BY link.rowid DESC LIMIT 101
+            """, (identity,)).fetchall()
+        return {"id": identity, "tasks": [dict(row) for row in rows[:100]], "more": len(rows) > 100}
+
     def message(self, identity, session_id, role, content):
         with self.db() as db:
             old = db.execute("SELECT session_id,role,content FROM messages WHERE id=?", (identity,)).fetchone()
@@ -432,6 +464,9 @@ class ControlStore:
                                    request["id"], body, request["node_id"], state, time.time(), time.time(), reason,
                                    submitted_by))
                     self._import_refs(db, request)
+                    if request["kind"] == "task.submit":
+                        db.execute("INSERT INTO session_task_actions VALUES(?,?,?,?,NULL)",
+                                   (session_id, identity, request["id"], request["payload"]["spec"]["workspace_id"]))
                     self.event(db, "actions.changed", {"action_id": request["id"]})
                 states.append(f"操作 {request['id']}：{state}")
             if states:

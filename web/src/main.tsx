@@ -3,6 +3,7 @@ import {flushSync} from 'react-dom';
 import {createRoot} from 'react-dom/client';
 import {action,api,ApiError,events,hasToken,Json,readNode,setToken} from './api';
 import {conversationTitle,type Entry,useConversations} from './conversations';
+import {ConversationTasks} from './ConversationTasks';
 import ErrorBoundary from './ErrorBoundary';
 import type {GraphSource,ProbeReading} from './GraphPanel';
 import TaskObservation from './TaskObservation';
@@ -179,6 +180,8 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const conv=useConversations(disconnect,()=>refreshNow.current());
   const {mergeList}=conv;
   const [wide,setWide]=useState(()=>!matchMedia(COMPACT).matches),[historyOpen,setHistoryOpen]=useState(false);
+  const [conversationTasks,setConversationTasks]=useState<string|null>(null);
+  const conversationTasksButton=useRef<HTMLButtonElement>(null);
   // overlay: the compact history is open over the active section, which then takes no input until it closes.
   const historyShown=wide||historyOpen,overlay=!wide&&historyOpen;
   const historyPanel=useRef<HTMLElement>(null),historyToggle=useRef<HTMLButtonElement>(null),messageList=useRef<HTMLDivElement>(null),composer=useRef<HTMLTextAreaElement>(null);
@@ -655,7 +658,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const ignoreRepeat=(e:React.KeyboardEvent)=>{if(e.repeat&&e.key==='Enter')e.preventDefault();};
   function openSection(key:Section){
     const back=key==='tasks'&&tab==='results'&&!overlay?returnFocus.current:null;
-    returnFocus.current=null;dropPick();
+    returnFocus.current=null;dropPick();setConversationTasks(null);
     if(!back||activeScope.current!==back.scope){setTab(key);setHistoryOpen(false);return;}
     flushSync(()=>setTab(key));
     const {launcher}=back,box=launcher.getBoundingClientRect(),area=launcher.closest('.surface')?.getBoundingClientRect();
@@ -665,7 +668,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   // Choosing a conversation (or a new one) is one explicit action: it opens 工作台 with that conversation's own
   // transcript, reading position and draft. Focus follows keyboard activation and the closing compact history.
   function openConversation(id:string|null,keyboardActivation=false){
-    returnFocus.current=null;dropPick();
+    returnFocus.current=null;dropPick();setConversationTasks(null);
     if(id!==conv.session&&messageList.current)transcriptOffsets.current.set(conv.session,messageList.current.scrollTop);
     flushSync(()=>{setTab('workbench');setHistoryOpen(false);if(id)conv.select(id);else conv.startNew();});
     if(!id)composer.current?.focus({preventScroll:true});
@@ -857,7 +860,12 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         <pre>{(selected&&(resultText||logText))||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
     </section>
     <aside className={`chat surface${emptyConversation?' chat-empty':''}${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'||overlay}>
-      <h2 className="conversation-name" title={sessionLabel}>{sessionLabel}</h2>
+      <div className="chat-heading">
+        <h2 className="conversation-name" title={sessionLabel}>{sessionLabel}</h2>
+        {!emptyConversation&&conv.saved[conv.session]&&thread.status==='ready'&&<button
+          type="button" ref={conversationTasksButton} className="quiet" aria-haspopup="dialog"
+          onClick={()=>setConversationTasks(conv.session)}>关联任务</button>}
+      </div>
       <div className="messages" ref={messageList} tabIndex={thread.messages.length || pending ? 0 : -1} role="log" aria-label="对话记录">
         {thread.status==='loading'&&!thread.messages.length&&<p className="muted">正在读取对话…</p>}
         {thread.status==='missing'&&<div className="chat-intro"><h3>这个对话已不存在</h3><p>控制服务中没有这个对话，未创建新会话。{conv.draft.trim()?'未发送的草稿仍在这里，可以移到新对话再发送。':'可以从「新对话」重新开始。'}</p>
@@ -881,6 +889,11 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         </div>
       </form>
     </aside>
+    {conversationTasks===conv.session&&tab==='workbench'&&<ConversationTasks session={conv.session}
+      onAccessLost={disconnect} onClose={()=>{
+        flushSync(()=>setConversationTasks(null));
+        conversationTasksButton.current?.focus({preventScroll:true});
+      }}/>}
     </div><footer>{openProgress?(openProgress.stage==='listing'?'列出结果文件…':'正在加载视图…'):busy||conv.sendingCount?'正在处理请求…':'就绪'}<span>STK · 计算持续运行，视图随处可达</span></footer>
   </div>;
 }

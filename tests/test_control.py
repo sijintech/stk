@@ -134,7 +134,12 @@ def test_action_review_and_idempotency(tmp_path):
 
 def test_agent_runtime_roundtrip_reconnect_and_original_probe(runtime, tmp_path):
     runtime_client, supervisor, _, _ = runtime
-    app = create_app(tmp_path / "control", OWNER, {"demo-field": DEMO_TEMPLATE})
+    class Model:
+        async def reply(self, messages, context):
+            return {"content": "Prepared the demo", "actions": [{"node_id": node["device_id"], "kind": "task.submit",
+                    "payload": {"workspace_id": first["id"], "template": "demo-field"}}]}
+
+    app = create_app(tmp_path / "control", OWNER, {"demo-field": DEMO_TEMPLATE}, model=Model())
     agent = NodeAgent(runtime_client, tmp_path / "agent")
     with TestClient(app) as c:
         node, _ = paired(c)
@@ -151,10 +156,24 @@ def test_agent_runtime_roundtrip_reconnect_and_original_probe(runtime, tmp_path)
             second = agent.execute(sent)
             assert first["id"] == second["id"]
             ws.send_json({"type": "result", "id": sent["id"], "result": second})
-            submit = operation(node["device_id"], "task.submit", {"spec": {"workspace_id": first["id"], **DEMO_TEMPLATE}, "template": "demo-field"})
-            c.post("/api/v1/actions", json=submit, headers=AUTH)
-            task = agent.execute(ws.receive_json()["action"])
+            session = "a" * 32
+            route = f"/api/v1/sessions/{session}"
+            sent = c.post(route + "/messages", json={"id": "b" * 32, "content": "Run the demo"}, headers=AUTH)
+            assert sent.status_code == 200, sent.text
+            submit = ws.receive_json()["action"]
+            task = agent.execute(submit)
             ws.send_json({"type": "result", "id": submit["id"], "result": task})
+            deadline = time.monotonic() + 5
+            while True:
+                refs = c.get(route + "/tasks", headers=AUTH).json()["tasks"]
+                assert len(refs) == 1
+                if refs[0]["state"] == "succeeded":
+                    assert refs[0]["task_id"] == task["id"]
+                    assert refs[0]["workspace_id"] == first["id"]
+                    assert refs[0]["message_id"] == sent.json()["messages"][-1]["id"]
+                    break
+                assert time.monotonic() < deadline
+                time.sleep(.01)
         # Both GUI/control transport can be gone; Runtime keeps executing.
         result = finish(runtime_client, supervisor, task["id"], timeout=40)
         assert result["state"] == "succeeded", result
@@ -214,6 +233,64 @@ def test_session_history_is_read_only_and_keeps_legacy_creation(tmp_path):
         assert saved.json() == sent.json()
         assert c.get("/api/v1/sessions", headers=AUTH).json() == before
         assert c.app.state.store.events() == events
+
+
+def test_session_tasks_use_reply_and_runtime_receipts(tmp_path):
+    workspace = "b" * 32
+    good, wrong, unrelated = "c" * 32, "d" * 32, "e" * 32
+    session, other, reply = "1" * 32, "2" * 32, "3" * 32
+    spec = {"workspace_id": workspace, "argv": ["private-script"], "name": "private name"}
+
+    class Model:
+        async def reply(self, messages, context):
+            return {"content": f"Unrelated action {unrelated}", "actions": [
+                {"node_id": context["devices"][0]["id"], "kind": "task.submit", "payload": {"spec": spec}},
+                {"node_id": context["devices"][0]["id"], "kind": "task.submit", "payload": {"spec": spec}},
+                {"node_id": context["devices"][0]["id"], "kind": "task.submit", "payload": {"spec": spec}},
+            ]}
+
+    with TestClient(create_app(tmp_path, OWNER, model=Model())) as c:
+        node, _ = paired(c)
+        node_id = node["device_id"]
+        client, _ = paired(c, "client")
+        headers = {"Authorization": "Bearer " + client["token"]}
+        path = f"/api/v1/sessions/{session}"
+        store = c.app.state.store
+        assert c.get(path + "/tasks").status_code == 401
+        assert c.get(path + "/tasks", headers=headers).status_code == 404
+        assert c.get("/api/v1/sessions", headers=headers).json() == []
+        c.get(f"/api/v1/sessions/{other}", headers=headers).raise_for_status()
+        c.post("/api/v1/actions", headers=AUTH, json={"id": unrelated, "node_id": node_id,
+               "kind": "task.submit", "payload": {"spec": spec}}).raise_for_status()
+        body = {"id": reply, "content": "Submit two tasks"}
+        sent = c.post(path + "/messages", headers=headers, json=body)
+        assert sent.status_code == 200, sent.text
+        assert c.post(path + "/messages", headers=headers, json=body).json() == sent.json()
+        message_id = sent.json()["messages"][-1]["id"]
+        tasks = c.get(path + "/tasks", headers=headers).json()
+        assert tasks["id"] == session and tasks["more"] is False
+        assert len(tasks["tasks"]) == 3
+        first, second, third = tasks["tasks"]
+        assert first == {"message_id": message_id, "action_id": first["action_id"], "node_id": node_id,
+                         "workspace_id": workspace, "state": "review", "task_id": None}
+        assert second["action_id"] != first["action_id"]
+        assert c.get(f"/api/v1/sessions/{other}/tasks", headers=headers).json()["tasks"] == []
+        for item, task_id, target in [(first, good, workspace), (second, wrong, "f" * 32)]:
+            action_id = item["action_id"]
+            c.post(f"/api/v1/actions/{action_id}/review", headers=AUTH, json={"approved": True}).raise_for_status()
+            store.complete(action_id, node_id, {"id": task_id, "spec": {"workspace_id": target}})
+        c.post(f"/api/v1/actions/{third['action_id']}/review", headers=AUTH, json={"approved": False}).raise_for_status()
+        store.complete(third["action_id"], node_id, {"id": good, "spec": {"workspace_id": workspace}})
+        events = store.events()
+        receipt = c.get(path + "/tasks", headers=headers).json()["tasks"]
+        assert [(item["state"], item["task_id"]) for item in receipt] == [
+            ("succeeded", good), ("succeeded", None), ("rejected", None),
+        ]
+        assert store.events() == events
+        store.revoke(node_id)
+        assert c.get(path + "/tasks", headers=headers).json()["tasks"] == []
+        store.revoke(client["device_id"])
+        assert c.get(path + "/tasks", headers=headers).status_code == 401
 
 
 def test_session_list_labels_are_optional_and_read_only(tmp_path, monkeypatch):
