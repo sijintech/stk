@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-13 主线发布、问答卡片实窗与桌面消息布局方案
+
+`537e971016c540f8e8eb3d7ef8bfa7be6209ad13` 已推送到远端 main，整段 gitleaks 零发现。新头 Pages 和 Secret scan 通过，Desktop、Runtime 已启动。原七份工作区修改保留。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43530403353) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43530403050)
+
+补跑 Linux X11 真实项目问答。固定起点为已打开合成项目的聚焦工作台，1600×1100 与 680×1000 英文、缩放 1。宽窗点一次「写问题」，窄窗经「历史」两次。直接键入草稿、Esc 后截图确认文字仍显示在卡片内，准备按钮位于卡片右侧。各窗只有注意列表读取，零准备、发送和模型请求，项目数据库与修订一致。回执 `root-delivery-20261113-194/native-question-{wide,narrow-final}/receipt.json`。
+
+Claude 119 在独立 worktree 提交 `d7cff5ea`，Root 审阅并于本地 `eedc1160` 合入方案。先让用户块在现有控件中整体靠右，助手和状态行靠左，延续现有字体、折行、键盘和跟随。验证区分块内共同左缘和最宽行的右锚点。Claude 120 从 `eedc1160` 在独立 worktree 实现，Root 负责下一轮审阅、实窗及集成。桌面消息左右对齐当前为设计状态。 [设计](docs/design/native-conversation-role-layout.md)
+
 ## 2026-11-13 前序桌面 CI 终态与发布检查
 
 远端 `834f7bd4656fe197e7bc8d93a5454042a718498d` 的 Desktop 于 23:51:05 UTC 结束，五个作业通过。Windows 原生预览 6/6，含 WebView2 与 Reports 的 Markdown、HTML、PDF、MP4 和内嵌视频。Windows CPU 1561/1561，零跳过。Linux 三项与 Runtime 13/13 通过。macOS CPU 1621/1621、Metal 测试 254/254，必测原生组 4/6。MP4 与内嵌视频在切到后台的暂停检查失败，分别是隐藏期间的保持检查和颜色转换或自然结束前的暂停检查。可见首次与第二次暂停对照 2/2，重复核验对照 0/2。前序 Desktop 已到终态。日志 `root-delivery-20261113-194/408-{macos,windows-native}-job.log`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43522208408) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/43522208408/artifacts/14086897145) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43522208394)
