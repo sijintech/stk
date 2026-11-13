@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-13 23:01 UTC · Windows Markdown 原生捕获回归
+
+Root 从 `413a2833` 的终态 Windows 日志确认，Markdown 第 13 轮超时来自 `CreateForWindow` ABI 本身耗时 120041 毫秒。HRESULT 检查和本地清理耗时均为零，首张成功样本已识别正文。此前 PDF 同类阻塞已采用随窗口生命周期持有捕获目标。主线本地 `895a6b577acb8e88dee046a4d465d6a41c1f0860` 把同一路径用于 Markdown，仍为每次像素采样新建捕获会话。Linux 原生报告测试目标编译并链接通过，Windows 实际 20 轮待下一个代码头 CI。证据 `root-delivery-20261113-192/{413-windows-api.log,windows-markdown-harness-build.log}`。 [上一轮 Windows 原生验证](https://github.com/sijintech/stk/actions/runs/43511133797/job/132206514170)
+
+Root 补跑当前头完整 UI 标签 147/147、零跳过，含 Xvfb 和图形画廊。桌面与相关测试目标最终构建退出码为零。完整项目标签 1568 项正在执行。远端 `834f7bd4` 的 Linux 包与安装冒烟已成功，完整 Desktop 与 Runtime 尚未结束。证据 `root-delivery-20261113-192/{typography-all-ui.xml,final-build.log}`。 [当前 Desktop CI](https://github.com/sijintech/stk/actions/runs/43522208408) [当前 Runtime CI](https://github.com/sijintech/stk/actions/runs/43522208394)
+
 ## 2026-11-13 23:00 UTC · 工作台发布与桌面正文比例字体
 
 已把 15 个提交快进推送到远端 `834f7bd4656fe197e7bc8d93a5454042a718498d`，范围 gitleaks 零发现。该头 Pages 和 Secret scan 已通过，Desktop 与 Runtime 继续运行。 [Pages](https://github.com/sijintech/stk/actions/runs/43522208435) [Desktop CI](https://github.com/sijintech/stk/actions/runs/43522208408) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43522208394)
