@@ -1,5 +1,15 @@
 # STK 当前交接
 
+## 2026-11-13 16:42 UTC · Web 会话关联任务
+
+本地 main `d137f31d4805acba997695b0c83395a5cfc23b6f` 增加会话任务详情。Hub 同事务保存回复、该回复创建的任务操作和结构化关联，节点返回同一运行工作区的有效任务 ID 后才补入关联。已配对客户端可在当前已保存会话明确打开，只读一次任务列表。旧会话保留原记录，旧 Hub 的缺失路由给出明确提示。Web 宽窗为右侧面板，窄窗为覆盖层。关闭后焦点回到入口，迟到回执丢弃。
+
+Hub 全套 94/94，含真实合成 NodeAgent 和 Runtime 回执、拒绝、跨会话隔离、无关操作、错误工作区及撤权用例。Web 生产构建成功，最终定向 4/4。固定起点为已配对、已有已选任务、任务和会话草稿、移动过相机的 Viewer，以及打开的合成会话。Chromium 1440×900 与 390×844 各一次打开、一次关闭，分别验 Esc 和按钮。任务来源正确，草稿、选中任务和原画布保持，测量内零 POST。较早的全量运行 393/395，两条结果页用例复跑通过。更新测试的全量 395/395，最后的复核状态文案和回执解析使用独立构建通过定向。证据 `root-delivery-20261113-172/{control-final.xml,web-exact,web-final-full.log,web-rerun}`。
+
+Claude 109 在独立工作树交付 `3e39aa9b17add5ae0be29a248a4d64849dfb9ca4`，Root 核对本地工作流与会话身份后纳入设计。Claude 110 已独立从 `d137f31d` 开发原生读取和响应式详情。文件查看与普通原生问答的任务引用仍待接。Claude 107 的 macOS 诊断说明以 `fdf5cbbc` 合入本地，核对了对应工件、CI 选择和命令语法。复现命令仍待在 macOS 运行。
+
+远端 `6ed5e920` 的 Runtime 和 Secret scan 通过，Desktop 的 Linux 三项通过，Windows 与 macOS 仍在运行。PR 53 与 54 的精确旧头仍分别为 `c9f13994` 和 `2dd3e4ee`，状态 DIRTY 和 UNSTABLE，主线已有相应后续处理。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43458144964) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43458144925)
+
 ## 2026-11-13 16:25 UTC · 双端主页的 AOCI 收尾
 
 稳定源码上的 AOCI Maintain 返回 `stopped/blocked`，零候选。Scope 状态为 `observed_evidence_review_required`，有 94 条待审观察证据。保留原正式索引和基线文件，三份既有改动的摘要一致。后续在既有观察证据审阅完成后重开维护计划。
