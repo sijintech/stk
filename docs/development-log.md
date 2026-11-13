@@ -1,5 +1,17 @@
 # 开发交接记录
 
+## 2026-11-13 21:49 UTC · 会话页头、输入卡片和历史操作
+
+本地 main `ab5dcbc0685be09b698797eee1d40b8bea8bd59d` 将桌面聚焦问答与智能体会话的标题放到正文上方。问答的冻结数据来源与修订移入「请求详情」，状态、模型与适用操作留在原处。Linux X11 固定起点为已打开合成问答、详情折叠。1600×1100 和 680×1000 均一次点击展开，显示原数据来源、修订和两项可复制 ID。项目数据库摘要与修订一致，宽窗零 Bridge 请求，窄窗只有后台注意事项轮询。定向 2/2，Linux 项目 CPU 1125/1125（含两个已安装 Peer helper 用例），桌面构建通过。
+
+Claude 116 在独立 worktree 提交 `bc28502420aeb204ea830567e4c9d5dfe6a0ef7f`。Root 核对 Synthrix 远端仍为 `caec2b9`，修正了新键盘路径和任务面板入口，并在 `5568c2f18d2ef40bab65d40539ce600b69715dbb` 合入逐区对照。`50e7d5a97cb34b7701bac05ca8c3f01e7903223e` 实现 Web 用户消息靠右、助手消息靠左及单张输入卡片。真实 Hub 与 Chromium 固定起点为 1440×900、390×844 已打开合成会话、输入框聚焦且有草稿。两窗均零点击、一次 Ctrl+Enter 发送。上滚 520 像素后回复保留阅读位置，一次点击「跟随最新」回到末尾。每窗恰一条 POST，零模型调用。布局与流程定向 6/6、Web 构建和全量 401/401 通过。
+
+`c3e823eb9b2a87de4dbb3bf2ed88cc280a57e847` 让 Web 的「新对话」与搜索在历史滚动时一起保持可见。真实 Hub 与 Chromium 两窗从已展开、滚到底的 32 条历史起步，各一次点击，进入未保存新对话且输入框获焦。零写请求、零模型调用，Hub 会话摘要一致。定向 6/6，覆盖窄窗键盘滚动与两窗搜索。证据 `root-delivery-20261113-189/{project.xml,native-wide/receipt.json,native-narrow/receipt.json,web-full.xml,web-history-focused.xml,live/browser-receipt.json,live-history/browser-receipt.json}`。
+
+Claude 117 已在 `claude/native-conversation-typography-117` 从 `50e7d5a9` 接手原生正文比例字体、折行和滚动回归。Claude 113 在原独立 worktree 复核 macOS 继承 ACL 和 Windows 目标目录绑定。Root 用候选 `f3131c34` 重编确定性竞态夹具，确认不支持的重命名返回失败且目标名称不存在。 [Apple 文件系统 ACL](https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/FileSystemProgrammingGuide/FileSystemDetails/FileSystemDetails.html) [Windows 重命名接口](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info)
+
+远端 `413a2833` Linux 包与安装冒烟、Pages、Secret scan 通过，Desktop 与 Runtime 仍运行。待推范围 gitleaks 零发现，原七份工作区修改保留。开放 PR #53 的修复及契约已通过独立提交进入主线，#54 仅含旧大写交接。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43511133797) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43511133680)
+
 ## 2026-11-13 21:31 UTC · 统一工作台会话改动已发布
 
 Root 在前序 Desktop 完整终态后把 16 个提交从 `f3c666eb8ad28fac9dc923065efc7e3feee6b4df` 快进推送到 `413a283379e032f64b857d53844612fbc1b705bc`，独立核对远端完整 SHA。范围 gitleaks 零发现。新头 Pages 与 Secret scan 已成功，Desktop 与 Runtime 待终态。上一头 Windows 官方原生 XML 6/6。上一头 macOS 工件确认 CPU 1618/1618、Metal 254/254、必测原生 4/6。可选 MP4 对照持续播放取到帧 1，立即暂停取到帧 0、0，两组 HTML 仍因视口裁切无帧号。证据 `root-delivery-20261113-188/{release-scan.log,f3c-windows-native.xml,f3c-ctest-native-preview.xml}`。 [新头 Desktop](https://github.com/sijintech/stk/actions/runs/43511133797) [新头 Runtime](https://github.com/sijintech/stk/actions/runs/43511133680) [Pages](https://github.com/sijintech/stk/actions/runs/43511133705) [Secret scan](https://github.com/sijintech/stk/actions/runs/43511133737) [上一头 Windows 工件](https://github.com/sijintech/stk/actions/runs/43500121086/artifacts/14078466145)
