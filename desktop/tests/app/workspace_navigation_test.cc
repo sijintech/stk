@@ -1125,9 +1125,24 @@ TEST_F(SavedConversationNavigationPython, SearchOpensAnOlderQuestionWithoutWriti
       ASSERT_TRUE(f.drv->key(wm::Key::Home, wm::ModShift));
     }
     ASSERT_TRUE(f.drv->key(wm::Key::Unknown, wm::ModNone, "comparison lattice"));
+    if (!narrow) {
+      f.drv->ctx.rect.xmax = 680;
+      f.drv->frame();
+      const auto *resized_query = widget("conversation_search/query");
+      ASSERT_NE(resized_query, nullptr);
+      ASSERT_EQ(f.screen.ui()->focused(), resized_query->id);
+      ASSERT_NE(f.screen.ui()->edit_state(), nullptr);
+      EXPECT_EQ(f.screen.ui()->edit_state()->text(), "comparison lattice");
+    }
     ASSERT_TRUE(f.drv->key(wm::Key::Enter)); f.drv->frame();
     const auto match = std::string("conversation_search/open/question/") + kFirst;
     ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget(match) && widget(match)->enabled; }, 30));
+    if (!narrow) {
+      f.drv->ctx.rect.xmax = 1600;
+      f.drv->frame();
+      ASSERT_NE(widget(match), nullptr);
+      ASSERT_TRUE(widget(match)->enabled);
+    }
     EXPECT_EQ(discussion.exchange_id(), visible);
     wm::Event repeated;
     repeated.type = wm::EventType::KeyDown;
@@ -1147,7 +1162,23 @@ TEST_F(SavedConversationNavigationPython, SearchOpensAnOlderQuestionWithoutWriti
     EXPECT_EQ(f.shell->store().viewer().camera_serial(), camera);
     EXPECT_EQ(project().project()->revision, 1);
     EXPECT_FALSE(std::filesystem::exists(dir.path() / "unexpected_write"));
+    EXPECT_EQ(widget("conversation_search/query"), nullptr);
   }
+
+  f.drv->ctx.rect.xmax = 1600;
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("workbench_search_conversations"));
+  f.drv->ctx.rect.xmax = 680;
+  f.drv->frame();
+  ASSERT_NE(widget("conversation_search/query"), nullptr);
+  ASSERT_TRUE(f.drv->key(wm::Key::Esc));
+  f.drv->frame();
+  ASSERT_EQ(widget("conversation_search/query"), nullptr);
+  ASSERT_NE(widget("workbench_history"), nullptr);
+  EXPECT_EQ(f.screen.ui()->focused(), widget("workbench_history")->id);
+  f.drv->ctx.rect.xmax = 1600;
+  f.drv->frame();
+  EXPECT_EQ(widget("conversation_search/query"), nullptr);
 }
 
 class LegacyConversationSearchPython : public SavedConversationNavigationPython {

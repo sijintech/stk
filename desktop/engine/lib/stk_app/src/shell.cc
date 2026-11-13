@@ -1080,11 +1080,30 @@ std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, 
 }
 
 class AppShell::WorkbenchNavigation final : public wm::Region {
+  struct ConversationSearch {
+    std::string query, requested;
+    io::Json items = io::Json::array(), next = nullptr;
+    std::string error;
+    uint64_t scope = 0, bridge = 0, visibility = 0, activity = 0;
+    bool focus = true;
+    bool busy = false, loaded = false, first_page = true;
+  };
+  struct HistoryState {
+    std::shared_ptr<ConversationSearch> search;
+  };
+
  public:
-  WorkbenchNavigation(AppShell &shell, bool rail)
+  static void attach(AppShell &shell, EditorArea &area)
+  {
+    auto history = std::make_shared<HistoryState>();
+    area.emplace_region<WorkbenchNavigation>(shell, true, history);
+    area.emplace_region<WorkbenchNavigation>(shell, false, history);
+  }
+
+  WorkbenchNavigation(AppShell &shell, bool rail, std::shared_ptr<HistoryState> history)
       : Region(rail ? "workbench_rail" : "workbench_strip",
                rail ? wm::RegionAlign::Left : wm::RegionAlign::Top, 144.0f),
-        shell_(shell), rail_(rail)
+        shell_(shell), rail_(rail), history_(std::move(history))
   {
     persistent = false;
   }
@@ -1130,16 +1149,6 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
   }
 
  private:
-  struct ConversationSearch {
-    std::string query, requested;
-    io::Json items = io::Json::array(), next = nullptr;
-    std::string error;
-    uint64_t scope = 0, bridge = 0, visibility = 0, activity = 0;
-    std::string launcher;
-    bool focus = true;
-    bool busy = false, loaded = false, first_page = true;
-  };
-
   bool can_search_conversations(ProjectState &project) const
   {
     const auto *client = shell_.store_.bridge();
@@ -1184,24 +1193,24 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
 
   void draw_conversation_search(ui::Context &ui, EditorArea &origin, ProjectState &project)
   {
-    if (!conversation_search_) { return; }
-    const auto state = conversation_search_;
+    const auto state = history_->search;
+    if (!state) { return; }
     if (!can_search_conversations(project) || state->scope != shell_.store_.project_scope_epoch() ||
         state->bridge != shell_.store_.bridge_epoch() || state->visibility != screen()->visibility_epoch() ||
         state->activity != origin.activity_epoch()) {
-      conversation_search_.reset();
+      history_->search.reset();
       return;
     }
     const auto current = [this, weak = std::weak_ptr<bool>(search_alive_), state = std::weak_ptr<ConversationSearch>(state)] {
       if (weak.expired()) { return false; }
       const auto search = state.lock();
-      return search && search == conversation_search_ && search->scope == shell_.store_.project_scope_epoch() &&
+      return search && search == history_->search && search->scope == shell_.store_.project_scope_epoch() &&
              search->bridge == shell_.store_.bridge_epoch() && search->visibility == screen()->visibility_epoch() &&
              search->activity == static_cast<EditorArea &>(*area()).activity_epoch();
     };
-    const auto close = [this, &ui, current, launcher = state->launcher](bool restore) {
+    const auto close = [this, &ui, current, launcher = history_key_](bool restore) {
       if (!current()) { return; }
-      conversation_search_.reset();
+      history_->search.reset();
       if (restore) { ui.restore_focus_next_frame(launcher); }
       shell_.store_.changed();
     };
@@ -1333,25 +1342,25 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
     const bool can_compose = !project.busy() && !discussion.busy() && !discussion.exchange_busy() && bool(compose);
     if (rail) { rail->button("workbench_write_question", compose_label, std::move(compose)).disable(!can_compose); }
     else { menu.push_back({std::string(compose_label), std::move(compose), can_compose}); }
-    std::function<void(std::string)> open_search;
+    std::function<void()> open_search;
     if (can_search_conversations(project)) {
       const auto label = shell_.store_.tr("workbench.history.search.short");
       open_search = [this, weak = std::weak_ptr<bool>(search_alive_), scope, bridge = shell_.store_.bridge_epoch(),
-                     visibility = screen()->visibility_epoch(), activity = origin.activity_epoch()](std::string launcher) {
+                     visibility = screen()->visibility_epoch(), activity = origin.activity_epoch()] {
         if (weak.expired() || shell_.store_.project_scope_epoch() != scope || shell_.store_.bridge_epoch() != bridge ||
             screen()->visibility_epoch() != visibility || static_cast<EditorArea &>(*area()).activity_epoch() != activity) { return; }
-        conversation_search_ = std::make_shared<ConversationSearch>();
-        conversation_search_->scope = scope;
-        conversation_search_->bridge = bridge;
-        conversation_search_->visibility = visibility;
-        conversation_search_->activity = activity;
-        conversation_search_->launcher = std::move(launcher);
+        auto state = std::make_shared<ConversationSearch>();
+        state->scope = scope;
+        state->bridge = bridge;
+        state->visibility = visibility;
+        state->activity = activity;
+        history_->search = std::move(state);
         shell_.store_.changed();
       };
       if (rail) {
-        auto &button = rail->button("workbench_search_conversations", label, {})
+        auto &button = rail->button("workbench_search_conversations", label, open_search)
             .tip(shell_.store_.tr("workbench.history.search"));
-        button.on_click = [open_search, key = button.key] { open_search(key); };
+        history_key_ = button.key;
       }
     }
     if (questions_supported) {
@@ -1397,10 +1406,7 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
     }
     if (!rail) {
       if (open_search) {
-        menu.push_back({std::string(shell_.store_.tr("workbench.history.search")),
-                        [this, weak = std::weak_ptr<bool>(search_alive_), open_search] {
-          if (!weak.expired()) { open_search(history_key_); }
-        }});
+        menu.push_back({std::string(shell_.store_.tr("workbench.history.search")), std::move(open_search)});
       }
       // A popup dispatches by row index. Close it when a refresh or project switch replaces the rows.
       auto &history = nav.scope(identity).menu_button("workbench_history", shell_.store_.tr("workbench.nav.history"),
@@ -1412,14 +1418,14 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
   AppShell &shell_;
   bool rail_;
   std::string history_key_;
-  std::shared_ptr<ConversationSearch> conversation_search_;
+  // The rail and strip present the same search while the area crosses the responsive breakpoint.
+  std::shared_ptr<HistoryState> history_;
   std::shared_ptr<bool> search_alive_ = std::make_shared<bool>(true);
 };
 
 void AppShell::attach_workbench_navigation(EditorArea &area)
 {
-  area.emplace_region<WorkbenchNavigation>(*this, true);
-  area.emplace_region<WorkbenchNavigation>(*this, false);
+  WorkbenchNavigation::attach(*this, area);
 }
 
 class AppShell::TopBar final : public wm::Region {
