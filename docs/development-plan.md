@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-13 18:19 UTC · 发布双端会话详情与文件预览
+
+Root 将 `main` 从 `57f3601a1c214db81e0e8a80aa26b86f85c666ed` 快进至 `19998d12097685138b555904fbe880e1a91750f0`，推送后单独核对远端。16 个提交 gitleaks 零发现。发布包含 Web 文本预览、桌面关联任务与冻结文本预览、居中会话和键盘焦点、传输重试契约以及 macOS 首次暂停帧标记诊断。仓库中原七份未提交内容保留。
+
+新头 Secret scan 通过，Desktop、Runtime 与 Pages 正在运行。Claude 112 的定向 47/47、Root 集成 60/60、真实 Linux 宽窄窗文件路径已验。Claude 113 在独立 worktree 继续原生文件保存。旧 PR #53 的重试契约已随此批主线发布，两条旧 PR 仍开放。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43481451563) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43481451605) [Pages](https://github.com/sijintech/stk/actions/runs/43481451519) [Secret scan](https://github.com/sijintech/stk/actions/runs/43481451487)
+
 ## 2026-11-13 18:17 UTC · 原生会话冻结文件预览与发布门禁
 
 本地 main `8894b2f5087a65d6986749383289d488cf0fae5d` 纳入 Claude 112 独立候选。在关联任务中，明确点击「查看文件」读取所选任务的冻结快照清单。明确点击「预览」后核对记录、长度、SHA-256 和实际 UTF-8 字节。预览上限 256 KiB，内容按纯文本显示。Root 保留面板初始焦点，补齐逐级返回后旧控件回调的失效校验。集成定向 60/60，双语目录各 3004 键校验通过，暂存 gitleaks 零发现。Claude 独立定向 47/47，完整项目回归仍在运行。
