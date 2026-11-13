@@ -1,5 +1,9 @@
 # STK 当前交接
 
+## 2026-11-13 20:07 UTC · 会话改动的 Linux 项目回归完成
+
+`ababc0c96462612d383d95af1f6e3b772962db22` 的本地项目 CTest 1563 项中首跑通过 1561 项。两项已安装 Peer 辅助程序用例需要 `STK_TEST_PEER_INSTALLATION`，指定既有完整可迁移安装后定向 2/2，共 1563 个唯一测试通过。先用仅含构建产物的暂存目录复跑时，两个用例的 Bridge 均未就绪。证据 `root-delivery-20261113-186/{escape-project-full.xml,escape-peer-retry.xml,escape-peer-installed.xml}`。Web 仍以同源码构建的 399/399 和真实 Hub 宽窄窗口回执为准。待发布范围从远端 `13d32015` 到 `95e91e11` 的 11 个提交通过 gitleaks。远端 macOS 与 Windows 原生文档作业仍在运行，保持仓库发布顺序。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43491122224)
+
 ## 2026-11-13 20:02 UTC · 原生会话退出编辑时保留草稿
 
 本地 main `ababc0c96462612d383d95af1f6e3b772962db22` 在智能体会话和项目问答中按 Esc 结束编辑，保留本地草稿及焦点。继续打字可编辑原草稿，也可从已聚焦的输入框用快捷键直接触发当前主操作。桌面表格和普通编辑字段维持自己的 Esc 行为。Linux X11 固定起点为 1600×1100 与 680×1000 的已打开智能体会话，焦点在含两行草稿的输入框。每窗零鼠标点击。按一次 Esc，项目修订与会话链保持原值，零发送。随后按一次 Ctrl+Enter，原样新增一条用户消息，项目修订与运行审批数保持原值。桌面 UI 核心 135/135、会话定向 53/53，桌面二进制与测试目标构建成功，暂存 gitleaks 零发现。证据 `root-delivery-20261113-186/{escape-ui.xml,escape-project.xml,native-escape-wide-b/receipt.json,native-escape-narrow-b/receipt.json}`。 [统一工作台](docs/design/unified-workbench.md)
