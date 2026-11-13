@@ -39,11 +39,12 @@ function fileList(value:Json,session:string,task:TaskReference):FileList {
   return value as FileList;
 }
 
-function ConversationFiles({session,task,preview,onPreview,onAccessLost}:{
+function ConversationFiles({session,task,preview,onPreview,onAccessLost,onRetryFocus}:{
   session:string;task:TaskReference;preview:FilePreview|null;onPreview:(preview:FilePreview|null)=>void;
-  onAccessLost:()=>void;
+  onAccessLost:()=>void;onRetryFocus:()=>void;
 }){
   const [list,setList]=useState<FileList|null>(null),[error,setError]=useState('');
+  const [attempt,setAttempt]=useState(0);
   const [reading,setReading]=useState<{path:string;mode:'preview'|'download'}|null>(null);
   const [fileError,setFileError]=useState('');
   const activeRead=useRef<AbortController|null>(null);
@@ -101,10 +102,12 @@ function ConversationFiles({session,task,preview,onPreview,onAccessLost}:{
       setError('无法读取此任务发布的文件。');
     });
     return ()=>request.abort();
-  },[session,task,onAccessLost]);
+  },[session,task,onAccessLost,attempt]);
   return <section aria-label={preview?undefined:'发布文件'}>
     {!preview&&<p className="muted">任务 {task.task_id}</p>}
-    {error?<p role="alert">{error}</p>:!list?<p role="status">正在读取文件…</p>:
+    {error?<p role="alert">{error} <button type="button" className="quiet" onClick={()=>{
+      onRetryFocus();setError('');setAttempt(value=>value+1);
+    }}>重新读取</button></p>:!list?<p role="status">正在读取文件…</p>:
       !list.files.length?<p className="muted">此任务暂无发布文件。</p>:
       <ul hidden={preview!==null}>{list.files.map(file=><li key={file.path}><bdi>{visiblePath(file.path)}</bdi>
         <span>{file.size.toLocaleString()} 字节</span>
@@ -136,10 +139,12 @@ export function ConversationTasks({session,onClose,onAccessLost}:{
 }){
   const dialog=useRef<HTMLDialogElement>(null);
   const [list,setList]=useState<TaskList|null>(null),[error,setError]=useState('');
+  const [attempt,setAttempt]=useState(0);
   const [fileTask,setFileTask]=useState<TaskReference|null>(null);
   const [preview,setPreview]=useState<FilePreview|null>(null);
   const fileLauncher=useRef<HTMLButtonElement|null>(null);
   const back=useRef<HTMLButtonElement>(null);
+  const close=useRef<HTMLButtonElement>(null);
   const tasksScroll=useRef(0);
   useLayoutEffect(()=>{
     if(fileTask)back.current?.focus({preventScroll:true});
@@ -161,18 +166,21 @@ export function ConversationTasks({session,onClose,onAccessLost}:{
       setError(error instanceof ApiError&&error.status===404?'当前控制服务未提供此对话的任务列表。':String(error));
     });
     return ()=>request.abort();
-  },[session,onAccessLost]);
+  },[session,onAccessLost,attempt]);
   return <dialog className="conversation-tasks" ref={dialog} aria-labelledby="conversation-tasks-title"
     onCancel={event=>{event.preventDefault();onClose();}}>
     <div className="conversation-tasks-head">
       <h2 id="conversation-tasks-title">{preview?'文件预览':fileTask?'发布文件':'关联任务'}</h2>
-      <button type="button" className="quiet" autoFocus onClick={onClose}>关闭</button>
+      <button type="button" className="quiet" ref={close} autoFocus onClick={onClose}>关闭</button>
     </div>
     {fileTask&&!preview&&<button type="button" className="quiet" ref={back} onClick={()=>setFileTask(null)}>返回关联任务</button>}
     {fileTask&&<ConversationFiles key={fileTask.action_id} session={session} task={fileTask}
-      preview={preview} onPreview={setPreview} onAccessLost={onAccessLost}/>}
+      preview={preview} onPreview={setPreview} onAccessLost={onAccessLost}
+      onRetryFocus={()=>back.current?.focus({preventScroll:true})}/>}
     <div hidden={fileTask!==null}>
-      {error?<p role="alert">{error}</p>:!list?<p role="status">正在读取关联任务…</p>:
+      {error?<p role="alert">{error} <button type="button" className="quiet" onClick={()=>{
+        close.current?.focus({preventScroll:true});setError('');setAttempt(value=>value+1);
+      }}>重新读取</button></p>:!list?<p role="status">正在读取关联任务…</p>:
       !list.tasks.length?<p className="muted">此对话暂无关联任务。</p>:
       <ul>{list.tasks.map(task=><li key={task.action_id}>
         <strong>{task.state==='succeeded'&&!task.task_id?'已收到回执，任务 ID 未确认':states[task.state]}</strong>

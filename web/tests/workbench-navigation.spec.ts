@@ -2017,6 +2017,44 @@ for (const viewport of viewports) {
       }, null, 2));
     });
 
+    test('conversation detail retries a failed task or file read in place', async ({page}) => {
+      const hub = new Hub();
+      conversations(hub);
+      const taskId = '4'.repeat(32), actionId = '5'.repeat(32);
+      const action = {message_id: '6'.repeat(32), action_id: actionId, node_id: '7'.repeat(32),
+        workspace_id: '8'.repeat(32), state: 'succeeded', task_id: taskId};
+      await hub.install(page);
+      const sent = posts(page);
+      await page.goto(ORIGIN + '/');
+      await choose(page, /相场参数讨论/);
+      await draft(page).fill('等待重试的草稿');
+      const launcher = page.getByRole('button', {name: '关联任务', exact: true});
+      await launcher.click();
+      const tasks = page.getByRole('dialog', {name: '关联任务'});
+      await expect(tasks.getByRole('alert')).toContainText('未提供此对话的任务列表');
+      hub.conversationTasks.set(A, [action]);
+      const retryTasks = tasks.getByRole('button', {name: '重新读取'});
+      await retryTasks.focus();
+      await page.keyboard.press('Enter');
+      const view = tasks.getByRole('button', {name: '查看文件'});
+      await expect(view).toBeVisible();
+      await expect(tasks.getByRole('button', {name: '关闭'})).toBeFocused();
+      await view.click();
+      const files = page.getByRole('dialog', {name: '发布文件'});
+      await expect(files.getByRole('alert')).toContainText('无法读取此任务发布的文件');
+      hub.conversationFiles.set(`${A} ${actionId}`, {id: A, action_id: actionId, task_id: taskId, more: false,
+        files: [{path: 'report.txt', size: 12, sha256: 'a'.repeat(64)}]});
+      await files.getByRole('button', {name: '重新读取'}).click();
+      await expect(files.getByText('report.txt')).toBeVisible();
+      await expect(files.getByRole('button', {name: '返回关联任务'})).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(launcher).toBeFocused();
+      await expect(draft(page)).toHaveValue('等待重试的草稿');
+      expect(hub.calls).toEqual([`history ${A}`, `tasks ${A}`, `tasks ${A}`, `files ${A} ${actionId}`, `files ${A} ${actionId}`]);
+      expect(sent.seen).toEqual([]);
+      sent.stop();
+    });
+
     test('history sits in the navigation without moving the active section', async ({page}) => {
       const hub = new Hub();
       conversations(hub);
