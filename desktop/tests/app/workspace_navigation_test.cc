@@ -763,6 +763,8 @@ def init(self, *args, **kwargs):
         return read
     for method in ("project.requests.list", "project.requests.get", "project.requests.progress", "project.conversations.search"):
         self.methods[method] = observe(method, self.methods[method])
+    if Path(__file__).with_name("legacy_conversation_search").exists():
+        self.methods.pop("project.conversations.search")
     for method in ("project.requests.start", "project.agent.create", "project.agent.say",
                    "project.agent.start", "project.agent.run_target", "project.agent.run_decide",
                    "models.local.start", "project.attention.viewed"):
@@ -1126,6 +1128,30 @@ TEST_F(SavedConversationNavigationPython, SearchOpensAnOlderQuestionWithoutWriti
     EXPECT_EQ(project().project()->revision, 1);
     EXPECT_FALSE(std::filesystem::exists(dir.path() / "unexpected_write"));
   }
+}
+
+class LegacyConversationSearchPython : public SavedConversationNavigationPython {
+ protected:
+  void configure_bridge(bridge::ClientOptions &options, const std::string &python) override
+  {
+    SavedConversationNavigationPython::configure_bridge(options, python);
+    std::ofstream(dir.path() / "legacy_conversation_search").put('\n');
+  }
+};
+
+TEST_F(LegacyConversationSearchPython, OlderBridgeKeepsRecentHistoryWithoutTheSearchAction)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_table());
+  ASSERT_NO_FATAL_FAILURE(save_question(kFirst, "Saved on an older bridge"));
+  f.drv->ctx.rect.xmax = 1600;
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  const auto existing = std::string("workbench_question/") + kFirst;
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget(existing) && widget(existing)->enabled; }, 30));
+  ASSERT_TRUE(client->hello_info());
+  EXPECT_FALSE(client->hello_info()->has_method("project.conversations.search"));
+  EXPECT_EQ(widget("workbench_search_conversations"), nullptr);
+  EXPECT_NE(widget("workbench_saved_questions"), nullptr);
 }
 
 TEST_F(SavedConversationNavigationPython, BrowseSavedQuestionsBeyondTheRecentRailWithoutSelectingOrWriting)
