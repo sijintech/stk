@@ -1332,6 +1332,8 @@ TEST_F(ProjectPython, AIWorkspaceFirstTypedQuestionPreparesOnceWithoutSending)
 #endif
   ASSERT_TRUE(f.drv->key(wm::Key::Enter, primary)); ai_frame();
   ASSERT_FALSE(discussion.exchange_request().empty()) << discussion.exchange_error();
+  ASSERT_NE(f.screen.ui()->find(input_key), nullptr);
+  EXPECT_EQ(f.screen.ui()->focused(), f.screen.ui()->find(input_key)->id);
   const auto request = discussion.exchange_request();
   EXPECT_EQ(discussion.exchange_question().at("text"), question);
   EXPECT_EQ(request.at("status"), "pending");
