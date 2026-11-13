@@ -1880,13 +1880,23 @@ class AIEditor final : public Editor {
         close_run_detail(state, true);
       }
     };
-    auto &panel = ctx.ui->modal("ai_agent_run_detail_panel", ctx.tr("ai.agent.run.detail"), close, options);
+    const auto ticket = run_detail_.ticket;
+    const auto *files = agent.run_files(ticket, run_detail_.item);
+    const auto *preview = files ? agent.run_file_preview(ticket, run_detail_.item) : nullptr;
+    // One panel: the tasks, then a task's frozen snapshot files, then one file's text (the Web dialog's pages).
+    auto &panel = ctx.ui->modal("ai_agent_run_detail_panel",
+        ctx.tr(preview ? "ai.agent.run.preview" : files ? "ai.agent.run.files" : "ai.agent.run.detail"), close, options);
     const auto &close_button = panel.row().alignment(ui::LayoutAlign::Right)
         .button("ai_agent_run_detail_close", ctx.tr("ui.close"), close).width(5);
     if (run_detail_focus_ticket_ != run_detail_.ticket) {
       run_detail_focus_ticket_ = run_detail_.ticket;
       ctx.ui->focus_modal_next_frame(close_button.key);
     }
+    const float width = options.width_units * style.unit - 2 * style.panel_margin - 2 * style.text_margin -
+        style.scrollbar - 2 * style.pixel;
+    const float rows = std::clamp(window.y * (narrow ? 0.8f : 1.0f) / style.unit - 10.0f, 4.0f, 30.0f);
+    if (preview) { run_file_preview_page(panel, ctx, state, *files, *preview, width, rows); return; }
+    if (files) { run_files_page(panel, ctx, state, *detail, *files); return; }
     panel.paragraph(catalog.format("ai.agent.run.card", {{"run", io::get_string(run_detail_.item, "run_id")}}));
     const auto state_name = io::get_string(*detail, "state");
     if (state_name == "reading") { panel.paragraph(ctx.tr("ai.agent.run.detail.reading")); return; }
@@ -1904,8 +1914,6 @@ class AIEditor final : public Editor {
                                    catalog.tr_or("workflow.run.status." + status, status))},
         {"counts", counts}}));
     if (io::get_bool(*detail, "stop_error", false)) { panel.paragraph(ctx.tr("ai.agent.run.detail.stop_error")); }
-    const float width = options.width_units * style.unit - 2 * style.panel_margin - 2 * style.text_margin -
-        style.scrollbar - 2 * style.pixel;
     // A ticket's projection is set once (reading, then its result): rewrap only for another ticket, width, font or
     // language.
     const auto signature = std::to_string(run_detail_.ticket) + "/" + state_name + "/" + std::to_string(width) + "/" +
@@ -1914,9 +1922,134 @@ class AIEditor final : public Editor {
       run_detail_text_ = signature;
       run_detail_log_ = wrapped_text(run_detail_lines(*detail, ctx), width, ctx);
     }
-    const float rows = std::clamp(window.y * (narrow ? 0.8f : 1.0f) / style.unit - 10.0f, 4.0f, 30.0f);
+    // Tasks whose produced frozen snapshot can list files, each with its own entry below the list.
+    std::vector<std::pair<size_t, const Json *>> entries;
+    if (agent.can_read_run_files(ticket, run_detail_.item) && detail->contains("tasks")) {
+      for (const auto &task : detail->at("tasks")) {  // by reference: the pointers are used below
+        if (!task.is_object() || !task.contains("produced")) { continue; }
+        const auto &produced = task.at("produced");
+        if (produced.is_object() && produced.contains("files_entry")) {
+          entries.emplace_back(produced.at("files_entry").get<size_t>(), &task);
+        }
+      }
+    }
+    // The context keeps this list's scroll while a snapshot's files are shown, so Back returns to the same place.
     panel.log_view("ai_agent_run_detail_tasks", run_detail_log_,
-                   std::min(rows, float(std::max<size_t>(run_detail_log_.line_count(), 1)) + 0.5f));
+                   std::min(std::max(4.0f, rows - float(entries.size())),
+                            float(std::max<size_t>(run_detail_log_.line_count(), 1)) + 0.5f));
+    for (const auto &[entry, task] : entries) {
+      const auto row = io::get_int(*task, "row", -1);
+      // The files page's Back has this key too, so keyboard focus returns to this exact entry.
+      panel.button("ai_agent_run_detail_files/" + std::to_string(entry),
+          catalog.format("ai.agent.run.files.open", {{"row", row < 0 ? std::string("?") : std::to_string(row)},
+                                                       {"step", io::get_string(*task, "step")}}),
+          [this, weak = lifetime(), &agent, ticket, item = run_detail_.item, entry, owner = run_detail_owner_epoch_,
+           page = run_detail_page_epoch_] {
+        if (weak.expired() || owner != run_detail_owner_epoch_ || run_detail_.ticket != ticket ||
+            page != run_detail_page_epoch_) { return; }
+        if (agent.read_run_files(ticket, item, entry)) { ++run_detail_page_epoch_; }
+      }).disable(state.busy()).tip(ctx.tr("ai.agent.run.files.open.tip"));
+    }
+  }
+
+  /** A task's frozen snapshot files: each output record with its manifest size, and Preview for small text. */
+  void run_files_page(ui::Layout &panel, EditorContext &ctx, ProjectState &state, const Json &detail, const Json &files)
+  {
+    auto &agent = state.agent();
+    const auto &catalog = ctx.store.catalog();
+    const auto ticket = run_detail_.ticket;
+    const auto entry = io::get_int(files, "entry", 0);
+    const auto guard = [this, weak = lifetime(), ticket, owner = run_detail_owner_epoch_, page = run_detail_page_epoch_] {
+      return !weak.expired() && owner == run_detail_owner_epoch_ && run_detail_.ticket == ticket &&
+          page == run_detail_page_epoch_;
+    };
+    panel.button("ai_agent_run_detail_files/" + std::to_string(entry), ctx.tr("ai.agent.run.files.back"),
+                 [this, guard, &agent, ticket] {
+      if (!guard()) { return; }
+      ++run_detail_page_epoch_;
+      agent.close_run_files(ticket);
+    });
+    static const Json none = Json::array();
+    for (const auto &task : detail.contains("tasks") ? detail.at("tasks") : none) {  // no copy
+      if (!task.is_object() || !task.contains("produced")) { continue; }
+      const auto &produced = task.at("produced");
+      if (!produced.is_object() || produced.value("files_entry", Json()) != Json(entry)) { continue; }
+      const auto row = io::get_int(task, "row", -1);
+      panel.paragraph(catalog.format("ai.agent.run.files.source", {{"id", io::get_string(produced, "snapshot_id")},
+          {"row", row < 0 ? std::string("?") : std::to_string(row)}, {"step", io::get_string(task, "step")}}));
+      break;
+    }
+    const auto state_name = io::get_string(files, "state");
+    if (state_name == "reading") { panel.paragraph(ctx.tr("ai.agent.run.files.reading")); return; }
+    if (state_name == "mismatch") { panel.paragraph(ctx.tr("ai.agent.run.files.mismatch")); return; }
+    if (state_name != "ready") { panel.paragraph(ctx.tr("ai.agent.run.files.unavailable")); return; }
+    const auto listed = files.value("files", Json::array());
+    for (size_t i = 0; i < listed.size(); ++i) {
+      const auto &file = listed.at(i);
+      const auto output = io::get_string(file, "output"), name = io::get_string(file, "name");
+      const auto label = core::utf8::truncate_display(output == name ? name : output + " · " + name, 40) + " · " +
+          catalog.format("ai.agent.run.files.size", {{"size", std::to_string(io::get_int(file, "size", 0))}});
+      auto &line = panel.row();
+      line.label(label).tip(output == name ? name : output + " · " + name);
+      const auto kind = io::get_string(file, "preview");
+      if (kind == "text") {
+        // The preview's Back has this key too, so keyboard focus returns to this exact file.
+        line.button("ai_agent_run_detail_preview/" + std::to_string(i), ctx.tr("ai.agent.run.preview.open"),
+                    [this, guard, &agent, ticket, item = run_detail_.item, i] {
+          if (!guard()) { return; }
+          if (agent.read_run_file_preview(ticket, item, i)) {
+            ++run_detail_page_epoch_;
+            run_preview_position_ = {0.0f, false};
+          }
+        }).width(5).disable(state.busy()).tip(ctx.tr("ai.agent.run.preview.open.tip"));
+      }
+      else { line.label(ctx.tr(kind == "large" ? "ai.agent.run.preview.large" : "ai.agent.run.preview.format")); }
+    }
+    if (const auto more = io::get_int(files, "more", 0); more > 0) {
+      panel.paragraph(catalog.format("ai.agent.run.files.more", {{"count", std::to_string(more)}}));
+    }
+  }
+
+  /** One frozen text file, shown literally in a log view that starts at its first line. */
+  void run_file_preview_page(ui::Layout &panel, EditorContext &ctx, ProjectState &state, const Json &files,
+                             const Json &preview, const float width, const float rows)
+  {
+    auto &agent = state.agent();
+    const auto ticket = run_detail_.ticket;
+    const auto file = io::get_int(preview, "file", 0);
+    panel.button("ai_agent_run_detail_preview/" + std::to_string(file), ctx.tr("ai.agent.run.preview.back"),
+                 [this, weak = lifetime(), &agent, ticket, owner = run_detail_owner_epoch_,
+                  page = run_detail_page_epoch_] {
+      if (weak.expired() || owner != run_detail_owner_epoch_ || run_detail_.ticket != ticket ||
+          page != run_detail_page_epoch_) { return; }
+      ++run_detail_page_epoch_;
+      agent.close_run_file_preview(ticket);
+      run_preview_text_.clear();
+      run_preview_log_.clear();
+    });
+    panel.paragraph(io::get_string(preview, "name"));
+    const auto state_name = io::get_string(preview, "state");
+    if (state_name == "reading") { panel.paragraph(ctx.tr("ai.agent.run.preview.reading")); return; }
+    if (state_name == "mismatch") { panel.paragraph(ctx.tr("ai.agent.run.preview.mismatch")); return; }
+    if (state_name == "not_text") { panel.paragraph(ctx.tr("ai.agent.run.preview.not_text")); return; }
+    if (state_name != "ready") { panel.paragraph(ctx.tr("ai.agent.run.preview.unavailable")); return; }
+    if (!preview.contains("text") || !preview.at("text").is_string()) { return; }
+    const auto &text = preview.at("text").get_ref<const std::string &>();  // up to 256 KiB: not copied per frame
+    if (text.empty()) { panel.paragraph(ctx.tr("ai.agent.run.preview.empty")); return; }
+    const auto &style = ctx.ui->style();
+    // A ready preview of one ticket's entry and file is always the same verified bytes: rewrap only for another
+    // file, width or font.
+    const auto signature = std::to_string(ticket) + "/" + std::to_string(io::get_int(files, "entry", 0)) + "/" +
+        std::to_string(file) + "/" + std::to_string(width) + "/" + std::to_string(style.mono.size_px);
+    if (run_preview_text_ != signature) {
+      run_preview_text_ = signature;
+      // Every character is kept (spaces included) and wrapped on code point boundaries.
+      auto buffer = frozen_plan_text(text, width, ctx);
+      run_preview_log_ = buffer ? std::move(*buffer) : wrapped_text(text, width, ctx);
+    }
+    panel.log_view("ai_agent_run_detail_preview_text", run_preview_log_,
+                   std::min(rows, float(std::max<size_t>(run_preview_log_.line_count(), 1)) + 0.5f),
+                   &run_preview_position_);
   }
 
   static std::string run_detail_lines(const Json &detail, EditorContext &ctx)
@@ -1968,6 +2101,7 @@ class AIEditor final : public Editor {
     if (restore && run_detail_.ui) { run_detail_.ui->restore_focus_next_frame(run_detail_.entry); }
     run_detail_ = {};
     run_detail_text_.clear(); run_detail_log_.clear();
+    run_preview_text_.clear(); run_preview_log_.clear();
   }
 
   /** What the session waits for: a draft to review and apply (through the session, project.agent.decide), then the
@@ -2055,9 +2189,14 @@ class AIEditor final : public Editor {
   } run_detail_;
   uint64_t run_detail_owner_epoch_ = 0;
   uint64_t run_detail_focus_ticket_ = 0;
+  uint64_t run_detail_page_epoch_ = 0;
   bool run_detail_drawn_ = false;
   std::string run_detail_text_;
   ui::LogBuffer run_detail_log_;
+  // The open file preview's wrapped text and reading position (memory only, like the detail).
+  std::string run_preview_text_;
+  ui::LogBuffer run_preview_log_;
+  ui::LogViewPosition run_preview_position_{0.0f, false};
 };
 }  // namespace
 

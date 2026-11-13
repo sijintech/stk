@@ -15,6 +15,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <optional>
+#include <vector>
 
 namespace stk::app {
 namespace {
@@ -90,6 +93,10 @@ def init(self, *args, **kwargs):
              'progress': None, 'produced': {'directory': '/absolute-secret/dir', 'files': {}}},
         ] + [{'step': 'simulate', 'row': 'row-2', 'attempt': 0, 'status': 'pending', 'error': None, 'updated_at': None,
               'progress': None, 'produced': None} for _ in range(198)]
+        if (control / 'produced.json').exists():
+            # Real frozen snapshots captured by the test: task index -> its produced object.
+            for index, produced in json.loads((control / 'produced.json').read_text()).items():
+                tasks[int(index)]['produced'] = produced
         run = {'id': p['run_id'], 'project_id': 'project-secret', 'plan_sha256': 'e' * 64 if (control / 'run_mismatch').exists()
                else ('a' * 64 if p['run_id'].startswith('run:') else 'f' * 64),
                'status': 'stopped', 'complete': False, 'stop_error': 'stop-secret', 'executor_id': 'executor-secret',
@@ -182,9 +189,63 @@ def init(self, *args, **kwargs):
     for name in names:
         self.methods['project.agent.' + name] = lambda p, c, n=name: action(n, p)
     self.methods['project.workflow_runs.get'] = lambda p, c: run_get(p)
+    # The real snapshot and file methods, logged. Snapshot reads are numbered: snapshot read N is held while
+    # hold_snapshot existed, until snapshot_release_N; resolve_* markers alter a real resolve reply.
+    snapshot_reads = [0]
+    def logged(name, original):
+        def call(p, c):
+            serial = None
+            with calls_lock, (control / 'calls.jsonl').open('a', encoding='utf-8') as out:
+                out.write(json.dumps({'method': name, 'params': p}) + '\n')
+                if name in ('snapshots.get', 'snapshots.resolve'):
+                    snapshot_reads[0] += 1
+                    serial = snapshot_reads[0]
+            replying.serial = serial  # the reply is sent from this thread (see send)
+            if serial is not None and (control / 'hold_snapshot').exists():
+                (control / ('snapshot_held_%d' % serial)).write_text('held')
+                deadline = time.monotonic() + 10
+                while not (control / ('snapshot_release_%d' % serial)).exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+            if name == 'snapshots.resolve' and (control / 'resolve_fail').exists():
+                raise BridgeError('not_found', 'fixture resolve failure at /private/fixture/path')
+            result = original(p, c)
+            if name == 'snapshots.resolve':
+                result = dict(result)
+                if (control / 'resolve_wrong_sha').exists():
+                    result['sha256'] = '0' * 64
+                if (control / 'resolve_wrong_size').exists():
+                    result['size'] += 1
+                if (control / 'resolve_wrong_record').exists():
+                    result['record_id'] = '00000000-0000-4000-8000-000000000000'
+                if (control / 'resolve_changed_bytes').exists():
+                    data = bytearray(Path(result['path']).read_bytes())
+                    data[0] ^= 1  # same size, other bytes
+                    changed = control / 'changed-object'
+                    changed.write_bytes(bytes(data))
+                    result['path'] = str(changed)
+                if (control / 'resolve_symlink').exists():
+                    link = control / 'linked-object'
+                    link.unlink(missing_ok=True)
+                    link.symlink_to(result['path'])
+                    result['path'] = str(link)
+            return result
+        return call
+    for method in list(self.methods):
+        if method.startswith('project.snapshots.') or method.startswith('project.files.'):
+            self.methods[method] = logged(method[len('project.'):], self.methods[method])
+    for name in ('get', 'resolve'):
+        if (control / ('no_snapshot_' + name)).exists():
+            self.methods.pop('project.snapshots.' + name, None)
+
+replying = threading.local()
 
 def send(self, message, method=None):
     flushed = original_send(self, message, method)
+    if flushed and method in ('project.snapshots.get', 'project.snapshots.resolve'):
+        serial = getattr(replying, 'serial', None)
+        if serial is not None:
+            (control / ('snapshot_replied_%d' % serial)).write_text('replied')
+            replying.serial = None
     if flushed and method == 'project.agent.get':
         serial = message.get('result', {}).get('get_serial')
         failure = message.get('error', {}).get('message', '')
@@ -221,6 +282,8 @@ class NativeAgentRuns : public ::testing::Test {
   ProjectState &state() { return f.shell->store().project(); }
   ProjectAgent &agent() { return state().agent(); }
   virtual bool legacy() const { return false; }
+  /** A marker the wire fixture reads at start (a capability the bridge then does not offer). */
+  virtual const char *capability_marker() const { return nullptr; }
   void marker(const char *name) { std::ofstream(dir.path() / name) << "fixture"; }
 
   void SetUp() override
@@ -230,6 +293,7 @@ class NativeAgentRuns : public ::testing::Test {
     if (python.empty()) { python = bridge::find_executable("python3").value_or(""); }
     if (python.empty()) { GTEST_SKIP() << "Python is required for the native agent wire fixture"; }
     if (legacy()) { marker("legacy"); }
+    if (const auto *name = capability_marker()) { marker(name); }
     const auto script = dir.path() / "agent_runs_wire.py";
     std::ofstream(script) << kRunWire;
     bridge::ClientOptions options;
@@ -331,6 +395,102 @@ class NativeAgentRuns : public ::testing::Test {
     for (const auto *method : {"run_plan", "run_decide", "run_observe", "run_target", "create", "say", "start"}) {
       EXPECT_EQ(count(method), 0u) << method;
     }
+  }
+  /** One bridge call answered before returning (fixture setup only). */
+  Json sync_call(const std::string &method, Json params)
+  {
+    auto answer = std::make_shared<std::optional<bridge::Result<Json>>>();
+    client->call(method, std::move(params)).then([answer](bridge::Result<Json> result) { *answer = std::move(result); });
+    EXPECT_TRUE(loop.pump_until([&] { return answer->has_value(); }, 30)) << method;
+    if (!answer->has_value()) { return Json(); }
+    EXPECT_TRUE(answer->value().ok()) << method << ": " << answer->value().error().describe();
+    return answer->value().ok() ? answer->value().value() : Json();
+  }
+  /** Project files of a simulation's outputs, really indexed and captured into one frozen snapshot. */
+  struct Captured { std::string snapshot_id; std::map<std::string, std::string> records; };
+  Captured capture_outputs()
+  {
+    const std::vector<std::pair<std::string, std::string>> files = {
+        {"notes.txt", "<b>bold</b> <script>alert(1)</script>\r\nline two\rhidden\x1b[31mred\x1b[0m\ttab "
+                      "\xe2\x80\xae" "evil\n中文🙂\n"},
+        {"big.log", std::string(300 * 1024, 'x') + "\n"},
+        {"binary.out", std::string("\xff\xfe\x00", 3) + " not UTF-8"},
+        {"scalar.vti", "<VTKFile type=\"ImageData\"/>\n"},
+        {"page.html", "<html><body><h1>Not previewed</h1></body></html>\n"},
+        {"empty.txt", ""}};
+    const auto outputs = dir.path() / "project" / "results" / "run";
+    std::filesystem::create_directories(outputs);
+    Json paths = Json::array();
+    for (const auto &[name, bytes] : files) {
+      std::ofstream(outputs / name, std::ios::binary) << bytes;
+      paths.push_back(core::path_to_utf8(outputs / name));
+    }
+    const auto handle = state().project()->handle;
+    const auto indexed = sync_call("project.files.index", {{"handle", handle},
+        {"expected_revision", state().project()->revision}, {"paths", paths}});
+    const auto captured = sync_call("project.snapshots.capture", {{"handle", handle},
+        {"expected_revision", indexed.at("revision")}, {"record_ids", indexed.at("record_ids")}});
+    EXPECT_TRUE(loop.pump_until([&] {
+      return !state().busy() && state().project()->revision == captured.at("revision").get<int64_t>();
+    }, 30));
+    Captured result{captured.at("snapshot").at("id").get<std::string>(), {}};
+    for (size_t i = 0; i < files.size(); ++i) {
+      result.records[files[i].first] = indexed.at("record_ids").at(i).get<std::string>();
+    }
+    return result;
+  }
+  /** Task 0 produces six outputs (two named differently than their files); task 2 only notes.txt. */
+  Captured produce()
+  {
+    auto captured = capture_outputs();
+    const auto &r = captured.records;
+    write_produced({{"0", {{"directory", "results/run"}, {"snapshot_id", captured.snapshot_id},
+        {"files", {{"notes", r.at("notes.txt")}, {"big", r.at("big.log")}, {"binary.out", r.at("binary.out")},
+                   {"scalar.vti", r.at("scalar.vti")}, {"page.html", r.at("page.html")},
+                   {"empty.txt", r.at("empty.txt")}}}}},
+        {"2", {{"snapshot_id", captured.snapshot_id}, {"files", {{"notes.txt", r.at("notes.txt")}}}}}});
+    return captured;
+  }
+  void write_produced(const Json &produced) { std::ofstream(dir.path() / "produced.json") << produced.dump(); }
+  void snapshot_held(int n)
+  {
+    ASSERT_TRUE(bridge::test::wait_until([&] { return exists("snapshot_held_" + std::to_string(n)); }, 5));
+  }
+  /** Let held snapshot read ``n`` answer, then make sure its reply reached the controller (a later reply). */
+  void snapshot_release(int n)
+  {
+    marker(("snapshot_release_" + std::to_string(n)).c_str());
+    ASSERT_TRUE(bridge::test::wait_until([&] { return exists("snapshot_replied_" + std::to_string(n)); }, 5));
+    sync_call("project.agent.list", {{"handle", state().project()->handle}, {"limit", 1}});
+  }
+  /** A ready detail of the consumed card (one workflow_runs.get). */
+  uint64_t ready_detail(const Json &card)
+  {
+    const auto ticket = agent().read_run_detail(card);
+    EXPECT_NE(ticket, 0u);
+    EXPECT_TRUE(loop.pump_until([&] {
+      const auto *detail = agent().run_detail(ticket, card);
+      return detail && io::get_string(*detail, "state") != "reading";
+    }));
+    return ticket;
+  }
+  std::string files_state(uint64_t ticket, const Json &card)
+  {
+    const auto *files = agent().run_files(ticket, card);
+    return files ? io::get_string(*files, "state") : std::string("closed");
+  }
+  std::string preview_state(uint64_t ticket, const Json &card)
+  {
+    const auto *preview = agent().run_file_preview(ticket, card);
+    return preview ? io::get_string(*preview, "state") : std::string("closed");
+  }
+  bool settle_files(uint64_t ticket, const Json &card)
+  {
+    return loop.pump_until([&] { return files_state(ticket, card) != "reading"; });
+  }
+  bool settle_preview(uint64_t ticket, const Json &card)
+  {
+    return loop.pump_until([&] { return preview_state(ticket, card) != "reading"; });
   }
   void list_ready()
   {
@@ -915,6 +1075,234 @@ TEST_F(NativeAgentRuns, AMissingOrDifferentRunStaysOnItsCardWithoutTouchingTheSe
   expect_no_agent_actions();
 }
 
+TEST_F(NativeAgentRuns, SnapshotFilesListOnlyTheTasksValidatedOutputsAndPreviewSmallTextLiterally)
+{
+  marker("consumed");
+  const auto captured = produce();
+  select();
+  const auto card = consumed_item();
+  const auto ticket = ready_detail(card);
+  const auto detail = *agent().run_detail(ticket, card);
+  ASSERT_EQ(io::get_string(detail, "state"), "ready") << detail.dump();
+  // Entries for the tasks that produced a snapshot and output records; the IDs themselves stay private.
+  EXPECT_EQ(detail.at("tasks").at(0).at("produced").at("files_entry"), 0);
+  EXPECT_FALSE(detail.at("tasks").at(1).at("produced").contains("files_entry"));  // snapshot, no records
+  EXPECT_EQ(detail.at("tasks").at(2).at("produced").at("files_entry"), 1);
+  for (const auto &[name, record] : captured.records) { EXPECT_EQ(detail.dump().find(record), std::string::npos); }
+  EXPECT_EQ(detail.dump().find(captured.snapshot_id), std::string::npos);
+  ASSERT_TRUE(agent().can_read_run_files(ticket, card));
+  const auto chain = io::get_string(agent().view(), "chain_sha256");
+  const auto total = io::get_int(agent().view(), "total", -1);
+  const auto revision = state().project()->revision;
+  const auto session_reads = gets().size();
+  const auto writes = count("files.index") + count("snapshots.capture");
+  EXPECT_FALSE(agent().read_run_files(ticket, card, 2));  // no third entry
+  EXPECT_FALSE(agent().read_run_file_preview(ticket, card, 0));  // nothing listed yet
+  ASSERT_TRUE(agent().read_run_files(ticket, card, 0));
+  EXPECT_FALSE(agent().busy());
+  EXPECT_EQ(files_state(ticket, card), "reading");
+  ASSERT_TRUE(settle_files(ticket, card));
+  const auto files = *agent().run_files(ticket, card);
+  ASSERT_EQ(io::get_string(files, "state"), "ready") << files.dump();
+  ASSERT_EQ(count("snapshots.get"), 1u);
+  for (const auto &call : calls()) {
+    if (call.at("method") == "snapshots.get") {
+      EXPECT_EQ(call.at("params"), Json({{"handle", state().project()->handle}, {"snapshot_id", captured.snapshot_id}}));
+    }
+  }
+  const Json expected = Json::parse(R"([
+    {"output": "notes", "name": "notes.txt", "size": 90, "preview": "text"},
+    {"output": "big", "name": "big.log", "size": 307201, "preview": "large"},
+    {"output": "binary.out", "name": "binary.out", "size": 13, "preview": "text"},
+    {"output": "scalar.vti", "name": "scalar.vti", "size": 28, "preview": "format"},
+    {"output": "page.html", "name": "page.html", "size": 49, "preview": "format"},
+    {"output": "empty.txt", "name": "empty.txt", "size": 0, "preview": "text"}])");
+  EXPECT_EQ(files.at("files"), expected) << files.dump();
+  EXPECT_EQ(files.at("more"), 0);
+  const auto listed = files.dump();
+  for (const auto &[name, record] : captured.records) { EXPECT_EQ(listed.find(record), std::string::npos); }
+  for (const auto *hidden : {"results/run", "/project", ".stk", "sha256"}) { EXPECT_EQ(listed.find(hidden), std::string::npos) << hidden; }
+  // A large or unsupported file is never resolved, so the service never hashes it for a preview.
+  EXPECT_FALSE(agent().read_run_file_preview(ticket, card, 1));
+  EXPECT_FALSE(agent().read_run_file_preview(ticket, card, 3));
+  EXPECT_FALSE(agent().read_run_file_preview(ticket, card, 4));
+  EXPECT_FALSE(agent().read_run_file_preview(ticket, card, 6));
+  EXPECT_EQ(count("snapshots.resolve"), 0u);
+  ASSERT_TRUE(agent().read_run_file_preview(ticket, card, 0));
+  EXPECT_EQ(preview_state(ticket, card), "reading");
+  ASSERT_TRUE(settle_preview(ticket, card));
+  const auto preview = *agent().run_file_preview(ticket, card);
+  ASSERT_EQ(io::get_string(preview, "state"), "ready") << preview.dump();
+  EXPECT_EQ(io::get_string(preview, "name"), "notes.txt");
+  // HTML stays markup text; CRLF is one line end; a lone CR, ESC and the bidirectional override are shown.
+  EXPECT_EQ(io::get_string(preview, "text"), "<b>bold</b> <script>alert(1)</script>\nline two\\u{d}hidden\\u{1b}[31mred"
+            "\\u{1b}[0m\ttab \\u{202e}evil\n中文🙂\n");
+  ASSERT_EQ(count("snapshots.resolve"), 1u);
+  for (const auto &call : calls()) {
+    if (call.at("method") == "snapshots.resolve") {
+      EXPECT_EQ(call.at("params"), Json({{"handle", state().project()->handle}, {"snapshot_id", captured.snapshot_id},
+                                         {"record_id", captured.records.at("notes.txt")}}));
+    }
+  }
+  EXPECT_EQ(preview.dump().find(dir.str()), std::string::npos);
+  EXPECT_EQ(preview.dump().find(".stk"), std::string::npos);
+  ASSERT_TRUE(agent().read_run_file_preview(ticket, card, 2));
+  ASSERT_TRUE(settle_preview(ticket, card));
+  EXPECT_EQ(*agent().run_file_preview(ticket, card), Json({{"state", "not_text"}, {"file", 2}, {"name", "binary.out"}}));
+  ASSERT_TRUE(agent().read_run_file_preview(ticket, card, 5));
+  ASSERT_TRUE(settle_preview(ticket, card));
+  EXPECT_EQ(preview_state(ticket, card), "ready");
+  EXPECT_EQ(io::get_string(*agent().run_file_preview(ticket, card), "text"), "");
+  // Back to the list, then to the tasks: nothing more is read.
+  agent().close_run_file_preview(ticket);
+  EXPECT_EQ(preview_state(ticket, card), "closed");
+  EXPECT_EQ(files_state(ticket, card), "ready");
+  agent().close_run_files(ticket);
+  EXPECT_EQ(files_state(ticket, card), "closed");
+  EXPECT_EQ(io::get_string(*agent().run_detail(ticket, card), "state"), "ready");
+  // The other task's entry lists only its own output record of the same snapshot.
+  ASSERT_TRUE(agent().read_run_files(ticket, card, 1));
+  ASSERT_TRUE(settle_files(ticket, card));
+  EXPECT_EQ(agent().run_files(ticket, card)->at("files"),
+            Json::parse(R"([{"output": "notes.txt", "name": "notes.txt", "size": 90, "preview": "text"}])"));
+  loop.run_ready();
+  EXPECT_EQ(count("snapshots.get"), 2u);
+  EXPECT_EQ(count("snapshots.resolve"), 3u);
+  EXPECT_EQ(count("workflow_runs.get"), 1u);
+  EXPECT_EQ(count("files.index") + count("snapshots.capture"), writes);
+  for (const auto *method : {"snapshots.verify", "snapshots.list", "files.resolve", "files.refresh", "files.remove"}) {
+    EXPECT_EQ(count(method), 0u) << method;
+  }
+  EXPECT_TRUE(agent().error().empty()) << agent().error();
+  EXPECT_EQ(io::get_string(agent().view(), "chain_sha256"), chain);
+  EXPECT_EQ(io::get_int(agent().view(), "total", -1), total);
+  EXPECT_EQ(state().project()->revision, revision);
+  EXPECT_EQ(gets().size(), session_reads);
+  agent().close_run_detail(ticket);
+  EXPECT_EQ(files_state(ticket, card), "closed");
+  expect_no_agent_actions();
+}
+
+TEST_F(NativeAgentRuns, MismatchedTamperedOrUnreadableSnapshotFilesAreNeverShown)
+{
+  marker("consumed");
+  const auto captured = produce();
+  select();
+  const auto card = consumed_item();
+  // A produced record that the frozen manifest does not list: nothing is listed, nothing is resolved.
+  write_produced({{"0", {{"snapshot_id", captured.snapshot_id},
+      {"files", {{"notes", captured.records.at("notes.txt")}, {"ghost", "00000000-0000-4000-8000-000000000000"}}}}}});
+  auto ticket = ready_detail(card);
+  ASSERT_TRUE(agent().read_run_files(ticket, card, 0)); ASSERT_TRUE(settle_files(ticket, card));
+  EXPECT_EQ(*agent().run_files(ticket, card), Json({{"state", "mismatch"}, {"entry", 0}}));
+  EXPECT_FALSE(agent().read_run_file_preview(ticket, card, 0));
+  agent().close_run_detail(ticket);
+  // A snapshot the project does not have.
+  write_produced({{"0", {{"snapshot_id", "00000000-0000-4000-8000-000000000001"},
+      {"files", {{"notes", captured.records.at("notes.txt")}}}}}});
+  ticket = ready_detail(card);
+  ASSERT_TRUE(agent().read_run_files(ticket, card, 0)); ASSERT_TRUE(settle_files(ticket, card));
+  EXPECT_EQ(*agent().run_files(ticket, card), Json({{"state", "unavailable"}, {"entry", 0}}));
+  agent().close_run_detail(ticket);
+  // Malformed IDs offer no entry at all.
+  write_produced({{"0", {{"snapshot_id", "not-a-snapshot"}, {"files", {{"notes", captured.records.at("notes.txt")}}}}},
+                  {"2", {{"snapshot_id", captured.snapshot_id}, {"files", {{"notes", "record-1"}}}}}});
+  ticket = ready_detail(card);
+  EXPECT_FALSE(agent().run_detail(ticket, card)->at("tasks").at(0).at("produced").contains("files_entry"));
+  EXPECT_FALSE(agent().run_detail(ticket, card)->at("tasks").at(2).at("produced").contains("files_entry"));
+  EXPECT_FALSE(agent().read_run_files(ticket, card, 0));
+  agent().close_run_detail(ticket);
+  EXPECT_EQ(count("snapshots.get"), 2u);
+  EXPECT_EQ(count("snapshots.resolve"), 0u);
+  // A resolve reply of another identity, digest or size, bytes that changed, a final link or a failure.
+  produce();
+  ticket = ready_detail(card);
+  ASSERT_TRUE(agent().read_run_files(ticket, card, 0)); ASSERT_TRUE(settle_files(ticket, card));
+  ASSERT_EQ(files_state(ticket, card), "ready");
+  const std::vector<std::pair<const char *, const char *>> cases = {
+      {"resolve_wrong_sha", "mismatch"}, {"resolve_wrong_size", "mismatch"}, {"resolve_wrong_record", "mismatch"},
+      {"resolve_changed_bytes", "mismatch"}, {"resolve_symlink", "unavailable"}, {"resolve_fail", "unavailable"}};
+  for (const auto &[name, expected] : cases) {
+    marker(name);
+    ASSERT_TRUE(agent().read_run_file_preview(ticket, card, 0)) << name;
+    ASSERT_TRUE(settle_preview(ticket, card)) << name;
+    EXPECT_EQ(*agent().run_file_preview(ticket, card), Json({{"state", expected}, {"file", 0}, {"name", "notes.txt"}})) << name;
+    std::filesystem::remove(dir.path() / name);
+  }
+  ASSERT_TRUE(agent().read_run_file_preview(ticket, card, 0)); ASSERT_TRUE(settle_preview(ticket, card));
+  EXPECT_EQ(preview_state(ticket, card), "ready");  // the frozen object itself was never changed
+  EXPECT_EQ(count("snapshots.resolve"), cases.size() + 1);
+  EXPECT_TRUE(agent().error().empty()) << agent().error();
+  EXPECT_FALSE(agent().busy());
+  expect_no_agent_actions();
+}
+
+TEST_F(NativeAgentRuns, LateSnapshotRepliesAreDroppedAfterBackCloseAnotherListReselectionOrReopening)
+{
+  marker("consumed");
+  produce();
+  select();
+  const auto card = consumed_item();
+  auto ticket = ready_detail(card);
+  marker("hold_snapshot");
+  // Back to the tasks while the list is read.
+  ASSERT_TRUE(agent().read_run_files(ticket, card, 0)); ASSERT_NO_FATAL_FAILURE(snapshot_held(1));
+  agent().close_run_files(ticket);
+  ASSERT_NO_FATAL_FAILURE(snapshot_release(1));
+  EXPECT_EQ(files_state(ticket, card), "closed");
+  // Another task's list replaces the first one; the first reply does not fill it.
+  ASSERT_TRUE(agent().read_run_files(ticket, card, 0)); ASSERT_NO_FATAL_FAILURE(snapshot_held(2));
+  ASSERT_TRUE(agent().read_run_files(ticket, card, 1)); ASSERT_NO_FATAL_FAILURE(snapshot_held(3));
+  ASSERT_NO_FATAL_FAILURE(snapshot_release(2));
+  EXPECT_EQ(files_state(ticket, card), "reading");
+  ASSERT_NO_FATAL_FAILURE(snapshot_release(3));
+  ASSERT_EQ(files_state(ticket, card), "ready");
+  EXPECT_EQ(agent().run_files(ticket, card)->at("entry"), 1);
+  EXPECT_EQ(agent().run_files(ticket, card)->at("files").size(), 1u);
+  // Back to the list while a preview is read, then the same file again (ABA): only the newest reply counts.
+  ASSERT_TRUE(agent().read_run_file_preview(ticket, card, 0)); ASSERT_NO_FATAL_FAILURE(snapshot_held(4));
+  agent().close_run_file_preview(ticket);
+  ASSERT_TRUE(agent().read_run_file_preview(ticket, card, 0)); ASSERT_NO_FATAL_FAILURE(snapshot_held(5));
+  ASSERT_NO_FATAL_FAILURE(snapshot_release(4));
+  EXPECT_EQ(preview_state(ticket, card), "reading");
+  ASSERT_NO_FATAL_FAILURE(snapshot_release(5));
+  EXPECT_EQ(preview_state(ticket, card), "ready");
+  // Closing the detail during a preview read.
+  agent().close_run_file_preview(ticket);
+  ASSERT_TRUE(agent().read_run_file_preview(ticket, card, 0)); ASSERT_NO_FATAL_FAILURE(snapshot_held(6));
+  agent().close_run_detail(ticket);
+  ASSERT_NO_FATAL_FAILURE(snapshot_release(6));
+  EXPECT_EQ(preview_state(ticket, card), "closed"); EXPECT_EQ(files_state(ticket, card), "closed");
+  // Switching away and back to the same session during a list read.
+  std::filesystem::remove(dir.path() / "hold_snapshot");
+  ticket = ready_detail(card);
+  marker("hold_snapshot");
+  ASSERT_TRUE(agent().read_run_files(ticket, card, 0)); ASSERT_NO_FATAL_FAILURE(snapshot_held(7));
+  agent().select("session-b"); agent().select("session-a"); agent().pump(0);
+  ASSERT_TRUE(loop.pump_until([&] { return !agent().view().empty(); }));
+  ASSERT_NO_FATAL_FAILURE(snapshot_release(7));
+  EXPECT_EQ(files_state(ticket, card), "closed");
+  EXPECT_EQ(agent().run_detail(ticket, card), nullptr);
+  // Reopening the project during a preview read: entries are disabled while it opens, and nothing comes back.
+  std::filesystem::remove(dir.path() / "hold_snapshot");
+  ticket = ready_detail(card);
+  ASSERT_TRUE(agent().read_run_files(ticket, card, 0)); ASSERT_TRUE(settle_files(ticket, card));
+  marker("hold_snapshot");
+  ASSERT_TRUE(agent().read_run_file_preview(ticket, card, 0)); ASSERT_NO_FATAL_FAILURE(snapshot_held(9));
+  ASSERT_TRUE(state().open(dir.str() + "/project"));
+  EXPECT_EQ(preview_state(ticket, card), "closed");
+  EXPECT_FALSE(agent().read_run_files(ticket, card, 0));
+  ASSERT_TRUE(loop.pump_until([&] { return !state().busy(); }));
+  ASSERT_NO_FATAL_FAILURE(snapshot_release(9));
+  ASSERT_NO_FATAL_FAILURE(select());
+  EXPECT_EQ(preview_state(ticket, card), "closed");
+  EXPECT_EQ(agent().run_detail(ticket, card), nullptr);
+  EXPECT_EQ(count("snapshots.get"), 5u);
+  EXPECT_EQ(count("snapshots.resolve"), 4u);
+  EXPECT_TRUE(agent().error().empty()) << agent().error();
+  expect_no_agent_actions();
+}
+
 /** The acceptance rows of docs/design/native-conversation-references.md 5.2 from the workbench rail. */
 class NativeAgentRunDetailUI : public NativeAgentRuns {
  protected:
@@ -970,6 +1358,52 @@ class NativeAgentRunDetailUI : public NativeAgentRuns {
     }, 30));
   }
   std::string entry() { return "ai_agent_run_detail/approve:session-a"; }
+  /** Texts of the open panel's labels and paragraphs, in drawing order. */
+  std::vector<std::string> panel_labels()
+  {
+    std::vector<std::string> texts;
+    if (const auto *modal = panel()) {
+      for (const auto &w : modal->widgets()) {
+        if (w.type == ui::WidgetType::Label || w.type == ui::WidgetType::Paragraph) { texts.push_back(w.text); }
+      }
+    }
+    return texts;
+  }
+  bool has_label(const std::string &text)
+  {
+    const auto texts = panel_labels();
+    return std::find(texts.begin(), texts.end(), text) != texts.end();
+  }
+  void wait_for(const std::string &key)
+  {
+    ASSERT_TRUE(loop.pump_until([&] { frame(); return f.screen.ui()->find(key) != nullptr; }, 30)) << key;
+  }
+  /** The preview's wrapped lines joined without spaces (tabs are expanded to spaces). */
+  std::string preview_text()
+  {
+    const auto *log = f.screen.ui()->find("ai_agent_run_detail_preview_text");
+    std::string text;
+    for (size_t i = 0; log && log->log && i < log->log->line_count(); ++i) { text += std::string(log->log->line(i)); }
+    text.erase(std::remove(text.begin(), text.end(), ' '), text.end());
+    return text;
+  }
+  void tab_to(const std::string &key)
+  {
+    for (int i = 0; i < 12 && f.screen.ui()->focused() != id(key); ++i) { ASSERT_TRUE(f.drv->key(wm::Key::Tab)); frame(); }
+    ASSERT_NE(id(key), 0u) << key;
+    ASSERT_EQ(f.screen.ui()->focused(), id(key)) << key;
+  }
+  void expect_no_saved_file_state(const Captured &captured)
+  {
+    for (auto *area : f.screen.areas()) {
+      const auto *editor_area = dynamic_cast<const EditorArea *>(area);
+      if (!editor_area) { continue; }
+      const auto saved = editor_area->editor().save_workspace_state().dump();
+      std::vector<std::string> hidden = {captured.snapshot_id, "notes.txt", "alert(1)", "results/run", "files_entry"};
+      for (const auto &[name, record] : captured.records) { hidden.push_back(record); }
+      for (const auto &text : hidden) { EXPECT_EQ(saved.find(text), std::string::npos) << text; }
+    }
+  }
   ui::WidgetId id(const std::string &key)
   {
     const auto *found = f.screen.ui()->find(key); return found ? found->id : 0;
@@ -1113,6 +1547,178 @@ TEST_F(NativeAgentRunDetailUI, AFailedReadStaysInTheOpenedPanelOfSessionA)
   expect_no_agent_actions();
 }
 
+TEST_F(NativeAgentRunDetailUI, WideWindowViewsAndPreviewsSnapshotFilesInTheSamePanelAndGoesBackToEachPlace)
+{
+  f.drv->ctx.rect = {0, 0, 1600, 1100};
+  const auto captured = produce();  // real project files in one frozen snapshot, before the fixed start
+  ASSERT_NO_FATAL_FAILURE(open_rail());
+  const auto layout = f.screen.arrangement();
+  const auto viewer = f.shell->store().viewer().save_workspace_state();
+  const auto camera = f.shell->store().viewer().camera_serial();
+  const auto exchange = state().discussion().exchange_id();
+  const auto revision = state().project()->revision;
+  clicks = 0;
+  ASSERT_NO_FATAL_FAILURE(open_session_a());
+  const auto agent_text = "ai_agent_text/" + state().project()->handle;
+  f.screen.ui()->find(agent_text)->string.assign("Unsent agent words");
+  frame();
+  const auto chain = io::get_string(agent().view(), "chain_sha256");
+  const auto total = io::get_int(agent().view(), "total", -1);
+  const auto reading = f.screen.ui()->scroll_of(f.screen.ui()->find("ai_agent_timeline")->id);
+  ASSERT_NO_FATAL_FAILURE(click(entry()));
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  const auto *tasks = f.screen.ui()->find("ai_agent_run_detail_tasks");
+  wm::Event wheel; wheel.type = wm::EventType::Wheel; wheel.x = int(tasks->rect.cx());
+  wheel.y = f.screen.rect().ymax - 1 - int(tasks->rect.cy()); wheel.wheel_y = 2;
+  ASSERT_TRUE(f.drv->send(wheel)); frame();
+  const auto tasks_position = f.screen.ui()->scroll_of(f.screen.ui()->find("ai_agent_run_detail_tasks")->id);
+  ASSERT_NE(f.screen.ui()->find("ai_agent_run_detail_files/0"), nullptr);
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/0")->text, "View files · Row 3 · simulate evil line");
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/1")->text, "View files · Row 7 · collect");
+  const auto stale_files = f.screen.ui()->find("ai_agent_run_detail_files/0")->on_click;
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_files/0"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview/0"));
+  const auto *modal = panel(); ASSERT_NE(modal, nullptr);
+  EXPECT_EQ(modal->title(), "Snapshot files");
+  EXPECT_FLOAT_EQ(modal->frame().x1(), 1600.0f);  // the same right panel
+  EXPECT_FLOAT_EQ(modal->frame().w, 420.0f);
+  EXPECT_FLOAT_EQ(modal->frame().y, 0.0f);
+  EXPECT_LE(modal->frame().y1(), 1100.0f);
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_tasks"), nullptr);
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/0")->text, "Back to linked tasks");
+  EXPECT_TRUE(has_label("notes · notes.txt · 90 bytes")) << ::testing::PrintToString(panel_labels());
+  EXPECT_TRUE(has_label("big · big.log · 307201 bytes"));
+  EXPECT_TRUE(has_label("Over 256 KiB"));
+  EXPECT_TRUE(has_label("No text preview"));
+  for (const auto *absent : {"ai_agent_run_detail_preview/1", "ai_agent_run_detail_preview/3", "ai_agent_run_detail_preview/4"}) {
+    EXPECT_EQ(f.screen.ui()->find(absent), nullptr) << absent;  // large, VTI and HTML files have no preview
+  }
+  EXPECT_NE(f.screen.ui()->find("ai_agent_run_detail_preview/2"), nullptr);
+  EXPECT_NE(f.screen.ui()->find("ai_agent_run_detail_preview/5"), nullptr);
+  const auto stale_preview = f.screen.ui()->find("ai_agent_run_detail_preview/0")->on_click;
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_preview/0"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview_text"));
+  stale_files(); stale_preview(); frame();
+  modal = panel(); ASSERT_NE(modal, nullptr);
+  EXPECT_EQ(modal->title(), "File preview");
+  EXPECT_FLOAT_EQ(modal->frame().x1(), 1600.0f);
+  EXPECT_FLOAT_EQ(modal->frame().w, 420.0f);
+  EXPECT_TRUE(has_label("notes.txt"));
+  const auto text = preview_text();
+  EXPECT_NE(text.find("<b>bold</b><script>alert(1)</script>linetwo\\u{d}hidden\\u{1b}[31mred\\u{1b}[0mtab\\u{202e}evil中文🙂"),
+            std::string::npos) << text;
+  EXPECT_EQ(f.screen.ui()->scroll_of(f.screen.ui()->find("ai_agent_run_detail_preview_text")->id), 0.0f);
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_preview/0")->text, "Back to snapshot files");
+  const auto stale_back = f.screen.ui()->find("ai_agent_run_detail_preview/0")->on_click;
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_preview/0"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview/5"));
+  stale_back(); frame();
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_preview/0")->text, "Preview");
+  EXPECT_EQ(panel()->title(), "Snapshot files");
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_files/0"));
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  frame();
+  EXPECT_EQ(panel()->title(), "Linked tasks");
+  EXPECT_EQ(f.screen.ui()->scroll_of(f.screen.ui()->find("ai_agent_run_detail_tasks")->id), tasks_position);
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/0")->text, "View files · Row 3 · simulate evil line");
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_close")); frame();
+  EXPECT_EQ(panel(), nullptr);
+  EXPECT_EQ(f.screen.ui()->focused(), id(entry()));
+  EXPECT_EQ(clicks, 7);  // session, linked tasks, view files, preview, back, back, close
+  EXPECT_EQ(count("workflow_runs.get"), 1u);
+  EXPECT_EQ(count("snapshots.get"), 1u);
+  EXPECT_EQ(count("snapshots.resolve"), 1u);
+  EXPECT_EQ(count("snapshots.verify"), 0u);
+  EXPECT_EQ(f.screen.ui()->scroll_of(f.screen.ui()->find("ai_agent_timeline")->id), reading);
+  EXPECT_EQ(io::get_string(agent().view(), "chain_sha256"), chain);
+  EXPECT_EQ(io::get_int(agent().view(), "total", -1), total);
+  EXPECT_EQ(agent().selected(), "session-a");
+  EXPECT_EQ(state().project()->revision, revision);
+  EXPECT_EQ(state().discussion().exchange_id(), exchange);
+  EXPECT_EQ(f.screen.arrangement(), layout);
+  EXPECT_EQ(f.shell->store().viewer().save_workspace_state(), viewer);
+  EXPECT_EQ(f.shell->store().viewer().camera_serial(), camera);
+  EXPECT_EQ(f.screen.ui()->find(agent_text)->string.value(), "Unsent agent words");
+  expect_no_saved_file_state(captured);
+  expect_no_agent_actions();
+}
+
+TEST_F(NativeAgentRunDetailUI, KeyboardFocusReturnsToTheExactEntryAndFileAfterEachBack)
+{
+  f.drv->ctx.rect = {0, 0, 1600, 1100};
+  produce();
+  ASSERT_NO_FATAL_FAILURE(open_rail());
+  ASSERT_NO_FATAL_FAILURE(open_session_a());
+  ASSERT_NO_FATAL_FAILURE(click(entry()));
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  ASSERT_NO_FATAL_FAILURE(tab_to("ai_agent_run_detail_files/1"));
+  const auto second = id("ai_agent_run_detail_files/1");
+  ASSERT_TRUE(f.drv->key(wm::Key::Enter)); frame();
+  // The files page's Back takes the place (and focus) of the entry that opened it.
+  EXPECT_EQ(f.screen.ui()->focused(), second);
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/1")->text, "Back to linked tasks");
+  ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview/0"));
+  ASSERT_NO_FATAL_FAILURE(tab_to("ai_agent_run_detail_preview/0"));
+  const auto file = id("ai_agent_run_detail_preview/0");
+  ASSERT_TRUE(f.drv->key(wm::Key::Enter)); frame();
+  EXPECT_EQ(f.screen.ui()->focused(), file);
+  ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview_text"));
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_preview/0")->text, "Back to snapshot files");
+  ASSERT_TRUE(f.drv->key(wm::Key::Enter)); frame();  // Back to the list: focus on the same file's Preview
+  ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview/0"));
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_preview/0")->text, "Preview");
+  EXPECT_EQ(f.screen.ui()->focused(), file);
+  ASSERT_NO_FATAL_FAILURE(tab_to("ai_agent_run_detail_files/1"));
+  ASSERT_TRUE(f.drv->key(wm::Key::Enter)); frame();  // Back to the tasks: focus on the same entry
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/1")->text, "View files · Row 7 · collect");
+  EXPECT_EQ(f.screen.ui()->focused(), second);
+  // Esc from the files page closes the whole panel and returns to the card's entry.
+  ASSERT_TRUE(f.drv->key(wm::Key::Enter)); frame();
+  ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview/0"));
+  ASSERT_TRUE(f.drv->key(wm::Key::Esc)); frame(); frame();
+  EXPECT_EQ(panel(), nullptr);
+  EXPECT_EQ(f.screen.ui()->focused(), id(entry()));
+  EXPECT_EQ(count("snapshots.get"), 2u);
+  EXPECT_EQ(count("snapshots.resolve"), 1u);
+  expect_no_agent_actions();
+}
+
+TEST_F(NativeAgentRunDetailUI, ReselectingTheSessionDropsAnOpenPreviewAndCloseReturnsToTheCard)
+{
+  produce();
+  ASSERT_NO_FATAL_FAILURE(open_rail());
+  ASSERT_NO_FATAL_FAILURE(open_session_a());
+  ASSERT_NO_FATAL_FAILURE(click(entry()));
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_files/0"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview/2"));
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_preview/2"));  // binary.out: not UTF-8
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return has_label("This file cannot be previewed as UTF-8 text."); }, 30));
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_preview_text"), nullptr);
+  ASSERT_TRUE(agent().select_history_session("session-b"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return io::get_string(agent().view().value("session", Json::object()), "id") == "session-b"; }));
+  EXPECT_EQ(panel(), nullptr);
+  ASSERT_TRUE(agent().select_history_session("session-a"));
+  ASSERT_NO_FATAL_FAILURE(wait_for(entry()));
+  frame();
+  EXPECT_EQ(panel(), nullptr);  // returning neither reopens nor reads again
+  // Close from the preview page goes straight back to the card's entry.
+  ASSERT_NO_FATAL_FAILURE(click(entry()));
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_files/0"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview/5"));
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_preview/5"));  // empty.txt
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return has_label("Empty file"); }, 30));
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_close")); frame();
+  EXPECT_EQ(panel(), nullptr);
+  EXPECT_EQ(f.screen.ui()->focused(), id(entry()));
+  EXPECT_EQ(count("workflow_runs.get"), 2u);
+  EXPECT_EQ(count("snapshots.get"), 2u);
+  EXPECT_EQ(count("snapshots.resolve"), 2u);
+  expect_no_agent_actions();
+}
+
 class NativeAgentRunDetailNarrowUI : public NativeAgentRunDetailUI {
  protected:
   NativeAgentRunDetailNarrowUI() : NativeAgentRunDetailUI("zh_CN", 680, 1000) {}
@@ -1174,6 +1780,108 @@ TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseWindowOpensABottomSheetFromHis
   EXPECT_EQ(count("workflow_runs.get"), 1u);
   EXPECT_EQ(f.screen.arrangement(), layout);
   EXPECT_EQ(f.shell->store().viewer().save_workspace_state(), viewer);
+  expect_no_agent_actions();
+}
+
+TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseBottomSheetPreviewsAFileInFiveClicksAndEscReturnsToTheCard)
+{
+  const auto captured = produce();
+  ASSERT_NO_FATAL_FAILURE(open_rail("workbench_history"));
+  const auto layout = f.screen.arrangement();
+  const auto viewer = f.shell->store().viewer().save_workspace_state();
+  clicks = 0;
+  ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+  std::string session;
+  loop.pump_until([&] {
+    frame();
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &candidate : block->widgets()) {
+        if (candidate.type == ui::WidgetType::MenuItem && candidate.enabled && candidate.text.ends_with("session-a")) {
+          session = candidate.key;
+        }
+      }
+    }
+    return !session.empty();
+  }, 15);
+  ASSERT_FALSE(session.empty());
+  ASSERT_NO_FATAL_FAILURE(click(session));
+  f.screen.run_deferred();
+  ASSERT_NO_FATAL_FAILURE(wait_for(entry()));
+  ASSERT_NO_FATAL_FAILURE(click(entry()));
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/0")->text, "查看文件 · 第 3 行 · simulate evil line");
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_files/0"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview/0"));
+  const auto *modal = panel(); ASSERT_NE(modal, nullptr);
+  EXPECT_EQ(modal->title(), "快照文件");
+  EXPECT_FLOAT_EQ(modal->frame().x, 0.0f);  // the same full-width bottom sheet
+  EXPECT_FLOAT_EQ(modal->frame().w, 680.0f);
+  EXPECT_FLOAT_EQ(modal->frame().y1(), 1000.0f);
+  EXPECT_GE(modal->frame().y, 0.0f);
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/0")->text, "返回关联任务");
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_preview/0")->text, "预览");
+  EXPECT_TRUE(has_label("big · big.log · 307201 字节"));
+  EXPECT_TRUE(has_label("超过 256 KiB"));
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_run_detail_preview/0"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview_text"));
+  EXPECT_EQ(clicks, 5);  // history, session, linked tasks, view files, preview
+  modal = panel(); ASSERT_NE(modal, nullptr);
+  EXPECT_EQ(modal->title(), "文件预览");
+  EXPECT_FLOAT_EQ(modal->frame().x, 0.0f);
+  EXPECT_FLOAT_EQ(modal->frame().w, 680.0f);
+  EXPECT_FLOAT_EQ(modal->frame().y1(), 1000.0f);
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_preview/0")->text, "返回快照文件");
+  const auto *log = f.screen.ui()->find("ai_agent_run_detail_preview_text");
+  const auto &style = f.screen.ui()->style();
+  const float available = log->rect.w - 2 * style.text_margin - style.scrollbar - 2 * style.pixel;
+  for (size_t i = 0; i < log->log->line_count(); ++i) { EXPECT_LE(f.measurer.width(log->log->line(i), style.mono), available); }
+  EXPECT_NE(preview_text().find("<script>alert(1)</script>"), std::string::npos) << preview_text();
+  ASSERT_TRUE(f.drv->key(wm::Key::Esc)); frame(); frame();
+  EXPECT_EQ(panel(), nullptr);
+  EXPECT_EQ(f.screen.ui()->focused(), id(entry()));
+  EXPECT_EQ(count("workflow_runs.get"), 1u);
+  EXPECT_EQ(count("snapshots.get"), 1u);
+  EXPECT_EQ(count("snapshots.resolve"), 1u);
+  EXPECT_EQ(f.screen.arrangement(), layout);
+  EXPECT_EQ(f.shell->store().viewer().save_workspace_state(), viewer);
+  expect_no_saved_file_state(captured);
+  expect_no_agent_actions();
+}
+
+/** An older bridge without project.snapshots.resolve: the linked tasks stay as before, without file entries. */
+class NativeAgentRunFilesWithoutResolveUI : public NativeAgentRunDetailUI {
+  const char *capability_marker() const override { return "no_snapshot_resolve"; }
+};
+TEST_F(NativeAgentRunFilesWithoutResolveUI, LinkedTasksShowNoFileEntriesAndReadNoSnapshot)
+{
+  produce();
+  ASSERT_NO_FATAL_FAILURE(open_rail());
+  ASSERT_NO_FATAL_FAILURE(open_session_a());
+  ASSERT_NO_FATAL_FAILURE(click(entry()));
+  ASSERT_NO_FATAL_FAILURE(wait_ready());
+  EXPECT_NE(panel_text().find("Frozensnapshot"), std::string::npos);
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/0"), nullptr);
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/1"), nullptr);
+  EXPECT_EQ(count("snapshots.get"), 0u);
+  EXPECT_EQ(count("snapshots.resolve"), 0u);
+  expect_no_agent_actions();
+}
+
+class NativeAgentRunFilesWithoutGet : public NativeAgentRuns {
+  const char *capability_marker() const override { return "no_snapshot_get"; }
+};
+TEST_F(NativeAgentRunFilesWithoutGet, ADetailCannotListFilesWithoutTheSnapshotRead)
+{
+  marker("consumed");
+  produce();
+  select();
+  const auto card = consumed_item();
+  const auto ticket = ready_detail(card);
+  ASSERT_EQ(io::get_string(*agent().run_detail(ticket, card), "state"), "ready");
+  EXPECT_FALSE(agent().can_read_run_files(ticket, card));
+  EXPECT_FALSE(agent().read_run_files(ticket, card, 0));
+  EXPECT_EQ(agent().run_files(ticket, card), nullptr);
+  EXPECT_EQ(count("snapshots.get"), 0u);
   expect_no_agent_actions();
 }
 

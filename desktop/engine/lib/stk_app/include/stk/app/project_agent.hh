@@ -6,6 +6,8 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace stk::app {
 class AppStore;
@@ -21,6 +23,9 @@ struct AgentItem {
  * session waits for a person's decision (``Waiting``); its session runs, so a decision must wait (``Running``); an
  * agent made it but its session is not read yet (``Unknown``). */
 enum class AgentDraft { Unknown, None, Waiting, Running };
+
+/** The full frozen snapshot ID and (output name, record ID) pairs of one task of a linked-task detail. */
+struct AgentRunOutputs { std::string snapshot_id; std::vector<std::pair<std::string, std::string>> records; };
 
 /** Agent sessions of the open project (project.agent.*, format 13; docs/design/agent-harness.md): the planner's
  * route, the list of sessions, the selected session's steps, and who made a draft, message, request or context.
@@ -99,6 +104,26 @@ class ProjectAgent {
   const io::Json *run_detail(uint64_t ticket, const io::Json &item) const;
   /** Forget ``ticket``; its late reply is then dropped. */
   void close_run_detail(uint64_t ticket);
+  /** The ready detail of ``ticket`` may list its produced frozen snapshots' files: the service reads and resolves
+   * snapshots. Each task with a snapshot and output records is one files entry (its ``files_entry`` index). */
+  bool can_read_run_files(uint64_t ticket, const io::Json &item) const;
+  /** One project.snapshots.get for the exact snapshot of files entry ``entry`` (from the validated workflow reply),
+   * replacing an earlier list and preview of the ticket. Passive like read_run_detail; false when not sent. */
+  bool read_run_files(uint64_t ticket, const io::Json &item, size_t entry);
+  /** {state: reading | ready | unavailable | mismatch, entry, files: [{output, name, size, preview: text | large |
+   * format}], more}: only the entry's output records, each cross-checked with the manifest. Never an ID or path. */
+  const io::Json *run_files(uint64_t ticket, const io::Json &item) const;
+  /** Back to the tasks: forget the list and its preview (late replies are dropped). */
+  void close_run_files(uint64_t ticket);
+  /** One project.snapshots.resolve for listed file ``file`` when its manifest size and name allow a text preview
+   * (nothing is resolved, so nothing is hashed, otherwise). The reply must name the manifest's snapshot, record,
+   * digest and size; the frozen object is read once with no final link, and its bytes must hash to the manifest. */
+  bool read_run_file_preview(uint64_t ticket, const io::Json &item, size_t file);
+  /** {state: reading | ready | unavailable | mismatch | not_text, file, name, text}: ``text`` is the complete UTF-8
+   * content with controls, bidirectional and invisible format characters shown as \u{hex} (CRLF is one line end). */
+  const io::Json *run_file_preview(uint64_t ticket, const io::Json &item) const;
+  /** Back to the list (late replies are dropped). */
+  void close_run_file_preview(uint64_t ticket);
   /** Answer the message that waits (after a refusal, or when a run was lost). */
   bool start();
   bool cancel();
@@ -158,7 +183,19 @@ class ProjectAgent {
   // Transient only: never restored as execution permission or a reviewed plan.
   std::map<std::string, io::Json> run_plans_, run_actions_;
   // Linked-task details by ticket: the exact card that asked and its projection (never a full plan or a path).
-  struct RunDetail { io::Json item, view; uint64_t project_scope; };
+  // ``produced`` keeps the full snapshot and record IDs of each files entry privately (not in ``view``); a list
+  // keeps each listed record's manifest identity. ``step`` changes with every file read or back, fencing replies.
+  struct RunFile { std::string record_id, name, sha256; int64_t size = -1; bool text = false; };
+  struct RunDetail {
+    io::Json item, view;
+    uint64_t project_scope;
+    std::vector<AgentRunOutputs> produced;
+    io::Json files, preview;  // null while not shown
+    size_t entry = 0;
+    std::vector<RunFile> listed;
+    uint64_t step = 0;
+  };
+  bool run_files_current(uint64_t ticket, const io::Json &item) const;
   std::map<uint64_t, RunDetail> run_details_;
   uint64_t run_detail_ticket_ = 0;  // never repeats within a controller, so a closed ticket cannot come back
   struct Attempt { std::string text, session_id, turn_id; bool create = false; } attempt_;

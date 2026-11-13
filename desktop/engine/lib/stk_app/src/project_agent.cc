@@ -4,10 +4,14 @@
 #include "stk/app/app_store.hh"
 #include "stk/app/jobs_spec.hh"
 #include "stk/app/project_state.hh"
+#include "stk/core/mmap.hh"
+#include "stk/core/paths.hh"
+#include "stk/core/sha256.hh"
 #include "stk/core/utf8.hh"
 #include "stk/ui/utf8.hh"
 
 #include <algorithm>
+#include <cctype>
 #include <limits>
 #include <stdexcept>
 
@@ -80,9 +84,72 @@ std::string relative_directory(const Json &value)
   return plain(value, 120);
 }
 
+// File preview limits, as the Web conversation preview: small UTF-8 text by manifest size and file name only.
+constexpr int64_t kPreviewBytes = 256 * 1024;
+constexpr size_t kFileEntries = 8;
+
+/** A project UUID (projectUuid of the Bridge schema): the only snapshot and record IDs ever sent. */
+bool project_uuid(const Json &value)
+{
+  if (!value.is_string()) { return false; }
+  const auto &text = value.get_ref<const std::string &>();
+  if (text.size() != 36) { return false; }
+  for (size_t i = 0; i < text.size(); ++i) {
+    const char c = text[i];
+    if (i == 8 || i == 13 || i == 18 || i == 23) { if (c != '-') { return false; } }
+    else if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) { return false; }
+  }
+  return true;
+}
+
+bool sha256_hex(const Json &value)
+{
+  return value.is_string() && core::is_sha256_hex(value.get_ref<const std::string &>());
+}
+
+/** The Web preview's text formats, by the frozen file's own name (case-insensitive). */
+bool text_format(const std::string &name)
+{
+  const auto dot = name.rfind('.');
+  if (dot == std::string::npos || dot == 0) { return false; }
+  std::string extension = name.substr(dot + 1);
+  std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) { return std::tolower(c); });
+  for (const auto *known : {"txt", "log", "out", "err", "csv", "tsv", "json", "md"}) {
+    if (extension == known) { return true; }
+  }
+  return false;
+}
+
+/** Valid UTF-8 shown literally in a log view: CRLF is one line end; other controls (a lone CR, ESC, DEL, C1),
+ * bidirectional and invisible format characters become \u{hex}, so none can rewind, recolor or reorder a line. */
+std::string literal_text(std::string_view text)
+{
+  std::string out;
+  out.reserve(text.size());
+  for (size_t pos = 0; pos < text.size();) {
+    const auto decoded = core::utf8::decode(text, pos);
+    const auto cp = decoded.code_point;
+    const size_t length = std::max<size_t>(decoded.length, 1);
+    if (cp == '\r' && pos + 1 < text.size() && text[pos + 1] == '\n') { out += '\n'; pos += 2; continue; }
+    const bool hidden = (cp < 0x20 && cp != '\n' && cp != '\t') || (cp >= 0x7f && cp <= 0x9f) || cp == 0xad ||
+        cp == 0x61c || cp == 0x180e || (cp >= 0x200b && cp <= 0x200f) || (cp >= 0x2028 && cp <= 0x202e) ||
+        (cp >= 0x2060 && cp <= 0x206f) || cp == 0xfeff || (cp >= 0xfff9 && cp <= 0xfffb);
+    if (hidden) {
+      static const char *digits = "0123456789abcdef";
+      std::string hex;
+      for (auto value = uint32_t(cp); value || hex.empty(); value >>= 4) { hex.insert(hex.begin(), digits[value & 15]); }
+      out += "\\u{" + hex + "}";
+    }
+    else { out.append(text.substr(pos, length)); }
+    pos += length;
+  }
+  return out;
+}
+
 /** The bounded projection of project.workflow_runs.get for the card ``item`` (design 4.3). Throws on a reply
- * that is not this card's run; a different frozen plan keeps only the mismatch. */
-Json run_detail_projection(const Json &result, const Json &item)
+ * that is not this card's run; a different frozen plan keeps only the mismatch. ``outputs`` receives the full
+ * snapshot and record IDs of each task that produced both (its ``files_entry``), never part of the projection. */
+Json run_detail_projection(const Json &result, const Json &item, std::vector<AgentRunOutputs> &outputs)
 {
   const auto &run = member(result, "run");
   if (!run.is_object() || io::get_string(run, "id") != io::get_string(item, "run_id") ||
@@ -131,6 +198,16 @@ Json run_detail_projection(const Json &result, const Json &item)
       }
       if (const auto analysis = prefix(member(produced, "analysis_run_id")); !analysis.empty()) {
         out["analysis_run_id"] = analysis;
+      }
+      // A files entry only for the exact snapshot and record IDs of this validated reply, all of them well formed.
+      const auto &files = member(produced, "files");
+      if (outputs.size() < kFileEntries && project_uuid(member(produced, "snapshot_id")) && files.is_object() &&
+          !files.empty() && files.size() <= 100 &&
+          std::all_of(files.begin(), files.end(), [](const Json &record) { return project_uuid(record); })) {
+        AgentRunOutputs entry{produced.at("snapshot_id").get<std::string>(), {}};
+        for (const auto &[name, record] : files.items()) { entry.records.emplace_back(name, record.get<std::string>()); }
+        out["files_entry"] = outputs.size();
+        outputs.push_back(std::move(entry));
       }
       if (!out.empty()) { line["produced"] = std::move(out); }
     }
@@ -559,8 +636,8 @@ uint64_t ProjectAgent::read_run_detail(const Json &item)
         !can_read_run_detail(found->second.item)) { run_details_.erase(found); }
     else if (!result.ok()) { found->second.view = {{"state", "unavailable"}}; }  // the remote message is not shown
     else {
-      try { found->second.view = run_detail_projection(result.value(), found->second.item); }
-      catch (const std::exception &) { found->second.view = {{"state", "unavailable"}}; }
+      try { found->second.view = run_detail_projection(result.value(), found->second.item, found->second.produced); }
+      catch (const std::exception &) { found->second.view = {{"state", "unavailable"}}; found->second.produced.clear(); }
     }
     ++version_;
     store_.changed();
@@ -583,6 +660,188 @@ const Json *ProjectAgent::run_detail(const uint64_t ticket, const Json &item) co
 void ProjectAgent::close_run_detail(const uint64_t ticket)
 {
   if (run_details_.erase(ticket)) { ++version_; store_.changed(); }
+}
+
+bool ProjectAgent::can_read_run_files(const uint64_t ticket, const Json &item) const
+{
+  const auto *detail = run_detail(ticket, item);
+  const auto hello = store_.bridge()->hello_info();
+  return detail && io::get_string(*detail, "state") == "ready" && hello &&
+      hello->has_method("project.snapshots.get") && hello->has_method("project.snapshots.resolve");
+}
+
+bool ProjectAgent::run_files_current(const uint64_t ticket, const Json &item) const
+{
+  return can_read_run_files(ticket, item) && !run_details_.at(ticket).files.is_null();
+}
+
+bool ProjectAgent::read_run_files(const uint64_t ticket, const Json &item, const size_t entry)
+{
+  if (project_.busy() || !can_read_run_files(ticket, item)) { return false; }
+  auto &detail = run_details_.at(ticket);
+  if (entry >= detail.produced.size()) { return false; }
+  const auto step = ++detail.step;
+  detail.entry = entry;
+  detail.files = {{"state", "reading"}, {"entry", entry}};
+  detail.preview = nullptr;
+  detail.listed.clear();
+  const auto snapshot_id = detail.produced[entry].snapshot_id;
+  const auto handle = project_.project()->handle;
+  const std::weak_ptr<bool> weak = alive_;
+  const auto epoch = epoch_;
+  const auto selection = selection_;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  options.timeout_s = 15;
+  store_.bridge()->call("project.snapshots.get", {{"handle", handle}, {"snapshot_id", snapshot_id}}, options)
+      .then([this, weak, epoch, selection, handle, ticket, step, snapshot_id](bridge::Result<Json> result) {
+    if (!weak.lock() || epoch != epoch_ || selection != selection_ || !project_.project() ||
+        project_.project()->handle != handle) { return; }
+    const auto found = run_details_.find(ticket);
+    if (found == run_details_.end() || found->second.step != step) { return; }  // closed, back or another list
+    auto &detail = found->second;
+    if (!run_files_current(ticket, detail.item)) { detail.files = nullptr; }
+    else if (!result.ok()) { detail.files = {{"state", "unavailable"}, {"entry", detail.entry}}; }
+    else {
+      // The exact snapshot asked for, a well-formed manifest, and every output record of the task in it.
+      const auto &snapshot = member(result.value(), "snapshot");
+      const auto &manifest = member(snapshot, "manifest");
+      const auto &files = member(manifest, "files");
+      std::map<std::string, const Json *> by_record;
+      bool valid = io::get_string(snapshot, "id") == snapshot_id && io::get_string(snapshot, "kind") == "files" &&
+          io::get_string(manifest, "kind") == "files" && files.is_array() && !files.empty() && files.size() <= 100;
+      for (size_t i = 0; valid && i < files.size(); ++i) {
+        const auto &file = files.at(i);
+        valid = project_uuid(member(file, "record_id")) && member(file, "name").is_string() &&
+            sha256_hex(member(file, "sha256")) && member(file, "size").is_number_integer() &&
+            file.at("size").get<int64_t>() >= 0 &&
+            by_record.emplace(file.at("record_id").get<std::string>(), &file).second;
+      }
+      const auto &records = detail.produced[detail.entry].records;
+      if (valid && std::any_of(records.begin(), records.end(), [&](const auto &record) {
+            return !by_record.count(record.second);
+          })) {
+        detail.files = {{"state", "mismatch"}, {"entry", detail.entry}};
+      }
+      else if (!valid) { detail.files = {{"state", "unavailable"}, {"entry", detail.entry}}; }
+      else {
+        Json listed = Json::array();
+        for (size_t i = 0; i < std::min(records.size(), kDetailFiles); ++i) {
+          const auto &file = *by_record.at(records[i].second);
+          RunFile entry{records[i].second, file.at("name").get<std::string>(), file.at("sha256").get<std::string>(),
+                        file.at("size").get<int64_t>(), false};
+          const bool format = text_format(entry.name);
+          entry.text = format && entry.size <= kPreviewBytes;
+          listed.push_back({{"output", plain(Json(records[i].first), 80)}, {"name", plain(Json(entry.name), 80)},
+                            {"size", entry.size},
+                            {"preview", entry.text ? "text" : (format ? "large" : "format")}});
+          detail.listed.push_back(std::move(entry));
+        }
+        detail.files = {{"state", "ready"}, {"entry", detail.entry}, {"files", std::move(listed)},
+                        {"more", records.size() - std::min(records.size(), kDetailFiles)}};
+      }
+    }
+    ++version_;
+    store_.changed();
+  });
+  ++version_;
+  store_.changed();
+  return true;
+}
+
+const Json *ProjectAgent::run_files(const uint64_t ticket, const Json &item) const
+{
+  return run_files_current(ticket, item) ? &run_details_.at(ticket).files : nullptr;
+}
+
+void ProjectAgent::close_run_files(const uint64_t ticket)
+{
+  const auto found = run_details_.find(ticket);
+  if (found == run_details_.end() || found->second.files.is_null()) { return; }
+  ++found->second.step;
+  found->second.files = found->second.preview = nullptr;
+  found->second.listed.clear();
+  ++version_;
+  store_.changed();
+}
+
+bool ProjectAgent::read_run_file_preview(const uint64_t ticket, const Json &item, const size_t file)
+{
+  if (project_.busy() || !run_files_current(ticket, item)) { return false; }
+  auto &detail = run_details_.at(ticket);
+  // Size and format come from the validated manifest: an unsupported or large file is never resolved (hashed).
+  if (io::get_string(detail.files, "state") != "ready" || file >= detail.listed.size() ||
+      !detail.listed[file].text) { return false; }
+  const auto step = ++detail.step;
+  const auto listed = detail.listed[file];
+  const auto snapshot_id = detail.produced[detail.entry].snapshot_id;
+  const auto name = detail.files.at("files").at(file).at("name");
+  detail.preview = {{"state", "reading"}, {"file", file}, {"name", name}};
+  const auto handle = project_.project()->handle;
+  const std::weak_ptr<bool> weak = alive_;
+  const auto epoch = epoch_;
+  const auto selection = selection_;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  options.timeout_s = 15;
+  store_.bridge()->call("project.snapshots.resolve",
+                        {{"handle", handle}, {"snapshot_id", snapshot_id}, {"record_id", listed.record_id}}, options)
+      .then([this, weak, epoch, selection, handle, ticket, step, snapshot_id, listed, file, name](
+                bridge::Result<Json> result) {
+    if (!weak.lock() || epoch != epoch_ || selection != selection_ || !project_.project() ||
+        project_.project()->handle != handle) { return; }
+    const auto found = run_details_.find(ticket);
+    if (found == run_details_.end() || found->second.step != step) { return; }  // closed, back or another file
+    auto &detail = found->second;
+    if (!run_files_current(ticket, detail.item)) { detail.files = detail.preview = nullptr; detail.listed.clear(); }
+    else {
+      Json view = {{"state", "unavailable"}, {"file", file}, {"name", name}};  // never the message or a path
+      if (result.ok()) {
+        const auto &resolved = result.value();
+        const auto &size = member(resolved, "size");
+        if (io::get_string(resolved, "snapshot_id") != snapshot_id ||
+            io::get_string(resolved, "record_id") != listed.record_id ||
+            io::get_string(resolved, "sha256") != listed.sha256 || io::get_string(resolved, "name") != listed.name ||
+            !size.is_number_integer() || size.get<int64_t>() != listed.size) {
+          view["state"] = "mismatch";
+        }
+        else if (const auto path = io::get_string(resolved, "path"); !path.empty() && listed.size <= kPreviewBytes) {
+          try {
+            // The existing bounded reader: one regular file, no final link, exactly the manifest's size.
+            const auto bytes = core::SharedBytes::read_exact_file(core::path_from_utf8(path), size_t(listed.size));
+            const std::string_view text(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+            if (core::Sha256::hex(bytes.data(), bytes.size()) != listed.sha256) { view["state"] = "mismatch"; }
+            else if (!core::utf8::is_valid(text)) { view["state"] = "not_text"; }
+            else { view["state"] = "ready"; view["text"] = literal_text(text); }
+          }
+          catch (const std::exception &) {}  // FileError names the path: only "unavailable" is kept
+        }
+      }
+      detail.preview = std::move(view);
+    }
+    ++version_;
+    store_.changed();
+  });
+  ++version_;
+  store_.changed();
+  return true;
+}
+
+const Json *ProjectAgent::run_file_preview(const uint64_t ticket, const Json &item) const
+{
+  if (!run_files_current(ticket, item)) { return nullptr; }
+  const auto &preview = run_details_.at(ticket).preview;
+  return preview.is_null() ? nullptr : &preview;
+}
+
+void ProjectAgent::close_run_file_preview(const uint64_t ticket)
+{
+  const auto found = run_details_.find(ticket);
+  if (found == run_details_.end() || found->second.preview.is_null()) { return; }
+  ++found->second.step;
+  found->second.preview = nullptr;
+  ++version_;
+  store_.changed();
 }
 
 bool ProjectAgent::start()
