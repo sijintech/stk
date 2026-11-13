@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-13 23:27 UTC · Web 全量通过，保存副本合成候选通过 Linux
+
+Web 最终生产构建和全量 Playwright 403/403，零跳过。较早一轮在并行构建负载下出现三项定期任务读取误判与两项 Viewer 截图超时，修订与复验后通过。最新消息定向测试用静态偏移验证 Tab 和 Enter 的焦点顺序。真实 Hub 回执另用实际 PageUp、Shift+Tab 和 Enter，宽窄窗均回到末尾且保持草稿。证据 `root-delivery-20261113-193/{web-exact.xml,web-recheck.xml,live-follow-acceptance/browser-receipt.json,live-follow-acceptance/hub-receipt.json}`。
+
+隔离保存候选 `adfd87ac1534da133dc19fef8383ca4b49a165b7` 使用含比例字体和 Markdown 测试修订的基线，重新编译通过。文件暂存 20/20、回退 9/9、原生会话与项目草稿 52/52。Linux X11 从已打开合成项目工作台起步。英文 1600×1100 四次点击到测试选择器，显式选择新名称后保存。中文 680×1000 五次点击到输入字段，键入路径后 Tab 与 Enter 确认。两窗分别合测取消、已有名称、保存，快照解析累计零、零、一次。60 字节副本摘要与冻结内容一致，原数据与修订一致。macOS ACL 与 Windows 绑定目录重命名仍待目标平台验证。证据 `root-delivery-20261113-193/{save-platform-unit.xml,save-platform-fallback.xml,save-platform-project-final.xml,native-save-chooser-platform-head/receipt.json,native-save-fallback-platform-head/receipt.json}`。
+
+远端 `834f7bd4` Runtime 13/13 已完成。Desktop Linux 三项通过，macOS 已进入 WKWebView 原生验收，Windows CPU 仍运行，待整轮终态后推送。Claude 118 在独立 worktree 继续桌面输入卡片。PR #53 的对应主线生命周期用例 35/35，原 PR 提案与当前发布契约的忙状态语义不同，沿用当前契约。PR #54 仅旧交接。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43522208408) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43522208394)
+
 ## 2026-11-13 23:19 UTC · 保存会话一键回到最新消息
 
 本地 main `9588193c1d3849e9cde0ebb9635ef9ccd5d90ff7` 让 Web 已保存会话在最后一条消息未显示时提供「跟随最新」。首次载入历史仍从原阅读位置开始。Chromium 与真实 Hub 固定起点为已打开 60 条记录的合成会话、正文在顶部、输入框有未发送草稿。1440×900 和 390×844 各一次点击到末尾，焦点在正文。按 PageUp 后，Shift+Tab、Enter 可再次回到末尾。两轮测量均零 Hub 请求、模型调用与草稿变化，32 条会话记录摘要相同。首次实现抢占了输入框前一个 Tab 位置，已把按钮移到正文之前。真实窄窗还复现快速键盘返回时 PageUp 动画覆盖跳转，最终用即时滚动处理。生产构建通过，定向 10/10。全量复验结果单独记录。证据 `root-delivery-20261113-193/{web-before.log,web-instant-build.log,web-recheck.xml,live-follow-acceptance/browser-receipt.json,live-follow-acceptance/hub-receipt.json}`。
