@@ -1,5 +1,9 @@
 # STK 当前交接
 
+## 2026-11-13 21:00 UTC · 会话搜索最终 Bridge 投影验收
+
+`d005cce1dbb76ec1b8526e8f903f97d57531273f` 将 SQLite 请求读取限定为标题绑定所需的身份列，新增助手回复独有词的反证。最终 Bridge、脚本、智能体、请求、归档和项目搜索联跑 177/177。远端到该提交的 12 个提交执行 gitleaks，零发现。证据 `root-delivery-20261113-188/{bridge-release.xml,combined-scan.log}`。远端 Desktop `43500121086` 的 Linux 三项、macOS CPU 已通过，macOS Metal 及 Windows CPU 正在运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43500121086)
+
 ## 2026-11-13 20:58 UTC · 搜索项目隔离、旧 Bridge 和全量回归
 
 本地 main `ca63ea02915b0255b332b1c345e4c0a070f19809` 核对两个同时有效的项目句柄，另一项目的查询不返回当前项目的匹配，定向 1/1。`fab1ab230cf05ae5404e7665bc101fc5402e067a` 用真实 Bridge 去掉可选搜索方法，验证桌面仍显示原近期历史和分页入口，搜索入口隐藏，联合定向 2/2。Linux 项目标签全量 1565/1565，新增旧 Bridge 用例单独通过。合成 1000 条问答的本机查询测了各三次，唯一旧标题约 100–111 毫秒，广泛匹配的首批 20 条约 100 毫秒，实际合作方规模的时延待验证。证据 `root-delivery-20261113-188/{project-full.xml,bridge-scope.xml,legacy.xml,search-scale.log}`。远端 Desktop 仍运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43500121086)
