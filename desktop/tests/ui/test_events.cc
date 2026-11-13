@@ -923,6 +923,70 @@ TEST(LogView, StaticTextStartsAtTheTopAndScrollsWithoutAFollowControl)
   EXPECT_FLOAT_EQ(position.offset, 0.0f);
 }
 
+TEST(LogView, ClearingMonoDrawsAndScrollsWithTheRegularFontAndKeepsTheDefaultMonospace)
+{
+  for (const float scale : {1.0f, 2.0f}) {
+    SCOPED_TRACE(scale);
+    Harness h(scale);
+    h.window = {800 * scale, 600 * scale};
+    LogBuffer text, terminal;
+    LogViewPosition position;
+    for (int i = 0; i < 50; ++i) {
+      text.append("Message " + std::to_string(i) + "\n");
+      terminal.append("$ step " + std::to_string(i) + "\n");
+    }
+    h.ui = [&](Context &ctx) {
+      Layout &l = ctx.block("r", {0, 0, h.window.x, h.window.y}).layout();
+      l.log_view("text", text, 5.0f, &position).mono = false;
+      l.log_view("terminal", terminal, 5.0f);
+    };
+    h.frame();
+    const Style &st = h.ctx->style();
+    EXPECT_FALSE(h.w("text").mono);
+    EXPECT_TRUE(h.w("terminal").mono);
+    const auto fonts = [&](std::string_view prefix) {
+      std::vector<const DrawCmd *> found;
+      for (const DrawCmd &c : h.ctx->draw_list().cmds) {
+        if (c.type == CmdType::Text && c.text.starts_with(prefix)) { found.push_back(&c); }
+      }
+      return found;
+    };
+    const FontMetrics regular = h.measurer.metrics(st.font);
+    const float row = std::round(st.font.size_px * 1.4f), pad = std::round(0.2f * st.unit);
+    const Rect body = h.w("text").rect.inset(st.pixel, st.pixel);
+    const float tail = 50 * row + 2 * pad - body.h;
+    ASSERT_FALSE(fonts("Message ").empty());
+    for (const DrawCmd *c : fonts("Message ")) {
+      EXPECT_EQ(c->font.kind, FontKind::Regular) << c->text;
+      EXPECT_FLOAT_EQ(c->font.size_px, st.font.size_px);
+      // The baseline is centred in the row with the regular font's own metrics.
+      const int line = std::stoi(c->text.substr(8));
+      const float top = std::round(body.y + pad + float(line) * row - tail);
+      EXPECT_FLOAT_EQ(c->pos.y, std::round(top + row * 0.5f + (regular.ascent - regular.descent) * 0.5f)) << c->text;
+    }
+    ASSERT_FALSE(fonts("$ step ").empty());
+    for (const DrawCmd *c : fonts("$ step ")) { EXPECT_EQ(c->font.kind, FontKind::Mono) << c->text; }
+
+    // The scroll extent, keys and saved position share the regular row height.
+    const WidgetId id = h.w("text").id;
+    EXPECT_TRUE(position.follow);
+    EXPECT_NEAR(h.ctx->scroll_of(id), tail, 0.5f);
+    ASSERT_TRUE(h.ctx->focus_widget(id));
+    h.key(Key::Home);
+    EXPECT_FLOAT_EQ(position.offset, 0.0f);
+    h.key(Key::Down);
+    h.key(Key::Down);
+    EXPECT_FLOAT_EQ(position.offset, 2 * row);
+    EXPECT_FALSE(position.follow);
+    h.key(Key::End);
+    EXPECT_NEAR(position.offset, tail, 0.5f);
+    EXPECT_TRUE(position.follow);
+    text.append("Message 50\n");
+    h.frame();
+    EXPECT_NEAR(position.offset, tail + row, 0.5f) << "follows the latest line";
+  }
+}
+
 TEST(Modal, TrapsFocusAndInput)
 {
   Harness h;

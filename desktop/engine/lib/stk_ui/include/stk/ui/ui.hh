@@ -401,7 +401,9 @@ class Layout {
   Widget &progress(float fraction, std::string_view text = {});
   Widget &virtual_list(std::string_view key, ListSpec spec);
   /** An optional caller-owned position must remain valid while this frame receives input.
-   * Static text can turn off following while retaining scroll and keyboard navigation. */
+   * Static text can turn off following while retaining scroll and keyboard navigation.
+   * Lines draw with the monospace font. Clear Widget::mono on the result to draw, size rows and
+   * scroll with the regular UI font; the caller then wraps lines with that font. */
   Widget &log_view(std::string_view key, const LogBuffer &log, float height_units = 8.0f,
                    LogViewPosition *position = nullptr, bool can_follow = true);
   Widget &table(std::string_view key, TableSpec spec);

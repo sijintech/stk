@@ -698,7 +698,8 @@ void Context::draw_widget(const Widget &w)
         const float y = std::round(body.y + lpad + float(i) * row_h - scroll);
         const Rect row{body.x, y, body.w - sbw, row_h};
         if (log) {
-          draw_.text(std::string(w.log->line(size_t(i))), {row.x + st.text_margin, baseline(row)}, st.mono,
+          // The widget's font: monospace by default, the regular UI font when the caller cleared mono.
+          draw_.text(std::string(w.log->line(size_t(i))), {row.x + st.text_margin, baseline(row)}, font,
                      th.tooltip.text);
           continue;
         }

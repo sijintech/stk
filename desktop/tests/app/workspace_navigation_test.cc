@@ -1644,6 +1644,46 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
     const auto *view = widget("ai_transcript");
     return view ? f.screen.ui()->scroll_of(view->id) : -1.0f;
   };
+  // The focused transcript wraps and draws with the regular UI font. Roles stay on their own lines, and
+  // the reply keeps its words and hard line breaks.
+  const auto expect_proportional_transcript = [&](const ui::Widget &transcript, const ui::Context &ui) {
+    const auto &style = ui.style();
+    const auto &log = *transcript.log;
+    EXPECT_FALSE(transcript.mono);
+    // A line wrapped for the monospace font never exceeds this bound (the wrap width, plus the
+    // panel margins and scrollbar the column reserves). Wrapped for the regular font, some lines do.
+    const float mono_bound = transcript.rect.w + 2 * style.panel_margin + style.scrollbar - 4 * style.unit;
+    float widest_mono = 0.0f;
+    std::string paragraph;
+    size_t assistant = 0, rows = 0;
+    for (size_t line = 0; line < log.line_count(); ++line) {
+      const auto text = log.line(line);
+      EXPECT_LE(ui.measurer().width(text, style.font), transcript.rect.w - 2 * style.text_margin) << text;
+      widest_mono = std::max(widest_mono, ui.measurer().width(text, style.mono));
+      if (text == f.shell->store().tr("ai.assistant")) { assistant = line; }
+      else if (text.starts_with("Saved reply row ")) {
+        EXPECT_EQ(text, "Saved reply row " + std::to_string(rows)); ++rows;
+      }
+      else if (assistant > 0 && rows == 0) { paragraph += std::string(text) + " "; }
+    }
+    ASSERT_GT(log.line_count(), 2u);
+    EXPECT_EQ(log.line(0), f.shell->store().tr("ai.you"));
+    EXPECT_EQ(log.line(1), "Read this saved question");
+    EXPECT_EQ(log.line(2), "");
+    EXPECT_EQ(assistant, 3u);
+    EXPECT_EQ(rows, 90u);
+    std::string expected;
+    for (int word = 0; word < 32; ++word) { expected += "Conversation wrapping "; }
+    EXPECT_EQ(paragraph, expected);
+    EXPECT_GT(widest_mono, mono_bound) << "the transcript was wrapped for the monospace font";
+    size_t drawn = 0;
+    for (const auto &command : ui.draw_list().cmds) {
+      if (command.type != ui::CmdType::Text || !transcript.rect.contains(command.pos)) { continue; }
+      EXPECT_EQ(command.font.kind, ui::FontKind::Regular) << command.text;
+      ++drawn;
+    }
+    EXPECT_GT(drawn, 0u);
+  };
   const auto expect_column = [&] {
     const auto *transcript = widget("ai_transcript");
     const auto *input = widget(draft);
@@ -1665,9 +1705,7 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
     EXPECT_EQ(prepare->rect.x1(), input->rect.x1());
     EXPECT_LT(prepare->rect.w, input->rect.w * 0.5f);
     ASSERT_NE(transcript->log, nullptr);
-    for (size_t line = 0; line < transcript->log->line_count(); ++line) {
-      EXPECT_LE(ui.measurer().width(transcript->log->line(line), style.mono), transcript->rect.w - 2 * style.text_margin);
-    }
+    ASSERT_NO_FATAL_FAILURE(expect_proportional_transcript(*transcript, ui));
   };
 
   f.drv->ctx.rect.xmax = 1600;
@@ -1794,6 +1832,51 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
   f.drv->frame();
   ASSERT_NO_FATAL_FAILURE(expect_column());
   EXPECT_EQ(widget(draft)->string.value(), "Unsent question ab");
+
+  // The split view keeps its monospace transcript. Returning wraps for the regular font again.
+  ASSERT_NO_FATAL_FAILURE(click("workbench_split"));
+  ASSERT_EQ(f.screen.maximized(), nullptr);
+  const auto *split = widget("ai_transcript");
+  ASSERT_NE(split, nullptr);
+  EXPECT_TRUE(split->mono);
+  size_t mono_drawn = 0;
+  for (const auto &command : f.screen.ui()->draw_list().cmds) {
+    if (command.type != ui::CmdType::Text || !split->rect.contains(command.pos)) { continue; }
+    if (command.text == f.shell->store().tr("ui.log.follow")) { continue; }
+    EXPECT_EQ(command.font.kind, ui::FontKind::Mono) << command.text;
+    ++mono_drawn;
+  }
+  EXPECT_GT(mono_drawn, 0u);
+  EXPECT_EQ(discussion.exchange_request(), selected);
+  ASSERT_NO_FATAL_FAILURE(click("tool_workbench"));
+  ASSERT_EQ(f.screen.maximized(), conversation);
+  ASSERT_NO_FATAL_FAILURE(expect_column());
+  EXPECT_EQ(widget(draft)->string.value(), "Unsent question ab");
+  EXPECT_EQ(discussion.exchange_request(), selected);
+
+  // In a narrow window, ordinary maximization of the same editor wraps to the same width as the
+  // focused column, so only the font separates the cached lines. It shows monospace lines again.
+  f.drv->ctx.ui_scale = 1.0f;
+  f.drv->ctx.rect.xmax = 680;
+  f.drv->ctx.rect.ymax = 1000;
+  f.drv->frame();
+  ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
+  ASSERT_NO_FATAL_FAILURE(expect_column());
+  f.screen.set_maximized(nullptr);
+  f.screen.set_maximized(conversation);
+  f.drv->frame();
+  ASSERT_FALSE(f.shell->workbench_is_focused(f.screen));
+  const auto *maximized = widget("ai_transcript");
+  ASSERT_NE(maximized, nullptr);
+  ASSERT_NE(maximized->log, nullptr);
+  EXPECT_TRUE(maximized->mono);
+  const auto &style = f.screen.ui()->style();
+  for (size_t line = 0; line < maximized->log->line_count(); ++line) {
+    EXPECT_LE(f.screen.ui()->measurer().width(maximized->log->line(line), style.mono),
+              maximized->rect.w - 2 * style.text_margin) << maximized->log->line(line);
+  }
+  EXPECT_EQ(discussion.exchange_request(), selected);
+  EXPECT_EQ(project().project()->revision, 1);
 }
 
 TEST_F(SavedConversationNavigationPython, WriteQuestionDoesNotOpenSavedHistoryOnFirstVisit)

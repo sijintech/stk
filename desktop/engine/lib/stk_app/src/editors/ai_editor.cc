@@ -164,14 +164,16 @@ std::string parameter_reply(const Json &reply, const Json &context, EditorContex
   catch (const std::exception &) { return original; }
 }
 
-ui::LogBuffer wrapped_text(std::string text, const float width, EditorContext &ctx)
+/** Wraps for the font the LogView draws with: monospace unless the caller clears the view's mono. */
+ui::LogBuffer wrapped_text(std::string text, const float width, EditorContext &ctx, const bool mono)
 {
   ui::LogBuffer normalized(std::numeric_limits<size_t>::max()), result(std::numeric_limits<size_t>::max());
   normalized.append(text);
   text.clear();
   for (size_t i = 0; i < normalized.line_count(); ++i) { text += std::string(normalized.line(i)) + "\n"; }
   if (ctx.ui) {
-    for (const auto &line : ui::break_lines(text, width, ctx.ui->measurer(), ctx.ui->style().mono)) {
+    const auto &style = ctx.ui->style();
+    for (const auto &line : ui::break_lines(text, width, ctx.ui->measurer(), mono ? style.mono : style.font)) {
       result.append(text.substr(line.begin, line.end - line.begin) + "\n");
     }
   }
@@ -1198,11 +1200,13 @@ class AIEditor final : public Editor {
     const float width = ctx.draw ? float(ctx.draw->rect.width()) : 1280.0f;
     // Reserve region padding, the split gutter and the log scrollbar. Use the same
     // font as LogView; line breaks affect display only, never the saved reply.
+    // The focused workbench reads the conversation in the regular UI font; the split view keeps monospace.
+    const bool transcript_mono = !focused;
     const float conversation_width = focused ? std::min(layout.block().rect().w, kConversationWidth * style.scale) :
         width * (wide ? 0.68f : 1.0f);
     const float wrap_width = std::max(unit, conversation_width - 4 * unit);
     const std::string content = question.dump() + reply.dump() + progress.dump() + std::to_string(wrap_width) +
-        std::to_string(unit) + std::string(ctx.tr("ai.you"));
+        std::to_string(unit) + (transcript_mono ? "/mono/" : "/regular/") + std::string(ctx.tr("ai.you"));
     if (shown_exchange_ != content) {
       shown_exchange_ = content;
       std::string text;
@@ -1216,8 +1220,8 @@ class AIEditor final : public Editor {
       }
       // Measure what the log actually displays: tabs expand before wrapping,
       // and terminal escape bytes do not count towards visible line width.
-      transcript_ = wrapped_text(std::move(text), wrap_width, ctx);
-      raw_reply_ = wrapped_text(io::get_string(reply, "text"), wrap_width, ctx);
+      transcript_ = wrapped_text(std::move(text), wrap_width, ctx, transcript_mono);
+      raw_reply_ = wrapped_text(io::get_string(reply, "text"), wrap_width, ctx, true);
     }
     if (!request.empty()) {
       auto summary = std::string(ctx.tr("discussion.requests." + status)) + " · " + model;
@@ -1243,7 +1247,8 @@ class AIEditor final : public Editor {
       const float candidate_space = parameter_request && status == "completed" ? 4.0f : 0.0f;
       const float transcript_units = wide ? std::clamp(height / unit - 23.0f - candidate_space, 5.0f, 22.0f) :
           settings_open ? 6.0f : std::clamp(height / unit - 25.0f - candidate_space, 6.0f, 22.0f);
-      layout.log_view("ai_transcript", transcript_, transcript_units, transcript_position(transcript_positions_, id));
+      layout.log_view("ai_transcript", transcript_, transcript_units, transcript_position(transcript_positions_, id))
+          .mono = transcript_mono;
     }
     if (!compact_empty && (!focused || !id.empty())) {
       const bool archived = ctx.store.archive().archived("request", id);
@@ -1728,14 +1733,16 @@ class AIEditor final : public Editor {
       const float width = focused ? std::min(layout.block().rect().w, kConversationWidth * style.scale) :
           layout.block().rect().w;
       const float wrap_width = std::max(unit, width - 4 * unit);
-      const auto shown = io::get_string(view, "chain_sha256") + std::to_string(wrap_width);
+      // As for the question transcript: the regular UI font when focused, monospace in the split view.
+      const bool timeline_mono = !focused;
+      const auto shown = io::get_string(view, "chain_sha256") + std::to_string(wrap_width) + (timeline_mono ? "/mono" : "/regular");
       if (shown_agent_ != shown) {
         shown_agent_ = shown;
-        agent_timeline_ = wrapped_text(agent_steps(view, ctx), wrap_width, ctx);
+        agent_timeline_ = wrapped_text(agent_steps(view, ctx), wrap_width, ctx, timeline_mono);
       }
       const float height = ctx.draw ? float(ctx.draw->rect.height()) : 800.0f;
       layout.log_view("ai_agent_timeline", agent_timeline_, std::clamp(height / unit - 24.0f, 6.0f, 22.0f),
-                      transcript_position(agent_transcript_positions_, agent.selected()));
+                      transcript_position(agent_transcript_positions_, agent.selected())).mono = timeline_mono;
       agent_cards(layout, ctx, state, view);
       agent_run_cards(layout, ctx, state);
       const auto show_usage = [&](ui::Layout &where) {
@@ -2016,7 +2023,7 @@ class AIEditor final : public Editor {
         std::to_string(style.mono.size_px) + "/" + std::string(ctx.tr("ai.agent.run.detail.task"));
     if (run_detail_text_ != signature) {
       run_detail_text_ = signature;
-      run_detail_log_ = wrapped_text(run_detail_lines(*detail, ctx), width, ctx);
+      run_detail_log_ = wrapped_text(run_detail_lines(*detail, ctx), width, ctx, true);
     }
     // Tasks whose produced frozen snapshot can list files, each with its own entry below the list.
     std::vector<std::pair<size_t, const Json *>> entries;
@@ -2141,7 +2148,7 @@ class AIEditor final : public Editor {
       run_preview_text_ = signature;
       // Every character is kept (spaces included) and wrapped on code point boundaries.
       auto buffer = frozen_plan_text(text, width, ctx);
-      run_preview_log_ = buffer ? std::move(*buffer) : wrapped_text(text, width, ctx);
+      run_preview_log_ = buffer ? std::move(*buffer) : wrapped_text(text, width, ctx, true);
     }
     panel.log_view("ai_agent_run_detail_preview_text", run_preview_log_,
                    std::min(rows, float(std::max<size_t>(run_preview_log_.line_count(), 1)) + 0.5f),

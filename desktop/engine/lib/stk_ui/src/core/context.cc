@@ -1204,7 +1204,8 @@ void Context::set_hover(const Widget *w, Vec2 p)
 float Context::list_row_height(const Widget &w) const
 {
   if (w.type == WidgetType::LogView) {
-    return std::round(style_.mono.size_px * 1.4f);
+    // Rows follow the font the log draws with, so scrolling, keys and the extent stay aligned.
+    return std::round((w.mono ? style_.mono : style_.font).size_px * 1.4f);
   }
   if (w.table) {
     const float height = std::isfinite(w.table->row_height) ? std::clamp(w.table->row_height, 0.5f, 12.0f) : 1.0f;

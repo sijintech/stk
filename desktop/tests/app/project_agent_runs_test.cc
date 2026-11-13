@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <optional>
@@ -66,6 +67,12 @@ def init(self, *args, **kwargs):
                 sessions[identity].update(state='answered', awaiting=[])
             if (control / 'long_timeline').exists():
                 events = [{'kind': 'user_turn', 'turn': i, 'text': 'Saved message %d' % i} for i in range(50)]
+                sessions[identity].update(events=events, total=len(events))
+            if (control / 'long_words').exists():
+                words = 'Proportional transcript words ' * 30
+                events = [{'kind': 'user_turn', 'turn': 0, 'text': 'First question line\nSecond question line ' + words},
+                          {'kind': 'model_completed', 'text': 'Agent reply line\n' + words + '\n中文回复保持完整'}]
+                events += [{'kind': 'user_turn', 'turn': i, 'text': 'Saved message %d' % i} for i in range(1, 40)]
                 sessions[identity].update(events=events, total=len(events))
         return sessions[identity]
     details = [0]
@@ -862,6 +869,7 @@ TEST_F(NativeAgentRuns, UIStartsWithPreparationOffAndDisplaysEveryPlanLineBefore
   const auto check_complete = [&] {
     const auto *view = widget("ai_agent_run_plan/" + id);
     ASSERT_NE(view, nullptr); ASSERT_NE(view->log, nullptr);
+    EXPECT_TRUE(view->mono);  // frozen plans stay monospace
     const auto &style = f.screen.ui()->style();
     const float available = view->rect.w - 2 * style.text_margin - style.scrollbar - 2 * style.pixel;
     std::string text;
@@ -1370,6 +1378,87 @@ class NativeAgentRunDetailUI : public NativeAgentRuns {
       frame(); return f.screen.ui()->find("ai_agent_run_detail_tasks") != nullptr;
     }, 30));
   }
+  /** With long_words: the focused timeline wraps, draws and scrolls with the regular UI font and keeps
+   * every role line, hard line break and word. Keys move by the regular font's row height. */
+  void expect_proportional_timeline(const std::function<void()> &reopen)
+  {
+    const auto &ui = *f.screen.ui();
+    const auto &style = ui.style();
+    const auto *timeline = ui.find("ai_agent_timeline");
+    ASSERT_NE(timeline, nullptr); ASSERT_NE(timeline->log, nullptr);
+    const auto &log = *timeline->log;
+    EXPECT_FALSE(timeline->mono);
+    const auto tr = [&](const char *key) { return std::string(f.shell->store().tr(key)); };
+    // Wrapped for the monospace font, no line could exceed the wrap width (bounded by this).
+    const float mono_bound = timeline->rect.w + 2 * style.panel_margin + style.scrollbar - 4 * style.unit;
+    float widest_mono = 0.0f;
+    std::vector<std::string> lines;
+    for (size_t i = 0; i < log.line_count(); ++i) {
+      lines.emplace_back(log.line(i));
+      EXPECT_LE(f.measurer.width(lines.back(), style.font), timeline->rect.w - 2 * style.text_margin) << lines.back();
+      widest_mono = std::max(widest_mono, f.measurer.width(lines.back(), style.mono));
+    }
+    EXPECT_GT(widest_mono, mono_bound) << "the timeline was wrapped for the monospace font";
+    ASSERT_GT(lines.size(), 8u);
+    EXPECT_EQ(lines[0], "");
+    EXPECT_EQ(lines[1], tr("ai.you"));
+    EXPECT_EQ(lines[2], "First question line");
+    const auto says = std::find(lines.begin(), lines.end(), tr("ai.agent.says"));
+    ASSERT_NE(says, lines.end());
+    ASSERT_LT(says + 2, lines.end());
+    EXPECT_EQ(*(says + 1), "Agent reply line");
+    std::string words, expected;
+    for (int i = 0; i < 30; ++i) { expected += "Proportional transcript words "; }
+    for (auto line = says + 2; line != lines.end() && *line != "中文回复保持完整"; ++line) { words += *line + " "; }
+    EXPECT_EQ(words, expected);
+    words.clear();
+    for (auto line = lines.begin() + 3; line != lines.end() && line < says; ++line) { words += *line + " "; }
+    EXPECT_EQ(words, "Second question line " + expected);
+    EXPECT_NE(std::find(lines.begin(), lines.end(), "中文回复保持完整"), lines.end());
+    EXPECT_EQ(lines.back(), "");  // the timeline's final newline
+    EXPECT_EQ(*(lines.end() - 2), "Saved message 39");
+    EXPECT_EQ(*(lines.end() - 3), tr("ai.you"));
+    size_t drawn = 0;
+    for (const auto &command : ui.draw_list().cmds) {
+      if (command.type != ui::CmdType::Text || !timeline->rect.contains(command.pos)) { continue; }
+      EXPECT_EQ(command.font.kind, ui::FontKind::Regular) << command.text;
+      ++drawn;
+    }
+    EXPECT_GT(drawn, 0u);
+
+    // Rows, scroll extent and keys share the regular font's row height; the position is per session.
+    const float row = std::round(style.font.size_px * 1.4f);
+    const float tail = float(log.line_count()) * row + 2 * std::round(0.2f * style.unit) - (timeline->rect.h - 2 * style.pixel);
+    const auto scroll = [&] { return ui.scroll_of(ui.find("ai_agent_timeline")->id); };
+    EXPECT_NEAR(scroll(), tail, 0.5f) << "a newly opened session starts at its latest message";
+    ASSERT_NO_FATAL_FAILURE(click("ai_agent_timeline"));
+    ASSERT_TRUE(f.drv->key(wm::Key::Home)); frame();
+    EXPECT_FLOAT_EQ(scroll(), 0.0f);
+    ASSERT_TRUE(f.drv->key(wm::Key::DownArrow)); frame();
+    ASSERT_TRUE(f.drv->key(wm::Key::DownArrow)); frame();
+    EXPECT_FLOAT_EQ(scroll(), 2 * row);
+    ASSERT_TRUE(f.drv->key(wm::Key::End)); frame();
+    EXPECT_NEAR(scroll(), tail, 0.5f);
+    ASSERT_TRUE(f.drv->key(wm::Key::UpArrow)); frame();
+    EXPECT_NEAR(scroll(), tail - row, 0.5f);
+    const float reading = scroll();
+    const auto input = "ai_agent_text/" + state().project()->handle;
+    ASSERT_NE(f.screen.ui()->find(input), nullptr);
+    f.screen.ui()->find(input)->string.assign("Unsent words\nsecond line");
+    frame();
+    agent().select("session-b");
+    ASSERT_TRUE(loop.pump_until([&] {
+      frame(); return agent().view().value("chain_sha256", std::string()) == "session-b" && ui.find("ai_agent_timeline");
+    }, 30));
+    reopen();
+    ASSERT_NE(ui.find("ai_agent_timeline"), nullptr);
+    EXPECT_FALSE(ui.find("ai_agent_timeline")->mono);
+    EXPECT_FLOAT_EQ(scroll(), reading);
+    ASSERT_NE(f.screen.ui()->find(input), nullptr);
+    EXPECT_EQ(f.screen.ui()->find(input)->string.value(), "Unsent words\nsecond line");
+    EXPECT_EQ(count("say"), 0u);
+    EXPECT_EQ(count("run_decide"), 0u);
+  }
   std::string entry() { return "ai_agent_run_detail/approve:session-a"; }
   /** Texts of the open panel's labels and paragraphs, in drawing order. */
   std::vector<std::string> panel_labels()
@@ -1530,6 +1619,16 @@ TEST_F(NativeAgentRunDetailUI, ExplicitSendFollowsTheTimelineAndOtherSessionsKee
   ASSERT_TRUE(loop.pump_until([&] { frame(); return !agent().busy() && count("start") == 1u; }, 30));
   EXPECT_EQ(count("say"), 1u);
   EXPECT_EQ(count("run_decide"), 0u);
+}
+
+TEST_F(NativeAgentRunDetailUI, WideFocusedTimelineUsesTheRegularFontWithRolesKeysAndPosition)
+{
+  f.drv->ctx.rect = {0, 0, 1600, 1100};
+  marker("long_words");
+  ASSERT_NO_FATAL_FAILURE(open_rail());
+  ASSERT_NO_FATAL_FAILURE(open_session_a());
+  ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
+  ASSERT_NO_FATAL_FAILURE(expect_proportional_timeline([&] { open_session_a(); }));
 }
 
 TEST_F(NativeAgentRunDetailUI, WideWindowOpensARightPanelInTwoClicksAndReturnsFocusWithoutSideEffects)
@@ -1870,6 +1969,38 @@ class NativeAgentRunDetailNarrowUI : public NativeAgentRunDetailUI {
   }
 };
 
+TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseTimelineUsesTheRegularFontWithRolesKeysAndPosition)
+{
+  marker("long_words");
+  ASSERT_NO_FATAL_FAILURE(open_rail("workbench_history"));
+  ASSERT_NO_FATAL_FAILURE(open_narrow_session_a());
+  ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
+  ASSERT_NO_FATAL_FAILURE(expect_proportional_timeline([&] { open_narrow_session_a(); }));
+
+  // Ordinary maximization of the same editor is not the focused workbench: at this width both wrap to
+  // the same width, so only the font tells the cached lines apart. It returns to monospace lines.
+  auto *area = f.screen.maximized();
+  ASSERT_NE(area, nullptr);
+  f.screen.set_maximized(nullptr); f.screen.set_maximized(area); frame();
+  ASSERT_FALSE(f.shell->workbench_is_focused(f.screen));
+  const auto *timeline = f.screen.ui()->find("ai_agent_timeline");
+  ASSERT_NE(timeline, nullptr); ASSERT_NE(timeline->log, nullptr);
+  EXPECT_TRUE(timeline->mono);
+  const auto &style = f.screen.ui()->style();
+  for (size_t i = 0; i < timeline->log->line_count(); ++i) {
+    EXPECT_LE(f.measurer.width(timeline->log->line(i), style.mono), timeline->rect.w - 2 * style.text_margin)
+        << timeline->log->line(i);
+  }
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  frame();
+  ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
+  ASSERT_NE(f.screen.ui()->find("ai_agent_timeline"), nullptr);
+  EXPECT_FALSE(f.screen.ui()->find("ai_agent_timeline")->mono);
+  EXPECT_EQ(agent().selected(), "session-a");
+  EXPECT_EQ(count("say"), 0u);
+}
+
 TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseWindowOpensABottomSheetFromHistoryInThreeClicks)
 {
   ASSERT_NO_FATAL_FAILURE(open_rail("workbench_history"));
@@ -1891,6 +2022,7 @@ TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseWindowOpensABottomSheetFromHis
   const auto *tasks = f.screen.ui()->find("ai_agent_run_detail_tasks");
   ASSERT_NE(tasks, nullptr);
   const auto &style = f.screen.ui()->style();
+  EXPECT_TRUE(tasks->mono);  // linked task lists stay monospace
   const float available = tasks->rect.w - 2 * style.text_margin - style.scrollbar - 2 * style.pixel;
   for (size_t i = 0; i < tasks->log->line_count(); ++i) {
     EXPECT_LE(f.measurer.width(tasks->log->line(i), style.mono), available);
@@ -1943,6 +2075,7 @@ TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseBottomSheetPreviewsAFileInFive
   EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_preview/0")->text, "返回快照文件");
   const auto *log = f.screen.ui()->find("ai_agent_run_detail_preview_text");
   const auto &style = f.screen.ui()->style();
+  EXPECT_TRUE(log->mono);  // file previews stay monospace
   const float available = log->rect.w - 2 * style.text_margin - style.scrollbar - 2 * style.pixel;
   for (size_t i = 0; i < log->log->line_count(); ++i) { EXPECT_LE(f.measurer.width(log->log->line(i), style.mono), available); }
   EXPECT_NE(preview_text().find("<script>alert(1)</script>"), std::string::npos) << preview_text();
