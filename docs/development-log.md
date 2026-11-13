@@ -1,5 +1,9 @@
 # 开发交接记录
 
+## 2026-11-13 21:31 UTC · 统一工作台会话改动已发布
+
+Root 在前序 Desktop 完整终态后把 16 个提交从 `f3c666eb8ad28fac9dc923065efc7e3feee6b4df` 快进推送到 `413a283379e032f64b857d53844612fbc1b705bc`，独立核对远端完整 SHA。范围 gitleaks 零发现。新头 Pages 与 Secret scan 已成功，Desktop 与 Runtime 待终态。上一头 Windows 官方原生 XML 6/6。上一头 macOS 工件确认 CPU 1618/1618、Metal 254/254、必测原生 4/6。可选 MP4 对照持续播放取到帧 1，立即暂停取到帧 0、0，两组 HTML 仍因视口裁切无帧号。证据 `root-delivery-20261113-188/{release-scan.log,f3c-windows-native.xml,f3c-ctest-native-preview.xml}`。 [新头 Desktop](https://github.com/sijintech/stk/actions/runs/43511133797) [新头 Runtime](https://github.com/sijintech/stk/actions/runs/43511133680) [Pages](https://github.com/sijintech/stk/actions/runs/43511133705) [Secret scan](https://github.com/sijintech/stk/actions/runs/43511133737) [上一头 Windows 工件](https://github.com/sijintech/stk/actions/runs/43500121086/artifacts/14078466145)
+
 ## 2026-11-13 21:28 UTC · 会话搜索键盘验收与发布门禁
 
 本地 main `1108d4061f9cd421f134958c25400ba29c2c82d5` 支持桌面按 Enter 提交标题搜索，首批唯一匹配显示后再按 Enter 打开。多条匹配及键盘长按仍留在搜索中。Linux X11 固定起点为任务页、已打开合成项目、32 条已保存问答。1600×1100 一次点击、680×1000 两次点击，两窗各两次 Enter，打开超出近期列表的第一条问答。每窗一次标题查询和一次原请求、数据范围、消息读取，数据库摘要与修订一致，零发送或运行。定向 69/69、UI 核心 135/135，桌面构建通过。实窗夹具需等待 Bridge 的近期项目读取和首屏绘制后再点打开项目。证据 `root-delivery-20261113-188/{search-keyboard.xml,search-keyboard-ui.xml,native-keyboard-ready-wide/receipt.json,native-keyboard-ready-narrow/receipt.json}`。
