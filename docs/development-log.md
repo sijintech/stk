@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-13 19:28 UTC · Web 历史可按会话标题查找
+
+本地 main `90bc270e85bc48844aab32b6781c61b3ae7380e5` 增加「搜索对话」。按已载入的标题筛选，空格分隔的词均须匹配。唯一命中时 Enter 打开并聚焦正文，多条或零条时继续留在筛选区。清空恢复完整列表。没有新增后端调用或权限。桌面仍使用近期与分页历史，桌面标题搜索待接。Web 生产构建成功，定向 5/5、全量 397/397，零跳过。修复前的两窗对照因不存在搜索框失败。暂存 gitleaks 零发现。
+
+真实本机 Hub 和 Chromium 固定起点为任务页，已有 32 条已保存会话，选中乙，较旧的甲有未发送草稿且正文已滚至 430 像素。1440×900 宽窗 1 次点击搜索，390×844 窄窗 2 次点击含打开历史。输入「科研 甲」后按一次 Enter，进入甲正文，恢复草稿和 430 像素位置。筛选阶段零请求，打开只发一次原会话 GET。前后 Hub 会话摘要一致，零 POST 与零模型调用。界面驱动另核对保留 Viewer 和任务状态。证据 `root-delivery-20261113-185/{search-final.xml,web-full.xml,live/browser-receipt.json,live/hub-receipt.json}`。 [统一工作台](design/unified-workbench.md)
+
+远端 `13d32015` 的 Pages 和 Secret scan 已成功。Desktop Linux 打包通过，其他目标和 Runtime 仍在运行。Claude 113 和 114 在各自独立 worktree 继续进行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43491122224) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43491121980)
+
 ## 2026-11-13 19:21 UTC · 工作台改动已发布到 main
 
 Root 从 `19998d12097685138b555904fbe880e1a91750f0` 快进推送至 `13d320155e2f3354f706d54d7ca581971943996b`，独立核对远端完整 SHA。14 个提交范围的 gitleaks 零发现。新头 Secret scan 与 Pages 通过，Desktop、Runtime 正在运行。上一头的 Windows 原生官方工件 `14069047795` 已下载并核对，必测 6/6，各 20/20 周期，五个生产报告用例均保留 Viewer 和 Python 草稿。macOS 仍以同头官方工件和本地修订记录为准。 [新头 Desktop](https://github.com/sijintech/stk/actions/runs/43491122224) [新头 Runtime](https://github.com/sijintech/stk/actions/runs/43491121980) [新头 Pages](https://github.com/sijintech/stk/actions/runs/43491121988) [Windows 工件](https://github.com/sijintech/stk/actions/runs/43481451563/artifacts/14069047795)
