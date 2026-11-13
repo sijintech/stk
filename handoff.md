@@ -1,5 +1,11 @@
 # STK 当前交接
 
+## 2026-11-13 17:14 UTC · 发布统一首页与会话文件到 main
+
+Root 将远端 main 从 `6ed5e920d8ecbb64a826684bd4190a0540dbbd50` 快进到 `57f3601a1c214db81e0e8a80aa26b86f85c666ed`，推送后单独核对远端完整 SHA。12 个提交扫描零发现。发布包含两端会话首页简化、Web 会话关联任务、文件清单与校验下载，以及原生报告首次暂停的附加取证。Web 395/395、Hub 95/95、桌面导航 26/26、报告宿主 14/14。原 AOCI 和状态文档工作区的既有改动保留。
+
+新头 Desktop、Runtime、Secret scan 和 Pages 都已触发。Claude 110 原生关联任务详情仍在独立工作树验证。复核旧 PR #53 与 #54，头分别为 `c9f13994` 和 `2dd3e4ee`，继续开放。前者的当前传输生命周期及关闭回归 44/44。AOCI 观察证据审阅门仍有 94 条，未改动正式索引。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43470699822) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43470699712) [Secret scan](https://github.com/sijintech/stk/actions/runs/43470699680) [Pages](https://github.com/sijintech/stk/actions/runs/43470699724)
+
 ## 2026-11-13 17:13 UTC · 上一轮 Desktop 终态
 
 远端 `6ed5e920d8ecbb64a826684bd4190a0540dbbd50` 的 Desktop `43458144964` 于 17:12:42 UTC 结束，5/6 作业通过。Linux 三项、Windows CPU 1537/1537、Windows 原生文档验收均通过。macOS 作业失败，CPU 与 Metal 通过，必测原生 4/6。正式 Windows 工件 `14061160879` 已发布，详细清单待核对。此终态满足仓库推送门禁。待发布提交包括会话首页、Web 会话任务与文件下载、首次暂停取证。Claude 110 的原生详情候选仍在独立验证。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43458144964) [Windows 工件](https://github.com/sijintech/stk/actions/runs/43458144964/artifacts/14061160879)
