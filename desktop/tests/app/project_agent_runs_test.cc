@@ -1410,6 +1410,34 @@ class NativeAgentRunDetailUI : public NativeAgentRuns {
   }
 };
 
+TEST_F(NativeAgentRunDetailUI, FocusedConversationKeepsTheCompleteSessionListAvailableOnDemand)
+{
+  f.drv->ctx.rect = {0, 0, 1600, 1100};
+  ASSERT_NO_FATAL_FAILURE(open_rail());
+  ASSERT_NO_FATAL_FAILURE(open_session_a());
+  const auto draft = "ai_agent_text/" + state().project()->handle;
+  ASSERT_NE(f.screen.ui()->find(draft), nullptr);
+  f.screen.ui()->find(draft)->string.assign("An unsent question");
+  frame();
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_session"), nullptr);
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_refresh"), nullptr);
+  EXPECT_NE(f.screen.ui()->find("workbench_agent_session/session-b"), nullptr);
+  const auto before = calls();
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_sessions"));
+  const auto *sessions = f.screen.ui()->find("ai_agent_session");
+  ASSERT_NE(sessions, nullptr);
+  ASSERT_FALSE(sessions->items.empty());
+  EXPECT_EQ(sessions->items.front(), "New session");
+  EXPECT_NE(f.screen.ui()->find("ai_agent_refresh"), nullptr);
+  EXPECT_EQ(calls(), before);
+  ASSERT_NO_FATAL_FAILURE(click("ai_agent_sessions"));
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_session"), nullptr);
+  ASSERT_NE(f.screen.ui()->find(draft), nullptr);
+  EXPECT_EQ(f.screen.ui()->find(draft)->string.value(), "An unsent question");
+  EXPECT_EQ(agent().selected(), "session-a");
+  EXPECT_EQ(calls(), before);
+}
+
 TEST_F(NativeAgentRunDetailUI, WideWindowOpensARightPanelInTwoClicksAndReturnsFocusWithoutSideEffects)
 {
   f.drv->ctx.rect = {0, 0, 1600, 1100};

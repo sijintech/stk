@@ -1605,30 +1605,10 @@ class AIEditor final : public Editor {
     return text;
   }
 
-  void agent_view(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft, const bool focused)
+  void agent_sessions(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool enabled)
   {
     auto &agent = state.agent();
     const auto &catalog = ctx.store.catalog();
-    const std::string handle = state.project()->handle;
-    if (agent_opening_ != handle) {
-      agent_opening_ = handle; shown_agent_.clear(); agent_timeline_.clear(); agent_navigation_error_.clear();
-      draft.allow_prepare = false;  // reopening a project restores its text, never permission to prepare
-    }
-    poll_agent(ctx, agent);
-    const bool enabled = !state.busy() && !agent.busy();
-    intent_dropdown(layout, ctx, state, draft);
-    hint(layout, ctx, agent.runs_supported() ? "ai.agent.intro_runs" : "ai.agent.intro");
-    if (!agent.error().empty()) { layout.paragraph(agent.error()); }
-    if (!agent_navigation_error_.empty()) { layout.paragraph(agent_navigation_error_); }
-    // The planner: a model on this computer or the organization's network (v1), chosen by the service.
-    const auto &route = agent.route();
-    const auto choice = route.value("choice", Json());
-    if (!agent.route_loaded()) { layout.paragraph(ctx.tr("models.auto.reading")); }
-    else if (choice.is_object()) {
-      layout.paragraph(catalog.format("ai.agent.planner", {{"name", io::get_string(choice, "name")}, {"model", io::get_string(choice, "model")},
-          {"location", std::string(ctx.tr("models.location." + io::get_string(choice, "location")))}}));
-    }
-    else { layout.paragraph(ctx.tr("ai.agent.no_planner")); }
     // Sessions, newest first; the first entry starts a new one.
     std::vector<std::string> ids = {""}, titles = {std::string(ctx.tr("ai.agent.new_session"))};
     for (const auto &session : agent.sessions()) {
@@ -1642,15 +1622,58 @@ class AIEditor final : public Editor {
     auto &sessions = layout.row();
     sessions.dropdown("ai_agent_session", std::move(titles), {
       [ids, &agent] { const auto at = std::find(ids.begin(), ids.end(), agent.selected()); return at == ids.end() ? 0 : int(at - ids.begin()); },
-      [ids, &agent, &state, handle](const int index) {
+      [ids, &agent, &state, handle = state.project()->handle](const int index) {
         if (state.project() && state.project()->handle == handle && index >= 0 && size_t(index) < ids.size()) { agent.select(ids[size_t(index)]); }
       }}).disable(!enabled);
     sessions.button("ai_agent_refresh", ctx.tr("ai.refresh_history"), [&agent] { agent.load_list(); agent.draft_changed(""); }).width(6);
+  }
+
+  void agent_view(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft, const bool focused)
+  {
+    auto &agent = state.agent();
+    const auto &catalog = ctx.store.catalog();
+    const std::string handle = state.project()->handle;
+    if (agent_opening_ != handle) {
+      agent_opening_ = handle; shown_agent_.clear(); agent_timeline_.clear(); agent_navigation_error_.clear();
+      draft.allow_prepare = false;  // reopening a project restores its text, never permission to prepare
+    }
+    poll_agent(ctx, agent);
+    const bool enabled = !state.busy() && !agent.busy();
+    intent_dropdown(layout, ctx, state, draft);
+    const auto intro = agent.runs_supported() ? "ai.agent.intro_runs" : "ai.agent.intro";
+    if (!focused) { hint(layout, ctx, intro); }
+    if (!agent.error().empty()) { layout.paragraph(agent.error()); }
+    if (!agent_navigation_error_.empty()) { layout.paragraph(agent_navigation_error_); }
+    // The planner: a model on this computer or the organization's network (v1), chosen by the service.
+    const auto &route = agent.route();
+    const auto choice = route.value("choice", Json());
+    const auto planner = !agent.route_loaded() ? std::string(ctx.tr("models.auto.reading")) : choice.is_object() ?
+        catalog.format("ai.agent.planner", {{"name", io::get_string(choice, "name")}, {"model", io::get_string(choice, "model")},
+            {"location", std::string(ctx.tr("models.location." + io::get_string(choice, "location")))}}) :
+        std::string(ctx.tr("ai.agent.no_planner"));
+    if (focused) {
+      if (auto *sessions = layout.panel("ai_agent_sessions", ctx.tr("workbench.history.agent_sessions"), false)) {
+        agent_sessions(*sessions, ctx, state, enabled);
+        hint(*sessions, ctx, intro);
+        if (choice.is_object()) { sessions->paragraph(planner); }
+      }
+    }
+    else {
+      layout.paragraph(planner);
+      agent_sessions(layout, ctx, state, enabled);
+    }
     const auto &view = agent.view();
     const auto state_name = io::get_string(view, "state");
     const bool running = agent.running();
     const bool session_loaded = selected_agent_loaded(agent);
     if (session_loaded) {
+      if (focused) {
+        const auto selected = std::find_if(agent.sessions().begin(), agent.sessions().end(), [&agent](const Json &item) {
+          return io::get_string(item, "id") == agent.selected();
+        });
+        const auto title = agent_session_label(selected != agent.sessions().end() ? *selected : view.at("session"));
+        layout.label(title).tip(title);
+      }
       layout.paragraph(running ? std::string(ctx.tr("ai.agent.running")) :
           std::string(catalog.tr_or("ai.agent.state." + state_name, state_name)));
       const auto &style = layout.ctx().style();
@@ -1667,20 +1690,23 @@ class AIEditor final : public Editor {
       layout.log_view("ai_agent_timeline", agent_timeline_, std::clamp(height / unit - 24.0f, 6.0f, 22.0f));
       agent_cards(layout, ctx, state, view);
       agent_run_cards(layout, ctx, state);
-      const auto usage = view.value("usage", Json::object());
-      if (!usage.empty()) {
+      const auto show_usage = [&](ui::Layout &where) {
+        const auto usage = view.value("usage", Json::object());
+        if (usage.empty()) { return; }
         const auto planner = usage.value("planner", Json::object()), requests = usage.value("requests", Json::object());
-        layout.paragraph(catalog.format("ai.agent.usage", {{"turns", std::to_string(io::get_int(planner, "turns", 0))},
+        where.paragraph(catalog.format("ai.agent.usage", {{"turns", std::to_string(io::get_int(planner, "turns", 0))},
             {"planner", std::to_string(io::get_int(planner, "input_tokens", 0) + io::get_int(planner, "output_tokens", 0))},
             {"requests", std::to_string(io::get_int(requests, "requests", 0))},
             {"request_tokens", std::to_string(io::get_int(requests, "input_tokens", 0) + io::get_int(requests, "output_tokens", 0))}}));
-      }
+      };
+      if (!focused) { show_usage(layout); }
       auto &actions = layout.row();
       actions.button("ai_agent_cancel", ctx.tr("discussion.requests.cancel"), [&agent] { agent.cancel(); })
           .disable(!enabled || !running);
       actions.button("ai_agent_continue", ctx.tr("ai.agent.continue"), [&agent] { agent.start(); })
           .disable(!enabled || running || state_name != "ready" || agent.target_pending()).tip(ctx.tr("ai.agent.continue.tip"));
       if (auto *record = layout.panel("ai_agent_record", ctx.tr("ai.agent.record"), false)) {
+        if (focused) { show_usage(*record); }
         record->paragraph(catalog.format("ai.agent.chain", {{"events", std::to_string(io::get_int(view, "total", 0))},
             {"digest", io::get_string(view, "chain_sha256").substr(0, 16)}}));
         auto &checks = record->row();
@@ -1737,6 +1763,7 @@ class AIEditor final : public Editor {
       ctx.store.changed();  // The history rail was built before this receipt was shown.
     }
     auto &input = layout.text_area("ai_agent_text/" + handle, ui::bind(draft.agent_text), {.max_length = 8192, .visible_lines = 3});
+    if (focused && !choice.is_object()) { layout.paragraph(planner); }
     const bool has_text = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
         !ctx.ui->edit_state()->text().empty() : !draft.agent_text.empty();
     const bool new_session = agent.selected().empty();
