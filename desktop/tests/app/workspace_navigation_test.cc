@@ -1392,7 +1392,7 @@ TEST_F(SavedConversationNavigationPython, FocusedQuestionShowsOnlyApplicableActi
       {"99999999-9999-4999-8999-999999999999", "cancelled", "cancelled", "cancelled_before_start", false, false, false, true},
   };
   for (const auto &item : cases) {
-    ASSERT_NO_FATAL_FAILURE(save_question_state(item.id, "Captured temperature", item.seed, "aliyun-token-plan/1"));
+    ASSERT_NO_FATAL_FAILURE(save_question_state(item.id, "Compare\n  captured temperature", item.seed, "aliyun-token-plan/1"));
   }
   std::ofstream(dir.path() / "forbid_question_preparation").put('\n');
   f.drv->ctx.rect.xmax = 1600;
@@ -1425,8 +1425,16 @@ TEST_F(SavedConversationNavigationPython, FocusedQuestionShowsOnlyApplicableActi
     SCOPED_TRACE(item.seed);
     ASSERT_NO_FATAL_FAILURE(show(item));
     const auto tr = [&](const std::string &key) { return f.shell->store().tr(key); };
+    const ui::Widget *title = nullptr;
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &entry : block->widgets()) {
+        if (entry.type == ui::WidgetType::Label && entry.text == "Compare captured temperature") { title = &entry; }
+      }
+    }
+    ASSERT_NE(title, nullptr);
+    EXPECT_LT(title->rect.y, widget("ai_transcript")->rect.y);
     EXPECT_TRUE(contains_text(std::string(tr(std::string("discussion.requests.") + item.status)) + " · fixture-v1"));
-    EXPECT_TRUE(contains_text("This question uses: Captured temperature · revision 1"));
+    EXPECT_FALSE(contains_text("This question uses:"));
     EXPECT_FALSE(contains_text(std::string_view(item.id).substr(0, 8)));
     EXPECT_EQ(widget("ai_send_saved") != nullptr, item.send);
     EXPECT_EQ(widget("ai_cancel") != nullptr, item.cancel);
@@ -1448,6 +1456,7 @@ TEST_F(SavedConversationNavigationPython, FocusedQuestionShowsOnlyApplicableActi
   const auto [x, y] = f.widget_center("ai_scope_detail");
   ASSERT_TRUE(f.drv->click(x, y));
   f.drv->frame();
+  EXPECT_TRUE(contains_text("This question uses: Compare\n  captured temperature · revision 1"));
   EXPECT_TRUE(contains_text(std::string("Request ID · ") + kSecond));
   EXPECT_TRUE(contains_text("Context ID · " + io::get_string(discussion.exchange_request(), "context_id")));
   EXPECT_NE(widget("ai_copy_request_id"), nullptr);

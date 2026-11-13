@@ -40,6 +40,24 @@ using io::Json;
 
 constexpr float kConversationWidth = 880.0f;
 
+std::string conversation_title(std::string_view text)
+{
+  std::string title;
+  for (size_t pos = 0; pos < text.size();) {
+    size_t length = 0;
+    const auto cp = ui::utf8::decode(text, pos, &length);
+    pos += length;
+    if (cp < 0x20 || (cp >= 0x7f && cp <= 0x9f) || ui::utf8::is_space(cp) ||
+        cp == 0x61c || cp == 0x200e || cp == 0x200f || (cp >= 0x202a && cp <= 0x202e) ||
+        (cp >= 0x2066 && cp <= 0x2069)) {
+      if (!title.empty() && title.back() != ' ') { title += ' '; }
+    }
+    else { ui::utf8::append(title, cp); }
+  }
+  if (!title.empty() && title.back() == ' ') { title.pop_back(); }
+  return core::utf8::truncate_display(title, 80);
+}
+
 ui::Layout &focused_conversation_column(ui::Layout &layout)
 {
   const auto &style = layout.ctx().style();
@@ -334,6 +352,11 @@ class AIEditor final : public Editor {
     poll(ctx, discussion);
     auto &body = focused ? focused_conversation_column(layout) : layout;
     const bool compose_first = focused && compose_handle_ == opening;
+    if (focused && !compose_first && !discussion.exchange_request().empty()) {
+      auto title = conversation_title(io::get_string(discussion.exchange_question(), "text"));
+      if (title.empty()) { title = ctx.tr("ai.history"); }
+      body.label(title).tip(title);
+    }
     if (compose_first) {
       const auto visibility = std::exchange(compose_focus_visibility_, std::nullopt);
       const bool focus = visibility && *visibility == screen->visibility_epoch();
@@ -1200,8 +1223,7 @@ class AIEditor final : public Editor {
       auto summary = std::string(ctx.tr("discussion.requests." + status)) + " · " + model;
       if (!focused) { summary += " · " + id.substr(0, 8); }
       layout.paragraph(summary);
-      layout.paragraph(ctx.store.catalog().format("ai.request_source", {{"revision", std::to_string(io::get_int(request, "source_revision", -1))},
-          {"title", io::get_string(context, "title")}}));
+      if (!focused) { request_source(layout, ctx, request, context); }
       if (discussion.following()) { layout.label(ctx.tr("ai.following")); }
       else if (active) { layout.paragraph(ctx.tr("ai.paused")); }
       if (focused && active && cancel_requested) { layout.paragraph(ctx.tr("discussion.requests.cancel_requested")); }
@@ -1276,6 +1298,7 @@ class AIEditor final : public Editor {
       if (!id.empty()) {
         const auto context_id = io::get_string(request, "context_id");
         if (focused) {
+          request_source(*details, ctx, request, context);
           const auto show_id = [&](std::string_view kind, const std::string &value) {
             const auto suffix = std::string(kind) + "_id";
             auto &row = details->row();
@@ -1303,6 +1326,13 @@ class AIEditor final : public Editor {
         draw_saved_questions(*history, ctx, state);
       }
     }
+  }
+
+  void request_source(ui::Layout &layout, EditorContext &ctx, const Json &request, const Json &context)
+  {
+    layout.paragraph(ctx.store.catalog().format("ai.request_source", {
+        {"revision", std::to_string(io::get_int(request, "source_revision", -1))},
+        {"title", io::get_string(context, "title")}}));
   }
 
   ui::Widget &question_composer(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft,
@@ -1656,6 +1686,15 @@ class AIEditor final : public Editor {
       timeline_session_ = agent.selected();
     }
     const bool enabled = !state.busy() && !agent.busy();
+    const auto &view = agent.view();
+    const bool session_loaded = selected_agent_loaded(agent);
+    if (focused && session_loaded) {
+      const auto selected = std::find_if(agent.sessions().begin(), agent.sessions().end(), [&agent](const Json &item) {
+        return io::get_string(item, "id") == agent.selected();
+      });
+      const auto title = agent_session_label(selected != agent.sessions().end() ? *selected : view.at("session"));
+      layout.label(title).tip(title);
+    }
     intent_dropdown(layout, ctx, state, draft);
     const auto intro = agent.runs_supported() ? "ai.agent.intro_runs" : "ai.agent.intro";
     if (!focused) { hint(layout, ctx, intro); }
@@ -1679,18 +1718,9 @@ class AIEditor final : public Editor {
       layout.paragraph(planner);
       agent_sessions(layout, ctx, state, enabled);
     }
-    const auto &view = agent.view();
     const auto state_name = io::get_string(view, "state");
     const bool running = agent.running();
-    const bool session_loaded = selected_agent_loaded(agent);
     if (session_loaded) {
-      if (focused) {
-        const auto selected = std::find_if(agent.sessions().begin(), agent.sessions().end(), [&agent](const Json &item) {
-          return io::get_string(item, "id") == agent.selected();
-        });
-        const auto title = agent_session_label(selected != agent.sessions().end() ? *selected : view.at("session"));
-        layout.label(title).tip(title);
-      }
       layout.paragraph(running ? std::string(ctx.tr("ai.agent.running")) :
           std::string(catalog.tr_or("ai.agent.state." + state_name, state_name)));
       const auto &style = layout.ctx().style();
@@ -2307,21 +2337,8 @@ bool reveal_saved_agent_session(Editor &editor, ProjectState &project, const std
 
 std::string agent_session_label(const io::Json &session)
 {
-  const auto text = io::get_string(session, "first_message");
-  std::string label;
-  for (size_t pos = 0; pos < text.size();) {
-    size_t length = 0;
-    const auto cp = ui::utf8::decode(text, pos, &length);
-    pos += length;
-    if (cp < 0x20 || (cp >= 0x7f && cp <= 0x9f) || ui::utf8::is_space(cp) ||
-        cp == 0x61c || cp == 0x200e || cp == 0x200f || (cp >= 0x202a && cp <= 0x202e) ||
-        (cp >= 0x2066 && cp <= 0x2069)) {
-      if (!label.empty() && label.back() != ' ') { label += ' '; }
-    }
-    else { ui::utf8::append(label, cp); }
-  }
-  if (!label.empty() && label.back() == ' ') { label.pop_back(); }
-  return label.empty() ? io::get_string(session, "id").substr(0, 8) : core::utf8::truncate_display(label, 80);
+  auto label = conversation_title(io::get_string(session, "first_message"));
+  return label.empty() ? io::get_string(session, "id").substr(0, 8) : label;
 }
 
 std::unique_ptr<Editor> make_ai_editor(const EditorType &type)
