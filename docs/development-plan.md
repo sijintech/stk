@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-13 20:18 UTC · 会话快捷键、草稿保护和 Web 历史搜索已发布
+
+Root 已从 `13d32015` 快进推送到 `f3c666eb8ad28fac9dc923065efc7e3feee6b4df`，远端完整 SHA 一致。14 个提交的发布范围经 gitleaks 零发现。新头 Pages 与 Secret scan 已通过，Desktop 与 Runtime 已启动。Claude 的保存副本修订仍在 `claude/native-conversation-file-save-113`。 [新头 Desktop CI](https://github.com/sijintech/stk/actions/runs/43500121086) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43500120670) [Pages](https://github.com/sijintech/stk/actions/runs/43500120769) [Secret scan](https://github.com/sijintech/stk/actions/runs/43500121013)
+
+上一头 `13d32015` 的 macOS 官方作业日志确认 CPU 1617/1617、Metal 254/254，必测原生文档 4/6。两项视频均在 `hidden-tab-pause` 阶段失败。隐藏前对照 1/2、独立隐藏暂停 0/2。首轮工具栏的四个帧号采样命令均运行成功，具体帧序列待工件复核。上一头 Windows 官方原生 6/6。证据 `root-delivery-20261113-186/{previous-macos-job.log,previous-windows-native.zip}`。 [上一头 Desktop CI](https://github.com/sijintech/stk/actions/runs/43491122224)
+
 ## 2026-11-13 20:16 UTC · 上一发布头 Desktop 已结束
 
 远端 `13d320155e2f3354f706d54d7ca581971943996b` Desktop 运行于 20:15:14 UTC 结束，六项作业中五项通过。Linux 三项、Windows CPU、Windows WebView2 原生文档通过，Windows 官方原生 XML 为 6/6。macOS CPU、Metal、打包及安装冒烟通过，必测 WKWebView 原生文档、隐藏前对照和隐藏暂停诊断失败。官方 macOS 工件已开始下载，将按实际用例复核。Runtime 13/13、Pages 与 Secret scan 已通过。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43491122224) [macOS 工件](https://github.com/sijintech/stk/actions/runs/43491122224/artifacts/14073253397) [Windows 工件](https://github.com/sijintech/stk/actions/runs/43491122224/artifacts/14072498601) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43491121980)
