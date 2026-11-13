@@ -127,6 +127,10 @@ def init(self, *args, **kwargs):
             if (control / ('fail_get_%d' % serial)).exists():
                 raise BridgeError('unavailable', 'fixture get failure %d' % serial)
             result = copy.deepcopy(session(p.get('session_id', 'session-a')))
+            if (control / 'grow_timeline_b').exists() and p.get('session_id') == 'session-b':
+                result['events'].append({'kind': 'model_completed', 'text': 'A late reply in session B'})
+                result['chain_sha256'] += '-late'
+                result['total'] += 1
             result['get_serial'] = serial  # same total for every read: only this tells old and new replies apart
             if (control / 'omit_cards').exists():
                 result['run_approvals'] = []
@@ -1506,6 +1510,14 @@ TEST_F(NativeAgentRunDetailUI, ExplicitSendFollowsTheTimelineAndOtherSessionsKee
   EXPECT_LT(reading, tail);
   ASSERT_NO_FATAL_FAILURE(click("workbench_agent_session/session-b"));
   ASSERT_TRUE(loop.pump_until([&] { frame(); return scroll() == tail; }, 30));
+  ASSERT_NO_FATAL_FAILURE(open_session_a());
+  EXPECT_FLOAT_EQ(scroll(), reading);
+  marker("grow_timeline_b");
+  ASSERT_NO_FATAL_FAILURE(click("workbench_agent_session/session-b"));
+  ASSERT_TRUE(loop.pump_until([&] {
+    frame(); return agent().view().value("chain_sha256", std::string()) == "session-b-late";
+  }, 30));
+  EXPECT_FLOAT_EQ(scroll(), tail);
   ASSERT_NO_FATAL_FAILURE(open_session_a());
   EXPECT_FLOAT_EQ(scroll(), reading);
   EXPECT_EQ(count("say"), 0u);

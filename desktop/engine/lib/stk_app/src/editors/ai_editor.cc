@@ -1645,9 +1645,16 @@ class AIEditor final : public Editor {
     if (agent_opening_ != handle) {
       agent_opening_ = handle; shown_agent_.clear(); agent_timeline_.clear(); agent_navigation_error_.clear();
       agent_transcript_positions_.clear();
+      timeline_session_.clear();
       draft.allow_prepare = false;  // reopening a project restores its text, never permission to prepare
     }
     poll_agent(ctx, agent);
+    if (timeline_session_ != agent.selected()) {
+      if (auto *position = transcript_position(agent_transcript_positions_, timeline_session_)) {
+        position->follow = false;
+      }
+      timeline_session_ = agent.selected();
+    }
     const bool enabled = !state.busy() && !agent.busy();
     intent_dropdown(layout, ctx, state, draft);
     const auto intro = agent.runs_supported() ? "ai.agent.intro_runs" : "ai.agent.intro";
@@ -2232,7 +2239,7 @@ class AIEditor final : public Editor {
   ProjectContextPicker picker_;
   ui::LogBuffer transcript_, raw_reply_;
   TranscriptPositions transcript_positions_, agent_transcript_positions_;
-  std::string pending_session_, pending_project_, agent_opening_, shown_agent_, agent_navigation_error_;
+  std::string pending_session_, pending_project_, agent_opening_, shown_agent_, timeline_session_, agent_navigation_error_;
   ui::LogBuffer agent_timeline_;
   std::string run_plan_origin_;
   std::map<std::string, std::string> run_plan_text_;

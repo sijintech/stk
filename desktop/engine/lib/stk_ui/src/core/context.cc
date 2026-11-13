@@ -1818,7 +1818,7 @@ EventResult Context::mouse_down(const Event &e)
         const float ph = std::round(0.9f * style_.unit);
         const float pw = std::round(LayoutEngine::text_w(*this, tr("ui.log.follow")) + style_.unit);
         const Rect pill{w->rect.x1() - pw - style_.scrollbar - 3 * px, w->rect.y1() - ph - 3 * px, pw, ph};
-        if (log_view_position(*w).follow || !pill.contains(e.pos)) {
+        if (log_view_position(*w).follow || scroll_of(w->id) >= ms - 0.5f || !pill.contains(e.pos)) {
           break;
         }
         set_scroll(w->id, ms, ms);

@@ -821,7 +821,7 @@ void Context::draw_widget(const Widget &w)
         const Color color = hover && track.contains(mouse_) ? colors.item.mul_hsl(1.0f, 1.0f, 1.35f) : colors.item;
         draw_.round_box(thumb, clamp_radius(colors.roundness * thumb.h * 2.0f, thumb), CORNER_ALL, color, none);
       }
-      if (log && w.log_can_follow && !position.follow) {
+      if (log && w.log_can_follow && !position.follow && scroll < ms - 0.5f) {
         const std::string_view label = tr("ui.log.follow");
         const float ph = std::round(0.9f * st.unit);
         const float pw = std::round(LayoutEngine::text_w(*this, label) + st.unit);
