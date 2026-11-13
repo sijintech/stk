@@ -192,6 +192,7 @@ struct PauseRequest {
   bool query_inflight = false;
   bool held_for_hide = false;
   bool verified = false;
+  bool pause_requested_under_suspension = false;
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
   detail::MediaPauseVerification::Clock::time_point started;
   std::shared_ptr<test::VisiblePauseObservation> visible_control;
@@ -241,7 +242,7 @@ static void verify_pause(std::shared_ptr<PauseRequest> request)
     return;
   }
   // The watchdog is independent of WebKit replies and never owns the view or
-  // State. There is at most one state query in flight, and no pause is replayed.
+  // State. There is at most one state query or suspended pause in flight.
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
     verify_pause(request);
   });
@@ -265,9 +266,42 @@ static void verify_pause(std::shared_ptr<PauseRequest> request)
       return;
     }
     const auto replied = Check::Clock::now();
+    const auto waiting = request->verification.expire(
+        completed->media_generation, completed->result.navigation_generation, replied);
+    const bool needs_suspended_pause = request->held_for_hide && completed->hide_pause == request &&
+        completed->suspension.ready(true) && !request->pause_requested_under_suspension &&
+        playback == WKMediaPlaybackStateSuspended;
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+    // Keep the isolated actuator and its explicit diagnostic follow-up independent.
+    const bool use_native_pause = !completed->test_last_pause.isolated_actuator;
+#else
+    const bool use_native_pause = true;
+#endif
+    if (waiting == Check::Result::Waiting && needs_suspended_pause && use_native_pause) {
+      // Suspension can remember prior playing intent. Pause once under our own suspension before
+      // accepting the proof that allows release, with the same request and original deadline.
+      request->pause_requested_under_suspension = true;
+      request->query_inflight = true;
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+      observe_hide_pause(completed, "pause-under-suspension", replied, int(playback));
+#endif
+      [completed->view pauseAllMediaPlaybackWithCompletionHandler:^{
+        request->query_inflight = false;
+        const auto active = request->state.lock();
+        if (!live(active) || active->view != request->view || active->hide_pause != request ||
+            active->media_generation != request->generation || active->result.navigation_generation != request->navigation) {
+          return;
+        }
+#ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
+        observe_hide_pause(active, "pause-under-suspension-ack", Check::Clock::now());
+#endif
+        // The existing watchdog owns the next query and the deadline.
+      }];
+      return;
+    }
     const bool playing = playback == WKMediaPlaybackStatePlaying;
-    const auto result = request->verification.observe(
-        playing, completed->media_generation, completed->result.navigation_generation, replied);
+    const auto result = waiting == Check::Result::Waiting ? request->verification.observe(
+        playing, completed->media_generation, completed->result.navigation_generation, replied) : waiting;
     request->verified |= result == Check::Result::Paused;
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
     if (result != Check::Result::Ignored) {
