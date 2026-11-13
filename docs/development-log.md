@@ -1,5 +1,15 @@
 # 开发交接记录
 
+## 2026-11-13 17:36 UTC · 原生会话关联任务
+
+本地 main `5ae6507372adde77bae2b495bec9ac30fb8e0772` 纳入 Claude 独立工作树的 `ca4ea773`、`a415e414`。已消费的智能体运行卡片可以打开「关联任务」。详情只读当前项目的工作流状态、冻结快照与产物名称。宽窗沿用 Web 的右侧面板，700 逻辑像素及以下为底部覆盖层。Root 补齐项目打开或关闭发出后的作用域校验、编辑器移动与重开详情后的过期回调围栏。
+
+固定起点为桌面界面驱动中已打开合成项目、Bridge 已就绪的聚焦工作台。英文 1600×1100 从左栏会话 A 到详情共 2 次点击。中文 680×1000 从「历史」经会话 A 到详情共 3 次。两窗各一次 Esc 或点击关闭后恢复原卡片焦点。单次打开只发一个 `project.workflow_runs.get`。会话哈希链、项目修订、草稿、Viewer 相机及分栏布局保持。覆盖项目、会话、卡片变化和旧回执丢弃。原生文件预览、下载、普通问答引用和本片真实桌面窗口回放待接。
+
+Claude 独立候选全项目 991/991、定向 27/27。Root 集成后重新构建，定向 27/27，双语各 2983 条校验通过，暂存 gitleaks 零发现。证据 `root-delivery-20261113-174/{build-exact.log,native-detail-exact.xml}` 与 Claude 110 工作树 `build/evidence/candidate-full-project-tests.log`。AOCI 收尾仍在 94 条观察证据审阅门返回 `stopped/blocked`、零候选、无 Recovery。三份既有 AOCI 改动摘要一致。
+
+远端仍为 `57f3601a`。Pages 和 Secret scan 通过，Desktop 与 Runtime 仍在运行。PR #53 与 #54 的精确旧头未变，均保持开放。Claude 111 已在独立工作树核对 macOS 首次暂停的官方回执。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43470699822) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43470699712)
+
 ## 2026-11-13 17:21 UTC · 会话内文本预览
 
 本地 main `1ed52816271bf24f17ec2f4128ed0fa0a3e36e6f` 为发布清单加入小型 UTF-8 文本预览。明确点击后走已发布的校验文件接口，核对大小和摘要后按纯文本显示。预览上限 256 KiB。返回后恢复文件清单的滚动及触发按钮。其他格式沿用现有下载。
