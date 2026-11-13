@@ -1,5 +1,15 @@
 # STK 当前交接
 
+## 2026-11-13 19:45 UTC · 双端会话共用主操作快捷键
+
+本地 main `b076c2a31d0a35ec2f7828b7b134c5065bd93ab7` 采用 Ctrl+Enter（macOS 为 ⌘+Enter）触发当前会话的主操作。Web 发送后回到输入框。原生智能体会话沿用原发送动作。原生项目问答只准备并保存待发送问题，保留输入区焦点，发送由用户单独触发。Enter 继续换行。已整合 Claude 114 的最终对照稿 `1ef7632212a217f742e63afa2f91b60c60508e2d`，记录本次取舍，正文跟随和原生 Esc 草稿保留待接。桌面历史继续使用近期和分页入口，跨页标题搜索待覆盖权限和分页边界。 [统一工作台](docs/design/unified-workbench.md)
+
+真实本机 Hub 和 Chromium 固定起点为打开合成会话、输入框聚焦并已写草稿。1440×900 和 390×844 分别零鼠标点击、一次 Ctrl+Enter，每个会话一次消息 POST，正文保留 Enter 输入的换行，清空已发送草稿后焦点留在输入框，Hub 返回无模型配置的本地响应。Web 构建成功、全量 399/399，包含组字、长按和发送期间下一份草稿的回归。 [验收提案](docs/design/synthrix-workbench-next-acceptance.md)
+
+Linux 原生界面驱动固定起点为已打开会话和已聚焦的草稿输入框。一次 Ctrl+Enter、零鼠标点击，项目问答经实际项目 Bridge 生成一条 pending 请求，`executor_id` 为空，零发送，随后点击同一准备按钮未生成重复请求。1600×1400 智能体夹具同样零鼠标点击、一次 Ctrl+Enter，沿已有动作记录一次 `project.agent.say`，清空草稿并保留输入焦点，零 `project.agent.run.decide`。该测试初跑 1600×1100 未点到可见区外的输入框，调整固定窗口后通过。定向 53/53、UI 核心 135/135、双语 3006/3006，桌面二进制构建成功，暂存 gitleaks 零发现。macOS、Windows 及桌面实窗快捷键待验。证据 `root-delivery-20261113-186/{web-full.xml,live/browser-receipt.json,live/hub-receipt.json,desktop-shortcuts.xml,ui.xml}`。
+
+远端 `13d32015` Runtime 13/13，Desktop Linux 打包与干净系统安装冒烟通过，其余目标仍运行，发布等待该 Desktop 运行结束。Claude 113 首份 `dc8ab856` 在隔离 worktree，Root 复现 POSIX 权限和路径替换问题，后续修订单等待同一 Claude 会话结束现有验证后在原 worktree 启动。开放 PR #53 的相关重试契约已单独接入主线，PR #54 仍为旧交接。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43491122224) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43491121980)
+
 ## 2026-11-13 19:28 UTC · Web 历史可按会话标题查找
 
 本地 main `90bc270e85bc48844aab32b6781c61b3ae7380e5` 增加「搜索对话」。按已载入的标题筛选，空格分隔的词均须匹配。唯一命中时 Enter 打开并聚焦正文，多条或零条时继续留在筛选区。清空恢复完整列表。没有新增后端调用或权限。桌面仍使用近期与分页历史，桌面标题搜索待接。Web 生产构建成功，定向 5/5、全量 397/397，零跳过。修复前的两窗对照因不存在搜索框失败。暂存 gitleaks 零发现。
