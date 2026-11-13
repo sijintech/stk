@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-13 19:21 UTC · 工作台改动已发布到 main
+
+Root 从 `19998d12097685138b555904fbe880e1a91750f0` 快进推送至 `13d320155e2f3354f706d54d7ca581971943996b`，独立核对远端完整 SHA。14 个提交范围的 gitleaks 零发现。新头 Secret scan 与 Pages 通过，Desktop、Runtime 正在运行。上一头的 Windows 原生官方工件 `14069047795` 已下载并核对，必测 6/6，各 20/20 周期，五个生产报告用例均保留 Viewer 和 Python 草稿。macOS 仍以同头官方工件和本地修订记录为准。 [新头 Desktop](https://github.com/sijintech/stk/actions/runs/43491122224) [新头 Runtime](https://github.com/sijintech/stk/actions/runs/43491121980) [新头 Pages](https://github.com/sijintech/stk/actions/runs/43491121988) [Windows 工件](https://github.com/sijintech/stk/actions/runs/43481451563/artifacts/14069047795)
+
+Claude 114 已从发布头在独立 `claude/synthrix-workbench-acceptance-114` 启动，负责对照 Synthrix 已发布主页与双端现状，提交下一项减少操作的验收方案。Claude 113 继续在另一独立工作树开发保存副本；Root 负责主线、集成与实际目标平台验证。开放 PR #53 与 #54 仍为既有冲突和旧交接头。原七份工作区修改均保留。
+
 ## 2026-11-13 19:18 UTC · 工作台发布前核验
 
 上一远端 `19998d12097685138b555904fbe880e1a91750f0` 的 Desktop 于 19:18:35 UTC 完成，六项作业中五项通过。Linux 三项、Windows CPU、Windows WebView2 原生文档均成功。macOS CPU 两条窄窗会话测试和必测视频两项失败，具体工件与本地修订见下一节。Runtime 13/13、Pages 和 Secret scan 通过。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43481451563) [Windows 工件](https://github.com/sijintech/stk/actions/runs/43481451563/artifacts/14069047795) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43481451605)
