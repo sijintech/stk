@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-13 18:17 UTC · 原生会话冻结文件预览与发布门禁
+
+本地 main `8894b2f5087a65d6986749383289d488cf0fae5d` 纳入 Claude 112 独立候选。在关联任务中，明确点击「查看文件」读取所选任务的冻结快照清单。明确点击「预览」后核对记录、长度、SHA-256 和实际 UTF-8 字节。预览上限 256 KiB，内容按纯文本显示。Root 保留面板初始焦点，补齐逐级返回后旧控件回调的失效校验。集成定向 60/60，双语目录各 3004 键校验通过，暂存 gitleaks 零发现。Claude 独立定向 47/47，完整项目回归仍在运行。
+
+Linux X11、真实桌面与项目 Bridge。固定起点为已打开合成项目的聚焦工作台，已有一条已消费的智能体会话。英文 1600×1100 从左栏到文本预览 4 次点击，中文 680×1000 经历史菜单 5 次。逐级返回各 1 次，最后关闭按钮或 Esc 1 次。两窗都显示冻结的 60 字节 JSON，原文件在验收前已改写，内嵌 HTML 标签仍显示为字符。各一次工作流、快照清单及预览读取，返回与关闭零读取。会话哈希、项目修订 5、数据库、源文件和快照字节前后一致。证据 `root-delivery-20261113-178/{integration.xml,native-preview-en-integrated/receipt.json,native-preview-zh_CN-integrated/receipt.json}`。
+
+上一远端 `57f3601a1c214db81e0e8a80aa26b86f85c666ed` 的 Desktop 于 18:17:03 UTC 完成，6 项中 5 项通过。Windows 原生 WebView2 与 Linux 三项、Windows CPU 均通过。macOS 构建、CPU、Metal、应用冒烟和首次工具栏对照通过，必测原生文档步骤失败。Windows 工件下载遇到 TLS `bad record MAC`，通过 GitHub 作业回执确认原生步骤通过。该终态满足仓库推送门禁。Claude 113 已在独立 worktree 开发显式保存副本。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43470699822) [macOS 工件](https://github.com/sijintech/stk/actions/runs/43470699822/artifacts/14065611207) [Windows 工件](https://github.com/sijintech/stk/actions/runs/43470699822/artifacts/14065485358)
+
 ## 2026-11-13 18:06 UTC · 关联任务键盘焦点与传输契约
 
 本地 main `ed60da0db646ff41f7014c35d3457bb7a50ad07c` 将桌面关联任务面板打开时的焦点移到关闭按钮，与 Web 对齐。只允许最上层面板中的可见控件取得这个焦点。关闭后回到原卡片。UI core、原生智能体与工作台导航 51/51。Linux X11 实窗英文 1600×1100，固定起点为已打开合成项目的聚焦工作台，Viewer 预置公开网格。两次点击从左栏会话打开详情，直接按 Enter 一次关闭，零 Tab、零滚动。前后正文像素取样一致，项目数据库、会话哈希、产物摘要一致。只发一次详情读取，另有进入会话所需的 route/get。证据 `root-delivery-20261113-177/{modal.xml,native-linked-en-modal-focus/receipt.json}`。
