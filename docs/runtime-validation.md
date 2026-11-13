@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-13 20:54 UTC · 桌面历史可按标题跨页查找
+
+本地 main `e9e6ef119644703499a20412718e74e7a292f31a` 增加「搜索对话」。从左栏或窄窗历史打开，在输入后按 Enter 或点击搜索。统一的可选桌面 Bridge 读取在当前项目分页返回活跃问答及智能体会话的标题。结果明确激活前不打开正文。标题按 NFKC、Unicode 大小写折叠与分词匹配。单次查询扫描候选标题，输出分页。归档问答从既有浏览入口打开，旧 Bridge 继续显示原来的历史。Claude 115 最终稿 `f82275331b3249669f7ee4205fbe29a31f4bd759` 已审阅并整合，采用单个方法和独立历史入口的取舍已写入设计。 [Bridge 契约](specs/stk-desktop-bridge-v1.md) [设计](design/native-conversation-search.md)
+
+Linux X11 固定起点为任务页、已打开合成项目、32 条已保存问答。英文 1600×1100 两次点击，680×1000 三次点击，含入口与选中结果，各一次 Enter 提交。进入的是超出近期列表的第一条问答。每窗一次标题查询，明确选中后各一次原请求、原数据范围及原消息读取。数据库摘要与修订不变，零发送、零执行。界面驱动另外验证草稿和 Viewer 相机保留。Python 177/177、原生定向 69/69、UI 核心 135/135，双语目录各 3013 个键，桌面构建与暂存 gitleaks 通过。证据 `root-delivery-20261113-188/{bridge-final.xml,native-layout.xml,ui.xml,i18n.log,native-final-wide/receipt.json,native-final-narrow/receipt.json}`。
+
+Claude 113 `13bf937eec06c7c36a746a60088110bf157ffbc9` 报告隔离 Linux 2260/2260，macOS 仅桩声明语法核对，Windows 未编译。Root 用链接包装器在无替换重命名回退处确定性替换临时项，复现失败回执仍留下最终路径的外来符号链接。复现记录 `root-delivery-20261113-188/claude-113-race.cc`，后续修订已回派同一独立 worktree。远端 `f3c666eb` Runtime 13/13 与 Linux 三项 Desktop 作业通过，macOS 与 Windows 仍运行，本次代码待前序 Desktop 终态再发布。PR #53 的重试修复及契约已有等效主线提交，#54 仍为旧大写交接。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43500121086) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43500120670)
+
 ## 2026-11-13 20:33 UTC · 双端发送后跟随最新消息
 
 本地 main `edfde0ef61c85fdb3292d3bb9cb8bcb8bb00fd33` 和 `88f3f038aeea0a63aa9a3cd55ece7921dd2f2538` 让 Web 与桌面智能体会话在明确发送后回到末尾。向上阅读后，后续回复保留阅读位置，可按「跟随最新」返回末尾。两端切换会话后恢复各自阅读位置。Web 首次阅读从顶部开始，原生智能体会话首次从末尾开始。 [统一工作台](design/unified-workbench.md)
