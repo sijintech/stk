@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-13 15:56 UTC · 文档发布重跑结果
+
+主线 `c04b48a0` 的 Pages `43456596160` 第二次在 15:54:50 UTC 终态失败。两次 Build 均成功，Publish 均由 Wrangler 报 `Received a malformed response from the API`，当前远端代码已发布，文档站部署未获成功回执。证据 `root-delivery-20261113-169/pages-retry-failed.json` 与 `pages-retry-failure-excerpt.log`。 [Pages CI](https://github.com/sijintech/stk/actions/runs/43456596160)
+
 ## 2026-11-13 15:54 UTC · 主线发布与 macOS 生产候选
 
 Root 将远端 main 从 `d4064e5124f7a81e90f257f2580af35b49c555ae` 快进到 `c04b48a02e41185a7baf97ce1798415d94c74269`，推送后独立核对完整 SHA。7 个提交范围扫描无发现。包括 Web 与桌面默认切片一致、Claude 105 进度提示的最终补充及 Claude 106 清空索引后恢复中间层。本次差异是 Web 与文档，Desktop 路径过滤未触发。Runtime `43456596317` 已排队，Secret scan `43456596165` 通过。Pages `43456596160` 首次构建成功，发布阶段收到 Cloudflare API 格式异常，已重跑失败作业。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/43456596317) [Pages](https://github.com/sijintech/stk/actions/runs/43456596160) [Secret scan](https://github.com/sijintech/stk/actions/runs/43456596165)
