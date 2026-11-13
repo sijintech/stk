@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-13 17:58 UTC · macOS 首次暂停帧标记对照
+
+本地 main `170dadb8c926eb6979e936d5e0c59e5c2ea2510c` 接通 Claude 111 取证提案的独立帧标记对照。MP4 与 HTML 各有持续播放和立即暂停两组。持续播放从首次 Play 返回后开始取图。立即暂停使用原工具栏点击和三次 DOM 采样，完成后才取图。结果包含截图请求与完成时刻、解码帧号、原导航代数和图片摘要。采集缺失或画面无法判定保留为不确定。两组属于独立会话，比较只能支持或削弱假设。六项生产原生门禁及原有二十轮不变。
+
+Linux `stk-reports-native-window` 构建通过，文档宿主与原生 AX CPU 15/15。使用 Linux 头对 Cocoa 条件路径做 C++ 语法检查通过。四个可选用例与上传路径已和 CMake、CI 交叉核对，暂存 gitleaks 零发现。真机帧标记证据待新头 Desktop CI。证据 `root-delivery-20261113-176/{native-exact-build.log,report-host-exact.xml,cocoa-cxx-exact-syntax.log}`。
+
+远端仍为 `57f3601a`，其 Desktop 的 macOS 构建、CPU、Metal 已通过，打包及原生媒体尚未结束，Windows 原生文档正在运行。复核开放 PR #53 和 #54 仍为原旧头，保留开放。Claude 112 在独立工作树已有文件清单、文本预览与测试改动，候选尚未交付。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43470699822) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43470699712)
+
 ## 2026-11-13 17:49 UTC · 桌面智能体会话居中与真实窗口验收
 
 本地 main `cfaf8c1816f5e66c81ef1cab97239206eaf06aa4` 让聚焦工作台中的智能体会话复用项目问答的 880 逻辑像素居中正文列，文本按实际列宽折行。窄窗随可用宽度排列。桌面应用和项目测试目标构建完成，导航、智能体和文献入口联合 51/51，暂存 gitleaks 零发现。首轮新增布局断言未计入 7 像素滚动条，修正验收容差后通过。
