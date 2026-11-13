@@ -1050,7 +1050,8 @@ bool Context::activate_focused(const Event &e)
     case WidgetType::TextField:
       if (e.key == Key::Enter) {
         const auto &options = w->text_opts;
-        if (options.multiline && options.submit_when_focused && options.on_submit && (e.mods & primary_mod())) {
+        const bool submit_shortcut = options.multiline ? (e.mods & primary_mod()) != 0 : options.submit_single_line;
+        if (submit_shortcut && options.submit_when_focused && options.on_submit) {
           if (!e.repeat && !(e.mods & (MOD_SHIFT | MOD_ALT))) {
             const auto submit = options.on_submit;
             submit();

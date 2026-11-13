@@ -1137,7 +1137,7 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
     uint64_t scope = 0, bridge = 0, visibility = 0, activity = 0;
     std::string launcher;
     bool focus = true;
-    bool busy = false, loaded = false;
+    bool busy = false, loaded = false, first_page = true;
   };
 
   bool can_search_conversations(ProjectState &project) const
@@ -1153,6 +1153,7 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
     auto &store = shell_.store_;
     if (!store.project().project() || !store.bridge()) { return; }
     state->busy = true;
+    state->first_page = after.is_null();
     state->error.clear();
     if (after.is_null()) {
       state->requested = state->query;
@@ -1215,10 +1216,16 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
     const auto start = [this, state = std::weak_ptr<ConversationSearch>(state), current] {
       if (const auto search = state.lock(); search && current()) { search_conversations(search); }
     };
+    const auto activate = [state = std::weak_ptr<ConversationSearch>(state), close, current](const auto &open) {
+      const auto search = state.lock();
+      if (search && current() && !search->busy && search->requested == search->query && open) {
+        close(false);
+        open();
+      }
+    };
     auto &input = row.text_field("query", {[state] { return state->query; },
                                           [state](const std::string &value) { state->query = value; }},
-        {.placeholder = std::string(shell_.store_.tr("workbench.history.search.placeholder")), .max_length = 200,
-         .on_submit = start, .submit_single_line = true});
+        {.placeholder = std::string(shell_.store_.tr("workbench.history.search.placeholder")), .max_length = 200});
     row.button("search", shell_.store_.tr("workspace.search.button"), start).width(5).disable(state->busy);
     row.button("close", shell_.store_.tr("ui.close"), [close] { close(true); }).width(4);
     if (std::exchange(state->focus, false)) { ui.focus_modal_next_frame(input.key); }
@@ -1227,6 +1234,7 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
     if (state->busy) { panel.label(shell_.store_.tr("workspace.search.searching")); }
     if (!state->error.empty()) { panel.paragraph(state->error); }
     if (current_results && state->loaded && state->items.empty()) { panel.label(shell_.store_.tr("workbench.history.search.empty")); }
+    std::function<void()> unique_result;
     for (const auto &item : state->items) {
       const auto id = io::get_string(item, "id"), kind = io::get_string(item, "kind");
       const auto label = io::get_string(item, "label");
@@ -1234,15 +1242,29 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
       const auto kind_label = shell_.store_.tr(agent ? "workbench.history.search.agent" : "workbench.history.search.question");
       const auto open = shell_.saved_conversation_action(origin, id,
           agent ? SavedConversationKind::AgentSession : SavedConversationKind::Question);
+      if (state->first_page && state->items.size() == 1 && state->next.is_null() && open) {
+        unique_result = [activate, open, id, kind, state = std::weak_ptr<ConversationSearch>(state)] {
+          const auto search = state.lock();
+          if (search && search->first_page && search->items.size() == 1 && search->next.is_null() &&
+              io::get_string(search->items.front(), "id") == id && io::get_string(search->items.front(), "kind") == kind) {
+            activate(open);
+          }
+        };
+      }
       panel.button("open/" + kind + "/" + id, label + " · " + std::string(kind_label) + " · " + id.substr(0, 8),
-          [state = std::weak_ptr<ConversationSearch>(state), close, current, open] {
-            const auto search = state.lock();
-            if (search && current() && !search->busy && search->requested == search->query && open) {
-              close(false); open();
-            }
-          })
+          [activate, open] { activate(open); })
           .disable(state->busy || !current_results || !open).tip(label);
     }
+    input.text_opts.submit_single_line = true;
+    input.text_opts.submit_when_focused = true;
+    input.text_opts.on_submit = [state = std::weak_ptr<ConversationSearch>(state), start, unique_result] {
+      const auto search = state.lock();
+      if (!search || search->busy) { return; }
+      if (search->loaded && search->requested == search->query && search->error.empty()) {
+        if (unique_result) { unique_result(); }
+      }
+      else { start(); }
+    };
     if (!state->next.is_null()) {
       panel.button("next", shell_.store_.tr("workbench.history.search.next"),
           [this, state = std::weak_ptr<ConversationSearch>(state), current] {

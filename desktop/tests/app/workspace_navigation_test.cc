@@ -1113,12 +1113,32 @@ TEST_F(SavedConversationNavigationPython, SearchOpensAnOlderQuestionWithoutWriti
     const auto *query = widget("conversation_search/query");
     ASSERT_NE(query, nullptr);
     EXPECT_EQ(f.screen.ui()->focused(), query->id);
+    if (narrow) {
+      const auto newer = "conversation_search/open/question/cccccccc-cccc-4ccc-8ccc-ccccccccccc0";
+      ASSERT_TRUE(f.drv->key(wm::Key::Unknown, wm::ModNone, "temperature"));
+      ASSERT_TRUE(f.drv->key(wm::Key::Enter)); f.drv->frame();
+      ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget(newer) && widget(newer)->enabled; }, 30));
+      ASSERT_TRUE(f.drv->key(wm::Key::Enter)); f.screen.run_deferred(); f.drv->frame();
+      ASSERT_NE(widget(newer), nullptr);
+      EXPECT_EQ(discussion.exchange_id(), visible);
+      ASSERT_TRUE(f.drv->key(wm::Key::Unknown, wm::ModNone, " "));
+      ASSERT_TRUE(f.drv->key(wm::Key::Home, wm::ModShift));
+    }
     ASSERT_TRUE(f.drv->key(wm::Key::Unknown, wm::ModNone, "comparison lattice"));
     ASSERT_TRUE(f.drv->key(wm::Key::Enter)); f.drv->frame();
     const auto match = std::string("conversation_search/open/question/") + kFirst;
     ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget(match) && widget(match)->enabled; }, 30));
     EXPECT_EQ(discussion.exchange_id(), visible);
-    ASSERT_NO_FATAL_FAILURE(click(match));
+    wm::Event repeated;
+    repeated.type = wm::EventType::KeyDown;
+    repeated.key = wm::Key::Enter;
+    repeated.is_repeat = true;
+    ASSERT_TRUE(f.drv->send(repeated));
+    f.screen.run_deferred(); f.drv->frame();
+    ASSERT_NE(widget(match), nullptr);
+    EXPECT_EQ(discussion.exchange_id(), visible);
+    if (narrow) { ASSERT_NO_FATAL_FAILURE(click(match)); }
+    else { ASSERT_TRUE(f.drv->key(wm::Key::Enter)); f.screen.run_deferred(); f.drv->frame(); }
     ASSERT_TRUE(loop.pump_until([&] {
       f.drv->frame(); return !discussion.exchange_busy() && widget(input) && discussion.exchange_id() == kFirst;
     }, 30));
