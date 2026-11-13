@@ -1,5 +1,11 @@
 # 开发交接记录
 
+## 2026-11-13 15:59 UTC · macOS 生产候选与 Pages 失败位置
+
+本地 main `bd4f3c32b3b0e0ff7dbfaa36ae4e2290113d0f62` 按字节集成 Cocoa 候选 `7d3c45bb3acff5d160a9a25ea5c3c369d364f62a`。同一个隐藏请求在本视图持有挂起且首次读到 Suspended 时追加一次原生暂停。暂停回执后沿原看门狗继续读状态，原 1 秒期限、代次校验、独立隔离对照及重显释放规则保留。Linux Reports 构建目标通过，文档模块回归 44/44。生产 Cocoa 代码尚待 macOS 编译和真机回放。上一次触发的 Desktop `42986687264` 已于 11 月 11 日 09:33:30 UTC 终态，5/6，唯一失败为已记录的 macOS 两个必测视频。中间 `c04b48a0` 只涉及 Web 与文档，未触发 Desktop。Claude 107 继续独立整理复现说明。 [上轮 Desktop CI](https://github.com/sijintech/stk/actions/runs/42986687264)
+
+Pages `43456596160` 的重跑在 `GET /accounts/***/pages/projects/stk` 收到 HTTP 503，早于资源上传和部署创建。Wrangler 3.15.0 将无法解析的返回体报告为 malformed response。文档构建成功。证据 `root-delivery-20261113-170/pages-endpoint-summary.log`。 [Pages CI](https://github.com/sijintech/stk/actions/runs/43456596160)
+
 ## 2026-11-13 15:56 UTC · 文档发布重跑结果
 
 主线 `c04b48a0` 的 Pages `43456596160` 第二次在 15:54:50 UTC 终态失败。两次 Build 均成功，Publish 均由 Wrangler 报 `Received a malformed response from the API`，当前远端代码已发布，文档站部署未获成功回执。证据 `root-delivery-20261113-169/pages-retry-failed.json` 与 `pages-retry-failure-excerpt.log`。 [Pages CI](https://github.com/sijintech/stk/actions/runs/43456596160)
