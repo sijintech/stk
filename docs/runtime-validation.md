@@ -1,5 +1,17 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-13 16:25 UTC · 双端主页的 AOCI 收尾
+
+稳定源码上的 AOCI Maintain 返回 `stopped/blocked`，零候选。Scope 状态为 `observed_evidence_review_required`，有 94 条待审观察证据。保留原正式索引和基线文件，三份既有改动的摘要一致。后续在既有观察证据审阅完成后重开维护计划。
+
+## 2026-11-13 16:23 UTC · 双端会话主页首片
+
+所有者确认 Synthrix 主要页面是 STK 网站和本地客户端共同的设计参照。Root 在本地 main 提交 `6e9a6571471946cbe3c0e7b655a177e66146c77e`。Web 将空白会话提示与输入框居中，已保存会话保留正文独立滚动和底部输入框。桌面聚焦问答用同一首问文案，缺少上下文的原因在准备按钮附近显示，原有明确准备和发送流程继续使用。Root 以发布的 Synthrix `caec2b9` 主页说明及其后续本地侧栏说明为参照。实际 Claude 在独立 `claude/unified-home-acceptance-108` 交付 `2198e76045e5eb35ccf3160377b2e2bb4685f429`，Root 核对并修正了矩阵中首次启动的既有行为。会话内任务和文件详情等待可核验且经授权的引用。
+
+Web 生产构建通过，Chromium 全量 393/393，最终布局用例再跑 2/2。固定起点为中文 1440×900 与 390×844、已配对的模拟 Hub、未发送的新对话。主页零点击可写。打开历史宽窗 1 次、窄窗 2 次，任务往返各 2 次，原草稿和 520 px 阅读位置保留。导航阶段零 POST，显式发送后只有 1 次模拟 POST。桌面 Linux 构建通过，项目导航与文献入口定向 26/26。真实 X11/OpenGL 缩放 1 的英文 1600×1000、中文 680×900 从分栏中打开合成空项目、进入工作台各 2 次点击，进入工作台后零点击显示提示、输入框和缺上下文反馈。两窗没有准备、捕获、发送或模型调用，项目 SQLite 摘要一致。证据 `root-delivery-20261113-171/{web-full.log,web-layout-final,native-project-final.xml,native-home-final-en,native-home-final-zh}`。
+
+远端 `6ed5e920` 的 Desktop 整轮仍在运行，Linux 打包与干净机冒烟已通过。该头 Pages 构建完成，发布步骤失败。首片留在本地 main，等待 Desktop 达到终态再推送。Claude 107 的 macOS 复现说明另待集成。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43458144964) [Pages CI](https://github.com/sijintech/stk/actions/runs/43458145095)
+
 ## 2026-11-13 15:59 UTC · macOS 生产候选与 Pages 失败位置
 
 本地 main `bd4f3c32b3b0e0ff7dbfaa36ae4e2290113d0f62` 按字节集成 Cocoa 候选 `7d3c45bb3acff5d160a9a25ea5c3c369d364f62a`。同一个隐藏请求在本视图持有挂起且首次读到 Suspended 时追加一次原生暂停。暂停回执后沿原看门狗继续读状态，原 1 秒期限、代次校验、独立隔离对照及重显释放规则保留。Linux Reports 构建目标通过，文档模块回归 44/44。生产 Cocoa 代码尚待 macOS 编译和真机回放。上一次触发的 Desktop `42986687264` 已于 11 月 11 日 09:33:30 UTC 终态，5/6，唯一失败为已记录的 macOS 两个必测视频。中间 `c04b48a0` 只涉及 Web 与文档，未触发 Desktop。Claude 107 继续独立整理复现说明。 [上轮 Desktop CI](https://github.com/sijintech/stk/actions/runs/42986687264)
