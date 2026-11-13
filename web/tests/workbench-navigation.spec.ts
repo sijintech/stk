@@ -3047,9 +3047,13 @@ test('the compact history scrolls a restored selection into view on keyboard ope
   const restored = item(page, /铁电回线分析/);
   await expect(restored).toBeFocused();
   const panel = (await historyPanel(page).boundingBox())!, row = (await restored.boundingBox())!;
-  expect(row.y).toBeGreaterThanOrEqual(panel.y);
+  const controls = (await historyPanel(page).locator('.history-controls').boundingBox())!;
+  expect(controls.y).toBeGreaterThanOrEqual(panel.y);
+  expect(row.y).toBeGreaterThanOrEqual(controls.y + controls.height);
   expect(row.y + row.height).toBeLessThanOrEqual(panel.y + panel.height);
   expect(await historyPanel(page).evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+  await historyPanel(page).getByRole('button', {name: '新对话', exact: true}).click();
+  await expect(draft(page)).toBeFocused();
   expect(hub.messages).toHaveLength(0);
   expect(errors).toEqual([]);
 });
@@ -3219,6 +3223,13 @@ test('wide history keyboard activation enters the transcript without tabbing thr
   await second.click();
   await shows(page, ['B 的问题']);
   await expect(entries(page)).toHaveCount(32);
+  await historyPanel(page).evaluate(el => { el.scrollTop = el.scrollHeight; });
+  const header = (await historyPanel(page).locator('.history-controls').boundingBox())!;
+  const rail = (await historyPanel(page).boundingBox())!;
+  expect(header.y).toBeGreaterThanOrEqual(rail.y);
+  expect(header.y + header.height).toBeLessThan(rail.y + rail.height);
+  await historyPanel(page).getByRole('button', {name: '新对话', exact: true}).click({trial: true});
+  await historyPanel(page).evaluate(el => { el.scrollTop = 0; });
   await go(page, '任务');
 
   await first.focus();

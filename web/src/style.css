@@ -45,12 +45,22 @@
   grid-row: 2;
   min-height: 0;
   overflow: auto;
+  scroll-padding-top: 92px;
   display: flex;
   flex-direction: column;
   padding: 14px 8px;
   background: #1f1f28;
   border-top: 1px solid #363646;
   border-right: 1px solid #363646;
+}
+.history-controls {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex: none;
+  display: flow-root;
+  background: #1f1f28;
+  padding-top: 4px;
 }
 .history-head {
   display: flex;
@@ -69,20 +79,12 @@
   font-size: 12px;
 }
 .history-search {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  flex: none;
   margin: 0 4px 8px;
   padding: 2px 0;
-  background: #1f1f28;
 }
 .history-search input {
   padding: 5px 7px;
   font-size: 12px;
-}
-.history-search + .history-list .conversation {
-  scroll-margin-top: 32px;
 }
 .history-list {
   list-style: none;

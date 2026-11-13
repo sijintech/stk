@@ -827,15 +827,17 @@ function Workbench({disconnect}:{disconnect:()=>void}){
     <nav className="section-nav" aria-label="工作区">{SECTIONS.map(([key,label])=><button type="button" className={tab===key?'active':''} aria-current={tab===key?'page':undefined} key={key} onClick={()=>openSection(key)}>{label}</button>)}
       {!wide&&<button type="button" ref={historyToggle} className={historyOpen?'history-toggle open':'history-toggle'} aria-expanded={historyOpen} aria-controls="conversation-history" aria-label="对话历史" onClick={toggleHistory}>历史</button>}</nav>
     <section id="conversation-history" ref={historyPanel} aria-label="对话历史" className={`history${wide?'':' history-overlay'}${historyShown?'':' surface-hidden'}`} inert={!historyShown}>
-      <div className="history-head"><h2>对话</h2><button type="button" className="new-conversation" onClick={()=>openConversation(null)}>新对话</button></div>
-      {(conv.entries.length>1||historyQuery)&&<form className="history-search" role="search" onSubmit={e=>{
-        e.preventDefault();
-        if(historyTerms.length&&historyEntries.length===1)openConversation(historyEntries[0].id,true);
-      }}>
-        <input type="search" aria-label="搜索对话" placeholder="搜索对话" value={historyQuery} maxLength={200}
-          onKeyDown={e=>{if(e.key==='Enter'&&(e.repeat||e.nativeEvent.isComposing))e.preventDefault();}}
-          onChange={e=>setHistoryQuery(e.target.value)}/>
-      </form>}
+      <div className="history-controls">
+        <div className="history-head"><h2>对话</h2><button type="button" className="new-conversation" onClick={()=>openConversation(null)}>新对话</button></div>
+        {(conv.entries.length>1||historyQuery)&&<form className="history-search" role="search" onSubmit={e=>{
+          e.preventDefault();
+          if(historyTerms.length&&historyEntries.length===1)openConversation(historyEntries[0].id,true);
+        }}>
+          <input type="search" aria-label="搜索对话" placeholder="搜索对话" value={historyQuery} maxLength={200}
+            onKeyDown={e=>{if(e.key==='Enter'&&(e.repeat||e.nativeEvent.isComposing))e.preventDefault();}}
+            onChange={e=>setHistoryQuery(e.target.value)}/>
+        </form>}
+      </div>
       <ul className="history-list">
         {historyEntries.map(entry=><li key={entry.id}><button type="button" className="conversation" aria-current={entry.id===conv.session?'true':undefined} onClick={e=>openConversation(entry.id,e.detail===0)}><span>{entry.name}</span><small>{entryNote(entry)}</small></button></li>)}
       </ul>
