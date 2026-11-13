@@ -53,7 +53,7 @@ namespace {
 constexpr const char *kReport = "a1111111-1111-4111-8111-111111111111";
 constexpr const char *kMediaSha256 = "a54fb5baf8ca34545a8e31ea46c8801347db722cc9c876279186ab8c94f860d1";
 constexpr size_t kMediaSize = 41558;
-// Only --visible-frame-clock-control reads this separate public synthetic clip, generated and
+// Frame-clock controls read this separate public synthetic clip, generated and
 // verified by spike/document_preview/fixtures/make_frame_clock_fixture.py. Same geometry, rate,
 // codecs and red/blue halves as frozen-preview.mp4, plus a per-frame ID marker.
 constexpr const char *kFrameClockMediaSha256 = "c2bbcb873b7628c22b512051443adde6ff2e6c8688c6d84f0307d6bab2a34eef";
@@ -72,6 +72,7 @@ void write(const fs::path &path, const std::string &text)
 }
 struct Options {
   enum class FreshPause { None, Hidden, Visible };
+  enum class FirstToolbarFrames { None, Playing, Paused };
   std::string python, backend, source = "markdown";
   fs::path output, media_fixture;
   bool pre_seek_hide_control = false;
@@ -90,6 +91,7 @@ struct Options {
   bool frame_clock_control = false;
   bool first_toolbar_pause_control = false;
   bool first_toolbar_immediate = false;
+  FirstToolbarFrames first_toolbar_frames = FirstToolbarFrames::None;
   bool suspend_reveal_control = false;
   bool fresh_pause_diagnostic() const { return fresh_pause != FreshPause::None; }
   bool pause_order_diagnostic() const
@@ -177,6 +179,7 @@ void log_last_media_observation(const Json &result) noexcept
                             "hidden_media_native_close", "frame_clock_verdict",
                             "first_toolbar_pause_delay", "first_toolbar_pause_trace",
                             "first_toolbar_pause_immediate", "first_toolbar_pause_immediate_trace",
+                            "first_toolbar_frame_clock",
                             "repeat_verified_visible_pause", "suspend_reveal",
                             "failed_reveal_observation", "failed_reveal_native_pause_trace",
                             "failed_reshown_hold", "reshown_hold_native_observation"}) {
@@ -1424,7 +1427,8 @@ class Exercise {
   }
   void first_toolbar_pause(app::EditorArea &area, const std::string &session, const Media &playing,
                            Clock::time_point play_returned,
-                           const std::shared_ptr<document_preview::ResourceSession> &resources, bool immediate)
+                           const std::shared_ptr<document_preview::ResourceSession> &resources, bool immediate,
+                           Options::FirstToolbarFrames frames)
   {
     const auto delay = immediate ? std::chrono::milliseconds(0) : kPassiveDelay;
     constexpr auto budget = document_preview::detail::MediaPauseVerification::timeout;
@@ -1479,6 +1483,19 @@ class Exercise {
           immediate ? "first_toolbar_pause_immediate_trace" : "first_toolbar_pause_trace");
       save();
     };
+    const auto frame_target = [&](bool before_pause) {
+      return layout_bound() && document_preview::test::visible_playback_target(
+          window_.native_window_handle(), session, trace, before_pause);
+    };
+    if (frames == Options::FirstToolbarFrames::Playing) {
+      evidence["stage"] = "playing-frame-clock";
+      first_toolbar_frame_clock(rect, playing, play_returned, std::nullopt, [&] {
+        return last_media_probe_ == prior_probe && frame_target(true);
+      });
+      save();
+      return;
+    }
+    std::optional<Media> settled;
     try {
       const auto delay_end = play_returned + delay;
       const bool drifted = !immediate && poll(delay_end, [&] { return !delay_bound(); });
@@ -1542,12 +1559,77 @@ class Exercise {
       evidence["stage"] = "observed";
       evidence["outcome"] = !paused(early) ? "early_sample_not_paused" : early.current_time > 0.05 ?
           "early_paused_above_floor" : "early_paused_at_or_below_floor";
+      if (paused(first) && paused(second) && std::abs(second.current_time - first.current_time) <= 0.10) {
+        settled = second;
+      }
     }
     catch (...) {
       try { record(); } catch (...) {} // Keep the original failure and any samples already observed.
       throw;
     }
     record();
+    if (frames == Options::FirstToolbarFrames::Paused) {
+      const auto settled_probe = last_media_probe_;
+      first_toolbar_frame_clock(rect, settled.value_or(playing), play_returned, trace.dispatched, [&] {
+        return settled.has_value() && last_media_probe_ == settled_probe && frame_target(false);
+      });
+      save();
+    }
+  }
+  void first_toolbar_frame_clock(ui::Rect viewport, const Media &geometry, Clock::time_point play_returned,
+                                 std::optional<Clock::time_point> pause_dispatch,
+                                 const std::function<bool()> &bound)
+  {
+    const bool paused = pause_dispatch.has_value();
+    const auto deadline = paused ? Clock::now() + frame_clock::kPausedBudget : play_returned + frame_clock::kPlayingBudget;
+    const auto *arm = paused ? "paused" : "uninterrupted_play";
+    ui::Rect picture;
+    try { picture = media_rectangle(viewport, geometry); }
+    catch (const std::runtime_error &error) {
+      result_["first_toolbar_frame_clock"] = {{"arm", arm}, {"outcome", "inconclusive"},
+          {"geometry_error", error.what()}, {"navigation_generation", geometry.navigation_generation},
+          {"dom_time_at_geometry_sample", geometry.current_time}, {"samples", Json::array()}};
+      return;
+    }
+    std::vector<frame_clock::Capture> captures;
+    std::optional<int> first, previous, stable;
+    std::optional<Clock::time_point> first_nonzero_requested, first_nonzero_completed;
+    for (int index = 1; index <= frame_clock::kMaxCapturesPerArm; ++index) {
+      captures.push_back(frame_clock_capture(paused ? "paused" : "playing", index, picture, deadline, bound));
+      const auto &capture = captures.back();
+      if (std::string_view(capture.status) != "completed") { break; }
+      const auto id = capture.reading.id;
+      if (!id) { previous.reset(); continue; }
+      if (*id > frame_clock::kPlayingMaxId) { break; }
+      if (!first) { first = id; }
+      if (paused && previous == id) { stable = id; break; }
+      if (!paused && *id > 0) {
+        first_nonzero_requested = capture.requested;
+        first_nonzero_completed = capture.completed;
+        break;
+      }
+      previous = id;
+    }
+    frame_clock_write(captures);
+    const bool persisted = std::all_of(captures.begin(), captures.end(), [](const auto &capture) {
+      return std::string_view(capture.status) != "completed" ||
+          (!capture.file.empty() && core::is_sha256_hex(capture.sha256));
+    });
+    const bool observed = persisted && (paused ? stable.has_value() : first_nonzero_requested.has_value());
+    Json samples = Json::array();
+    for (const auto &capture : captures) {
+      samples.push_back(frame_clock::capture_json(capture, play_returned, pause_dispatch));
+    }
+    result_["first_toolbar_frame_clock"] = {{"arm", arm},
+        {"outcome", observed ? "observed" : "inconclusive"}, {"samples", std::move(samples)},
+        {"navigation_generation", geometry.navigation_generation},
+        {"picture_rect_client_top_left", {picture.x, picture.y, picture.w, picture.h}},
+        {"dom_time_at_geometry_sample", geometry.current_time},
+        {"dom_frame_at_geometry_sample", frame_clock::dom_frame(geometry.current_time)},
+        {"first_decoded_frame", first ? Json(*first) : Json(nullptr)},
+        {"stable_paused_frame", stable ? Json(*stable) : Json(nullptr)},
+        {"first_nonzero_requested_seconds", media_time(play_returned, first_nonzero_requested)},
+        {"first_nonzero_completed_seconds", media_time(play_returned, first_nonzero_completed)}};
   }
   void fresh_native_pause_dom_diagnostic(app::EditorArea &area, const std::string &session,
                                          const Media &playing, const Media &last_seek, const NativePause &previous,
@@ -2742,9 +2824,9 @@ raise SystemExit(main())
   const bool video = options.source == "video" || options.source == "html-video";
   const bool html_video = options.source == "html-video";
   std::string media_bytes;
-  // The frame-clock diagnostic alone selects its separately pinned clip; all other modes are unchanged.
-  const size_t media_size = options.frame_clock_control ? kFrameClockMediaSize : kMediaSize;
-  const std::string media_sha256 = options.frame_clock_control ? kFrameClockMediaSha256 : kMediaSha256;
+  const bool marked_clip = options.frame_clock_control || options.first_toolbar_frames != Options::FirstToolbarFrames::None;
+  const size_t media_size = marked_clip ? kFrameClockMediaSize : kMediaSize;
+  const std::string media_sha256 = marked_clip ? kFrameClockMediaSha256 : kMediaSha256;
   if (video) {
     std::ifstream file(options.media_fixture, std::ios::binary);
     require(file.good(), "Pinned public MP4 fixture is required");
@@ -2978,7 +3060,7 @@ raise SystemExit(main())
 #ifdef __APPLE__
       if (options.first_toolbar_pause_control) {
         ui.first_toolbar_pause(*area, session, explicitly_playing, explicit_play_returned, resources,
-                               options.first_toolbar_immediate);
+                               options.first_toolbar_immediate, options.first_toolbar_frames);
         require(area->tab(1).save_workspace_state() == draft_state && area->tab(1).has_unsaved_changes() &&
             shell.store().scripts().history().empty(), "Toolbar pause control preserves the unexecuted Python draft");
         require(viewer.save_workspace_state() == viewer_state && viewer.camera_serial() == camera &&
@@ -3479,6 +3561,14 @@ int main(int argc, char **argv)
       options.first_toolbar_immediate = arg == "--first-toolbar-pause-immediate-control";
       continue;
     }
+    if (arg == "--first-toolbar-frame-clock-playing" || arg == "--first-toolbar-frame-clock-paused") {
+      if (options.first_toolbar_pause_control) { return 2; }
+      options.first_toolbar_pause_control = true;
+      options.first_toolbar_immediate = true;
+      options.first_toolbar_frames = arg == "--first-toolbar-frame-clock-playing" ?
+          Options::FirstToolbarFrames::Playing : Options::FirstToolbarFrames::Paused;
+      continue;
+    }
     if (arg == "--suspend-reveal-control") {
       if (options.suspend_reveal_control) { return 2; }
       options.suspend_reveal_control = true;
@@ -3542,7 +3632,7 @@ int main(int argc, char **argv)
        && options.source != "video" && options.source != "html-video"
 #endif
       )) {
-    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control|--visible-native-pause-control|--second-visible-native-pause-control|--repeat-verified-visible-native-pause-control|--hide-after-verified-native-pause-control|--hide-without-repeat-native-pause-control|--hide-without-repeat-native-pause-dom-control|--fresh-native-hide-dom-control|--fresh-native-visible-dom-control|--visible-frame-clock-control|--first-toolbar-pause-delay-control|--first-toolbar-pause-immediate-control|--suspend-reveal-control] [--pause-during-hidden-suspension]\n"); return 2;
+    std::fprintf(stderr, "usage: stk-reports-native-window --python PATH --gpu-backend BACKEND --evidence-dir DIR --source markdown|html|pdf|video|html-video [--media-fixture MP4] [--pre-seek-hide-control|--quiet-pre-seek-hide-control|--isolated-quiet-pre-seek-hide-control|--visible-native-pause-control|--second-visible-native-pause-control|--repeat-verified-visible-native-pause-control|--hide-after-verified-native-pause-control|--hide-without-repeat-native-pause-control|--hide-without-repeat-native-pause-dom-control|--fresh-native-hide-dom-control|--fresh-native-visible-dom-control|--visible-frame-clock-control|--first-toolbar-pause-delay-control|--first-toolbar-pause-immediate-control|--first-toolbar-frame-clock-playing|--first-toolbar-frame-clock-paused|--suspend-reveal-control] [--pause-during-hidden-suspension]\n"); return 2;
   }
   Json result = {{"format", "stk.reports-native-evidence/1"}, {"status", "running"}, {"required_cycles", options.reading_cycles()},
       {"completed_cycles", 0}, {"images", Json::array()}, {"native_scroll_requests", Json::array()},
@@ -3615,6 +3705,15 @@ int main(int argc, char **argv)
     result["production_ui_acceptance"] = false;
     result["not_a_gate"] = "The outcome describes the observed sample. Extra elapsed playback can mask a rollback.";
   }
+  if (options.first_toolbar_frames != Options::FirstToolbarFrames::None) {
+    const bool playing = options.first_toolbar_frames == Options::FirstToolbarFrames::Playing;
+    result["scenario"] = playing ? "first-toolbar-frame-clock-playing" : "first-toolbar-frame-clock-paused";
+    result["claim"] = playing ? "Frame markers immediately after first Play, with playback continuing" :
+        "Stable frame marker after the first immediate toolbar Pause and all three existing DOM samples";
+    result["matched_control"] = "reports_first_toolbar_frame_clock_" +
+        std::string(playing ? "paused_" : "playing_") + options.source + "_metal";
+    result["not_a_gate"] = "The arms use separate sessions. Discrete captures may miss transient pictures.";
+  }
   if (options.suspend_reveal_control) {
     result["scenario"] = "suspend-reveal-control";
     result["claim"] = "Test-owned Cocoa suspension through the ordinary hide pause, release on the same revealed view, "
@@ -3654,7 +3753,7 @@ int main(int argc, char **argv)
       require(outcome == "picture_backward" || outcome == "clock_reset_within_observation" ||
           outcome == "no_clock_reset_observed", "Visible frame clock finished without a conclusive outcome");
     }
-    if (options.first_toolbar_pause_control) {
+    if (options.first_toolbar_frames == Options::FirstToolbarFrames::None && options.first_toolbar_pause_control) {
       outcome = result.at(options.first_toolbar_immediate ? "first_toolbar_pause_immediate" :
                                                           "first_toolbar_pause_delay").value("outcome", "");
       require(outcome == "early_paused_above_floor" || outcome == "early_paused_at_or_below_floor" ||
@@ -3671,6 +3770,12 @@ int main(int argc, char **argv)
     if (options.frame_clock_control) {
       std::fprintf(stdout, "PASS: Cocoa visible frame clock diagnostic; outcome=%s; cycles=%d; %s\n",
           outcome.c_str(), options.reading_cycles(), core::path_to_utf8(directory).c_str());
+      return 0;
+    }
+    if (options.first_toolbar_frames != Options::FirstToolbarFrames::None) {
+      outcome = result.at("first_toolbar_frame_clock").at("outcome").get<std::string>();
+      std::fprintf(stdout, "PASS: Cocoa first toolbar frame clock diagnostic; outcome=%s; %s\n",
+          outcome.c_str(), core::path_to_utf8(directory).c_str());
       return 0;
     }
     if (options.first_toolbar_pause_control) {
