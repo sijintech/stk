@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-13 22:01 UTC · 搜索随窗口缩放保留，补齐 macOS 视频恢复对照
+
+本地 main `907b35b02c4c9ce156bc97f8723674b8c507ce46` 让桌面聚焦工作台的宽栏与窄窗导航共用当前搜索。切换宽窄时保留编辑中的文字、搜索结果与焦点，关闭后焦点回到当前布局的入口。Linux X11 固定起点是任务页、合成项目有 32 条已保存问答。1600×1100 起步一次点击、680×1000 起步两次点击。两轮各在输入后跨断点缩放、按 Enter 搜索、结果显示后缩回、再按 Enter 打开旧问答。每轮一次标题查询、各一次原请求与上下文和消息读取，数据库摘要及修订一致，零写入。定向 69/69、UI 核心 135/135、桌面构建成功。首轮定向测试持有跨帧 widget 指针导致断言失败，按新帧读取控件后通过。证据 `root-delivery-20261113-190/{native-wide-final/receipt.json,native-narrow-final/receipt.json,search-resize-final.xml,ui.xml}`。
+
+上一头 `f3c666eb` 的官方 macOS 工件复核到必测 HTML 和隐藏前对照都在实际报告区缩到 286 像素后通过区域菜单恢复，随后等待视图超时。相同布局的安静隐藏对照成功，其回执显示指针留在菜单时原生交互被挡，移到视口中央后一帧恢复。`2d02ef9046699c072dbb2e3393f9fbb8db607f2e` 让所有从区域菜单返回的 Cocoa 视频测试执行同样的指针移动，并在等待失败时记录视口、覆盖层、精确媒体会话与标签路径。Linux 原生测试目标编译成功。macOS 实测待 CI，MP4 隐藏暂停时间回退仍是独立失败。证据 `root-delivery-20261113-190/{f3c-required-html.json,f3c-required-mp4.json,f3c-control-html.json,f3c-quiet-html.json,build-reveal.log}`。 [官方 macOS 工件](https://github.com/sijintech/stk/actions/runs/43500121086/artifacts/14077324907)
+
+远端 `413a283379e032f64b857d53844612fbc1b705bc` Runtime 13/13 已于 21:53:52 UTC 完成。Desktop 的 Linux 三项通过，macOS 与 Windows 仍运行，待整轮终态后推送。Claude 113 与 117 在各自隔离 worktree 继续修订。PR #53 的功能已随等效主线提交交付，#54 是旧交接。原七份工作区修改保留。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43511133797) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43511133680)
+
 ## 2026-11-13 21:50 UTC · Web 历史固定区全量回归
 
 `c3e823eb9b2a87de4dbb3bf2ed88cc280a57e847` 的 Web 生产构建及最终全量 Playwright 401/401 通过，零跳过。该构建包含新输入卡片和固定历史操作。Linux 包及安装冒烟通过，远端 `413a2833` 完整 Desktop 仍运行，Runtime 10/13 已成功。证据 `root-delivery-20261113-189/{web-history-build.log,web-history-full.xml,live-history/hub-receipt.json}`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43511133797) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43511133680)
