@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-13 17:21 UTC · 会话内文本预览
+
+本地 main `1ed52816271bf24f17ec2f4128ed0fa0a3e36e6f` 为发布清单加入小型 UTF-8 文本预览。明确点击后走已发布的校验文件接口，核对大小和摘要后按纯文本显示。预览上限 256 KiB。返回后恢复文件清单的滚动及触发按钮。其他格式沿用现有下载。
+
+最终生产构建通过，Chromium 全套 395/395，宽窄定向 4/4。测试覆盖 HTML 标记只作为文本、二进制保留下载、原清单焦点恢复。真实 loopback Hub、NodeAgent 和 Runtime 在 Chromium 1440×900 和 390×844，各从已保存会话及未发送草稿起步，1 次关联任务、1 次查看文件、1 次预览、1 次返回文件清单。两窗均显示任务发布的合成日志，焦点返回预览入口，合计各三个 GET、零 POST。任务、产物和操作列表一致，模型调用零。证据 `root-delivery-20261113-173/{web-preview,web-preview-full.log,real-preview-1440.json,real-preview-390.json,real-preview-runtime.json}`。
+
+远端 `57f3601a` 的 Pages 部署及 Secret scan 已成功。Desktop 和 Runtime 仍在运行。Claude 110 独立构建已通过，原生详情及相关会话定向 27/27，全项目用例仍在跑。待作者冻结后由 Root 审查与集成。 [Pages](https://github.com/sijintech/stk/actions/runs/43470699724) [Desktop CI](https://github.com/sijintech/stk/actions/runs/43470699822) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43470699712)
+
 ## 2026-11-13 17:14 UTC · 发布统一首页与会话文件到 main
 
 Root 将远端 main 从 `6ed5e920d8ecbb64a826684bd4190a0540dbbd50` 快进到 `57f3601a1c214db81e0e8a80aa26b86f85c666ed`，推送后单独核对远端完整 SHA。12 个提交扫描零发现。发布包含两端会话首页简化、Web 会话关联任务、文件清单与校验下载，以及原生报告首次暂停的附加取证。Web 395/395、Hub 95/95、桌面导航 26/26、报告宿主 14/14。原 AOCI 和状态文档工作区的既有改动保留。
