@@ -181,6 +181,7 @@ void log_last_media_observation(const Json &result) noexcept
                             "first_toolbar_pause_immediate", "first_toolbar_pause_immediate_trace",
                             "first_toolbar_frame_clock",
                             "repeat_verified_visible_pause", "suspend_reveal",
+                            "last_failed_timeline_seek",
                             "failed_reveal_observation", "failed_reveal_native_pause_trace",
                             "failed_reshown_hold", "reshown_hold_native_observation"}) {
       const auto item = result.find(key);
@@ -2271,6 +2272,29 @@ class Exercise {
         before.rect_height / before.viewport_height, before.current_time, before.duration, fraction,
         before.navigation_generation, *viewport_generation, seek_deadline};
     const auto resources = media_session(session);
+    const auto record_seek_surface = [&]() noexcept {
+      try {
+        const auto *view = widget("reports_document_viewport");
+        const auto *context = screen_.ui();
+        const auto rectangle = [](ui::Rect r) { return Json::array({r.x, r.y, r.w, r.h}); };
+        Json overlays = Json::array();
+        if (context) {
+          for (const auto &block : context->blocks()) {
+            if (block->kind() != ui::Block::Kind::Region) {
+              overlays.push_back({{"kind", int(block->kind())}, {"frame", rectangle(block->frame())}});
+            }
+          }
+        }
+        result_["last_failed_timeline_seek"] = {{"cycle", cycle}, {"phase", phase},
+            {"input", input_state()}, {"expected_viewport", rectangle(bounds)},
+            {"actual_viewport", view ? rectangle(view->rect) : Json(nullptr)},
+            {"viewport_clip", view ? rectangle(view->clip) : Json(nullptr)},
+            {"viewport_enabled", view && view->enabled}, {"viewport_fully_visible", visible(view)},
+            {"layout_current", layout_epoch_.matches(input.viewport_generation)},
+            {"session_active", resources->active()}, {"overlays", std::move(overlays)}};
+      }
+      catch (...) {} // Optional evidence cannot replace the original seek failure.
+    };
     // A first accessibility read may enable WebKit's tree asynchronously. Repeat
     // only an empty completed read, never a partially delivered input or a limit
     // failure. All successful input still has to pass unchanged DOM/OS gates.
@@ -2295,6 +2319,9 @@ class Exercise {
             window_.width(), window_.height(), input, resources, observed, error);
         require(seek_deadline.permits(Clock::now()), "Provider AX query crossed the original seek deadline");
         const bool sent = candidate && finish(observed, delivery, error);
+        if (!sent && (candidate || !observed.lookup_complete || observed.candidates != 0)) {
+          record_seek_surface();
+        }
         provider_all_empty = provider_all_empty && observed.sliders == 0;
         auto list_json = [](const reports_native_test::TimelineChildListObservation &value) {
           return Json{{"type", value.type}, {"count", value.count}, {"over_budget", value.over_budget}};
@@ -2344,8 +2371,10 @@ class Exercise {
       require(provider_all_empty, "A nonempty provider AX tree cannot authorize a client fallback");
       require(seek_deadline.permits(Clock::now()), "Bounded AX seek expired before public client start");
       require(layout_epoch_.matches(input.viewport_generation), "Public AX fallback belongs to an invalidated layout");
-      require(native_input_.begin_client_seek(window_.native_window_handle(), native_bounds(bounds), window_.width(),
-          window_.height(), input, resources, error), error);
+      const bool client_started = native_input_.begin_client_seek(window_.native_window_handle(), native_bounds(bounds),
+          window_.width(), window_.height(), input, resources, error);
+      if (!client_started) { record_seek_surface(); }
+      require(client_started, error);
       const bool sent = finish(observed, delivery, error);
       const auto &child = observed.public_client; const auto &reply = child.response;
       const auto api = [&](auto value) -> Json { return child.response_available ? Json(value) : Json(nullptr); };
@@ -2375,6 +2404,7 @@ class Exercise {
           {"slider_screen_points_bottom_left", {observed.screen_x, observed.screen_y, observed.screen_width, observed.screen_height}},
           {"slider_range_value", {observed.minimum, observed.maximum, observed.value}}, {"target_fraction", fraction},
           {"viewport_normalized_top_left", {observed.normalized_x, observed.normalized_y}}});
+      if (!sent) { record_seek_surface(); }
       save(); require(sent, error); process();
     }
     catch (...) {
