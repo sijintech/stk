@@ -1,5 +1,9 @@
 # STK 开发计划
 
+## 2026-11-13 21:50 UTC · Web 历史固定区全量回归
+
+`c3e823eb9b2a87de4dbb3bf2ed88cc280a57e847` 的 Web 生产构建及最终全量 Playwright 401/401 通过，零跳过。该构建包含新输入卡片和固定历史操作。Linux 包及安装冒烟通过，远端 `413a2833` 完整 Desktop 仍运行，Runtime 10/13 已成功。证据 `root-delivery-20261113-189/{web-history-build.log,web-history-full.xml,live-history/hub-receipt.json}`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43511133797) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43511133680)
+
 ## 2026-11-13 21:49 UTC · 会话页头、输入卡片和历史操作
 
 本地 main `ab5dcbc0685be09b698797eee1d40b8bea8bd59d` 将桌面聚焦问答与智能体会话的标题放到正文上方。问答的冻结数据来源与修订移入「请求详情」，状态、模型与适用操作留在原处。Linux X11 固定起点为已打开合成问答、详情折叠。1600×1100 和 680×1000 均一次点击展开，显示原数据来源、修订和两项可复制 ID。项目数据库摘要与修订一致，宽窗零 Bridge 请求，窄窗只有后台注意事项轮询。定向 2/2，Linux 项目 CPU 1125/1125（含两个已安装 Peer helper 用例），桌面构建通过。
