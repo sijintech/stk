@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-13 22:43 UTC · 完成保存候选的 Linux 回归
+
+候选 `b1417391f905cda31e4424057cf6caaeac0b146a` 的桌面构建、智能体运行 49/49、保存输入定向 2/2 和 UI 135/135 全部通过。英文 1600×1100 从已打开合成项目工作台实测四次点击到保存选择器，确认新名称后得到校验副本。取消、已有名称、成功的合测共六次应用点击、三个选择器结果和 Esc。两个窗口用同一构建通过，项目与快照摘要核对一致。候选仍在 Root 隔离 worktree，macOS 和 Windows 的保存路径待原生验收。证据 `root-delivery-20261113-191/{save-keyboard-project.xml,save-keyboard-targeted.xml,save-keyboard-ui.xml,native-save-chooser-keyboard-release/receipt.json,native-save-fallback-keyboard-final/receipt.json}`。
+
+Claude 117 在独立 worktree 提交比例字体候选 `4f3b650b8cc8bda942cf453109c9e622e3111e64`，Root 已核对当前主线可干净集成，等待 Claude 的对照结果和独立回归。远端 `413a2833` 的 Windows 原生预览仍运行。范围 gitleaks 零发现，原七份工作区修改保留。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43511133797)
+
 ## 2026-11-13 22:39 UTC · 保存副本键盘复验与 macOS 工件
 
 Root 在桌面隔离候选中复现路径字段获焦后直接输入会追加到建议名称。候选修订 `b1417391f905cda31e4424057cf6caaeac0b146a` 进入表单和路径被拒后选中当前文本，下一次输入可替换。Linux X11 680×1000 中文从已打开合成项目的工作台起步，五次点击进入保存路径。输入路径，按 Tab 和 Enter 明确确认。取消、已有名称和成功路径合测共七次点击、两次路径输入、两组 Tab 与 Enter，最后 Esc。内容解析累计零、零、一次。保存的 60 字节摘要、0600 权限、原有文件和项目数据库已核对。最终桌面构建与 UI 135/135 通过。证据 `root-delivery-20261113-191/{native-save-keyboard.log,native-save-fallback-keyboard-final/receipt.json,save-keyboard-ui.xml}`。
