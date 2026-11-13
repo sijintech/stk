@@ -138,6 +138,24 @@
 .messages .user p { color: #a6a69c; }
 .messages .pending { opacity: .7; }
 .chat-intro { color: #a6a69c; }
+.chat-empty { justify-content: safe center; }
+.chat-empty .conversation-name {
+  align-self: center;
+  font-size: 12px;
+  color: #a6a69c;
+}
+.chat-empty .messages {
+  flex: none;
+  min-height: 0;
+  margin: 8px 0 16px;
+}
+.chat-welcome {
+  margin: 0;
+  color: inherit;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 550;
+}
 .chat-composer { flex: none; }
 .chat-composer textarea {
   display: block;

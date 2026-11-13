@@ -331,6 +331,10 @@ TEST_F(WorkspaceNavigationPython, FocusedConversationKeepsDataAndModelControlsOn
     EXPECT_EQ(widget("ai_send_saved"), nullptr);
     EXPECT_EQ(widget("ai_history"), nullptr);
     EXPECT_NE(widget("ai_all_saved_questions"), nullptr);
+    EXPECT_TRUE(shows(f, "Start with a scientific question"));
+    EXPECT_TRUE(shows(f, "No context captured yet. Capture a record before preparing a question."));
+    EXPECT_FALSE(shows(f, "Ask about selected data. Each request sends only its saved question and captured context."));
+    EXPECT_FALSE(widget("ai_prepare")->enabled);
   };
   ASSERT_NO_FATAL_FAILURE(expect_composer_in_view());
   ASSERT_NE(widget("ai_workbench_context_settings"), nullptr);

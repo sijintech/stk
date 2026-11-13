@@ -2528,6 +2528,7 @@
   "app.tool.python": "Python",
   "app.tool.swap": "Swap sides",
   "workbench.nav.home": "Workbench",
+  "workbench.question_start": "Start with a scientific question",
   "workbench.nav.tasks": "Tasks",
   "workbench.nav.results": "Results",
   "workbench.nav.split": "Split view",

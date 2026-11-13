@@ -2527,6 +2527,7 @@
   "app.tool.python": "Python",
   "app.tool.swap": "左右互换",
   "workbench.nav.home": "工作台",
+  "workbench.question_start": "从一个科学问题开始",
   "workbench.nav.tasks": "任务",
   "workbench.nav.results": "结果",
   "workbench.nav.split": "分栏视图",

@@ -1825,7 +1825,8 @@ for (const viewport of viewports) {
       expect(empty.log.width).toBe(empty.input.width);
       expect.soft(empty.send.width).toBeLessThan(110);
       expect(empty.send.x + empty.send.width).toBe(empty.input.x + empty.input.width);
-      expect.soft(empty.chat.y + empty.chat.height - empty.send.y - empty.send.height).toBeLessThanOrEqual(24);
+      expect(empty.chat.y + empty.chat.height - empty.send.y - empty.send.height).toBeGreaterThan(80);
+      expect(empty.input.y - empty.log.y - empty.log.height).toBeLessThan(32);
       await page.screenshot({path: test.info().outputPath(`${viewport.name}-conversation-empty.png`)});
 
       await choose(page, /相场参数讨论/);
@@ -1836,6 +1837,7 @@ for (const viewport of viewports) {
       await input.press('Enter');
       await expect(input).toHaveValue('待核对的网格\n');
       expect(sent.seen).toEqual([]);
+      const readingBounds = await bounds();
       await log.hover();
       await page.mouse.wheel(0, 520);
       const offset = () => log.evaluate(el => el.scrollTop);
@@ -1844,14 +1846,18 @@ for (const viewport of viewports) {
       expect(await chat.evaluate(el => el.scrollTop)).toBe(0);
       expect(await page.evaluate(() => scrollY)).toBe(0);
       const reading = await offset();
-      expect((await bounds()).input).toEqual(empty.input);
-      expect((await bounds()).send).toEqual(empty.send);
+      expect(readingBounds.chat.y + readingBounds.chat.height - readingBounds.send.y - readingBounds.send.height)
+        .toBeLessThanOrEqual(24);
+      expect((await bounds()).input).toEqual(readingBounds.input);
+      expect((await bounds()).send).toEqual(readingBounds.send);
       await page.screenshot({path: test.info().outputPath(`${viewport.name}-conversation-reading.png`)});
 
       await go(page, '任务');
       await go(page, '工作台');
       await expect(input).toHaveValue('待核对的网格\n');
       expect(await offset()).toBe(reading);
+      expect((await bounds()).input).toEqual(readingBounds.input);
+      expect((await bounds()).send).toEqual(readingBounds.send);
       expect(sent.seen).toEqual([]);
       await input.focus();
       await page.keyboard.press('Tab');

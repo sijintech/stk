@@ -690,6 +690,7 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   const sessionLabel=conv.missing.has(conv.session)?`已不存在 · ${conv.session.slice(0,6)}`:sessionRow?`${conversationTitle(sessionRow)} · ${conv.session.slice(0,6)}`:
     conv.own.has(conv.session)?'新对话 · 未保存':`正在确认 · ${conv.session.slice(0,6)}`;
   const thread=conv.thread,pending=conv.pending&&!thread.messages.some(m=>m.id===conv.pending!.id)?conv.pending:null;
+  const emptyConversation=thread.status==='ready'&&!thread.messages.length&&!pending&&!conv.failure;
   // 查询原始值 reads the raw data behind the displayed scene: its own task and path, whatever the file choice is now.
   // The reply is kept only while that scene is still the one shown (a new scene or another task discards it).
   function probeValue(){
@@ -855,14 +856,14 @@ function Workbench({disconnect}:{disconnect:()=>void}){
           <small className="log-note" role="status">{logNote}</small></div>}
         <pre>{(selected&&(resultText||logText))||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
     </section>
-    <aside className={`chat surface${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'||overlay}>
+    <aside className={`chat surface${emptyConversation?' chat-empty':''}${tab==='workbench'?'':' surface-hidden'}`} inert={tab!=='workbench'||overlay}>
       <h2 className="conversation-name" title={sessionLabel}>{sessionLabel}</h2>
       <div className="messages" ref={messageList} tabIndex={thread.messages.length || pending ? 0 : -1} role="log" aria-label="对话记录">
         {thread.status==='loading'&&!thread.messages.length&&<p className="muted">正在读取对话…</p>}
         {thread.status==='missing'&&<div className="chat-intro"><h3>这个对话已不存在</h3><p>控制服务中没有这个对话，未创建新会话。{conv.draft.trim()?'未发送的草稿仍在这里，可以移到新对话再发送。':'可以从「新对话」重新开始。'}</p>
           {!!conv.draft.trim()&&<button type="button" onClick={moveDraft}>移到新对话</button>}</div>}
         {thread.status==='error'&&<p className="muted">读取对话失败：{thread.error} <button type="button" className="quiet" onClick={conv.retry}>重新读取</button></p>}
-        {thread.status==='ready'&&!thread.messages.length&&!pending&&<p className="chat-intro">从一个科学问题开始</p>}
+        {emptyConversation&&<p className="chat-intro chat-welcome">从一个科学问题开始</p>}
         {thread.messages.map(m=><article key={m.id} className={m.role}><small>{m.role==='user'?'你':'STK'}</small><p>{m.content}</p></article>)}
         {pending&&<article className="user pending"><small>你 · 发送中</small><p>{pending.content}</p></article>}
       </div>

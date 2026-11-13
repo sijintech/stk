@@ -330,7 +330,7 @@ class AIEditor final : public Editor {
       if (focus && ctx.ui) { ctx.ui->restore_focus_next_frame(input.key); }
       draw_return_to_question(body, ctx, state);
     }
-    body.paragraph(ctx.tr("ai.intro"));
+    if (!focused) { body.paragraph(ctx.tr("ai.intro")); }
     if (!state.error().empty()) { body.paragraph(state.error()); }
     if (!discussion.error().empty()) { body.paragraph(discussion.error()); }
     if (!discussion.exchange_error().empty()) { body.paragraph(discussion.exchange_error()); }
@@ -356,7 +356,6 @@ class AIEditor final : public Editor {
         source(*panel, ctx, state, true);
         if (!picker_.active()) { configuration(*panel, ctx, state, draft); }
       }
-      else if (focused && discussion.context().empty()) { body.paragraph(ctx.tr("ai.no_context")); }
       conversation(body, ctx, state, draft, key, false, settings_open, focused, compose_first);
     }
   }
@@ -1200,7 +1199,10 @@ class AIEditor final : public Editor {
       }
       archived_notice(layout, ctx, "request", id);
     }
-    else if (!compose_first) { layout.paragraph(ctx.tr(discussion.exchange_busy() ? "ai.loading" : "ai.empty")); }
+    else if (!compose_first) {
+      if (compact_empty) { layout.label(ctx.tr("workbench.question_start"), ui::Align::Center); }
+      else { layout.paragraph(ctx.tr(discussion.exchange_busy() ? "ai.loading" : "ai.empty")); }
+    }
     if (!compact_empty) {
       const float height = ctx.draw ? float(ctx.draw->rect.height()) : 800.0f;
       const float candidate_space = parameter_request && status == "completed" ? 4.0f : 0.0f;
@@ -1304,7 +1306,7 @@ class AIEditor final : public Editor {
     auto &input = layout.text_area("ai_question/" + handle, ui::bind(draft.text), {.max_length = 65536, .visible_lines = 4});
     const bool has_question = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
         !ctx.ui->edit_state()->text().empty() : !draft.text.empty();
-    layout.paragraph(ctx.tr("ai.prepare_hint"));
+    layout.paragraph(ctx.tr(focused && discussion.context().empty() ? "ai.no_context" : "ai.prepare_hint"));
     if (picker_.active()) { layout.paragraph(ctx.tr("ai.scope.finish_first")); }
     const auto context_id = io::get_string(discussion.context(), "id");
     const auto *target = chosen_endpoint(ctx, draft);
