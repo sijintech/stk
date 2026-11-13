@@ -815,7 +815,7 @@ void Context::draw_widget(const Widget &w)
         const Color color = hover && track.contains(mouse_) ? colors.item.mul_hsl(1.0f, 1.0f, 1.35f) : colors.item;
         draw_.round_box(thumb, clamp_radius(colors.roundness * thumb.h * 2.0f, thumb), CORNER_ALL, color, none);
       }
-      if (log && !position.follow) {
+      if (log && w.log_can_follow && !position.follow) {
         const std::string_view label = tr("ui.log.follow");
         const float ph = std::round(0.9f * st.unit);
         const float pw = std::round(LayoutEngine::text_w(*this, label) + st.unit);
@@ -825,7 +825,7 @@ void Context::draw_widget(const Widget &w)
         draw_.text(std::string(label), {pill.x + std::round(st.unit * 0.5f), std::round(pill.cy() + (m.ascent - m.descent) * 0.5f)},
                    st.font, th.tooltip.text_sel);
       }
-      if (focused && !log) {
+      if (focused && (!log || !w.log_can_follow)) {
         draw_.round_box(r, clamp_radius(bc.roundness * st.unit, r), CORNER_ALL, none, th.menu.inner_sel);
       }
       break;

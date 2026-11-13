@@ -2049,7 +2049,7 @@ class AIEditor final : public Editor {
     }
     panel.log_view("ai_agent_run_detail_preview_text", run_preview_log_,
                    std::min(rows, float(std::max<size_t>(run_preview_log_.line_count(), 1)) + 0.5f),
-                   &run_preview_position_);
+                   &run_preview_position_, false);
   }
 
   static std::string run_detail_lines(const Json &detail, EditorContext &ctx)

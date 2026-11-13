@@ -178,6 +178,7 @@ void Context::set_scroll(WidgetId id, float v, float max)
 
 LogViewPosition Context::log_view_position(const Widget &w) const
 {
+  if (!w.log_can_follow) { return {w.log_position ? w.log_position->offset : scroll_of(w.id), false}; }
   if (w.log_position) { return *w.log_position; }
   const auto follow = follow_.find(w.id);
   return {scroll_of(w.id), follow == follow_.end() || follow->second};
@@ -185,8 +186,8 @@ LogViewPosition Context::log_view_position(const Widget &w) const
 
 void Context::remember_log_view_position(const Widget &w, const bool follow)
 {
-  if (w.log_position) { *w.log_position = {scroll_of(w.id), follow}; }
-  else { follow_[w.id] = follow; }
+  if (w.log_position) { *w.log_position = {scroll_of(w.id), w.log_can_follow && follow}; }
+  else if (w.log_can_follow) { follow_[w.id] = follow; }
 }
 
 /* -------------------------------------------------------------------- */
@@ -1782,6 +1783,7 @@ EventResult Context::mouse_down(const Event &e)
         }
       }
       if (w->log) {
+        if (!w->log_can_follow) { break; }
         /* The "follow" pill at the bottom right. */
         const float ph = std::round(0.9f * style_.unit);
         const float pw = std::round(LayoutEngine::text_w(*this, tr("ui.log.follow")) + style_.unit);

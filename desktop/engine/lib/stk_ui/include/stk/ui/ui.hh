@@ -323,6 +323,7 @@ struct Widget {
   std::shared_ptr<TableSpec> table;
   const LogBuffer *log = nullptr;
   LogViewPosition *log_position = nullptr;
+  bool log_can_follow = true;
   ImageSpec image;
   std::vector<Vec2> curve; /**< Normalized curve preview points; display only. */
   Binding<float> factor;
@@ -393,9 +394,10 @@ class Layout {
   /** fraction in [0, 1]; text empty = percentage. */
   Widget &progress(float fraction, std::string_view text = {});
   Widget &virtual_list(std::string_view key, ListSpec spec);
-  /** An optional caller-owned position must remain valid while this frame receives input. */
+  /** An optional caller-owned position must remain valid while this frame receives input.
+   * Static text can turn off following while retaining scroll and keyboard navigation. */
   Widget &log_view(std::string_view key, const LogBuffer &log, float height_units = 8.0f,
-                   LogViewPosition *position = nullptr);
+                   LogViewPosition *position = nullptr, bool can_follow = true);
   Widget &table(std::string_view key, TableSpec spec);
   Widget &image(std::string_view key, ImageSpec spec);
   /** Stable geometry for a native child view; no GPU drawing, input capture or Tab stop. */

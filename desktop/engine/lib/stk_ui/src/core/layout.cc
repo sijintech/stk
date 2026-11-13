@@ -390,11 +390,13 @@ Widget &Layout::virtual_list(std::string_view key, ListSpec spec)
   return w;
 }
 
-Widget &Layout::log_view(std::string_view key, const LogBuffer &log, float height_units, LogViewPosition *position)
+Widget &Layout::log_view(std::string_view key, const LogBuffer &log, float height_units, LogViewPosition *position,
+                         bool can_follow)
 {
   Widget &w = add_widget(WidgetType::LogView, key);
   w.log = &log;
   w.log_position = position;
+  w.log_can_follow = can_follow;
   w.mono = true;
   w.height = ctx().style().u(height_units);
   return w;

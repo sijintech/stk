@@ -879,6 +879,30 @@ TEST(LogView, OwnedPositionFollowsNewLinesUntilScrolled)
   EXPECT_FLOAT_EQ(h.ctx->scroll_of(h.w("log").id), reading);
 }
 
+TEST(LogView, StaticTextStartsAtTheTopAndScrollsWithoutAFollowControl)
+{
+  Harness h;
+  LogBuffer text;
+  LogViewPosition position;
+  for (int i = 0; i < 50; ++i) { text.append("line " + std::to_string(i) + "\n"); }
+  h.ui = [&](Context &ctx) {
+    ctx.block("r", {0, 0, 400, 600}).layout().log_view("text", text, 5.0f, &position, false);
+  };
+  h.frame();
+  const auto id = h.w("text").id;
+  EXPECT_FLOAT_EQ(h.ctx->scroll_of(id), 0.0f);
+  ASSERT_TRUE(h.ctx->focus_widget(id));
+  h.key(Key::PageDown);
+  EXPECT_GT(position.offset, 0.0f);
+  EXPECT_FALSE(position.follow);
+  const auto follow = h.ctx->tr("ui.log.follow");
+  for (const auto &command : h.ctx->draw_list().cmds) {
+    if (command.type == CmdType::Text) { EXPECT_NE(command.text, follow); }
+  }
+  h.key(Key::Home);
+  EXPECT_FLOAT_EQ(position.offset, 0.0f);
+}
+
 TEST(Modal, TrapsFocusAndInput)
 {
   Harness h;
