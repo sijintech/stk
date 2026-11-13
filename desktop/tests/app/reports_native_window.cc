@@ -893,6 +893,16 @@ class Exercise {
     const auto &reply = *last_media_probe_->reply;
     return NativePausePair{reply.native_pause_before, reply.native_pause_after};
   }
+  Json last_media_probe_evidence(Clock::time_point origin) const
+  {
+    if (!last_media_probe_) { return nullptr; }
+    const auto &probe = *last_media_probe_;
+    return {{"started_seconds", media_seconds(origin, probe.started)},
+        {"dispatched_seconds", media_time(origin, probe.dispatched)},
+        {"callback_seconds", media_time(origin, probe.callback)},
+        {"finished_seconds", media_time(origin, probe.finished)},
+        {"media", probe.reply && probe.reply->ok ? media_json(probe.reply->media) : Json(nullptr)}};
+  }
   void begin_hidden_media(int cycle, const std::string &session, const Media &playing,
                           Clock::time_point playing_returned) noexcept
   {
@@ -2994,6 +3004,7 @@ raise SystemExit(main())
             {"paused", media_json(red)},
             {"playing_native_pause", native_pause_pair_json(explicit_play_native_pause)},
             {"first_paused_native_pause", native_pause_pair_json(ui.last_native_pause())},
+            {"first_paused_dom_probe", ui.last_media_probe_evidence(explicit_play_returned)},
             {"click_return_seconds", media_seconds(explicit_play_returned, explicit_click_returned)},
             {"paused_return_seconds", media_seconds(explicit_play_returned, explicit_paused_returned)},
             {"checks", {{"lower_time_gt_0_05", red.current_time > 0.05},
@@ -3002,7 +3013,20 @@ raise SystemExit(main())
       catch (...) {} // Preserve the original assertion even if optional evidence cannot be copied.
       require(red.current_time > 0.05 && red.current_time < 2.6 && !red.ended,
           "Explicit pause must stop actual playback before the blue/ended segment");
-      ui.held_media(cycle, "explicit-pause", session, red, 0.25);
+      const auto record_explicit_hold = [&](bool success) noexcept {
+        try {
+          auto &observation = result.at("last_explicit_pause_observation");
+          observation["hold_success"] = success;
+          observation["hold_last_dom_probe"] = ui.last_media_probe_evidence(explicit_play_returned);
+          observation["hold_last_native_pause"] = native_pause_pair_json(ui.last_native_pause());
+        }
+        catch (...) {}
+      };
+      try {
+        ui.held_media(cycle, "explicit-pause", session, red, 0.25);
+        record_explicit_hold(true);
+      }
+      catch (...) { record_explicit_hold(false); throw; }
       red = ui.fit_decoded_media(*area, *viewer_area, session, red);
       bounds = ui.widget("reports_document_viewport")->rect;
       auto rectangle = ui.media_rectangle(bounds, red);
