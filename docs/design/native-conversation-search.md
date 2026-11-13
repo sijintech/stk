@@ -11,7 +11,8 @@
 ## 1. 结论
 
 - **现状。** 原生已保存问答的标题只在近期列表中出现，最多 20 条，默认 8 条。完整的分页历史只显示「模型 · 状态 · 编号前 8 位」，因此较早的问答无法按标题找到。智能体会话只载入最近 50 条，左栏显示 5 条。
-- **提议新增读取。** 新增两个可选的本机只读方法，`project.requests.titles` 和 `project.agent.titles`，在 protocol 1 下通过 `hello.methods` 分别协商。服务端按标题匹配，并限定每次扫描的行数。返回的单条结果与 `project.requests.recent` 同形，另有游标表示「已扫完」或「可继续」。
+- **最小的兼容读取。** 新增一个可选的本机只读方法 `project.requests.titles`，在 protocol 1 下通过 `hello.methods` 协商。服务端按标题匹配，并限定每次扫描的行数。返回的单条结果与 `project.requests.recent` 同形，另有游标表示「已扫完」或「可继续」，以及已检查到的时间。
+- **智能体会话的对应读取。** `project.agent.titles` 用同样的规则搜索智能体会话标题，单独协商。它可以与问答读取同批发布，也可以后发。
 - **只读标题，不读正文。** 问答标题只读请求行和用户消息行，不读上下文、助手回复和进度。智能体会话标题只读会话头和首条事件，不读整条事件链。结果在显式激活前不打开会话、不改选择、不加载交流内容。
 - **不复用现有方法。** 不给 `recent` 或 `list` 加参数，也不复用 `project.search`。旧 Bridge 不支持时，界面保持现状，不出现搜索框，不发新方法，也不出现 `invalid_params`。
 - **权限范围。** 新方法属于桌面专用读取，不进入脚本目录、智能体工具或 S2c 权限。范围是当前打开句柄所指的项目，默认排除已归档问答。不新增权限、项目格式或数据库表，也不改端点。
@@ -49,7 +50,7 @@
 | `project.requests.recent {handle, limit?}` | `{requests:[{request_id,status,created_at,label}]}`，最新在前，排除已归档 | 每行经 `_decode` 完整校验。`_input` 读取上下文与消息（`requests.py:225`），已完成的还要读助手回复（`requests.py:209`） | 只覆盖最新 20 条 |
 | `project.requests.list {handle, offset?, limit?, archived?}` | 最旧在前，每页 100 条，只含元数据，无标题 | 同样经 `_decode` 完整校验 | 没有标题 |
 | `project.discussion.get` / `list` | 单条消息全文；列表不含 `text`，只有 `text_bytes`（`discussion.py:88-98`） | — | 每条问答要单独读一次全文（N+1） |
-| `project.search {handle, query, limit?}` | 按类别分组，每类至多 50 条；消息结果的目标是 `message_id` | 读整个快照（`search.py:40`），以及所有用户和助手消息的正文（`search.py:93-106`） | 读的是正文而不是标题；整串匹配，不分词；归档依据上下文而不是请求；结果没有 `request_id` |
+| `project.search {handle, query, limit?}` | 按类别分组，每类至多 50 条；消息结果的目标是 `message_id` | 读整个快照（`search.py:39`），以及所有用户和助手消息的正文（`search.py:93-106`） | 读的是正文而不是标题；整串匹配，不分词；归档依据上下文而不是请求；结果没有 `request_id` |
 | `project.agent.list {handle, offset?, limit?}` | `{items:[{id,created_at,first_message,state,turn,...}], total}` | 每个会话经 `_read` 读取并校验整条事件链（`agent_sessions.py:202-222,238`） | 读全部记录；桌面固定 `limit:50`，不翻页（`project_agent.cc:370`） |
 | `project.agent.get` | 会话视图 | 整条事件链 | 属于打开会话 |
 
@@ -72,7 +73,7 @@
 - **现有：左栏与历史菜单。** 窗宽大于 700 逻辑像素乘缩放时为左栏，否则为顶部条加「历史」菜单（`shell.cc:815,1096`）。两者都有「写问题」「已保存问答」、近期问答 8 条、智能体会话 5 条和「刷新记录」（`shell.cc:1129-1234`）。窄窗菜单按行号派发，不能放输入框。
 - **现有：「已保存问答」页（以下称浏览页）。** 浏览页即 `shows_saved_questions`。它只取一页 `project.requests.list`，显示下拉框、刷新、归档开关和上一页/下一页（`ai_editor.cc:289-306,1079-1126`）。浏览页不会自动选中问答，`opened_history_ = true`。现有测试断言进入时只有一次 `project.requests.list`（`workspace_navigation_test.cc:1070-1133`）。
 - **现有：激活。** 激活走 `saved_conversation_action`，按屏幕、区域、可见性、句柄、项目 ID、作用域、Bridge、交流代数和导航代数逐项围栏，延迟到下一帧执行。若 `text_input_active()` 为真，则拒绝激活（`shell.cc:309-385`）。
-- **现有：单行 Enter。** 单行输入框按 Enter 只提交绑定，`on_submit` 仅对多行框生效（`stk_ui/src/core/context.cc:886-901`）。绑定在提交时才写入（`context.cc:780-785,790-808`），Esc 默认撤销本次输入（`context.cc:903-907`）。字段已有焦点但未在编辑时再按 Enter，会重新进入编辑（`context.cc:1049-1061`）。在聚焦的字段上打字（含输入法预编辑）会直接开始编辑（`context.cc:1454-1467`）。按钮在获得焦点时可用 Enter 或空格激活（`context.cc:1016`）。工作区搜索的注释写着「Enter 开始搜索」，但它的单行框实际上只能点按钮触发（`workspace_editor.cc:195-213`）。现有测试也是点按钮（`workflow_editor_test.cc:898-902`）。
+- **现有：单行 Enter。** 单行输入框按 Enter 只提交绑定，`on_submit` 仅对多行框生效（`stk_ui/src/core/context.cc:886-901`）。绑定在提交时才写入（`context.cc:780-785,790-808`），Esc 默认撤销本次输入（`context.cc:903-907`）。字段已有焦点但未在编辑时再按 Enter，会重新进入编辑（`context.cc:1049-1061`）。在聚焦的字段上打字（含输入法预编辑）会直接开始编辑（`context.cc:1454-1467`）。输入法组字期间，按键归输入法处理，Enter 不会提交（`context.cc:855-857`），与 Web 对 `isComposing` 的处理一致。按住 Enter 的重复事件在单行框中会再次提交同一文字。按钮在获得焦点时可用 Enter 或空格激活（`context.cc:1016`）。工作区搜索的注释写着「Enter 开始搜索」，但它的单行框实际上只能点按钮触发（`workspace_editor.cc:195-213`）。现有测试也是点按钮（`workflow_editor_test.cc:898-902`）。
 - **现有：大小写转换。** C++ 没有 Unicode 大小写折叠或 NFKC 实现，`stk_core`/`stk_ui` 中没有相应函数。
 - **现有：一个副作用陷阱。** 普通会话视图在 `request_page_` 载入后会自动打开最新的一条交流（`ai_editor.cc:1145-1146`），`ProjectDiscussion::call()` 会设置 `busy_`，从而禁用撰写和打开（`project_discussion.cc:190-226`）。搜索若借用这两者，就会产生打开会话或阻塞输入的副作用。
 
@@ -112,6 +113,7 @@
     {"request_id": "33333333-3333-4333-8333-333333333333", "status": "failed",
      "created_at": "2026-11-01T08:00:00+00:00", "label": "相场参数讨论"}],
   "next_cursor": null,
+  "checked_until": "2026-10-20T08:00:00+00:00",
   "unreadable": 0}}
 ```
 
@@ -132,6 +134,7 @@
 | `query` | 去掉首尾空白后的查询原文，供客户端核对回包 |
 | `requests` | 至多 `limit` 条，`maxItems 50`。单条结果与 `project.requests.recent` 同形，`label` 沿用其 schema 约束（1–80 码位、单行、无控制字符），客户端可共用渲染 |
 | `next_cursor` | `projectUuid \| null`。`null` 表示从最新到最旧已全部扫完。非空表示达到 `limit` 或扫描上限，结果可能不全 |
+| `checked_until` | `string \| null`。本次扫描中最后一条可读行的 `created_at`，不论它是否匹配；本次没有可读行时为 `null`。客户端据此显示「已检查到 {时间}」，不必为此另读请求 |
 | `unreadable` | 整数，大于等于 0。本次扫描中无法校验而被跳过的行数 |
 
 **排序与扫描**
@@ -150,12 +153,12 @@
   "query": "相场 讨论",
   "sessions": [{"session_id": "44444444-4444-4444-8444-444444444444",
                 "created_at": "2026-11-10T08:00:00+00:00", "label": "相场参数讨论"}],
-  "next_cursor": null, "unreadable": 0}}
+  "next_cursor": null, "checked_until": "2026-09-30T08:00:00+00:00", "unreadable": 0}}
 ```
 
 - **参数。** 与 4.1 相同，但没有 `archived`，因为 v1 的会话不能归档。项目格式低于 13 时返回空结果，与 `list` 一致（`agent_sessions.py:229-230`）。
 - **读取。** 读会话头并校验头摘要、ID、项目和 harness（同 `_read` 的 `agent_sessions.py:209-212`）。再按 `project_agent_events_by_session` 索引只取首个事件，用 `previous = header sha256` 校验该事件的摘要，并要求它是 `user_turn`。不读其后的事件。
-- **结果。** 不返回 `state`，因为状态要读完整条链才能算出，打开会话后再显示。`label` 用与 4.1 相同的单行算法生成（见 5.1）。
+- **结果。** 不返回 `state`，因为状态要读完整条链才能算出，打开会话后再显示。`label` 用与 4.1 相同的单行算法生成（见 5.1）。`checked_until` 为最后扫描那个会话头的 `created_at`，其余字段与 4.1 相同。
 - **顺序与游标。** 与 `project.agent.list` 一致，按首个事件 ID 从新到旧。游标为最后扫描的会话 ID，扫描上限同为 500。
 
 ### 4.3 版本协商与旧 Bridge 回退
@@ -241,7 +244,11 @@ match    = terms 非空 且 每个 term 都是 title_f 的子串
 
 ### 6.1 单类列表与双类列表
 
-「单类/双类列表」沿用 `build_history` 中 `show_agents` 的分支（`shell.cc:1140-1142`）：只列问答、只列智能体会话，或两类都列。仓库中没有更具体的定义，本文按这个理解。
+「单类/双类列表」沿用 `build_history` 中 `show_agents` 的分支（`shell.cc:1136-1142`）：只列问答、只列智能体会话，或两类都列。仓库中没有更具体的定义，本文按这个理解，请 root 确认。
+
+- **问答组出现的条件。** `recent_requests_supported()` 为真，且 `hello.methods` 含 `project.requests.titles`。
+- **会话组出现的条件。** 现有 `show_agents` 为真，且 `hello.methods` 含 `project.agent.titles`。按 `show_agents` 的现有规则，问答可用、会话列表已载入且为空时，左栏不列会话。这时搜索也不列会话组，也不发 `project.agent.titles`。
+- **方法缺失时。** 某一类在左栏列出、但缺少对应的标题方法时，按 4.3 显示一行范围提示，不发请求。
 
 - **单类。** 不显示组标题，结果直接列出，计数写作「N 条问答」。
 - **双类。** 问答组在前，智能体会话组在后，各有自己的计数、游标和「继续搜索」按钮。两组不合并排序，因为两类的游标不可比。某一组扫完且为空时显示「没有匹配的问答」或「没有匹配的智能体会话」，另一组照常显示。
@@ -251,7 +258,7 @@ match    = terms 非空 且 每个 term 都是 title_f 的子串
 - **首次结果。** 提交查询后，每组发一次首页请求。
 - **继续搜索。** `next_cursor` 非空时，该组末尾显示「继续搜索更早的记录」，需用户点击或用键盘激活，不自动连续翻页。
 - **追加。** 后续页的结果追加到已显示的结果后面，按 ID 去重。同一 ID 若在后页再次出现，以后页为准。
-- **空结果的判定。** 只有 `next_cursor` 为 `null` 且该组结果为零时，才显示「没有匹配」。未扫完时显示「已检查到 {时间} 前，尚未找到」，并显示继续按钮。不得在未扫完时显示「没有匹配」。
+- **空结果的判定。** 只有 `next_cursor` 为 `null` 且该组结果为零时，才显示「没有匹配」。未扫完时显示「已检查到 {时间}，尚未找到」，并显示继续按钮。{时间} 取最近一页的 `checked_until`，按本地时间显示；它为 `null` 时只显示「尚未找到」。不得在未扫完时显示「没有匹配」。
 - **无法读取的行。** `unreadable` 大于 0 时，在该组末尾加一行「另有 N 条记录无法读取」。实际原因要从分页历史打开该条才能看到，界面不猜测。
 
 ### 6.3 标题相同的结果
@@ -278,7 +285,7 @@ match    = terms 非空 且 每个 term 都是 title_f 的子串
 | 请求中 | 搜索框下显示「正在搜索…」，保留上一次结果；新提交替换旧请求 |
 | 已载入 | 计数与结果行（见第 6 节） |
 | 已扫完且为空 | `没有匹配的问答。`，与 Web 的 `role=status` 措辞对应 |
-| 未扫完 | 「已检查到 {时间} 前，尚未找到」加继续按钮 |
+| 未扫完 | 「已检查到 {时间}，尚未找到」加继续按钮，{时间} 来自 `checked_until` |
 | 失败 | 显示错误的 `describe()`，保留查询；不自动重试，按「刷新记录」或再按一次 Enter 才重搜 |
 | 方法不可用 | 见 4.3 |
 
@@ -335,6 +342,7 @@ match    = terms 非空 且 每个 term 都是 title_f 的子串
   - 保存 130 条问答；
   - 把扫描上限 monkeypatch 为 50，断言前两页的 `next_cursor` 非空，结果为部分；
   - 第三页 `next_cursor` 为 `null`；
+  - 扫描上限内零匹配时，`requests` 为空、`next_cursor` 非空，`checked_until` 等于第 50 行的 `created_at`；
   - 页间新插入的问答不进入后续页；
   - `cursor` 指向不存在的 ID 时返回 `invalid_params`。
 - **归档与格式**
@@ -359,6 +367,7 @@ match    = terms 非空 且 每个 term 都是 title_f 的子串
 - **激活**
   - 点击，或者 Tab 加 Enter 打开第 105 条（见第 9 节）；
   - 原草稿字节不变，`viewer.camera_serial()` 不变，`f.screen.maximized()` 为 AI 区域。
+- **会话行激活**：从搜索结果激活会话行，读取与从左栏打开同一会话完全相同（现有回执为 route/get），选中该会话，且不开始新一轮；有尚未完成的发送时，该行禁用。
 - **旧 Bridge**
   - 用 `del self.methods[...]` 去掉一个或两个新方法（同 `workspace_navigation_test.cc:2371`）；
   - 断言搜索框和提示按 4.3 的表格出现；
@@ -380,9 +389,10 @@ match    = terms 非空 且 每个 term 都是 title_f 的子串
   - 共有 130 条已保存问答，按插入顺序编号 #1 为最旧、#130 为最新。
   - #105 为「Zircon 相场参数讨论」，已完成，带两行回复。它不在近期列表（最新 8 条，`limit` 上限 20 时为 #111–#130）中，也不在分页历史首页（最旧 100 条，#1–#100）中。在基线中，它的下拉标题只有「模型 · 状态 · 编号」，无法按标题找到。
   - #3 的文字与 #105 完全相同，用于检验标题相同的情况。
-  - 另有一条已归档问答「Zircon archived note」。
+  - 另有一条已归档问答「Zircon 讨论 archived note」。它含查询的两个词，只因归档而被排除。
+  - 有一个智能体会话，首条消息为「Zircon 讨论 agent session」。项目格式为当前版本（不低于 13），所以 `show_agents` 为真。
   - 只在 #50 的助手回复和上下文单元格中出现过「hafnium」。
-- **项目 B。** 有一条问答「Zircon other project」。本次测量前已关闭，它的句柄已失效。
+- **项目 B。** 有一条问答「Zircon 讨论 other project」，也含查询的两个词。本次测量前已关闭，它的句柄已失效。
 - **界面起点。** 当前为任务页，项目 A 已打开并显示 #130。撰写区有两行未发送草稿。Viewer 已打开公开的 `muferro_domains.stkp`，记下相机序号。归档开关关闭。
 
 ### 9.2 步骤与预期
@@ -390,22 +400,22 @@ match    = terms 非空 且 每个 term 都是 title_f 的子串
 | 步骤 | 英文 1600×1100 | 中文 680×1000 |
 | --- | --- | --- |
 | 进入浏览页 | 左栏「Saved questions」1 次点击 | 「历史」、「已保存问答」2 次点击 |
-| 输入 | 直接键入 `zircon 讨论`，按 Enter | 键入 `zircon 讨论`，按 Enter（测量输入法组字的提交） |
-| 预期结果 | 问答组 2 行：#105 在前、#3 在后，标题相同，时间不同；无归档条目，无 B 的条目；`next_cursor` 为 `null` | 同左 |
-| 打开 | 按 Tab，Enter | 同左 |
+| 输入 | 直接键入 `zircon 讨论`，按 Enter | 同左。驱动以文本输入事件发送，不经输入法；组字中的 Enter 由 C++ 测试覆盖 |
+| 预期结果（查询 `zircon 讨论`，归档关闭） | 问答组 2 行：#105 在前、#3 在后，标题相同，时间不同。会话组 1 行「Zircon 讨论 agent session」。没有已归档条目，没有 B 的条目。两组的 `next_cursor` 均为 `null` | 同左 |
+| 打开 | 按 Tab（到 #105 行），Enter | 同左 |
 | 结果 | AI 区域显示 #105 及其回复；草稿、Viewer 相机与分栏不变 | 同左 |
-| 反证 1：标题之外 | 回到浏览页（查询仍在），改为 `hafnium` 并按 Enter：显示「没有匹配的问答」 | 同左 |
-| 反证 2：归档 | 打开归档开关：只显示「Zircon archived note」，可打开阅读，不能发送 | 同左 |
-| 合计 | 鼠标 1 次点击；非字符键 Enter、Tab、Enter | 鼠标 2 次点击；非字符键同左 |
+| 反证 1：权限与归档（查询 `zircon 讨论`） | 回到浏览页，查询仍为 `zircon 讨论`，结果与上面相同，仍然没有已归档条目和 B 的条目。打开归档开关后，问答组只剩「Zircon 讨论 archived note」1 行，可打开阅读，不能发送。会话组不变。关闭归档开关 | 同左 |
+| 反证 2：只看标题（查询 `hafnium`） | 改为 `hafnium` 并按 Enter：两组都显示「没有匹配」，`next_cursor` 均为 `null` | 同左 |
+| 合计（打开 #105 为止） | 鼠标 1 次点击；非字符键 Enter、Tab、Enter | 鼠标 2 次点击；非字符键同左 |
 
 鼠标路径：输入并按 Enter 后单击 #105 行，宽窗共 2 次点击，窄窗共 3 次。
 
 ### 9.3 记录与核对
 
-- **RPC 次数。** 进入浏览页到打开之前，只有 1 次 `project.requests.list`（现有）和 1 次 `project.requests.titles`。两个方法都在时，另有 1 次 `project.agent.titles`。`get`、`progress`、`discussion.get`、`contexts.get`、`agent.get` 均为零。打开后的读取与现有「从历史打开问答」的回执相同。
+- **RPC 次数。** 进入浏览页到打开之前，只有 1 次 `project.requests.list`（现有）、1 次 `project.requests.titles` 和 1 次 `project.agent.titles`。会话行在本次测量中不激活，激活由 C++ 测试覆盖。`get`、`progress`、`discussion.get`、`contexts.get`、`agent.get` 均为零。打开后的读取与现有「从历史打开问答」的回执相同。
 - **零写入。** 测量全程零 `create`、`start`、`discussion.add` 和模型请求。项目 A 的 SQLite 摘要和修订号前后一致。
 - **状态保留。** 撰写草稿字节一致，Viewer 相机序号一致，布局 JSON 一致。
-- **权限反证。** 项目 B 的「Zircon other project」从未出现。归档开关关闭时，已归档的条目不出现。`script.catalog` 中没有新方法。
+- **权限反证。** 项目 B 的「Zircon 讨论 other project」从未出现。归档开关关闭时，「Zircon 讨论 archived note」不出现。两者都含全部查询词，所以它们的缺席只能来自作用域和归档过滤。`script.catalog` 中没有新方法。
 - **旧 Bridge 对照。** 同一起点改用去掉两个方法的 Bridge：浏览页与基线像素一致，追踪中没有新方法。
 - **回执。** 写入 `receipt.json`，至少包含窗口、语言、缩放、起点描述、点击和按键序列、RPC 追踪、两份 SQLite 摘要、草稿摘要和相机序号。截图保存为 `search.png` 和 `opened.png`。点击数照 AGENTS 的要求记入 `docs/runtime-validation.md`，由 root 填写。
 
@@ -428,4 +438,5 @@ match    = terms 非空 且 每个 term 都是 title_f 的子串
 - **是否只做问答。** 问答和会话两个方法可以同批发布。若 root 只先做 `project.requests.titles`，按 4.3 的「只有问答」一行处理。
 - **会话标题的控制字符。** 会话标题由服务端单行化后，不再替换桌面额外处理的 U+061C、U+200E、U+200F。需要决定是把这三个字符也加入共用控制字符集（这会改变 `recent` 的输出和 schema 模式），还是保留现状。
 - **单行 Enter。** 是否让单行 Enter 触发 `on_submit`，属于 `stk_ui` 的独立决定。它同时会修正工作区搜索注释与实际行为的不一致。
+- **「单类/双类列表」的含义。** 本文按 `show_agents` 分支理解（6.1）。若 root 另有所指，例如单条匹配与多条匹配，需要改写 6.1 和 7.4。
 - **Web 是否改用同一归一规则。** Web 是否改为 NFKC 加 casefold，以消除第 5.3 节的差异，由 root 另定。
