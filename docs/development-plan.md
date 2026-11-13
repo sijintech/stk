@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-13 18:32 UTC · 桌面文件按静态文本阅读
+
+本地 main `2986df6ea9b8e9f8fb9b4360157bf0de1bfdf4cf` 让冻结文本预览从首行显示，去掉流式日志的「跟随最新」控件。键盘焦点有可见边界，翻页和回到开头继续可用。桌面与测试目标构建通过，文本视图、模态、智能体与工作台导航联合 59/59，暂存 gitleaks 零发现。
+
+真实 Linux X11 以已打开合成项目的聚焦工作台及已有智能体会话为起点。英文 1600×1100 点击 4 次进入预览，中文 680×1000 点击 5 次。预览仍显示冻结 JSON 原文，两窗截图均无跟随控件。各按 Esc 一次关闭。各一次工作流、清单及预览读取，关闭零读取，项目数据库、会话哈希和两份源文件字节一致。证据 `root-delivery-20261113-180/{static-preview.xml,native-preview-en-static/receipt.json,native-preview-zh_CN-static/receipt.json}`。
+
+远端仍为 `19998d12`。Desktop 的 Linux 打包和干净机冒烟通过，Linux 主回归、macOS 和 Windows 正在运行。Runtime 仍在运行，Pages 与 Secret scan 已通过。两条旧 PR 头未变化，保持开放。Claude 113 在独立 worktree 已有保存副本的原子发布及 UI 候选改动，继续开发验证。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43481451563) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43481451605)
+
 ## 2026-11-13 18:25 UTC · macOS 官方工件与桌面预览全量回归
 
 上一远端 `57f3601a` 的 macOS 工件已取回。CPU 1597/1597、Metal 254/254、原生必测 4/6。MP4 与 HTML 视频的首次显式暂停均通过当次下限及保持，保持末尾分别为 0.05307 秒和 0.06400 秒。MP4 完成第一轮，在第二轮第一次向早段 seek 时未找到可见原生子视图，未发送该次 seek。HTML 在第一轮隐藏后的首个暂停样本由播放时 0.20708 秒降到 0.102 秒，等于此前 seek 的落点，只失败于隐藏时间下限。立即暂停的独立对照中，MP4 三个样本稳定在 0.04219 秒，HTML 稳定在 0.10863 秒。延迟对照两项通过。这些分支分别保留为取证目标。
