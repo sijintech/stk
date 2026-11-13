@@ -1,5 +1,9 @@
 # STK 当前交接
 
+## 2026-11-13 20:11 UTC · 桌面实窗验证准备和发送分开
+
+使用 `ababc0c96462612d383d95af1f6e3b772962db22` 的 Linux X11 二进制，1600×1100 英文工作台固定起点为已选合成数据范围与模型标识、两行草稿已写、输入框聚焦。零鼠标点击。一次 Esc 保留草稿，零新增请求。随后一次 Ctrl+Enter 保存一条原文及一条 pending 请求，`executor_id` 为空，零 `project.requests.start`，项目修订仍为 1。证据 `root-delivery-20261113-186/native-question/{receipt.json,escaped.png,after.png}`。远端上一头的两个原生文档作业仍运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43491122224)
+
 ## 2026-11-13 20:07 UTC · 会话改动的 Linux 项目回归完成
 
 `ababc0c96462612d383d95af1f6e3b772962db22` 的本地项目 CTest 1563 项中首跑通过 1561 项。两项已安装 Peer 辅助程序用例需要 `STK_TEST_PEER_INSTALLATION`，指定既有完整可迁移安装后定向 2/2，共 1563 个唯一测试通过。先用仅含构建产物的暂存目录复跑时，两个用例的 Bridge 均未就绪。证据 `root-delivery-20261113-186/{escape-project-full.xml,escape-peer-retry.xml,escape-peer-installed.xml}`。Web 仍以同源码构建的 399/399 和真实 Hub 宽窄窗口回执为准。待发布范围从远端 `13d32015` 到 `95e91e11` 的 11 个提交通过 gitleaks。远端 macOS 与 Windows 原生文档作业仍在运行，保持仓库发布顺序。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43491122224)
