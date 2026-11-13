@@ -2021,7 +2021,8 @@ class Exercise {
   void record_failed_media_reveal(int cycle, const app::EditorArea &area, const std::string &session,
                                   const document_preview::ResourceSession &resources,
                                   const document_preview::test::NativeCloseObservation *close,
-                                  Clock::time_point playing_returned, Clock::time_point reveal_started) noexcept
+                                  Clock::time_point playing_returned, Clock::time_point reveal_started,
+                                  std::string_view tab_route) noexcept
   {
     record_native_pause_trace(close, session, "failed_reveal_native_pause_trace");
     record_hidden_native_close(close, session, playing_returned);
@@ -2049,9 +2050,9 @@ class Exercise {
       const bool same_resource = test::resource_session(parent, session, lookup_error).get() == &resources;
       const auto hidden_pause = trace ? test::hidden_pause_target(parent, session, *trace) : std::nullopt;
       result_["failed_reveal_observation"] = {
-          {"phase", "quiet-html-video-reveal"}, {"cycle", cycle}, {"session_sha256", core::Sha256::hex(session)},
+          {"phase", "paused-video-reveal"}, {"cycle", cycle}, {"session_sha256", core::Sha256::hex(session)},
           {"elapsed_seconds", media_seconds(reveal_started, Clock::now())},
-          {"active_tab", area.active_tab()}, {"client_size", {window_.width(), window_.height()}},
+          {"active_tab", area.active_tab()}, {"tab_route", tab_route}, {"client_size", {window_.width(), window_.height()}},
           {"main_rect", main ? bounds(screen_.to_ui(main->rect())) : Json(nullptr)},
           {"input", input_state()}, {"overlays", std::move(overlays)},
           {"viewport", viewport ? Json{{"native_widget", viewport->type == ui::WidgetType::NativeViewport},
@@ -3341,14 +3342,16 @@ raise SystemExit(main())
       require(area->tab(1).save_workspace_state() == draft_state, "Video hide preserves the Python draft");
 #ifdef __APPLE__
       const auto reveal_started = Clock::now();
+      std::string_view reveal_route;
       try {
 #endif
-        [[maybe_unused]] const auto reveal_route = ui.tab(*area, 0);
+        [[maybe_unused]] const auto route = ui.tab(*area, 0);
 #ifdef __APPLE__
-        if (html_video && options.quiet_hidden_hold && reveal_route == "area_menu") {
-          // Keyboard selection leaves the pointer on the menu button, whose tooltip blocks the native view.
-          auto &pointer = result["quiet_reveal_pointer"];
-          pointer = {{"tab_route", std::string(reveal_route)}, {"moved", false}, {"before", ui.input_state()}};
+        reveal_route = route;
+        if (route == "area_menu") {
+          // Move away from the area-menu tooltip before inspecting the revealed native view.
+          auto &pointer = result[options.quiet_hidden_hold ? "quiet_reveal_pointer" : "reveal_pointer"];
+          pointer = {{"tab_route", std::string(route)}, {"moved", false}, {"before", ui.input_state()}};
           const auto *viewport = ui.widget("reports_document_viewport");
           if (viewport && viewport->type == ui::WidgetType::NativeViewport && viewport->enabled && ui.visible(viewport)) {
             const ui::Vec2 center{viewport->rect.cx(), viewport->rect.cy()};
@@ -3363,9 +3366,8 @@ raise SystemExit(main())
 #ifdef __APPLE__
       }
       catch (...) {
-        if (html_video && options.quiet_hidden_hold) {
-          ui.record_failed_media_reveal(cycle, *area, session, *resources, close.get(), playing_returned, reveal_started);
-        }
+        ui.record_failed_media_reveal(cycle, *area, session, *resources, close.get(), playing_returned,
+                                      reveal_started, reveal_route);
         throw;
       }
 #endif
