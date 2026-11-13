@@ -1,5 +1,11 @@
 # 开发交接记录
 
+## 2026-11-13 20:02 UTC · 原生会话退出编辑时保留草稿
+
+本地 main `ababc0c96462612d383d95af1f6e3b772962db22` 在智能体会话和项目问答中按 Esc 结束编辑，保留本地草稿及焦点。继续打字可编辑原草稿，也可从已聚焦的输入框用快捷键直接触发当前主操作。桌面表格和普通编辑字段维持自己的 Esc 行为。Linux X11 固定起点为 1600×1100 与 680×1000 的已打开智能体会话，焦点在含两行草稿的输入框。每窗零鼠标点击。按一次 Esc，项目修订与会话链保持原值，零发送。随后按一次 Ctrl+Enter，原样新增一条用户消息，项目修订与运行审批数保持原值。桌面 UI 核心 135/135、会话定向 53/53，桌面二进制与测试目标构建成功，暂存 gitleaks 零发现。证据 `root-delivery-20261113-186/{escape-ui.xml,escape-project.xml,native-escape-wide-b/receipt.json,native-escape-narrow-b/receipt.json}`。 [统一工作台](design/unified-workbench.md)
+
+Claude 113 已交付 `9e6a112d97e2ee2fd294e545f50da765074539aa`，报告 Linux 定向 45/45、项目 1568/1568，基础全量在修正 Python 环境后 2244/2244。Root 审阅后把权限与路径替换修订单交给同一个 Claude 会话，现已在独立 worktree 运行。该候选等待修订与复验。远端 `13d32015` 的 Linux 三项和 Windows CPU 通过，macOS CPU、Metal、打包冒烟通过，macOS 与 Windows 原生文档作业仍运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43491122224)
+
 ## 2026-11-13 19:51 UTC · Linux 实窗核对双端快捷键
 
 `fa748646e0e885ffa137046a8d969a0e388ded1d` 补验原生项目问答在键盘准备后仍聚焦原输入框，实际项目 Bridge 定向用例 1/1，暂存 gitleaks 零发现。Linux X11 实窗使用 `b076c2a31d0a35ec2f7828b7b134c5065bd93ab7` 的桌面二进制。1600×1100 和 680×1000 都从已打开的本地智能体会话、已聚焦且写有两行草稿起步，零鼠标点击、一次 Ctrl+Enter。每窗收到一次 `project.agent.say`，仅新增一条文本完全匹配的用户消息，项目修订号为 0，零运行审批。界面显示这条消息并清空输入框。模型未配置，已有的尝试以本地提示结束。项目问答实窗和目标平台快捷键仍待补验。证据 `root-delivery-20261113-186/{native-wide-b/receipt.json,native-narrow/receipt.json,question-focus.xml}`。
