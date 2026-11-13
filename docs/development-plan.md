@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-13 23:19 UTC · 保存会话一键回到最新消息
+
+本地 main `9588193c1d3849e9cde0ebb9635ef9ccd5d90ff7` 让 Web 已保存会话在最后一条消息未显示时提供「跟随最新」。首次载入历史仍从原阅读位置开始。Chromium 与真实 Hub 固定起点为已打开 60 条记录的合成会话、正文在顶部、输入框有未发送草稿。1440×900 和 390×844 各一次点击到末尾，焦点在正文。按 PageUp 后，Shift+Tab、Enter 可再次回到末尾。两轮测量均零 Hub 请求、模型调用与草稿变化，32 条会话记录摘要相同。首次实现抢占了输入框前一个 Tab 位置，已把按钮移到正文之前。真实窄窗还复现快速键盘返回时 PageUp 动画覆盖跳转，最终用即时滚动处理。生产构建通过，定向 10/10。全量复验结果单独记录。证据 `root-delivery-20261113-193/{web-before.log,web-instant-build.log,web-recheck.xml,live-follow-acceptance/browser-receipt.json,live-follow-acceptance/hub-receipt.json}`。
+
+本地 `67195f24` 修正两组导航测试对定期只读 `task.get` 的处理。保留零写请求、会话请求与精确任务文件路径断言。桌面比例字体同一构建的项目全量 1568 项，首跑 1566 项通过，缺已安装 Peer helper 路径的两项补齐既有安装后通过，零跳过。证据 `root-delivery-20261113-192/typography-all-project.xml` 和 `root-delivery-20261113-193/peer-installed.xml`。
+
+Root 在独立 worktree 将保存副本候选重新合成到当前代码头，得到 `adfd87ac1534da133dc19fef8383ca4b49a165b7`，无冲突、gitleaks 零发现，精确候选 Linux 构建进行中。Claude 118 继续在自己的 worktree 实现输入卡片。远端 `834f7bd4` Runtime 13/13、Linux 桌面三项、Pages 与 Secret scan 成功。Desktop macOS 与 Windows 仍运行，整轮终态后再推送。PR #53 功能已在主线，#54 仅旧交接。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/43522208394) [Desktop CI](https://github.com/sijintech/stk/actions/runs/43522208408)
+
 ## 2026-11-13 23:01 UTC · Windows Markdown 原生捕获回归
 
 Root 从 `413a2833` 的终态 Windows 日志确认，Markdown 第 13 轮超时来自 `CreateForWindow` ABI 本身耗时 120041 毫秒。HRESULT 检查和本地清理耗时均为零，首张成功样本已识别正文。此前 PDF 同类阻塞已采用随窗口生命周期持有捕获目标。主线本地 `895a6b577acb8e88dee046a4d465d6a41c1f0860` 把同一路径用于 Markdown，仍为每次像素采样新建捕获会话。Linux 原生报告测试目标编译并链接通过，Windows 实际 20 轮待下一个代码头 CI。证据 `root-delivery-20261113-192/{413-windows-api.log,windows-markdown-harness-build.log}`。 [上一轮 Windows 原生验证](https://github.com/sijintech/stk/actions/runs/43511133797/job/132206514170)
