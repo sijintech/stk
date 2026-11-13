@@ -56,7 +56,7 @@
 
 位置在 `desktop/engine/lib/stk_app/src/editors/ai_editor.cc` 的 `agent_run_cards`，紧接「查看原决定的回执」按钮。
 
-- 控件键 `ai_agent_run_detail/<item_id>`。控件文字为「关联任务」。打开后按 Tab 可聚焦关闭按钮。
+- 控件键 `ai_agent_run_detail/<item_id>`。控件文字为「关联任务」。打开时焦点移到关闭按钮。
 - 只在卡片已消费时出现，即 `decision` 或 `receipt` 为对象。待决定卡片不显示，避免与「读取完整计划」混淆。批准仍只由完整计划解锁。
 - 显示条件还包括 `ProjectAgent::runs_supported()` 为真，以及 Bridge 握手中有 `project.workflow_runs.get`。项目格式 13 已满足该方法所需的格式 10。
 - 新增中英文文案键放在 `desktop/app/i18n/en.json` 与 `zh_CN.json` 的 `ai.agent.run.detail*` 下。
@@ -126,7 +126,7 @@ void close_run_detail(uint64_t ticket);
 
 | 行 | 操作 | 次数 | 结果与焦点 |
 | --- | --- | --- | --- |
-| 宽窗打开 | 左栏会话 A，再点「关联任务」 | 2 | 显示所选卡片的详情，首个 Tab 聚焦关闭按钮 |
+| 宽窗打开 | 左栏会话 A，再点「关联任务」 | 2 | 显示所选卡片的详情，自动聚焦关闭按钮 |
 | 宽窗收起 | 「关闭」或 Esc | 1 | 焦点返回原卡片入口，会话阅读位置不变 |
 | 窄窗打开 | 「历史」，会话 A，「关联任务」 | 3 | 同宽窗，历史菜单关闭后查看器不接收输入 |
 | 窄窗收起 | 「关闭」或 Esc | 1 | 同宽窗 |

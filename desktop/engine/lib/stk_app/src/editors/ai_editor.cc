@@ -1881,8 +1881,12 @@ class AIEditor final : public Editor {
       }
     };
     auto &panel = ctx.ui->modal("ai_agent_run_detail_panel", ctx.tr("ai.agent.run.detail"), close, options);
-    // First in the panel, so the first Tab lands on it (the modal itself takes no initial focus).
-    panel.row().alignment(ui::LayoutAlign::Right).button("ai_agent_run_detail_close", ctx.tr("ui.close"), close).width(5);
+    const auto &close_button = panel.row().alignment(ui::LayoutAlign::Right)
+        .button("ai_agent_run_detail_close", ctx.tr("ui.close"), close).width(5);
+    if (run_detail_focus_ticket_ != run_detail_.ticket) {
+      run_detail_focus_ticket_ = run_detail_.ticket;
+      ctx.ui->focus_modal_next_frame(close_button.key);
+    }
     panel.paragraph(catalog.format("ai.agent.run.card", {{"run", io::get_string(run_detail_.item, "run_id")}}));
     const auto state_name = io::get_string(*detail, "state");
     if (state_name == "reading") { panel.paragraph(ctx.tr("ai.agent.run.detail.reading")); return; }
@@ -2050,6 +2054,7 @@ class AIEditor final : public Editor {
     ui::Context *ui = nullptr;
   } run_detail_;
   uint64_t run_detail_owner_epoch_ = 0;
+  uint64_t run_detail_focus_ticket_ = 0;
   bool run_detail_drawn_ = false;
   std::string run_detail_text_;
   ui::LogBuffer run_detail_log_;

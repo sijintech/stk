@@ -560,6 +560,8 @@ class Context {
   Layout &modal(std::string_view key, std::string_view title, std::function<void()> on_close, ModalOptions opts = {});
   /** Restore focus on the next layout when the exact widget is visible and the request is current. */
   void restore_focus_next_frame(std::string key, std::function<bool()> current = {});
+  /** Focus an exact visible widget in the top modal on the next layout. */
+  void focus_modal_next_frame(std::string key);
   /** Discard pan and zoom when the content of an existing image widget changes. */
   void reset_image_view(WidgetId id);
   void end_frame();
@@ -711,7 +713,7 @@ class Context {
   void edit_click(const Widget &w, Vec2 p, bool extend, bool dbl);
   bool edit_key(const Event &e);
   void focus_next(bool backwards);
-  bool focus_visible_widget(WidgetId id);
+  bool focus_visible_widget(WidgetId id, Block::Kind kind = Block::Kind::Region);
   bool activate_focused(const Event &e);
   void open_popup_for(const Widget &w);
   void popup_select(int index);
@@ -789,6 +791,7 @@ class Context {
   struct PendingFocus {
     std::string key;
     std::function<bool()> current;
+    Block::Kind kind = Block::Kind::Region;
   };
   std::optional<PendingFocus> next_frame_focus_;
   WidgetId tooltip_forced_ = 0;

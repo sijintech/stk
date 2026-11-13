@@ -924,6 +924,33 @@ TEST(Modal, TrapsFocusAndInput)
   EXPECT_EQ(under, 1);
 }
 
+TEST(Modal, NextFrameFocusRequiresTheVisibleTopModal)
+{
+  Harness h;
+  bool top_open = true;
+  h.ui = [&](Context &ctx) {
+    ctx.block("region", {0, 0, 400, 600}).layout().button("under", "Under", [] {});
+    ctx.modal("lower", "Lower", [] {}).button("lower_close", "Close", [] {});
+    if (top_open) { ctx.modal("top", "Top", [] {}).button("top_close", "Close", [] {}); }
+  };
+  h.frame();
+  const auto top_key = h.w("top_close").key;
+  const auto lower_key = h.w("lower_close").key;
+  h.ctx->focus_modal_next_frame(top_key);
+  h.frame();
+  EXPECT_EQ(h.ctx->focused(), h.w("top_close").id);
+  h.ctx->focus_modal_next_frame(lower_key);
+  h.frame();
+  EXPECT_EQ(h.ctx->focused(), h.w("top_close").id);
+  h.ctx->restore_focus_next_frame(h.w("under").key);
+  h.frame();
+  EXPECT_EQ(h.ctx->focused(), h.w("top_close").id);
+  top_open = false;
+  h.ctx->focus_modal_next_frame(lower_key);
+  h.frame();
+  EXPECT_EQ(h.ctx->focused(), h.w("lower_close").id);
+}
+
 TEST(Tooltip, AppearsAfterDelay)
 {
   Harness h;

@@ -1012,6 +1012,8 @@ TEST_F(NativeAgentRunDetailUI, WideWindowOpensARightPanelInTwoClicksAndReturnsFo
   EXPECT_FLOAT_EQ(modal->frame().w, 420.0f);
   EXPECT_FLOAT_EQ(modal->frame().y, 0.0f);
   EXPECT_TRUE(f.screen.ui()->native_view_interaction_blocked());  // the Viewer below takes no input
+  ASSERT_NE(id("ai_agent_run_detail_close"), 0u);
+  EXPECT_EQ(f.screen.ui()->focused(), id("ai_agent_run_detail_close"));
   const auto *tasks = f.screen.ui()->find("ai_agent_run_detail_tasks");
   ASSERT_NE(tasks, nullptr); ASSERT_NE(tasks->log, nullptr);
   const auto text = panel_text();
@@ -1028,10 +1030,7 @@ TEST_F(NativeAgentRunDetailUI, WideWindowOpensARightPanelInTwoClicksAndReturnsFo
   ASSERT_TRUE(f.drv->send(wheel)); frame();
   EXPECT_GT(f.screen.ui()->scroll_of(f.screen.ui()->find("ai_agent_run_detail_tasks")->id), 0.0f);
   const auto first_close = f.screen.ui()->find("ai_agent_run_detail_close")->on_click;
-  // Keyboard: Tab enters the panel's Close, Esc closes and focus returns to the card's entry.
-  ASSERT_TRUE(f.drv->key(wm::Key::Tab)); frame();
-  ASSERT_NE(id("ai_agent_run_detail_close"), 0u);
-  EXPECT_EQ(f.screen.ui()->focused(), id("ai_agent_run_detail_close"));
+  // Esc closes and focus returns to the card's entry.
   ASSERT_TRUE(f.drv->key(wm::Key::Esc)); frame(); frame();
   EXPECT_EQ(panel(), nullptr);
   ASSERT_NE(id(entry()), 0u);

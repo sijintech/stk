@@ -126,10 +126,10 @@ bool Context::focus_widget(WidgetId id)
   return focus_visible_widget(id);
 }
 
-bool Context::focus_visible_widget(WidgetId id)
+bool Context::focus_visible_widget(WidgetId id, Block::Kind kind)
 {
   const Widget *w = find_id(id);
-  if (!w || w->block->kind() != Block::Kind::Region || w->layout_region || !w->focusable()) { return false; }
+  if (!w || w->block->kind() != kind || !in_modal_scope(*w) || w->layout_region || !w->focusable()) { return false; }
   const Rect visible = w->rect.intersect(w->clip).intersect({0, 0, window_.x, window_.y});
   if (visible.w <= 0 || visible.h <= 0) { return false; }
   focus_ = id;
@@ -257,6 +257,11 @@ void Context::restore_focus_next_frame(std::string key, std::function<bool()> cu
   next_frame_focus_ = PendingFocus{std::move(key), std::move(current)};
 }
 
+void Context::focus_modal_next_frame(std::string key)
+{
+  next_frame_focus_ = PendingFocus{std::move(key), {}, Block::Kind::Modal};
+}
+
 static void set_clip(Block &b, const Rect &clip)
 {
   for (Widget &w : const_cast<std::deque<Widget> &>(b.widgets())) {
@@ -339,14 +344,11 @@ void Context::end_frame()
     focus_ = 0;
   }
   if (const auto focus = std::exchange(next_frame_focus_, std::nullopt)) {
-    if (!edit_.id && !drag_.id && !popup_.owner && std::none_of(blocks_.begin(), blocks_.end(), [](const auto &b) {
-          return b->kind() == Block::Kind::Modal;
-        }))
-    {
+    if (!edit_.id && !drag_.id && !popup_.owner) {
       if (const auto *target = find(focus->key); target && target->key == focus->key &&
-          (!focus->current || focus->current()))
+          target->block->kind() == focus->kind && in_modal_scope(*target) && (!focus->current || focus->current()))
       {
-        focus_visible_widget(target->id);
+        focus_visible_widget(target->id, focus->kind);
       }
     }
   }
