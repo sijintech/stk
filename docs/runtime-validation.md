@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-13 20:16 UTC · 上一发布头 Desktop 已结束
+
+远端 `13d320155e2f3354f706d54d7ca581971943996b` Desktop 运行于 20:15:14 UTC 结束，六项作业中五项通过。Linux 三项、Windows CPU、Windows WebView2 原生文档通过，Windows 官方原生 XML 为 6/6。macOS CPU、Metal、打包及安装冒烟通过，必测 WKWebView 原生文档、隐藏前对照和隐藏暂停诊断失败。官方 macOS 工件已开始下载，将按实际用例复核。Runtime 13/13、Pages 与 Secret scan 已通过。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43491122224) [macOS 工件](https://github.com/sijintech/stk/actions/runs/43491122224/artifacts/14073253397) [Windows 工件](https://github.com/sijintech/stk/actions/runs/43491122224/artifacts/14072498601) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43491121980)
+
+待发布范围截至 `0317916ac666b83d2b7cab96ca19b80c2bc1edd5`，包括 Web 历史标题搜索、双端会话快捷键与原生 Esc 草稿保留。Windows 和 macOS 上的新快捷键及草稿行为待本次推送后的验证。原三份 AOCI 工作区摘要一致，四份既有状态文档工作区修改通过定向暂存保护。Claude 保存副本修订仍在隔离 worktree。 [Pages](https://github.com/sijintech/stk/actions/runs/43491121988) [Secret scan](https://github.com/sijintech/stk/actions/runs/43491121943)
+
 ## 2026-11-13 20:11 UTC · 桌面实窗验证准备和发送分开
 
 使用 `ababc0c96462612d383d95af1f6e3b772962db22` 的 Linux X11 二进制，1600×1100 英文工作台固定起点为已选合成数据范围与模型标识、两行草稿已写、输入框聚焦。零鼠标点击。一次 Esc 保留草稿，零新增请求。随后一次 Ctrl+Enter 保存一条原文及一条 pending 请求，`executor_id` 为空，零 `project.requests.start`，项目修订仍为 1。证据 `root-delivery-20261113-186/native-question/{receipt.json,escaped.png,after.png}`。远端上一头的两个原生文档作业仍运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43491122224)
