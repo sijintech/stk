@@ -1445,6 +1445,7 @@ TEST_F(NativeAgentRunDetailUI, WideWindowOpensARightPanelInTwoClicksAndReturnsFo
   EXPECT_FLOAT_EQ(modal->frame().x1(), 1600.0f);  // right-anchored, 420 px like the Web dialog
   EXPECT_FLOAT_EQ(modal->frame().w, 420.0f);
   EXPECT_FLOAT_EQ(modal->frame().y, 0.0f);
+  EXPECT_FLOAT_EQ(modal->frame().h, 1100.0f);
   EXPECT_TRUE(f.screen.ui()->native_view_interaction_blocked());  // the Viewer below takes no input
   ASSERT_NE(id("ai_agent_run_detail_close"), 0u);
   EXPECT_EQ(f.screen.ui()->focused(), id("ai_agent_run_detail_close"));
@@ -1583,7 +1584,7 @@ TEST_F(NativeAgentRunDetailUI, WideWindowViewsAndPreviewsSnapshotFilesInTheSameP
   EXPECT_FLOAT_EQ(modal->frame().x1(), 1600.0f);  // the same right panel
   EXPECT_FLOAT_EQ(modal->frame().w, 420.0f);
   EXPECT_FLOAT_EQ(modal->frame().y, 0.0f);
-  EXPECT_LE(modal->frame().y1(), 1100.0f);
+  EXPECT_FLOAT_EQ(modal->frame().y1(), 1100.0f);
   EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_tasks"), nullptr);
   EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/0")->text, "Back to linked tasks");
   EXPECT_TRUE(has_label("notes · notes.txt · 90 bytes")) << ::testing::PrintToString(panel_labels());
@@ -1603,6 +1604,7 @@ TEST_F(NativeAgentRunDetailUI, WideWindowViewsAndPreviewsSnapshotFilesInTheSameP
   EXPECT_EQ(modal->title(), "File preview");
   EXPECT_FLOAT_EQ(modal->frame().x1(), 1600.0f);
   EXPECT_FLOAT_EQ(modal->frame().w, 420.0f);
+  EXPECT_FLOAT_EQ(modal->frame().h, 1100.0f);
   EXPECT_TRUE(has_label("notes.txt"));
   const auto text = preview_text();
   EXPECT_NE(text.find("<b>bold</b><script>alert(1)</script>linetwo\\u{d}hidden\\u{1b}[31mred\\u{1b}[0mtab\\u{202e}evil中文🙂"),
@@ -1763,6 +1765,7 @@ TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseWindowOpensABottomSheetFromHis
   EXPECT_FLOAT_EQ(modal->frame().x, 0.0f);  // a full-width bottom sheet, like the Web dialog below 700 px
   EXPECT_FLOAT_EQ(modal->frame().w, 680.0f);
   EXPECT_FLOAT_EQ(modal->frame().y1(), 1000.0f);
+  EXPECT_FLOAT_EQ(modal->frame().h, 800.0f);
   const auto *tasks = f.screen.ui()->find("ai_agent_run_detail_tasks");
   ASSERT_NE(tasks, nullptr);
   const auto &style = f.screen.ui()->style();
@@ -1817,7 +1820,7 @@ TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseBottomSheetPreviewsAFileInFive
   EXPECT_FLOAT_EQ(modal->frame().x, 0.0f);  // the same full-width bottom sheet
   EXPECT_FLOAT_EQ(modal->frame().w, 680.0f);
   EXPECT_FLOAT_EQ(modal->frame().y1(), 1000.0f);
-  EXPECT_GE(modal->frame().y, 0.0f);
+  EXPECT_FLOAT_EQ(modal->frame().h, 800.0f);
   EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/0")->text, "返回关联任务");
   EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_preview/0")->text, "预览");
   EXPECT_TRUE(has_label("big · big.log · 307201 字节"));
@@ -1830,6 +1833,7 @@ TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseBottomSheetPreviewsAFileInFive
   EXPECT_FLOAT_EQ(modal->frame().x, 0.0f);
   EXPECT_FLOAT_EQ(modal->frame().w, 680.0f);
   EXPECT_FLOAT_EQ(modal->frame().y1(), 1000.0f);
+  EXPECT_FLOAT_EQ(modal->frame().h, 800.0f);
   EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_preview/0")->text, "返回快照文件");
   const auto *log = f.screen.ui()->find("ai_agent_run_detail_preview_text");
   const auto &style = f.screen.ui()->style();

@@ -248,6 +248,7 @@ Layout &Context::modal(std::string_view key, std::string_view title, std::functi
   b.title_ = std::string(title);
   b.on_close = std::move(on_close);
   b.width_units_ = opts.width_units;
+  b.modal_height_ = opts.height;
   b.has_pos_ = opts.has_pos;
   b.pos_ = opts.pos;
   return b.layout();
@@ -302,8 +303,14 @@ void Context::layout_block(Block &b)
       const float pad = st.panel_margin;
       const float title_h = st.panel_header;
       const float W = st.u(b.width_units_);
-      const float h = LayoutEngine::resolve(*this, root, 0, 0, W - 2 * pad);
-      Rect f{0, 0, W, title_h + h + 2 * pad};
+      float content_width = W - 2 * pad;
+      float h = LayoutEngine::resolve(*this, root, 0, 0, content_width);
+      const float chrome = title_h + 2 * pad;
+      Rect f{0, 0, W, b.modal_height_ > 0 ? std::min(b.modal_height_, window_.y) : chrome + h};
+      if (b.modal_height_ > 0 && chrome + h > f.h) {
+        content_width -= st.scrollbar;
+        h = LayoutEngine::resolve(*this, root, 0, 0, content_width);
+      }
       if (b.has_pos_) {
         f.x = b.pos_.x;
         f.y = b.pos_.y;
@@ -315,9 +322,12 @@ void Context::layout_block(Block &b)
       f.x = std::clamp(f.x, 0.0f, std::max(0.0f, window_.x - f.w));
       f.y = std::clamp(f.y, 0.0f, std::max(0.0f, window_.y - f.h));
       b.frame_ = f;
-      LayoutEngine::resolve(*this, root, f.x + pad, f.y + title_h + pad, W - 2 * pad);
-      b.content_h_ = f.h;
-      set_clip(b, f);
+      b.content_h_ = chrome + h;
+      const float max_scroll = std::max(0.0f, b.content_h_ - f.h);
+      const float scroll = std::clamp(scroll_of(b.scroll_id()), 0.0f, max_scroll);
+      if (b.modal_height_ > 0) { set_scroll(b.scroll_id(), scroll, max_scroll); }
+      LayoutEngine::resolve(*this, root, f.x + pad, f.y + title_h + pad - std::round(scroll), content_width);
+      set_clip(b, b.modal_height_ > 0 ? Rect{f.x, f.y + title_h, f.w, std::max(0.0f, f.h - title_h)} : f);
       break;
     }
     default:
@@ -983,6 +993,13 @@ void Context::focus_next(bool backwards)
     next = ((cur + (backwards ? -1 : 1)) % n + n) % n;
   }
   focus_ = order[size_t(next)]->id;
+  const Widget &target = *order[size_t(next)];
+  if (target.block->kind() == Block::Kind::Modal && target.block->modal_height_ > 0) {
+    const Block &block = *target.block;
+    const float delta = target.rect.y < target.clip.y ? target.rect.y - target.clip.y :
+        std::max(0.0f, target.rect.y1() - target.clip.y1());
+    set_scroll(block.scroll_id(), block.scroll() + delta, std::max(0.0f, block.content_height() - block.frame().h));
+  }
   redraw_ = true;
 }
 
@@ -2019,8 +2036,9 @@ EventResult Context::wheel(const Event &e)
     w->number.assign(clamp_number(w->number.value() + (e.wheel_y > 0 ? step : -step), w->props));
     return {true, true};
   }
-  if (blk && blk->kind() == Block::Kind::Region) {
-    const float ms = std::max(0.0f, blk->content_height() - blk->rect().h);
+  if (blk && (blk->kind() == Block::Kind::Region || blk->modal_height_ > 0)) {
+    const float view = blk->kind() == Block::Kind::Region ? blk->rect().h : blk->frame().h;
+    const float ms = std::max(0.0f, blk->content_height() - view);
     if (ms > 0.0f) {
       set_scroll(blk->scroll_id(), blk->scroll() - e.wheel_y * 2 * style_.unit, ms);
       return {true, true};

@@ -1873,7 +1873,8 @@ class AIEditor final : public Editor {
     const bool narrow = window.x <= 700.0f * ctx.ui->scale();
     ui::ModalOptions options;
     options.has_pos = true;  // the modal clamps its frame into the window: x = right edge, y = bottom edge
-    if (narrow) { options.width_units = std::max(8.0f, window.x / style.unit); options.pos = {0, window.y}; }
+    options.height = window.y * (narrow ? 0.8f : 1.0f);
+    if (narrow) { options.width_units = window.x / style.unit; options.pos = {0, window.y}; }
     else { options.width_units = std::min(21.0f, window.x / style.unit); options.pos = {window.x, 0}; }
     const auto close = [this, weak = lifetime(), &state, ticket = run_detail_.ticket, owner = run_detail_owner_epoch_] {
       if (!weak.expired() && owner == run_detail_owner_epoch_ && run_detail_.ticket == ticket) {
@@ -1886,6 +1887,19 @@ class AIEditor final : public Editor {
     // One panel: the tasks, then a task's frozen snapshot files, then one file's text (the Web dialog's pages).
     auto &panel = ctx.ui->modal("ai_agent_run_detail_panel",
         ctx.tr(preview ? "ai.agent.run.preview" : files ? "ai.agent.run.files" : "ai.agent.run.detail"), close, options);
+    const char *page = preview ? "preview" : files ? "files" : "tasks";
+    const int64_t file_entry = files ? io::get_int(*files, "entry", -1) : -1;
+    const int64_t preview_entry = preview ? io::get_int(*preview, "file", -1) : -1;
+    if (run_detail_focus_ticket_ != ticket) {
+      for (const auto *scope : {"tasks", "files", "preview"}) { panel.block().set_scroll_scope(scope, true); }
+      run_detail_files_scroll_entry_ = -1;
+      run_detail_preview_scroll_entry_ = -1;
+    }
+    const bool reset_scroll = preview ? preview_entry != run_detail_preview_scroll_entry_ :
+        files && file_entry != run_detail_files_scroll_entry_;
+    panel.block().set_scroll_scope(page, reset_scroll);
+    if (files) { run_detail_files_scroll_entry_ = file_entry; }
+    run_detail_preview_scroll_entry_ = preview_entry;
     const auto &close_button = panel.row().alignment(ui::LayoutAlign::Right)
         .button("ai_agent_run_detail_close", ctx.tr("ui.close"), close).width(5);
     if (run_detail_focus_ticket_ != run_detail_.ticket) {
@@ -1894,7 +1908,7 @@ class AIEditor final : public Editor {
     }
     const float width = options.width_units * style.unit - 2 * style.panel_margin - 2 * style.text_margin -
         style.scrollbar - 2 * style.pixel;
-    const float rows = std::clamp(window.y * (narrow ? 0.8f : 1.0f) / style.unit - 10.0f, 4.0f, 30.0f);
+    const float rows = std::clamp(options.height / style.unit - 10.0f, 4.0f, 30.0f);
     if (preview) { run_file_preview_page(panel, ctx, state, *files, *preview, width, rows); return; }
     if (files) { run_files_page(panel, ctx, state, *detail, *files); return; }
     panel.paragraph(catalog.format("ai.agent.run.card", {{"run", io::get_string(run_detail_.item, "run_id")}}));
@@ -2189,6 +2203,8 @@ class AIEditor final : public Editor {
   } run_detail_;
   uint64_t run_detail_owner_epoch_ = 0;
   uint64_t run_detail_focus_ticket_ = 0;
+  int64_t run_detail_files_scroll_entry_ = -1;
+  int64_t run_detail_preview_scroll_entry_ = -1;
   uint64_t run_detail_page_epoch_ = 0;
   bool run_detail_drawn_ = false;
   std::string run_detail_text_;

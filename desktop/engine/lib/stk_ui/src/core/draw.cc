@@ -110,8 +110,14 @@ void Context::draw_block(const Block &b)
                  {title.x, std::round(title.cy() + (fm.ascent - fm.descent) * 0.5f)}, st.font, th.panel_title);
       draw_.rect({b.frame().x + st.pixel, b.frame().y + st.panel_header - st.pixel, b.frame().w - 2 * st.pixel, st.pixel},
                  mb.outline);
-      draw_.clip_push(b.frame());
+      const Rect body{b.frame().x, b.frame().y + st.panel_header, b.frame().w,
+                      std::max(0.0f, b.frame().h - st.panel_header)};
+      draw_.clip_push(b.modal_height_ > 0 ? body : b.frame());
       draw_layout(*b.root_, b);
+      if (b.modal_height_ > 0 && b.content_height() > b.frame().h) {
+        const bool hot = mouse_.x >= body.x1() - st.scrollbar - 2 * st.pixel && body.contains(mouse_);
+        draw_scrollbar(body, b.content_height() - st.panel_header, body.h, b.scroll(), hot);
+      }
       draw_.clip_pop();
       break;
     }

@@ -975,6 +975,39 @@ TEST(Modal, NextFrameFocusRequiresTheVisibleTopModal)
   EXPECT_EQ(h.ctx->focused(), h.w("lower_close").id);
 }
 
+TEST(Modal, FixedHeightKeepsItsHeaderAndScrollsToTheLastControl)
+{
+  Harness h;
+  int clicks = 0;
+  h.ui = [&](Context &ctx) {
+    ModalOptions options;
+    options.height = 150;
+    options.has_pos = true;
+    options.pos = {0, h.window.y};
+    auto &body = ctx.modal("sheet", "Files", [] {}, options);
+    body.button("close", "Close", [] {});
+    for (int i = 0; i < 20; ++i) { body.label("A file in the list"); }
+    body.button("last", "Save last file", [&] { ++clicks; });
+  };
+  h.frame();
+  const Rect initial = h.w("last").block->frame();
+  EXPECT_FLOAT_EQ(initial.h, 150);
+  EXPECT_FLOAT_EQ(initial.y1(), h.window.y);
+  EXPECT_TRUE(h.w("last").rect.intersect(h.w("last").clip).empty());
+  h.key(Key::Tab);
+  ASSERT_EQ(h.ctx->focused(), h.w("close").id);
+  h.key(Key::Tab);
+  ASSERT_EQ(h.ctx->focused(), h.w("last").id);
+  EXPECT_TRUE(h.w("last").clip.contains(h.center("last")));
+  EXPECT_EQ(h.w("last").block->frame(), initial);
+  EXPECT_TRUE(h.w("close").rect.intersect(h.w("close").clip).empty());
+  h.key(Key::Enter);
+  EXPECT_EQ(clicks, 1);
+  h.send(Event::wheel(h.center("last"), 100.0f));
+  EXPECT_FLOAT_EQ(h.w("last").block->scroll(), 0);
+  EXPECT_TRUE(h.w("close").clip.contains(h.center("close")));
+}
+
 TEST(Tooltip, AppearsAfterDelay)
 {
   Harness h;

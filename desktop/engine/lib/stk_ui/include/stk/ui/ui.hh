@@ -492,6 +492,7 @@ class Block {
   Layout *root_ = nullptr;
   float content_h_ = 0.0f;
   float width_units_ = 0.0f;
+  float modal_height_ = 0.0f;
   bool has_pos_ = false;
   Vec2 pos_;
   std::function<void()> on_close;
@@ -517,6 +518,8 @@ struct ModalOptions {
   /** Top-left position in window pixels; default = centered. */
   bool has_pos = false;
   Vec2 pos;
+  /** Fixed height in window pixels, clipped to the window. Zero sizes to content. */
+  float height = 0.0f;
 };
 
 class Context {
