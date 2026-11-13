@@ -1,5 +1,17 @@
 # STK 开发计划
 
+## 2026-11-13 16:52 UTC · 会话文件回归终态
+
+会话文件版本 Chromium 全量 395/395。最终滚动恢复和路径显示的构建另有 4/4 定向与真实两窗回放。稳定源码的 AOCI 维护返回 `stopped/blocked`、零候选，待审观察证据仍为 94 条。原正式索引与基线的既有修改摘要一致。前一远端 Desktop 的 Windows 原生文档和 macOS 诊断仍在运行。
+
+## 2026-11-13 16:50 UTC · 会话内发布文件清单
+
+本地 main `cff5933bade2b4809f16367fa1cacd334841dd32` 接通 Web 的「关联任务 → 查看文件」。Hub 用保存的会话和操作 ID 解析唯一 Runtime 任务，复用节点实时读路径与回执前撤权检查。响应返回发布路径、大小与摘要，前 200 条有界。切回任务后还原面板滚动和入口焦点，离开后丢弃迟到回执。当前交付是只读清单。
+
+真实 loopback Hub、NodeAgent、Runtime 和 Chromium 固定起点为已配对、已打开合成会话，输入区有未发送草稿，真实合成任务已成功。1440×900 与 390×844 各 1 次打开关联任务、1 次查看文件、1 次返回关联任务、1 次 Esc 关闭。两窗都显示发布的 3 个文件，回到原入口且草稿保留。各 2 个 GET、零 POST。Runtime 任务、产物与 Hub 操作列表一致，零模型调用。最终生产构建与定向 4/4，Hub 全套 94/94，最终路径校验改用 Runtime 校验器后定向 11/11。全量 Web 在进行。证据 `root-delivery-20261113-172/{real-files-1440.json,real-files-390.json,real-files-runtime.json,web-files-exact,hub-files-final.xml,hub-files-exact.xml}`。
+
+前一远端 `6ed5e920` 的 Linux 三项和 Windows CPU 已通过。macOS 已通过构建、CPU、Metal、打包和冒烟，生产原生报告步骤仍失败，诊断在运行。Windows 原生文档验收正在运行。Claude 110 仍在独立 `claude/native-conversation-run-detail-110` 开发。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43458144964)
+
 ## 2026-11-13 16:42 UTC · Web 会话关联任务
 
 本地 main `d137f31d4805acba997695b0c83395a5cfc23b6f` 增加会话任务详情。Hub 同事务保存回复、该回复创建的任务操作和结构化关联，节点返回同一运行工作区的有效任务 ID 后才补入关联。已配对客户端可在当前已保存会话明确打开，只读一次任务列表。旧会话保留原记录，旧 Hub 的缺失路由给出明确提示。Web 宽窗为右侧面板，窄窗为覆盖层。关闭后焦点回到入口，迟到回执丢弃。
