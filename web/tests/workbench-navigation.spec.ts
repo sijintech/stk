@@ -58,6 +58,7 @@ class Hub {
   readonly saved = new Map<string, Said[]>();
   readonly calls: string[] = [];
   readonly conversationTasks = new Map<string, unknown[]>();
+  readonly conversationFiles = new Map<string, unknown>();
   readonly messages: {session: string; id: string; content: string}[] = [];
   replies = 0;
   sendFail: false | 'before' | 'recorded' | 'lost' = false;
@@ -224,6 +225,15 @@ class Hub {
       if (voxel) return route.fulfill({status: 200, contentType: 'application/octet-stream', body: voxel});
       const file = join(EXAMPLE, `${stored[1]}.bin`);
       return existsSync(file) ? route.fulfill({status: 200, contentType: 'application/octet-stream', body: readFileSync(file)}) : json({detail: 'no blob'}, 404);
+    }
+    const files = /^sessions\/([^/]+)\/tasks\/([^/]+)\/files$/.exec(path);
+    if (files && request.method() === 'GET') {
+      const [, session, action] = files;
+      const key = `${session} ${action}`;
+      this.calls.push(`files ${key}`);
+      await this.gateOnce(`files ${key}`);
+      return json(this.conversationFiles.get(key) ?? {detail: 'Conversation task not found'},
+        this.conversationFiles.has(key) ? 200 : 404);
     }
     const conversation = /^sessions\/([^/]+)(\/history|\/messages|\/tasks)?$/.exec(path);
     if (conversation) {
@@ -1901,11 +1911,32 @@ for (const viewport of viewports) {
       const before = await state(page);
       await expect(launcher).toBeVisible();
       expect(hub.calls).toEqual([`history ${A}`]);
+      hub.conversationFiles.set(`${A} ${actionId}`, {id: A, action_id: actionId, task_id: taskId, more: false,
+        files: [{path: 'case/result.h5', size: 327, sha256: 'a'.repeat(64)}]});
       await launcher.click();
       const panel = page.getByRole('dialog', {name: '关联任务'});
       await expect(panel).toContainText(taskId);
       await expect(panel).toContainText('复核未通过');
       await expect(panel.getByRole('button', {name: '关闭'})).toBeFocused();
+      expect(hub.calls).toEqual([`history ${A}`, `tasks ${A}`]);
+      const filesLauncher = panel.getByRole('button', {name: '查看文件'});
+      await filesLauncher.click();
+      const files = page.getByRole('dialog', {name: '发布文件'});
+      await expect(files).toContainText('case/result.h5');
+      await expect(files).toContainText('327 字节');
+      await files.screenshot({path: test.info().outputPath('conversation-files.png')});
+      const back = files.getByRole('button', {name: '返回关联任务'});
+      await expect(back).toBeFocused();
+      await back.click();
+      await expect(filesLauncher).toBeFocused();
+      const releaseFiles = hub.holdNext(`files ${A} ${actionId}`);
+      await filesLauncher.click();
+      await expect(files.getByRole('status')).toContainText('正在读取文件');
+      await expect.poll(() => hub.reached.has(`files ${A} ${actionId}`)).toBe(true);
+      await back.click();
+      releaseFiles();
+      await expect(filesLauncher).toBeFocused();
+      await expect(panel).not.toContainText('case/result.h5');
       await page.keyboard.press('Escape');
       await expect(panel).toHaveCount(0);
       await expect(launcher).toBeFocused();
@@ -1917,7 +1948,8 @@ for (const viewport of viewports) {
       await expect(panel).not.toContainText(taskId);
       await panel.getByRole('button', {name: '关闭'}).click();
       await expect(launcher).toBeFocused();
-      expect(hub.calls).toEqual([`history ${A}`, `tasks ${A}`, `history ${B}`, `tasks ${B}`]);
+      expect(hub.calls).toEqual([`history ${A}`, `tasks ${A}`, `files ${A} ${actionId}`, `files ${A} ${actionId}`,
+        `history ${B}`, `tasks ${B}`]);
       const release = hub.holdNext(`tasks ${B}`);
       await launcher.click();
       await expect(panel.getByRole('status')).toContainText('正在读取');
@@ -1930,6 +1962,10 @@ for (const viewport of viewports) {
       await expect(draft(page)).toHaveValue('保留未发送草稿');
       expect(sent.seen).toEqual([]);
       sent.stop();
+      writeFileSync(test.info().outputPath('conversation-files.json'), JSON.stringify({
+        viewport: page.viewportSize(), openTasksClicks: 1, openFilesClicks: 1, returnToTasksClicks: 1,
+        closeTasksKey: 'Escape', requests: hub.calls, posts: sent.seen,
+      }, null, 2));
     });
 
     test('history sits in the navigation without moving the active section', async ({page}) => {

@@ -177,6 +177,35 @@ def test_agent_runtime_roundtrip_reconnect_and_original_probe(runtime, tmp_path)
         # Both GUI/control transport can be gone; Runtime keeps executing.
         result = finish(runtime_client, supervisor, task["id"], timeout=40)
         assert result["state"] == "succeeded", result
+        files_path = f"{route}/tasks/{submit['id']}/files"
+        assert c.get(files_path, headers=AUTH).status_code == 501
+        with c.websocket_connect("/api/v1/nodes/connect", headers=ws_auth) as ws, ThreadPoolExecutor(1) as pool:
+            ws.send_json({"type": "snapshot", "snapshot": {"features": ["read", "task.artifacts"]}})
+            deadline = time.monotonic() + 5
+            while "task.artifacts" not in app.state.store.device(node["device_id"])["snapshot"].get("features", []):
+                assert time.monotonic() < deadline
+                time.sleep(.01)
+            assert c.get(files_path.replace(session, "c" * 32, 1), headers=AUTH).status_code == 404
+            events = app.state.store.events()
+            pending = pool.submit(c.get, files_path, headers=AUTH)
+            read = ws.receive_json()
+            assert read == {"type": "read", "id": read["id"], "kind": "task.artifacts",
+                            "payload": {"task_id": task["id"]}}
+            artifacts = agent.execute({"id": read["id"], "node_id": node["device_id"],
+                                       "kind": read["kind"], "payload": read["payload"]})
+            ws.send_json({"type": "read_result", "id": read["id"], "result": artifacts})
+            published = pending.result(timeout=10)
+            assert published.status_code == 200, published.text
+            assert published.json() == {"id": session, "action_id": submit["id"], "task_id": task["id"], "more": False,
+                                        "files": [{k: row[k] for k in ("path", "size", "sha256")} for row in artifacts]}
+            assert app.state.store.events() == events
+            pending = pool.submit(c.get, files_path, headers=AUTH)
+            read = ws.receive_json()
+            ws.send_json({"type": "read_result", "id": read["id"], "result": [
+                {"path": "../other.h5", "size": 8, "sha256": "a" * 64},
+            ]})
+            assert pending.result(timeout=10).status_code == 502
+        assert c.get(files_path, headers=AUTH).status_code == 503
         again = NodeAgent(runtime_client, tmp_path / "another-cache").execute(submit)
         assert again["id"] == task["id"]
         scene = agent.execute(operation(node["device_id"], "view.build", {"task_id": task["id"], "path": "scalar-0.vti"}))

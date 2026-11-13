@@ -11,6 +11,8 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from suan.runtime.models import relative_path
+
 from .blobs import BlobError, BlobMismatch, BlobTooLarge
 from .limits import (ACTION_BODY_BYTES, ACTION_REQUEST_BYTES, FRAME_LIMIT, IMPORT_MAX_FILES, IMPORT_REQUEST_BYTES,
                      READ_REQUEST_BYTES, READ_TIMEOUT, frame)
@@ -502,6 +504,9 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
             raise HTTPException(400, "The request is nested too deeply") from None
         except (ValueError, TypeError, KeyError) as exc:
             raise request_error(exc) from exc
+        return await forward_read(node_id, kind, payload, request)
+
+    async def forward_read(node_id, kind, payload, request):
         node = require_read_node(node_id)
         if "read" not in (node["snapshot"].get("features") or ()):
             raise HTTPException(501, "This node agent has no read path; upgrade suan-node")
@@ -620,6 +625,38 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
         if tasks is None:
             raise HTTPException(404, "Session not found")
         return tasks
+
+    @app.get("/api/v1/sessions/{session_id}/tasks/{action_id}/files", dependencies=[Depends(client)])
+    async def session_task_files(session_id: str, action_id: str, request: Request):
+        validate_session_id(session_id)
+        if not re.fullmatch(r"[a-f0-9]{32}", action_id):
+            raise HTTPException(400, "Invalid action ID")
+        source = store.session_task_source(session_id, action_id)
+        if source is None:
+            raise HTTPException(404, "Conversation task not found")
+        node_id, task_id = source
+        reply = await forward_read(node_id, "task.artifacts", {"task_id": task_id}, request)
+        files = reply["result"]
+        if not isinstance(files, list):
+            raise HTTPException(502, "Invalid task file listing")
+        visible = []
+        paths = set()
+        for item in files[:200]:
+            if not isinstance(item, dict):
+                raise HTTPException(502, "Invalid task file listing")
+            path, size, digest = item.get("path"), item.get("size"), item.get("sha256")
+            try:
+                normalized = relative_path(path)
+            except ValueError as exc:
+                raise HTTPException(502, "Invalid task file listing") from exc
+            if (normalized != path or len(path) > 4096
+                    or path in paths or type(size) is not int or not 0 <= size <= 2**53 - 1
+                    or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)):
+                raise HTTPException(502, "Invalid task file listing")
+            paths.add(path)
+            visible.append({"path": path, "size": size, "sha256": digest})
+        return {"id": session_id, "action_id": action_id, "task_id": task_id,
+                "files": visible, "more": len(files) > 200}
 
     @app.post("/api/v1/sessions/{session_id}/messages")
     async def message(session_id: str, body: Chat, who=Depends(client)):

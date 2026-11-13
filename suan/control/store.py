@@ -433,6 +433,16 @@ class ControlStore:
             """, (identity,)).fetchall()
         return {"id": identity, "tasks": [dict(row) for row in rows[:100]], "more": len(rows) > 100}
 
+    def session_task_source(self, session_id, action_id):
+        """Resolve a published Runtime identity through its durable conversation link."""
+        with self.db() as db:
+            row = db.execute("""
+                SELECT a.node_id, link.task_id
+                FROM session_task_actions link JOIN actions a ON a.id=link.action_id
+                WHERE link.session_id=? AND link.action_id=? AND a.state='succeeded' AND link.task_id IS NOT NULL
+            """, (session_id, action_id)).fetchone()
+        return tuple(row) if row is not None else None
+
     def message(self, identity, session_id, role, content):
         with self.db() as db:
             old = db.execute("SELECT session_id,role,content FROM messages WHERE id=?", (identity,)).fetchone()
