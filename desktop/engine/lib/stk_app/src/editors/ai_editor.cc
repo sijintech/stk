@@ -1362,7 +1362,8 @@ class AIEditor final : public Editor {
     };
     // Active toolkit edits must disappear on project switch before a new binding is installed.
     auto &input = layout.text_area("ai_question/" + handle, ui::bind(draft.text),
-                                   {.max_length = 65536, .visible_lines = 4, .on_submit = prepare});
+                                   {.max_length = 65536, .visible_lines = 4, .on_submit = prepare,
+                                    .submit_when_focused = true, .preserve_on_escape = true});
     const bool has_question = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
         !ctx.ui->edit_state()->text().empty() : !draft.text.empty();
     layout.paragraph(ctx.tr(focused && discussion.context().empty() ? "ai.no_context" : "ai.prepare_hint"));
@@ -1788,7 +1789,8 @@ class AIEditor final : public Editor {
       else { agent.ask(draft.agent_text); }
     };
     auto &input = layout.text_area("ai_agent_text/" + handle, ui::bind(draft.agent_text),
-                                   {.max_length = 8192, .visible_lines = 3, .on_submit = send});
+                                   {.max_length = 8192, .visible_lines = 3, .on_submit = send,
+                                    .submit_when_focused = true, .preserve_on_escape = true});
     if (focused && !choice.is_object()) { layout.paragraph(planner); }
     const bool has_text = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
         !ctx.ui->edit_state()->text().empty() : !draft.agent_text.empty();

@@ -1457,6 +1457,15 @@ TEST_F(NativeAgentRunDetailUI, ConversationShortcutSendsOnceThroughTheExistingAg
   EXPECT_EQ(count("say"), 0u);
   ASSERT_NE(f.screen.ui()->edit_state(), nullptr);
   EXPECT_EQ(f.screen.ui()->edit_state()->text(), "Check the frozen results\n");
+  ASSERT_TRUE(f.drv->key(wm::Key::Esc)); frame();
+  EXPECT_EQ(count("say"), 0u);
+  EXPECT_EQ(f.screen.ui()->editing(), 0u);
+  EXPECT_EQ(f.screen.ui()->focused(), id(input));
+  ASSERT_NE(f.screen.ui()->find(input), nullptr);
+  EXPECT_EQ(f.screen.ui()->find(input)->string.value(), "Check the frozen results\n");
+  ASSERT_TRUE(f.drv->key(wm::Key::Unknown, wm::ModNone, "Use the saved file")); frame();
+  ASSERT_NE(f.screen.ui()->edit_state(), nullptr);
+  EXPECT_EQ(f.screen.ui()->edit_state()->text(), "Check the frozen results\nUse the saved file");
   const auto *send = f.screen.ui()->find("ai_agent_send");
   ASSERT_NE(send, nullptr);
   ASSERT_TRUE(send->enabled);

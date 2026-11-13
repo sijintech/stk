@@ -157,7 +157,8 @@ TEST(TextArea, MultilinePasteImeNavigationAndExplicitSubmit)
   int submitted = 0;
   h.ui = [&](Context &ctx) {
     ctx.block("r", {0, 0, 400, 600}).layout().text_area("source", bind(source),
-        {.mono = true, .visible_lines = 4, .on_submit = [&] { ++submitted; }});
+        {.mono = true, .visible_lines = 4, .on_submit = [&] { ++submitted; },
+         .submit_when_focused = true, .preserve_on_escape = true});
   };
   h.frame();
   h.click("source");
@@ -168,6 +169,9 @@ TEST(TextArea, MultilinePasteImeNavigationAndExplicitSubmit)
   EXPECT_EQ(h.ctx->edit_state()->text(), "for i in range(2):\n    print(i)\n    ");
   EXPECT_EQ(submitted, 0);
   h.send(Event::ime_preedit(ZHONG + WEN, 3));
+  h.key(Key::Enter, MOD_CTRL);
+  EXPECT_EQ(submitted, 0);
+  EXPECT_NE(h.ctx->editing(), 0u);
   const auto caret = h.ctx->text_input_rect();
   EXPECT_GT(caret.y, h.w("source").rect.y + h.ctx->style().line_height);
   h.send(Event::ime_commit(ZHONG + WEN));
@@ -183,6 +187,17 @@ TEST(TextArea, MultilinePasteImeNavigationAndExplicitSubmit)
   h.key(Key::Enter, MOD_CTRL);
   EXPECT_EQ(submitted, 1);
   EXPECT_EQ(source, "for i in range(2):\n    print(i)\n    " + ZHONG + WEN);
+  EXPECT_EQ(h.ctx->editing(), 0u);
+  h.type(" draft");
+  h.key(Key::Escape);
+  EXPECT_EQ(submitted, 1);
+  EXPECT_EQ(source, "for i in range(2):\n    print(i)\n    " + ZHONG + WEN + " draft");
+  EXPECT_EQ(h.ctx->editing(), 0u);
+  EXPECT_EQ(h.ctx->focused(), h.w("source").id);
+  h.send(held);
+  EXPECT_EQ(submitted, 1);
+  h.key(Key::Enter, MOD_CTRL);
+  EXPECT_EQ(submitted, 2);
   EXPECT_EQ(h.ctx->editing(), 0u);
 }
 

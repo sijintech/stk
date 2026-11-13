@@ -901,9 +901,12 @@ bool Context::edit_key(const Event &e)
       if (submit) { submit(); }
       return true;
     }
-    case Key::Escape:
-      cancel_edit();
+    case Key::Escape: {
+      const Widget *widget = edit_.table ? nullptr : find_id(edit_.id);
+      if (widget && widget->text_opts.preserve_on_escape) { commit_edit(); }
+      else { cancel_edit(); }
       return true;
+    }
     case Key::Tab: {
       if (edit_.multiline && !prim && !(e.mods & MOD_CTRL) && !shift) {
         ed.insert("    ");
@@ -1045,6 +1048,15 @@ bool Context::activate_focused(const Event &e)
       return false;
     case WidgetType::TextField:
       if (e.key == Key::Enter) {
+        const auto &options = w->text_opts;
+        if (options.multiline && options.submit_when_focused && options.on_submit && (e.mods & primary_mod())) {
+          if (!e.repeat && !(e.mods & (MOD_SHIFT | MOD_ALT))) {
+            const auto submit = options.on_submit;
+            submit();
+            redraw_ = true;
+          }
+          return true;
+        }
         begin_edit(*w, true);
         return true;
       }

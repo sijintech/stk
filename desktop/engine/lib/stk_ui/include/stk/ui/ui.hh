@@ -260,6 +260,10 @@ struct TextFieldOptions {
   bool multiline = false;
   int visible_lines = 8;
   std::function<void()> on_submit;
+  /** Allow the submit shortcut on a focused multiline field outside of text editing. */
+  bool submit_when_focused = false;
+  /** Escape ends editing and commits the local text binding without submitting. */
+  bool preserve_on_escape = false;
 };
 
 struct LogViewPosition {
