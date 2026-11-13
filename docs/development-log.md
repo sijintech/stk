@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-13 23:41 UTC · 桌面会话读取也可原地重试
+
+本地 main `4adcdaa52e89fd063c03deca3bcf9a1d372a462a` 对齐 Web 的关联任务与文件读取恢复。桌面在关联任务、冻结文件清单不可读取时提供「重新读取」。任务层用同一审批卡重新读取原运行，文件层保留原快照入口。两层都保留关闭和返回，恢复焦点分别是「关闭」与「返回关联任务」。身份不匹配仍使用专有提示。桌面构建和相关项目 CTest 53/53，零跳过。
+
+Linux X11 从已打开合成项目的工作台起步，真实 Bridge 对两类读取各注入一次暂时故障。1600×1100 英文宽窗共五次点击，680×1000 中文窄窗经「历史」共六次点击。两窗各一次点击重试关联任务，再一次点击重试冻结文件清单，恢复原快照名与文件名。最后 Esc 关闭。每窗两次 `project.workflow_runs.get`、两次 `project.snapshots.get`、零文件内容解析与模型调用，原数据库、会话链和快照摘要一致。证据 `root-delivery-20261113-194/{native-retry-build.log,native-retry.xml,native-save-retry-wide/receipt.json,native-save-retry-narrow/receipt.json}`。
+
+远端 `834f7bd4` 的 Windows CPU 工件确认 1561/1561、零跳过。Linux 三项与 Runtime 13/13 已通过。macOS 必测原生预览步骤失败，后续对照仍运行，Windows 原生预览也未到终态。Claude 118 仍在独立 worktree 收尾输入卡片。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43522208408) [Windows CPU 工件](https://github.com/sijintech/stk/actions/runs/43522208408/artifacts/14086056450)
+
 ## 2026-11-13 23:34 UTC · 会话关联任务与文件原地重试
 
 本地 main `fdd0d2fb30d12f5661eac075e5136086d44adca7` 在 Web 关联任务和发布文件列表读取失败时提供「重新读取」。重试各使用原会话和原任务的 GET，保持当前面板。任务层等待时焦点移到「关闭」，文件层移到「返回关联任务」。退出后焦点回到会话入口。自动化覆盖任务失败后键盘重试、文件失败后点击重试、精确请求和草稿。生产构建、定向 4/4、全量 Playwright 405/405，零跳过。
