@@ -999,6 +999,9 @@ TEST_F(NativeAgentRunDetailUI, WideWindowOpensARightPanelInTwoClicksAndReturnsFo
   const auto revision = state().project()->revision;
   const auto *timeline = f.screen.ui()->find("ai_agent_timeline");
   ASSERT_NE(timeline, nullptr);
+  const float scrollbar = f.screen.ui()->style().scrollbar;
+  EXPECT_NEAR(timeline->rect.w, 880.0f, scrollbar);
+  EXPECT_NEAR(timeline->rect.cx(), (1600.0f + 144.0f) / 2.0f, scrollbar / 2.0f + 1.0f);
   const auto reading = f.screen.ui()->scroll_of(timeline->id);
   ASSERT_NO_FATAL_FAILURE(click(entry()));
   ASSERT_NO_FATAL_FAILURE(wait_ready());

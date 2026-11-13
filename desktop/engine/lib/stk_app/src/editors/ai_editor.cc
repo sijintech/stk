@@ -319,7 +319,11 @@ class AIEditor final : public Editor {
     }
     if (draft.intent == kAgentIntent) {
       if (!agent.supported()) { draft.intent = 0; }
-      else { agent_view(layout, ctx, state, draft); return; }
+      else {
+        auto &body = focused ? focused_conversation_column(layout) : layout;
+        agent_view(body, ctx, state, draft, focused);
+        return;
+      }
     }
     if (!discussion.provider_loaded() && !discussion.busy() && !state.busy()) { discussion.load_provider(); }
     if (!draft.model_initialized && discussion.provider_loaded() && !discussion.provider().empty()) {
@@ -1601,7 +1605,7 @@ class AIEditor final : public Editor {
     return text;
   }
 
-  void agent_view(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft)
+  void agent_view(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft, const bool focused)
   {
     auto &agent = state.agent();
     const auto &catalog = ctx.store.catalog();
@@ -1649,8 +1653,10 @@ class AIEditor final : public Editor {
     if (session_loaded) {
       layout.paragraph(running ? std::string(ctx.tr("ai.agent.running")) :
           std::string(catalog.tr_or("ai.agent.state." + state_name, state_name)));
-      const float unit = ctx.ui ? ctx.ui->style().unit : 20.0f;
-      const float width = ctx.draw ? float(ctx.draw->rect.width()) : 1280.0f;
+      const auto &style = layout.ctx().style();
+      const float unit = style.unit;
+      const float width = focused ? std::min(layout.block().rect().w, kConversationWidth * style.scale) :
+          layout.block().rect().w;
       const float wrap_width = std::max(unit, width - 4 * unit);
       const auto shown = io::get_string(view, "chain_sha256") + std::to_string(wrap_width);
       if (shown_agent_ != shown) {
