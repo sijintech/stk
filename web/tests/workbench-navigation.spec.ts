@@ -3096,6 +3096,37 @@ for (const viewport of [{width: 1440, height: 900}, {width: 390, height: 844}]) 
   });
 }
 
+for (const viewport of [{width: 1440, height: 900}, {width: 390, height: 844}]) {
+  test(`conversation shortcut sends once and retains composer focus at ${viewport.width}px`, async ({page}) => {
+    await page.setViewportSize(viewport);
+    const hub = new Hub();
+    conversations(hub);
+    await setup(page, hub, {scene: false});
+    await choose(page, /相场参数讨论/);
+    const input = draft(page);
+    const sent = posts(page);
+    await input.fill('检查网格');
+    await input.press('Enter');
+    await expect(input).toHaveValue('检查网格\n');
+    await input.dispatchEvent('keydown', {key: 'Enter', ctrlKey: true, isComposing: true});
+    await input.dispatchEvent('keydown', {key: 'Enter', ctrlKey: true, repeat: true});
+    expect(sent.seen).toEqual([]);
+    const release = hub.holdNext(`send ${A}`);
+    await input.press('Control+Enter');
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue('');
+    await expect.poll(() => hub.reached.has(`send ${A}`)).toBe(true);
+    await input.fill('留在这里的第二份草稿');
+    await input.press('Control+Enter');
+    expect(sent.seen).toHaveLength(1);
+    release();
+    await expect.poll(() => hub.messages.map(message => message.content)).toEqual(['检查网格\n']);
+    await expect(input).toHaveValue('留在这里的第二份草稿');
+    await expect(input).toBeFocused();
+    sent.stop();
+  });
+}
+
 test('wide history keyboard activation enters the transcript without tabbing through other conversations', async ({page}) => {
   await page.setViewportSize({width: 1440, height: 900});
   const hub = new Hub();

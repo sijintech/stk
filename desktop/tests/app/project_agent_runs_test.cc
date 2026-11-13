@@ -62,6 +62,8 @@ def init(self, *args, **kwargs):
                     {'item': item, 'decision': {'decision': 'start'},
                      'receipt': {'outcome': 'started', 'ok': True, 'run_status': 'stopped'}},
                     {'item': pending, 'decision': None, 'receipt': None}])
+            if (control / 'answered').exists():
+                sessions[identity].update(state='answered', awaiting=[])
         return sessions[identity]
     details = [0]
     def run_get(p):
@@ -1440,6 +1442,37 @@ TEST_F(NativeAgentRunDetailUI, FocusedConversationKeepsTheCompleteSessionListAva
   EXPECT_EQ(f.screen.ui()->find(draft)->string.value(), "An unsent question");
   EXPECT_EQ(agent().selected(), "session-a");
   EXPECT_EQ(calls(), before);
+}
+
+TEST_F(NativeAgentRunDetailUI, ConversationShortcutSendsOnceThroughTheExistingAgentAction)
+{
+  f.drv->ctx.rect = {0, 0, 1600, 1400};
+  marker("answered");
+  ASSERT_NO_FATAL_FAILURE(open_rail());
+  ASSERT_NO_FATAL_FAILURE(open_session_a());
+  const auto input = "ai_agent_text/" + state().project()->handle;
+  ASSERT_NO_FATAL_FAILURE(click(input));
+  ASSERT_TRUE(f.drv->key(wm::Key::Unknown, wm::ModNone, "Check the frozen results")); frame();
+  ASSERT_TRUE(f.drv->key(wm::Key::Enter)); frame();
+  EXPECT_EQ(count("say"), 0u);
+  ASSERT_NE(f.screen.ui()->edit_state(), nullptr);
+  EXPECT_EQ(f.screen.ui()->edit_state()->text(), "Check the frozen results\n");
+  const auto *send = f.screen.ui()->find("ai_agent_send");
+  ASSERT_NE(send, nullptr);
+  ASSERT_TRUE(send->enabled);
+#ifdef __APPLE__
+  constexpr auto primary = wm::ModOS;
+#else
+  constexpr auto primary = wm::ModCtrl;
+#endif
+  ASSERT_TRUE(f.drv->key(wm::Key::Enter, primary));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return !agent().busy() && count("start") == 1u; }, 30));
+  EXPECT_EQ(count("say"), 1u);
+  EXPECT_EQ(count("run_target"), 1u);
+  EXPECT_EQ(count("run_decide"), 0u);
+  ASSERT_NE(f.screen.ui()->find(input), nullptr);
+  EXPECT_TRUE(f.screen.ui()->find(input)->string.value().empty());
+  EXPECT_EQ(f.screen.ui()->focused(), id(input));
 }
 
 TEST_F(NativeAgentRunDetailUI, WideWindowOpensARightPanelInTwoClicksAndReturnsFocusWithoutSideEffects)

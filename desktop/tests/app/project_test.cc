@@ -1325,8 +1325,12 @@ TEST_F(ProjectPython, AIWorkspaceFirstTypedQuestionPreparesOnceWithoutSending)
   EXPECT_EQ(f.screen.ui()->edit_state()->text(), question);
   EXPECT_TRUE(f.screen.ui()->find(input_key)->string.value().empty()); // Not yet blurred.
   ASSERT_TRUE(widget("ai_prepare")->enabled);
-  const auto [prepare_x, prepare_y] = f.widget_center("a2/main/ai_prepare");
-  f.drv->click(prepare_x, prepare_y); ai_frame();
+#ifdef __APPLE__
+  constexpr auto primary = wm::ModOS;
+#else
+  constexpr auto primary = wm::ModCtrl;
+#endif
+  ASSERT_TRUE(f.drv->key(wm::Key::Enter, primary)); ai_frame();
   ASSERT_FALSE(discussion.exchange_request().empty()) << discussion.exchange_error();
   const auto request = discussion.exchange_request();
   EXPECT_EQ(discussion.exchange_question().at("text"), question);

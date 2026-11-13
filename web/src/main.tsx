@@ -695,6 +695,11 @@ function Workbench({disconnect}:{disconnect:()=>void}){
   }):conv.entries;
   // The unsent text of a conversation the Hub no longer has goes to a new local conversation, ready to send there.
   function moveDraft(){flushSync(()=>conv.moveDraft());composer.current?.focus({preventScroll:true});}
+  function sendConversation(){
+    if(!conv.canSend)return;
+    composer.current?.focus({preventScroll:true});
+    void conv.send();
+  }
   const sessionRow=conv.saved[conv.session];
   const sessionLabel=conv.missing.has(conv.session)?`已不存在 · ${conv.session.slice(0,6)}`:sessionRow?`${conversationTitle(sessionRow)} · ${conv.session.slice(0,6)}`:
     conv.own.has(conv.session)?'新对话 · 未保存':`正在确认 · ${conv.session.slice(0,6)}`;
@@ -895,12 +900,18 @@ function Workbench({disconnect}:{disconnect:()=>void}){
         {conv.canResend&&conv.draft.trim()&&conv.failure.content!==conv.draft&&<p>请先重试上一条消息，当前草稿会保留。</p>}
         <button type="button" className="quiet" disabled={!conv.canResend} onClick={()=>void conv.resend()}>重新发送</button></div>}
       {conv.draftTooLong&&<p className="muted" role="status">单条消息最多 12,000 字符，请缩短后发送。</p>}
-      <form className="chat-composer" onSubmit={e=>{e.preventDefault();void conv.send();}}>
+      <form className="chat-composer" onSubmit={e=>{e.preventDefault();sendConversation();}}>
         <label className="sr-only" htmlFor="chat-input">对话内容</label>
-        <textarea id="chat-input" ref={composer} value={conv.draft} onChange={e=>conv.setDraft(e.target.value)} placeholder="描述计算任务…"/>
+        <textarea id="chat-input" ref={composer} value={conv.draft} onChange={e=>conv.setDraft(e.target.value)} placeholder="描述计算任务…"
+          onKeyDown={e=>{
+            if(e.key!=='Enter'||!(e.ctrlKey||e.metaKey)||e.shiftKey||e.altKey||e.nativeEvent.isComposing||e.keyCode===229)return;
+            e.preventDefault();
+            if(!e.repeat)sendConversation();
+          }}/>
         <div className="chat-actions">
           <small className="muted">常规模板自动执行。新脚本和高资源任务需复核。</small>
-          <button type="submit" className="primary" disabled={!conv.canSend}>发送</button>
+          <button type="submit" className="primary" disabled={!conv.canSend} title="Ctrl+Enter / ⌘+Enter"
+            aria-keyshortcuts="Control+Enter Meta+Enter">发送</button>
         </div>
       </form>
     </aside>

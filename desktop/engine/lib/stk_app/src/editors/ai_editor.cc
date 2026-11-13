@@ -1314,12 +1314,6 @@ class AIEditor final : public Editor {
     intent_dropdown(layout, ctx, state, draft);
     if (draft.intent >= 1 && !discussion.edit_proposals_supported()) { layout.paragraph(ctx.tr("ai.edits_unavailable")); }
     if (draft.intent == 2) { hint(layout, ctx, "ai.intent_sweep.hint"); }
-    // Active toolkit edits must disappear on project switch before a new binding is installed.
-    auto &input = layout.text_area("ai_question/" + handle, ui::bind(draft.text), {.max_length = 65536, .visible_lines = 4});
-    const bool has_question = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
-        !ctx.ui->edit_state()->text().empty() : !draft.text.empty();
-    layout.paragraph(ctx.tr(focused && discussion.context().empty() ? "ai.no_context" : "ai.prepare_hint"));
-    if (picker_.active()) { layout.paragraph(ctx.tr("ai.scope.finish_first")); }
     const auto context_id = io::get_string(discussion.context(), "id");
     const auto *target = chosen_endpoint(ctx, draft);
     const auto adapter = target ? io::get_string(*target, "adapter") : std::string();
@@ -1330,10 +1324,16 @@ class AIEditor final : public Editor {
     }
     const bool choose_automatically = automatic(ctx, draft);
     const auto ranked = choose_automatically ? route(ctx, state, draft) : Json();
-    auto &actions = focused ? layout.row().alignment(ui::LayoutAlign::Right) : layout;
-    actions.button("ai_prepare", ctx.tr("ai.prepare"), [this, &discussion, &state, handle, key, context_id, adapter, choose_automatically, ranked] {
-      if (!state.project() || state.project()->handle != handle || active_draft_ != key || picker_.active()) { return; }
+    const bool can_prepare = enabled && !picker_.active() && !discussion.exchange_busy() && !context_id.empty() &&
+        (choose_automatically ? ranked.is_object() && ranked.value("choice", Json()).is_object() : manual_model_ready) &&
+        !discussion.provider().empty() && (draft.intent < 1 || discussion.edit_proposals_supported());
+    const auto prepare = [this, weak = lifetime(), &discussion, &state, handle, key, context_id, adapter,
+                          choose_automatically, ranked, can_prepare, intent = draft.intent] {
+      if (weak.expired() || !can_prepare || !state.project() || state.project()->handle != handle ||
+          state.busy() || discussion.busy() || discussion.exchange_busy() || active_draft_ != key || picker_.active() ||
+          io::get_string(discussion.context(), "id") != context_id) { return; }
       const auto &current = drafts_.at(key);
+      if (current.text.empty() || current.intent != intent) { return; }
       const auto prompt = prompt_version(current.intent);
       if (choose_automatically) {
         const auto choice = ranked.is_object() ? ranked.value("choice", Json()) : Json();
@@ -1359,10 +1359,17 @@ class AIEditor final : public Editor {
         compose_handle_.clear();
         proposal_navigation_error_.clear();
       }
-    }).disable(!enabled || picker_.active() || discussion.exchange_busy() || context_id.empty() || !has_question ||
-               !(choose_automatically ? ranked.is_object() && ranked.value("choice", Json()).is_object() : manual_model_ready) ||
-               discussion.provider().empty() ||
-               (draft.intent >= 1 && !discussion.edit_proposals_supported()));
+    };
+    // Active toolkit edits must disappear on project switch before a new binding is installed.
+    auto &input = layout.text_area("ai_question/" + handle, ui::bind(draft.text),
+                                   {.max_length = 65536, .visible_lines = 4, .on_submit = prepare});
+    const bool has_question = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
+        !ctx.ui->edit_state()->text().empty() : !draft.text.empty();
+    layout.paragraph(ctx.tr(focused && discussion.context().empty() ? "ai.no_context" : "ai.prepare_hint"));
+    if (picker_.active()) { layout.paragraph(ctx.tr("ai.scope.finish_first")); }
+    auto &actions = focused ? layout.row().alignment(ui::LayoutAlign::Right) : layout;
+    actions.button("ai_prepare", ctx.tr("ai.prepare"), prepare).disable(!can_prepare || !has_question)
+        .tip(ctx.tr("ai.prepare.shortcut"));
     return input;
   }
 
@@ -1762,25 +1769,31 @@ class AIEditor final : public Editor {
       if (sent == draft.agent_text) { draft.agent_text.clear(); }
       ctx.store.changed();  // The history rail was built before this receipt was shown.
     }
-    auto &input = layout.text_area("ai_agent_text/" + handle, ui::bind(draft.agent_text), {.max_length = 8192, .visible_lines = 3});
-    if (focused && !choice.is_object()) { layout.paragraph(planner); }
-    const bool has_text = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
-        !ctx.ui->edit_state()->text().empty() : !draft.agent_text.empty();
     const bool new_session = agent.selected().empty();
     const auto session = agent.selected();
     const bool with_target = agent.runs_supported();
-    layout.button("ai_agent_send", ctx.tr(new_session ? "ai.agent.start" : "ai.agent.say"),
-        [&agent, &state, store = &ctx.store, handle, session, &draft, with_target, simulation, connection, options] {
-      if (!state.project() || state.project()->handle != handle || agent.selected() != session ||
-          (!session.empty() && !selected_agent_loaded(agent))) { return; }
+    const bool can_send = enabled && !running && state_name != "ready" && state_name != "ended" && target_valid &&
+        (new_session ? choice.is_object() : session_loaded);
+    const auto send = [weak = lifetime(), &agent, &state, store = &ctx.store, handle, session, &draft, with_target,
+                       simulation, connection, options, can_send, selection = agent.selection_epoch()] {
+      if (weak.expired() || !can_send || !state.project() || state.project()->handle != handle || state.busy() ||
+          agent.busy() || agent.running() || agent.selection_epoch() != selection || agent.selected() != session ||
+          draft.intent != kAgentIntent || draft.agent_text.empty() ||
+          (!session.empty() && (!selected_agent_loaded(agent) || io::get_string(agent.view(), "state") == "ready"))) { return; }
       if (with_target) {
         if (draft.allow_prepare != !simulation.is_null() ||
             (!simulation.is_null() && !draft.run_target.matches(store->jobs(), connection, options))) { return; }
         agent.ask(draft.agent_text, simulation);
       }
       else { agent.ask(draft.agent_text); }
-    }).disable(!enabled || !has_text || running || state_name == "ready" || state_name == "ended" ||
-               !target_valid || (new_session ? !choice.is_object() : !session_loaded));
+    };
+    auto &input = layout.text_area("ai_agent_text/" + handle, ui::bind(draft.agent_text),
+                                   {.max_length = 8192, .visible_lines = 3, .on_submit = send});
+    if (focused && !choice.is_object()) { layout.paragraph(planner); }
+    const bool has_text = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
+        !ctx.ui->edit_state()->text().empty() : !draft.agent_text.empty();
+    layout.button("ai_agent_send", ctx.tr(new_session ? "ai.agent.start" : "ai.agent.say"), send)
+        .disable(!can_send || !has_text).tip(ctx.tr("ai.agent.send.shortcut"));
   }
 
   void agent_run_cards(ui::Layout &layout, EditorContext &ctx, ProjectState &state)

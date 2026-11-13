@@ -896,6 +896,7 @@ bool Context::edit_key(const Event &e)
       }
       const Widget *widget = find_id(edit_.id);
       const auto submit = edit_.multiline && widget ? widget->text_opts.on_submit : std::function<void()>();
+      if (submit && (e.repeat || shift || (e.mods & MOD_ALT))) { return true; }
       commit_edit();
       if (submit) { submit(); }
       return true;

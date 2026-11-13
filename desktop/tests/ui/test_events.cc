@@ -175,6 +175,11 @@ TEST(TextArea, MultilinePasteImeNavigationAndExplicitSubmit)
   h.key(Key::Up);
   EXPECT_EQ(h.ctx->edit_state()->cursor(), 19u);
   h.key(Key::End, MOD_CTRL);
+  Event held = Event::key_down(Key::Enter, MOD_CTRL);
+  held.repeat = true;
+  h.send(held);
+  EXPECT_EQ(submitted, 0);
+  EXPECT_NE(h.ctx->editing(), 0u);
   h.key(Key::Enter, MOD_CTRL);
   EXPECT_EQ(submitted, 1);
   EXPECT_EQ(source, "for i in range(2):\n    print(i)\n    " + ZHONG + WEN);
