@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-13 22:47 UTC · 上一主线 Desktop 已到终态
+
+远端 `413a283379e032f64b857d53844612fbc1b705bc` Desktop 于 22:44:52 UTC 完成。Linux 三项及 Windows CPU 成功。macOS 必测预览 4/6，MP4 和 HTML 两项隐藏后时间回退，CPU、Metal 及独立暂停恢复用例通过。Windows 原生预览 5/6，包括 20 轮 WebView2 合成、HTML、PDF、MP4 和 HTML 视频。Markdown 第 13 轮第二次 OS 捕获在 `capture.create-for-window` 返回 `0x8007041d`，耗时约 120 秒，超出可见像素等待期限。此前样本已定位第一页正文，计数为一，要求连续两次。Runtime 13/13、Pages 和 Secret scan 均成功。证据 `root-delivery-20261113-192/413-windows-api.log`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43511133797) [Windows 工件](https://github.com/sijintech/stk/actions/runs/43511133797/artifacts/14083665425) [macOS 工件](https://github.com/sijintech/stk/actions/runs/43511133797/artifacts/14081159332)
+
+发布前 AOCI 0.1.0-rc21 检查返回 `stopped/blocked`，194 项计划目标、零签发候选。范围状态为 `observed_evidence_review_required`，有 94 项待复核观察，无未决恢复或第三方冲突。保留既有索引字节。证据 `root-delivery-20261113-192/release-aoci-scope.json`。前序 Desktop 门禁已到终态，独立候选仍按各自证据推进。
+
 ## 2026-11-13 22:43 UTC · 完成保存候选的 Linux 回归
 
 候选 `b1417391f905cda31e4424057cf6caaeac0b146a` 的桌面构建、智能体运行 49/49、保存输入定向 2/2 和 UI 135/135 全部通过。英文 1600×1100 从已打开合成项目工作台实测四次点击到保存选择器，确认新名称后得到校验副本。取消、已有名称、成功的合测共六次应用点击、三个选择器结果和 Esc。两个窗口用同一构建通过，项目与快照摘要核对一致。候选仍在 Root 隔离 worktree，macOS 和 Windows 的保存路径待原生验收。证据 `root-delivery-20261113-191/{save-keyboard-project.xml,save-keyboard-targeted.xml,save-keyboard-ui.xml,native-save-chooser-keyboard-release/receipt.json,native-save-fallback-keyboard-final/receipt.json}`。
