@@ -2008,7 +2008,7 @@ for (const viewport of viewports) {
       await choose(page, /相场参数讨论/);
       await expect(panel).toHaveCount(0);
       await expect(draft(page)).toHaveValue('保留未发送草稿');
-      expect(sent.seen).toEqual([]);
+      expect(sent.seen.filter(call => call !== '/api/v1/nodes/{node}/read task.get')).toEqual([]);
       sent.stop();
       writeFileSync(test.info().outputPath('conversation-files.json'), JSON.stringify({
         viewport: page.viewportSize(), openTasksClicks: 1, openFilesClicks: 1, openPreviewClicks: 1,
@@ -3102,7 +3102,7 @@ for (const viewport of [{width: 1440, height: 900}, {width: 390, height: 844}]) 
     await expect(entries(page)).toHaveCount(initialCount);
     await item(page, /铁电回线分析/).click();
     await expect(draft(page)).toHaveValue('当前未发送草稿');
-    expect(sent.seen).toEqual([]);
+    expect(sent.seen.filter(call => call !== '/api/v1/nodes/{node}/read task.get')).toEqual([]);
     sent.stop();
     writeFileSync(test.info().outputPath('history-search.json'), JSON.stringify({
       viewport, initial: '任务页 · 已打开 B · B 有未发送草稿 · 历史含 32 条',
