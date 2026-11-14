@@ -1,5 +1,13 @@
 # STK 当前交接
 
+## 2026-11-14 UTC · 窄窗历史搜索移到菜单首屏
+
+Claude 123 在独立 worktree 提交 `11f7e7d8df493634e0f6d2861c64fcc0a269cf99`，Root 审阅并按字节合入本地 main `2c4bf908329e123abf9470ac5298c2e9b350e040`，验收矩阵更新于 `8da54dbc`。支持搜索的窄窗「历史」将「搜索对话」放在「写问题」后。搜索是否可用也参与菜单身份，避免旧菜单行号指向不同动作。旧 Bridge 保留原菜单。Claude 与 Root 定向均 91/91、零跳过，另含 Claude 20 次重复测试。移除菜单身份标记的对照中，现有用例仍通过，未单独构造动态切换 Bridge 能力的场景。控件测试覆盖焦点、两组历史、所选条目、草稿、Viewer 和零写入。证据 `root-delivery-20261114-198/history-main.xml`。
+
+Linux X11，缩放 1，从任务页已打开含 32 条已保存问答的合成项目起步。680×1000 英文两次点击打开搜索。另在 680×300 英文和中文增加五条智能体会话，基线 `6abd4b71` 需先滚动，实测四格后第二次点击才打开搜索。新头两次点击且零滚动。三条回放各按两次 Enter 打开近期列表之外的旧问答，恰一次标题查询和一次原请求、上下文及消息读取，项目摘要及修订一致，零写入与模型调用。额外英文短窗从搜索按 Esc 后直接按 Enter 重开历史，确认焦点回到入口，未发搜索请求。证据 `root-delivery-20261114-198/native-{narrow-candidate,short-candidate-search,short-candidate-zh}/receipt.json` 和 `native-short-candidate-focus/focus-receipt.json`。
+
+远端 `65af7fa7` 的 Windows CPU 官方 JUnit 1565/1565、零跳过。macOS CPU 1625/1625、Metal 254/254，必测预览 4/6。MP4 隐藏后首次暂停读数由约 0.344 秒降到 0.234 秒，内嵌视频在隐藏保持中由约 0.208 秒降到 0.102 秒。新增同会话隐藏和重显的帧号诊断两项执行成功，具体帧号以工件复核为准。Claude 124 在独立 worktree 核对官方日志和帧工件，Root 负责修复与发布。Windows 原生预览仍运行，前序 Desktop 尚未结束。 [Windows CPU 工件](https://github.com/sijintech/stk/actions/runs/43538248513/artifacts/14091939451) [macOS 工件](https://github.com/sijintech/stk/actions/runs/43538248513/artifacts/14092583189) [Desktop CI](https://github.com/sijintech/stk/actions/runs/43538248513)
+
 ## 2026-11-14 UTC · 聚焦桌面结果显示任务名
 
 Claude 122 在独立 worktree 提交 `8ec3c1027ccc6929a87f57b2707b1b811f2a45c8`。Root 审阅后合入本地 main `6abd4b71e6dae4af7668ef05ba3b527b8e009833`，设计同步于 `620c3f9a`。桌面聚焦结果使用实际发起任务的连接或节点、工作区和任务名称。原范围中改选其它任务时沿用当前画面来源。来源范围失效或冷恢复时回退到原标签，完整 ID 仍在「来源」。Root 用长工作区的实窗复现发现任务名被截掉，合入时补上优先显示任务名的窄窗回退，并保留分栏来源标签。
