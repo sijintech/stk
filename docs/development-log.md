@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-14 UTC · 会话文件组合验收与 Web 结果回归
+
+隔离候选 `ce197a8233e89bcb766eb48c8b1489b507fdd99a` 合成当前桌面消息布局、文件预览重试与保存副本。Linux 从新构建通过，定向 110/110，零跳过。生产桌面二进制 `1043edced27ddb7a10af7e91896add82c374f07ff37a1a950a9742a3c712f01a` 通过 Linux X11 六条实窗，1600×1100 英文和 680×1000 中文，缩放 1。
+
+从聚焦工作台已打开合成项目起步，宽窗四次点击到受控文件选择器，窄窗五次到路径字段。取消、已有名称、明确保存三步的冻结文件解析累计为 0、0、1。副本摘要与冻结内容一致，权限为 0600，原文件、项目数据库、会话链及已有目标保留。另测预览临时读取故障，从同一起点宽窗五次、窄窗六次点击，均含一次重试，两次解析绑定同一文件。第三组以打开合成智能体会话为起点，宽窗两次、窄窗四次来回切换历史，正文位置与角色布局保留，草稿字形重合 95.9%。六条实窗均零模型调用。证据 `root-delivery-20261114-197/{combined-window-receipt.json,save-exact.xml,role-combined-wide-pixels.json,role-combined-narrow-pixels.json}`。保存副本继续留在隔离候选，目标平台的 ACL 与目录身份验收尚未完成。
+
+Web 当前源码的生产构建和 Chromium 结果来源定向 12/12、零跳过。覆盖宽窄窗的一键打开、来源展开及焦点恢复、长名称折行，以及旧和新清单读取路径。测试使用受控 Hub，结果为 `root-delivery-20261114-197/web-source.xml`。Claude 122 正在独立 worktree 对桌面名称显示与身份失效编写回归。远端 `65af7fa7` 的 Pages、Secret scan、Linux 打包与安装冒烟已成功，Desktop 和 Runtime 仍运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43538248513) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43538248558)
+
 ## 2026-11-14 UTC · 结果来源实窗基线与 Cocoa 输入诊断
 
 Linux X11 用已发布桌面源码 `385aa7f4` 的生产二进制复验结果来源。缩放 1，1600×1100 英文、680×1000 中文。固定起点为聚焦任务页，已选成功合成任务 `Signed VTI only result`，唯一可视化文件 `scalar-0.vti` 的清单已到，Viewer 为空，新建任务有未提交草稿。打开结果、返回原任务和重访分别一次点击。另一次点击「来源」后按 Esc。两窗来源行只显示文件名，详情显示任务 ID。回到任务页选中原行且草稿可见，重访画布像素一致。每窗一次图求值，任务及发布摘要一致，零任务提交或模型调用。回执 `root-delivery-20261111-162/native-vti-window/window-current-source-baseline-{en,zh}/window-receipt.json`，来源截图 `root-delivery-20261114-197/result-source-baseline-{en,zh}.png`。Claude 122 仍在独立 worktree 实现来源名称。
