@@ -166,6 +166,17 @@ if(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW AND (APPLE OR WIN32))
           TIMEOUT 180 RESOURCE_LOCK native_window
           FAIL_REGULAR_EXPRESSION "FAIL:|Error: Not freed memory|leaked")
       endforeach()
+      set(_hide_clock reports_hidden_frame_clock_${_source}_metal)
+      add_test(NAME ${_hide_clock} COMMAND "${STK_BRIDGE_TEST_PYTHON}"
+        "${CMAKE_SOURCE_DIR}/tests/check_native_evidence.py"
+        --success-marker "PASS: Cocoa hidden frame clock diagnostic" --timeout 150 --
+        $<TARGET_FILE:stk-reports-native-window>
+        --python "${STK_BRIDGE_TEST_PYTHON}" --gpu-backend metal --source ${_source}
+        --media-fixture "${_reports_spike}/fixtures/frame-clock-preview.mp4" --hidden-frame-clock-control
+        --evidence-dir "${CMAKE_CURRENT_BINARY_DIR}/reports-hidden-frame-clock-${_source}")
+      set_tests_properties(${_hide_clock} PROPERTIES LABELS "project;gpu;window;document_preview;diagnostic"
+        TIMEOUT 180 RESOURCE_LOCK native_window
+        FAIL_REGULAR_EXPRESSION "FAIL:|Error: Not freed memory|leaked")
     endforeach()
     add_test(NAME reports_pause_during_hidden_suspension_video_metal COMMAND "${STK_BRIDGE_TEST_PYTHON}"
       "${CMAKE_SOURCE_DIR}/tests/check_native_evidence.py"

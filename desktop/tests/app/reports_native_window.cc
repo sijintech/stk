@@ -92,6 +92,7 @@ struct Options {
   bool first_toolbar_pause_control = false;
   bool first_toolbar_immediate = false;
   FirstToolbarFrames first_toolbar_frames = FirstToolbarFrames::None;
+  bool hidden_frame_clock = false;
   bool suspend_reveal_control = false;
   bool fresh_pause_diagnostic() const { return fresh_pause != FreshPause::None; }
   bool pause_order_diagnostic() const
@@ -101,7 +102,7 @@ struct Options {
   int reading_cycles() const
   {
     return (pre_seek_hide_control || pause_order_diagnostic() || fresh_pause_diagnostic() ||
-            first_toolbar_pause_control || suspend_reveal_control) ? 1 : 20;
+            first_toolbar_pause_control || hidden_frame_clock || suspend_reveal_control) ? 1 : 20;
   }
 };
 #ifdef STK_DESKTOP_NATIVE_DOCUMENT_TEST_PROBES
@@ -181,7 +182,7 @@ void log_last_media_observation(const Json &result) noexcept
                             "hidden_media_native_close", "frame_clock_verdict",
                             "first_toolbar_pause_delay", "first_toolbar_pause_trace",
                             "first_toolbar_pause_immediate", "first_toolbar_pause_immediate_trace",
-                            "first_toolbar_frame_clock",
+                            "first_toolbar_frame_clock", "hidden_frame_clock",
                             "repeat_verified_visible_pause", "suspend_reveal",
                             "last_failed_timeline_seek",
                             "failed_reveal_observation", "failed_reveal_native_pause_trace",
@@ -1636,6 +1637,142 @@ class Exercise {
         {"first_nonzero_requested_seconds", media_time(play_returned, first_nonzero_requested)},
         {"first_nonzero_completed_seconds", media_time(play_returned, first_nonzero_completed)}};
   }
+  void hidden_frame_clock(app::EditorArea &area, const std::string &session, const Media &playing,
+                          Clock::time_point play_returned,
+                          const std::shared_ptr<document_preview::ResourceSession> &resources)
+  {
+    const auto parent = window_.native_window_handle();
+    const auto close = observe_native_close(session, playing.navigation_generation);
+    require(close && close->hide_pause, "Frame diagnostic needs the next pause on the playing navigation");
+    const auto &trace = *close->hide_pause;
+    const auto *initial = widget("reports_document_viewport");
+    require(visible(initial), "Frame diagnostic needs the visible video viewport");
+    const auto viewport = initial->rect;
+    const auto picture = media_rectangle(viewport, playing);
+    const int width = window_.width(), height = window_.height();
+    const auto active = [&] { return resources->active() && close->reason.empty() && !trace.overflow; };
+    const auto bound = [&](bool before_hide) {
+      const auto *current = widget("reports_document_viewport");
+      return active() && area.active_tab() == 0 && visible(current) && current->rect.x == viewport.x &&
+          current->rect.y == viewport.y && current->rect.w == viewport.w && current->rect.h == viewport.h &&
+          window_.width() == width && window_.height() == height && !screen_.ui()->native_view_interaction_blocked() &&
+          document_preview::test::visible_playback_target(parent, session, trace, before_hide);
+    };
+    Json evidence = {{"session_sha256", core::Sha256::hex(session)}, {"navigation_generation", trace.navigation_generation},
+        {"hide_media_generation", trace.media_generation}, {"playing_at_return", media_json(playing)},
+        {"outcome", "inconclusive"}};
+    std::vector<frame_clock::Capture> captures;
+    std::optional<int> before_frame, after_frame;
+    std::optional<Clock::time_point> hide_requested, reveal_requested;
+    const auto record = [&] {
+      frame_clock_write(captures);
+      const auto dispatch = trace.event_count ? std::optional(trace.dispatched) : std::nullopt;
+      evidence["hide_request_seconds"] = media_time(play_returned, hide_requested);
+      evidence["reveal_request_seconds"] = media_time(play_returned, reveal_requested);
+      evidence["native_dispatch_seconds"] = media_time(play_returned, dispatch);
+      evidence["samples"] = Json::array();
+      for (const auto &capture : captures) {
+        evidence["samples"].push_back(frame_clock::capture_json(capture, play_returned, dispatch));
+      }
+      evidence["before_frame"] = before_frame ? Json(*before_frame) : Json(nullptr);
+      evidence["after_frame"] = after_frame ? Json(*after_frame) : Json(nullptr);
+      const bool persisted = std::all_of(captures.begin(), captures.end(), [](const auto &capture) {
+        return !capture.reading.id || (!capture.file.empty() && core::is_sha256_hex(capture.sha256));
+      });
+      if (before_frame && after_frame && persisted && evidence["stage"] == "finished") {
+        evidence["outcome"] = *after_frame < *before_frame ? "reshown_frame_backward" : "no_reshown_frame_backward";
+      }
+      result_["hidden_frame_clock"] = evidence;
+      record_native_pause_trace(close.get(), session);
+      save();
+    };
+    const auto sample = [&](const char *phase) {
+      const auto observe = [&] {
+        evidence[std::string(phase) + "_probe"] = last_media_probe_evidence(play_returned);
+        evidence[std::string(phase) + "_native"] = native_pause_pair_json(last_native_pause());
+      };
+      Media observed;
+      try { observed = media(session, 1); }
+      catch (...) {
+        try { observe(); } catch (...) {} // The probe error remains the test failure.
+        throw;
+      }
+      observe();
+      require(observed.navigation_generation == trace.navigation_generation && active(),
+          "DOM sample must stay on the playing navigation");
+      return observed;
+    };
+    const auto hidden_target = [&] {
+      return document_preview::test::hidden_pause_target(parent, session, trace);
+    };
+    try {
+      evidence["stage"] = "playing-capture";
+      const auto deadline = play_returned + frame_clock::kPlayingBudget;
+      for (int index = 1; index <= frame_clock::kMaxCapturesPerArm; ++index) {
+        captures.push_back(frame_clock_capture("before-hide", index, picture, deadline, [&] { return bound(true); }));
+        const auto &capture = captures.back();
+        if (std::string_view(capture.status) != "completed") { break; }
+        if (capture.reading.id && *capture.reading.id > 0) {
+          if (*capture.reading.id <= frame_clock::kPlayingMaxId) { before_frame = capture.reading.id; }
+          break;
+        }
+      }
+      require(before_frame.has_value() && bound(true), "No bound early playing frame before the hide");
+      evidence["stage"] = "hidden-dom";
+      hide_requested = Clock::now();
+      tab(area, 1);
+      require(area.active_tab() == 1 && trace.event_count && active() && hidden_target(),
+          "The real tab switch must start the exact native hide pause");
+      sample("hidden_first");
+      const auto settle = trace.dispatched + document_preview::detail::MediaPauseVerification::timeout;
+      wait([&] { return Clock::now() >= settle || !active(); }, "Native hide verification budget", 2);
+      require(active(), "The original native view must survive the hidden observation");
+      sample("hidden_settled");
+      const auto settled_pause = hidden_target();
+      require(settled_pause && settled_pause->acknowledged && settled_pause->verified,
+          "The reveal needs the verified native pause of the exact hidden view");
+      evidence["hidden_verified_native"] = native_pause_json(*settled_pause);
+      evidence["stage"] = "reveal";
+      reveal_requested = Clock::now();
+      tab(area, 0);
+      move_pointer({viewport.cx(), viewport.cy()});
+      wait([&] { return bound(false) || !active(); }, "Same native report after reveal", 3);
+      require(bound(false), "The visible frame must belong to the original revealed native view");
+      const auto reshown = sample("reshown_before_capture");
+      require(reshown.paused && !reshown.ended && !reshown.seeking && bound(false),
+          "The revealed picture needs a bound paused media sample");
+      const auto revealed_picture = media_rectangle(viewport, reshown);
+      const auto capture_deadline = Clock::now() + frame_clock::kPausedBudget;
+      std::optional<int> previous;
+      evidence["stage"] = "revealed-capture";
+      for (int index = 1; index <= frame_clock::kMaxCapturesPerArm; ++index) {
+        captures.push_back(frame_clock_capture("after-reveal", index, revealed_picture, capture_deadline,
+                                               [&] { return bound(false); }));
+        const auto &capture = captures.back();
+        if (std::string_view(capture.status) != "completed") { break; }
+        if (previous && previous == capture.reading.id) { after_frame = previous; break; }
+        previous = capture.reading.id;
+      }
+      const auto final = sample("reshown_after_capture");
+      using document_preview::test::PlaybackState;
+      const bool released_paused = std::any_of(trace.events.begin(), trace.events.begin() + trace.event_count,
+          [](const auto &event) {
+            return event.phase == "release-state" &&
+                (event.playback_state == int(PlaybackState::Paused) || event.playback_state == int(PlaybackState::None));
+          });
+      evidence["native_release_observed_paused"] = released_paused;
+      if (!released_paused || !bound(false) || !final.paused || final.ended || final.seeking ||
+          std::abs(final.current_time - reshown.current_time) > 0.10) {
+        after_frame.reset();
+      }
+      evidence["stage"] = "finished";
+    }
+    catch (...) {
+      try { record(); } catch (...) {} // Retain the original failure if writing evidence also fails.
+      throw;
+    }
+    record();
+  }
   void fresh_native_pause_dom_diagnostic(app::EditorArea &area, const std::string &session,
                                          const Media &playing, const Media &last_seek, const NativePause &previous,
                                          const std::shared_ptr<document_preview::ResourceSession> &resources,
@@ -2867,7 +3004,8 @@ raise SystemExit(main())
   const bool video = options.source == "video" || options.source == "html-video";
   const bool html_video = options.source == "html-video";
   std::string media_bytes;
-  const bool marked_clip = options.frame_clock_control || options.first_toolbar_frames != Options::FirstToolbarFrames::None;
+  const bool marked_clip = options.frame_clock_control || options.hidden_frame_clock ||
+      options.first_toolbar_frames != Options::FirstToolbarFrames::None;
   const size_t media_size = marked_clip ? kFrameClockMediaSize : kMediaSize;
   const std::string media_sha256 = marked_clip ? kFrameClockMediaSha256 : kMediaSha256;
   if (video) {
@@ -2947,7 +3085,7 @@ raise SystemExit(main())
   }
   const int cycles = options.reading_cycles();
   const size_t required_images = (options.visible_pause_control || options.first_toolbar_pause_control ||
-      options.suspend_reveal_control) ? 0 :
+      options.hidden_frame_clock || options.suspend_reveal_control) ? 0 :
       options.fresh_pause_diagnostic() ? 4 : options.pause_order_diagnostic() ? 1 :
       (video ? (options.pre_seek_hide_control ? 6 : 161) : (pdf ? 160 : 140));
   result["required_images"] = required_images;
@@ -3118,6 +3256,11 @@ raise SystemExit(main())
         return;
       }
 #endif
+      if (options.hidden_frame_clock) {
+        // Get through the first toolbar pause before measuring the distinct hide transition.
+        ui.wait([&] { return Clock::now() >= explicit_play_returned + kPassiveDelay; },
+            "Passive settling before the initial toolbar pause", 1);
+      }
       const auto explicit_play_native_pause = ui.last_native_pause();
       ui.click("reports_document_pause", *area);
       const auto explicit_click_returned = Clock::now();
@@ -3187,6 +3330,19 @@ raise SystemExit(main())
       require(!playing.paused && playing.current_time < 2.5, "Hide must interrupt a playing early clip");
       const auto before_hide_pause = ui.last_native_pause();
 #ifdef __APPLE__
+      if (options.hidden_frame_clock) {
+        ui.hidden_frame_clock(*area, session, playing, playing_returned, resources);
+        require(area->tab(1).save_workspace_state() == draft_state && area->tab(1).has_unsaved_changes() &&
+            shell.store().scripts().history().empty(), "Frame diagnostic preserves the unexecuted Python draft");
+        require(viewer.save_workspace_state() == viewer_state && viewer.camera_serial() == camera &&
+            viewer.payload_serial() == payload && viewer.evaluations_started() == 0 &&
+            viewer_area->editor().save_workspace_state() == viewer_editor_state, "Frame diagnostic preserves the Viewer");
+        result["viewer_preserved"] = true;
+        result["python_draft_preserved"] = true;
+        result["completed_cycles"] = cycle;
+        ui.save();
+        return;
+      }
       if (options.fresh_pause_diagnostic()) {
         require(last_seek && before_hide_pause && last_seek->navigation_generation == playing.navigation_generation &&
             result.at("images").size() == required_images, "Fresh pause needs the full baseline seek history");
@@ -3601,6 +3757,11 @@ int main(int argc, char **argv)
       options.frame_clock_control = true;
       continue;
     }
+    if (arg == "--hidden-frame-clock-control") {
+      if (options.hidden_frame_clock) { return 2; }
+      options.hidden_frame_clock = true;
+      continue;
+    }
     if (arg == "--first-toolbar-pause-delay-control" || arg == "--first-toolbar-pause-immediate-control") {
       if (options.first_toolbar_pause_control) { return 2; }
       options.first_toolbar_pause_control = true;
@@ -3669,6 +3830,9 @@ int main(int argc, char **argv)
                                                options.fresh_pause_diagnostic())) ||
       (options.suspend_reveal_control && (options.source != "video" || options.pause_order_diagnostic() ||
           options.pre_seek_hide_control || options.fresh_pause_diagnostic() || options.first_toolbar_pause_control)) ||
+      (options.hidden_frame_clock && ((options.source != "video" && options.source != "html-video") ||
+          options.pause_order_diagnostic() || options.pre_seek_hide_control || options.fresh_pause_diagnostic() ||
+          options.first_toolbar_pause_control || options.suspend_reveal_control)) ||
       (options.pause_during_hidden_suspension && (!options.isolated_pause_control || options.source != "video")) ||
       ((options.pause_order_diagnostic() || options.pre_seek_hide_control || options.fresh_pause_diagnostic() ||
         options.first_toolbar_pause_control) &&
@@ -3766,6 +3930,13 @@ int main(int argc, char **argv)
         "and explicit native Play after a quiet hold";
     result["production_ui_acceptance"] = false;
   }
+  if (options.hidden_frame_clock) {
+    result["scenario"] = "hidden-frame-clock-control";
+    result["claim"] = "Own-window frame markers before the real tab hide and after reveal on the same navigation";
+    result["matched_control"] = "reports_native_" + options.source + "_metal";
+    result["production_ui_acceptance"] = false;
+    result["not_a_gate"] = "Captures delay the hide and cannot observe the picture while the view is hidden.";
+  }
   if (options.pre_seek_hide_control) {
     result["scenario"] = options.isolated_pause_control ? "isolated-quiet-pre-seek-hide-control" :
         (options.quiet_hidden_hold ? "quiet-pre-seek-hide-control" : "pre-seek-hide-control");
@@ -3809,6 +3980,12 @@ int main(int argc, char **argv)
     }
     result["status"] = "passed";
     write(directory / "result.json", result.dump(2));
+    if (options.hidden_frame_clock) {
+      outcome = result.at("hidden_frame_clock").at("outcome").get<std::string>();
+      std::fprintf(stdout, "PASS: Cocoa hidden frame clock diagnostic; outcome=%s; %s\n",
+          outcome.c_str(), core::path_to_utf8(directory).c_str());
+      return 0;
+    }
     if (options.suspend_reveal_control) {
       std::fprintf(stdout, "PASS: Cocoa suspend reveal diagnostic; %s\n", core::path_to_utf8(directory).c_str());
       return 0;

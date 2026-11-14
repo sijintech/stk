@@ -608,6 +608,16 @@ jobs:
             reports_first_toolbar_frame_clock_playing_html-video_metal reports_first_toolbar_frame_clock_paused_html-video_metal || status=$?
           exit "$status"
 
+      - name: Native WKWebView frame markers across hide and reveal
+        if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          status=0
+          ctest --test-dir build --output-on-failure -R '^reports_hidden_frame_clock_(video|html-video)_metal$' --timeout 180 --output-junit "$PWD/build/ctest-native-hidden-frame-clock.xml" || status=$?
+          python3 desktop/tests/check_required_tests.py build/ctest-native-hidden-frame-clock.xml \
+            reports_hidden_frame_clock_video_metal reports_hidden_frame_clock_html-video_metal || status=$?
+          exit "$status"
+
       - name: Native WKWebView suspend through hide and release on reveal
         if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
         continue-on-error: true
@@ -651,6 +661,7 @@ jobs:
             build/ctest-native-first-toolbar-pause-delay.xml
             build/ctest-native-first-toolbar-pause-immediate.xml
             build/ctest-native-first-toolbar-frame-clock.xml
+            build/ctest-native-hidden-frame-clock.xml
             build/spike/document_preview/native-evidence/**
             build/tests/app/reports-native-markdown/**
             build/tests/app/reports-native-html/**
@@ -691,6 +702,8 @@ jobs:
             build/tests/app/reports-first-toolbar-frame-clock-playing-html-video/**
             build/tests/app/reports-first-toolbar-frame-clock-paused-video/**
             build/tests/app/reports-first-toolbar-frame-clock-paused-html-video/**
+            build/tests/app/reports-hidden-frame-clock-video/**
+            build/tests/app/reports-hidden-frame-clock-html-video/**
             build/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
           retention-days: 14
