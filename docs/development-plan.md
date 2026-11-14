@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-14 UTC · 实际视角往返与当前 Web 同源切片
+
+桌面生产源码 `385aa7f4` 在 Linux X11 的 1600×1100 英文和 680×1000 中文窗口，从已选成功合成任务、已到文件清单、空 Viewer 和未提交任务草稿起步。一次点击打开切片后用中键旋转，画布像素确实变化。一次点击查看来源，Esc 收起，再各一次点击返回任务和重访结果。重访画布与旋转后的图像一致，每窗全程仅一次图求值，Runtime 任务和发布清单一致，零提交和模型调用。当前原生基线来源仍显示文件名。证据 `root-delivery-20261111-162/native-vti-window/window-source-camera-baseline-{en,zh}/window-receipt.json`，并核对 Jobs 原生窗口基线三项全部通过。
+
+Web 远端 `65af7fa7` 同源产物在真实隔离 Hub、NodeAgent 和 Runtime 中通过 1440×900、390×844 两窗回放。固定起点为已选成功任务、已到唯一 VTI 清单、空 Viewer 和两份未提交草稿。两窗一次点击打开，返回和重访各一次点击，恢复原入口焦点与两份草稿，重访画布相同。两窗各一次构建，实际 Z=12、896 个样本，范围 −3.4…19。Runtime 任务和产物不变，模型调用为零。首次调用旧回放夹具时，夹具仍要求发送显式索引 0。复验使用已有的中间层夹具，并核对返回的实际索引与样本。证据 `root-delivery-20261111-167/centered-vti/source-current-197/{wide,narrow}-ready`。
+
+远端 `65af7fa7` 的 Runtime 13/13 已于 01:29:06 UTC 完成。Desktop Linux 打包与安装冒烟通过，三个平台主作业继续运行。 [Runtime CI](https://github.com/sijintech/stk/actions/runs/43538248558) [Desktop CI](https://github.com/sijintech/stk/actions/runs/43538248513)
+
 ## 2026-11-14 UTC · 会话文件组合验收与 Web 结果回归
 
 隔离候选 `ce197a8233e89bcb766eb48c8b1489b507fdd99a` 合成当前桌面消息布局、文件预览重试与保存副本。Linux 从新构建通过，定向 110/110，零跳过。生产桌面二进制 `1043edced27ddb7a10af7e91896add82c374f07ff37a1a950a9742a3c712f01a` 通过 Linux X11 六条实窗，1600×1100 英文和 680×1000 中文，缩放 1。
