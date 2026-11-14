@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-14 UTC · 同一会话内重试文件预览
+
+本地 main `5b1dfec63f162d8838627803ff617c4022fba984` 将文件内容读取的重试接入两端。桌面在失败的冻结文件预览保留文件和返回入口，重试同一条目。Web 在连接或临时 HTTP 故障后保留发布清单及原预览或下载动作。两端沿用身份与内容校验。桌面摘要不符和非 UTF-8 仍有专门提示，Web 摘要不符不显示新增重试按钮。 [统一工作台](docs/design/unified-workbench.md)
+
+Linux X11，1600×1100 英文与 680×1000 中文，从已打开合成项目的工作台起步。宽窗五次点击，窄窗六次，含一次内容重试。读取第一次返回注入错误，第二次显示同一冻结文件。Enter 从恢复焦点的「返回快照文件」回到原条目，Esc 回到原卡片。每窗一次任务读取、一次文件清单读取、两次同文件解析，数据库、会话链及冻结文件摘要一致。桌面相关 CTest 71/71，零跳过。证据 `root-delivery-20261114-195/{preview-retry.xml,native-save-retry-wide/receipt.json,native-save-retry-narrow/receipt.json}`。
+
+Web Chromium 接真实隔离 Hub 和受控节点，1440×900、390×844。固定起点为发布清单中首次文件预览失败且原会话有草稿。一次点击重试取得同一摘要的文本，一次点击返回原文件，Esc 回会话。两窗各两个相同身份的 GET，零写请求、零模型调用，草稿及 Hub 会话、任务摘要一致。生产构建与全量 Playwright 405/405。证据 `root-delivery-20261114-195/{preview-web-build.log,preview-web-full.xml,live-preview-retry/browser-receipt.json,live-preview-retry/hub-receipt.json}`。
+
+远端 `537e9710` Runtime 13/13，Desktop Linux 三项通过，macOS 和 Windows 仍运行，待整轮终态后推送。Claude 120 在独立 worktree 实现桌面消息左右对齐并增加定向测试，正式交付仍待。PR #53 与 #54 头未变。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43530403353) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43530403050)
+
 ## 2026-11-14 UTC · 同一原生视频会话切页取证
 
 本地 main `bfff6154a7e161a4064e34c79a841e4993f86189` 为 macOS 增加 MP4 和内嵌 HTML 视频的独立帧标记诊断。用真实标签入口隐藏和重显同一会话。记录切页前非零帧、隐藏期首个和核验后的 DOM 与原生回执、重显后释放状态和两个稳定帧。截图、摘要与同一导航绑定。截图耗时会推迟切页，重显帧只能说明用户再次看到的画面。原六项生产验收、二十轮与阈值沿用。
