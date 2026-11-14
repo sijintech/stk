@@ -1956,11 +1956,21 @@ TEST_F(NativeAgentRunDetailUI, KeyboardFocusReturnsToTheExactEntryAndFileAfterEa
   EXPECT_EQ(f.screen.ui()->focused(), second);
   EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_files/1")->text, "Back to linked tasks");
   ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview/0"));
+  marker("resolve_fail");
   ASSERT_NO_FATAL_FAILURE(tab_to("ai_agent_run_detail_preview/0"));
   const auto file = id("ai_agent_run_detail_preview/0");
   ASSERT_TRUE(f.drv->key(wm::Key::Enter)); frame();
   EXPECT_EQ(f.screen.ui()->focused(), file);
+  ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_preview_retry"));
+  EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_preview_text"), nullptr);
+  std::filesystem::remove(dir.path() / "resolve_fail");
+  ASSERT_NO_FATAL_FAILURE(tab_to("ai_agent_run_preview_retry"));
+  const auto stale_retry = f.screen.ui()->find("ai_agent_run_preview_retry")->on_click;
+  ASSERT_TRUE(f.drv->key(wm::Key::Enter)); frame();
   ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview_text"));
+  EXPECT_EQ(f.screen.ui()->focused(), file);
+  stale_retry();
+  frame();
   EXPECT_EQ(f.screen.ui()->find("ai_agent_run_detail_preview/0")->text, "Back to snapshot files");
   ASSERT_TRUE(f.drv->key(wm::Key::Enter)); frame();  // Back to the list: focus on the same file's Preview
   ASSERT_NO_FATAL_FAILURE(wait_for("ai_agent_run_detail_preview/0"));
@@ -1978,7 +1988,7 @@ TEST_F(NativeAgentRunDetailUI, KeyboardFocusReturnsToTheExactEntryAndFileAfterEa
   EXPECT_EQ(panel(), nullptr);
   EXPECT_EQ(f.screen.ui()->focused(), id(entry()));
   EXPECT_EQ(count("snapshots.get"), 2u);
-  EXPECT_EQ(count("snapshots.resolve"), 1u);
+  EXPECT_EQ(count("snapshots.resolve"), 2u);
   expect_no_agent_actions();
 }
 

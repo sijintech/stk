@@ -12,6 +12,7 @@ type TaskList={tasks:TaskReference[];more:boolean};
 type PublishedFile={path:string;size:number;sha256:string};
 type FileList={files:PublishedFile[];more:boolean};
 type FilePreview={path:string;text:string};
+type FileReadError={message:string;retry?:{file:PublishedFile;mode:'preview'|'download';launcher:HTMLButtonElement}};
 const DOWNLOAD_LIMIT=64*1024*1024;
 const TEXT_PREVIEW_LIMIT=256*1024;
 const canPreviewText=(file:PublishedFile)=>file.size<=TEXT_PREVIEW_LIMIT&&
@@ -46,7 +47,7 @@ function ConversationFiles({session,task,preview,onPreview,onAccessLost,onRetryF
   const [list,setList]=useState<FileList|null>(null),[error,setError]=useState('');
   const [attempt,setAttempt]=useState(0);
   const [reading,setReading]=useState<{path:string;mode:'preview'|'download'}|null>(null);
-  const [fileError,setFileError]=useState('');
+  const [fileError,setFileError]=useState<FileReadError|null>(null);
   const activeRead=useRef<AbortController|null>(null);
   const previewHeading=useRef<HTMLHeadingElement>(null);
   const previewLauncher=useRef<HTMLButtonElement|null>(null);
@@ -60,11 +61,11 @@ function ConversationFiles({session,task,preview,onPreview,onAccessLost,onRetryF
       previewLauncher.current.focus({preventScroll:true});
     }
   },[preview]);
-  async function readFile(file:PublishedFile,mode:'preview'|'download'){
+  async function readFile(file:PublishedFile,mode:'preview'|'download',launcher:HTMLButtonElement){
     if(activeRead.current)return;
     const request=new AbortController();
     activeRead.current=request;
-    setReading({path:file.path,mode});setFileError('');
+    setReading({path:file.path,mode});setFileError(null);
     try{
       const bytes=await downloadConversationFile(session,task.action_id,file.path,file.sha256,file.size,request.signal);
       if(bytes.byteLength!==file.size)throw new Error('文件大小与发布记录不符。');
@@ -87,7 +88,12 @@ function ConversationFiles({session,task,preview,onPreview,onAccessLost,onRetryF
     }catch(error){
       if(request.signal.aborted)return;
       if(error instanceof ApiError&&(error.status===401||error.status===403)){onAccessLost();return;}
-      setFileError(error instanceof Error?error.message:'无法读取发布文件。');
+      const canRetry=error instanceof TypeError||error instanceof ApiError&&
+        (error.status===408||error.status===429||error.status>=500);
+      const message=mode==='preview'&&error instanceof ApiError?`预览失败 (${error.status})`:
+        error instanceof Error?error.message:'无法读取发布文件。';
+      setFileError({message,
+        retry:canRetry?{file,mode,launcher}:undefined});
     }finally{
       if(!request.signal.aborted){activeRead.current=null;setReading(null);}
     }
@@ -117,10 +123,10 @@ function ConversationFiles({session,task,preview,onPreview,onAccessLost,onRetryF
               if(reading)return;
               previewLauncher.current=event.currentTarget;
               filesScroll.current=event.currentTarget.closest('dialog')?.scrollTop??0;
-              void readFile(file,'preview');
+              void readFile(file,'preview',event.currentTarget);
             }}>{reading?.path===file.path&&reading.mode==='preview'?'正在读取…':'预览'}</button>}
           <button type="button" className="quiet" aria-disabled={!!reading}
-            aria-label={`下载 ${visiblePath(file.path)}`} onClick={()=>void readFile(file,'download')}>
+            aria-label={`下载 ${visiblePath(file.path)}`} onClick={event=>void readFile(file,'download',event.currentTarget)}>
             {reading?.path===file.path&&reading.mode==='download'?'正在下载…':'下载'}
           </button></div>}</li>)}</ul>}
     {preview&&<div>
@@ -129,7 +135,13 @@ function ConversationFiles({session,task,preview,onPreview,onAccessLost,onRetryF
       {preview.text?<pre className="conversation-file-preview" tabIndex={0} aria-label="文件内容">{preview.text}</pre>:
         <p className="muted">空文件</p>}
     </div>}
-    {fileError&&<p role="alert">{fileError}</p>}
+    {fileError&&<p role="alert">{fileError.message} {fileError.retry&&<button type="button" className="quiet" onClick={()=>{
+      const retry=fileError.retry;
+      if(!retry)return;
+      const {file,mode,launcher}=retry;
+      launcher.focus({preventScroll:true});
+      void readFile(file,mode,launcher);
+    }}>重新读取</button>}</p>}
     {!preview&&list?.more&&<p className="muted">显示前 200 个发布文件。</p>}
   </section>;
 }

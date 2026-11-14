@@ -2149,12 +2149,14 @@ class AIEditor final : public Editor {
   {
     auto &agent = state.agent();
     const auto ticket = run_detail_.ticket;
-    const auto file = io::get_int(preview, "file", 0);
-    panel.button("ai_agent_run_detail_preview/" + std::to_string(file), ctx.tr("ai.agent.run.preview.back"),
-                 [this, weak = lifetime(), &agent, ticket, owner = run_detail_owner_epoch_,
-                  page = run_detail_page_epoch_] {
-      if (weak.expired() || owner != run_detail_owner_epoch_ || run_detail_.ticket != ticket ||
-          page != run_detail_page_epoch_) { return; }
+    const auto file = io::get_int(preview, "file", -1);
+    const auto guard = [this, weak = lifetime(), ticket, owner = run_detail_owner_epoch_, page = run_detail_page_epoch_] {
+      return !weak.expired() && owner == run_detail_owner_epoch_ && run_detail_.ticket == ticket &&
+          page == run_detail_page_epoch_;
+    };
+    const auto &back = panel.button("ai_agent_run_detail_preview/" + std::to_string(file), ctx.tr("ai.agent.run.preview.back"),
+                                    [this, guard, &agent, ticket] {
+      if (!guard()) { return; }
       ++run_detail_page_epoch_;
       agent.close_run_file_preview(ticket);
       run_preview_text_.clear();
@@ -2165,7 +2167,21 @@ class AIEditor final : public Editor {
     if (state_name == "reading") { panel.paragraph(ctx.tr("ai.agent.run.preview.reading")); return; }
     if (state_name == "mismatch") { panel.paragraph(ctx.tr("ai.agent.run.preview.mismatch")); return; }
     if (state_name == "not_text") { panel.paragraph(ctx.tr("ai.agent.run.preview.not_text")); return; }
-    if (state_name != "ready") { panel.paragraph(ctx.tr("ai.agent.run.preview.unavailable")); return; }
+    if (state_name != "ready") {
+      panel.paragraph(ctx.tr("ai.agent.run.preview.unavailable"));
+      panel.button("ai_agent_run_preview_retry", ctx.tr("ai.agent.run.read_retry"),
+                   [this, guard, &agent, ticket, file, ui = ctx.ui, key = back.key] {
+        if (!guard() || file < 0) { return; }
+        const auto *current = agent.run_file_preview(ticket, run_detail_.item);
+        if (!current || io::get_string(*current, "state") != "unavailable" ||
+            io::get_int(*current, "file", -1) != file) { return; }
+        if (agent.read_run_file_preview(ticket, run_detail_.item, size_t(file))) {
+          ++run_detail_page_epoch_;
+          ui->focus_modal_next_frame(key);
+        }
+      }).disable(state.busy());
+      return;
+    }
     if (!preview.contains("text") || !preview.at("text").is_string()) { return; }
     const auto &text = preview.at("text").get_ref<const std::string &>();  // up to 256 KiB: not copied per frame
     if (text.empty()) { panel.paragraph(ctx.tr("ai.agent.run.preview.empty")); return; }

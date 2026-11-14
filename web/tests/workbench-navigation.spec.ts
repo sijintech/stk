@@ -1954,6 +1954,7 @@ for (const viewport of viewports) {
       const download = files.getByRole('button', {name: '下载 case/result.h5'});
       await download.click();
       await expect(files.getByRole('alert')).toContainText('文件摘要与发布记录不符');
+      await expect(files.getByRole('button', {name: '重新读取'})).toHaveCount(0);
       wrongBytes = false;
       const downloaded = page.waitForEvent('download');
       await download.click();
@@ -2042,11 +2043,28 @@ for (const viewport of viewports) {
       await view.click();
       const files = page.getByRole('dialog', {name: '发布文件'});
       await expect(files.getByRole('alert')).toContainText('无法读取此任务发布的文件');
+      const report = Buffer.from('verified result\n');
+      const sha256 = createHash('sha256').update(report).digest('hex');
       hub.conversationFiles.set(`${A} ${actionId}`, {id: A, action_id: actionId, task_id: taskId, more: false,
-        files: [{path: 'report.txt', size: 12, sha256: 'a'.repeat(64)}]});
+        files: [{path: 'report.txt', size: report.length, sha256}]});
       await files.getByRole('button', {name: '重新读取'}).click();
       await expect(files.getByText('report.txt')).toBeVisible();
       await expect(files.getByRole('button', {name: '返回关联任务'})).toBeFocused();
+      const reads: string[] = [];
+      await page.route(`**/api/v1/sessions/${A}/tasks/${actionId}/file?*`, route => {
+        reads.push(new URL(route.request().url()).search);
+        return reads.length === 1 ? route.fulfill({status: 503}) :
+          route.fulfill({status: 200, contentType: 'application/octet-stream', body: report});
+      });
+      const preview = files.getByRole('button', {name: '预览 report.txt'});
+      await preview.click();
+      await expect(files.getByRole('alert')).toContainText('预览失败 (503)');
+      await files.getByRole('button', {name: '重新读取'}).click();
+      const reading = page.getByRole('dialog', {name: '文件预览'});
+      await expect(reading.getByLabel('文件内容')).toHaveText('verified result');
+      expect(reads).toEqual(Array(2).fill('?' + new URLSearchParams({path: 'report.txt', sha256})));
+      await reading.getByRole('button', {name: '返回发布文件'}).click();
+      await expect(preview).toBeFocused();
       await page.keyboard.press('Escape');
       await expect(launcher).toBeFocused();
       await expect(draft(page)).toHaveValue('等待重试的草稿');
