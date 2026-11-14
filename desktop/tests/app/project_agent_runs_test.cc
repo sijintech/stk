@@ -19,6 +19,7 @@
 #include <iterator>
 #include <map>
 #include <optional>
+#include <sstream>
 #include <vector>
 
 namespace stk::app {
@@ -88,8 +89,11 @@ def init(self, *args, **kwargs):
             if (control / 'long_words').exists():
                 words = 'Proportional transcript words ' * 30
                 events = [{'kind': 'user_turn', 'turn': 0, 'text': 'First question line\nSecond question line ' + words},
-                          {'kind': 'model_completed', 'text': 'Agent reply line\n' + words + '\n中文回复保持完整'}]
-                events += [{'kind': 'user_turn', 'turn': i, 'text': 'Saved message %d' % i} for i in range(1, 40)]
+                          {'kind': 'model_completed', 'text': 'Agent reply line\n' + words + '\n中文回复保持完整'},
+                          # Terminal text: a tab, CRLF, ANSI styling, CJK, an emoji and a final newline.
+                          {'kind': 'user_turn', 'turn': 1, 'text': 'Tabs\there\r\nANSI \x1b[1mbold\x1b[0m 中文🙂 mixed\r\n'},
+                          {'kind': 'model_completed', 'text': 'Reply\twith tab\r\n\x1b[32mgreen\x1b[0m line'}]
+                events += [{'kind': 'user_turn', 'turn': i + 1, 'text': 'Saved message %d' % i} for i in range(1, 40)]
                 sessions[identity].update(events=events, total=len(events))
         return sessions[identity]
     details = [0]
@@ -169,6 +173,10 @@ def init(self, *args, **kwargs):
             v['state'] = 'ready'
             if (control / 'lose_say').exists():
                 raise BridgeError('unavailable', 'fixture lost message reply')
+            if method == 'say' and (control / 'say_appends').exists():
+                v['events'].append({'kind': 'user_turn', 'turn': len(v['events']), 'text': p['text']})
+                v['chain_sha256'] += '-said'
+                v['total'] += 1
             return copy.deepcopy(v)
         if method == 'run_target':
             deadline = time.monotonic() + 30
@@ -1397,6 +1405,79 @@ class NativeAgentRunDetailUI : public NativeAgentRuns {
       frame(); return f.screen.ui()->find("ai_agent_run_detail_tasks") != nullptr;
     }, 30));
   }
+  /** Focused roles: each user turn is one block that starts at its label after the blank line, wraps within 85%
+   * of the wrap width and is drawn with one left edge, its widest line ending at the visible text edge that
+   * leaves room for the scrollbar. Every other line starts at the left edge. Returns the drawn user lines. */
+  size_t expect_role_blocks(const bool long_replies = true)
+  {
+    const auto &ui = *f.screen.ui();
+    const auto &style = ui.style();
+    const auto *timeline = ui.find("ai_agent_timeline");
+    if (!timeline || !timeline->log || !timeline->log_blocks) { ADD_FAILURE() << "no focused timeline blocks"; return 0; }
+    const auto &log = *timeline->log;
+    const auto &blocks = *timeline->log_blocks;
+    const auto you = std::string(f.shell->store().tr("ai.you"));
+    // The editor's wrap width for the focused column.
+    const float wrap = std::max(style.unit, std::min(timeline->block->rect().w, 880.0f * style.scale) - 4 * style.unit);
+    const float cap = std::floor(0.85f * wrap);
+    const ui::Rect body = timeline->rect.inset(style.pixel, style.pixel);
+    const float left = body.x + style.text_margin;
+    const float edge = body.x1() - (style.scrollbar + 2 * style.pixel) - style.text_margin;
+    EXPECT_LE(wrap, edge - left) << "the wrap width fits the visible text area";
+    std::vector<int> owner(log.line_count(), -1);
+    size_t end = 0, labels = 0;
+    for (size_t b = 0; b < blocks.size(); ++b) {
+      const auto &block = blocks[b];
+      if (block.first_line < std::max<size_t>(end, 1) || block.lines == 0 || block.first_line + block.lines > log.line_count()) {
+        ADD_FAILURE() << "block " << b << " is out of order or range"; return 0;
+      }
+      end = block.first_line + block.lines;
+      EXPECT_EQ(log.line(block.first_line), you) << "a block starts with the role label";
+      EXPECT_EQ(log.line(block.first_line - 1), "") << "the blank line before a turn stays outside its block";
+      float widest = 0.0f;
+      for (size_t i = block.first_line; i < end; ++i) {
+        owner[i] = int(b);
+        const float width = f.measurer.width(log.line(i), style.font);
+        EXPECT_LE(width, cap) << log.line(i);
+        widest = std::max(widest, width);
+      }
+      EXPECT_FLOAT_EQ(block.width, widest);
+    }
+    float widest_other = 0.0f;
+    for (size_t i = 0; i < log.line_count(); ++i) {
+      if (log.line(i) == you) { ++labels; EXPECT_TRUE(owner[i] >= 0 && blocks[size_t(owner[i])].first_line == i) << i; }
+      if (owner[i] < 0) { widest_other = std::max(widest_other, f.measurer.width(log.line(i), style.font)); }
+    }
+    EXPECT_EQ(labels, blocks.size()) << "one block per user turn";
+    if (long_replies) { EXPECT_GT(widest_other, cap) << "replies keep the full wrap width"; }
+    EXPECT_LE(widest_other, wrap);
+    // Each drawn command maps back to its line through the fixed row height and the scroll offset.
+    const float row = std::round(style.font.size_px * 1.4f), pad = std::round(0.2f * style.unit);
+    const auto metrics = f.measurer.metrics(style.font);
+    const float scroll = ui.scroll_of(timeline->id);
+    size_t drawn = 0;
+    // Only the visible part: a scrolled region can put other blocks' text inside the log's rect.
+    const ui::Rect visible = timeline->rect.intersect(timeline->clip);
+    for (const auto &command : ui.draw_list().cmds) {
+      // The log's own Follow control is drawn over its lines once scrolled up.
+      if (command.type != ui::CmdType::Text || !visible.contains(command.pos) || command.text == ui.tr("ui.log.follow")) {
+        continue;
+      }
+      const float top = command.pos.y - row * 0.5f - (metrics.ascent - metrics.descent) * 0.5f;
+      const auto line = size_t(std::lround((top - body.y - pad + scroll) / row));
+      if (line >= log.line_count() || log.line(line) != command.text) {
+        ADD_FAILURE() << "drawn text is not line " << line << ": " << command.text; continue;
+      }
+      if (owner[line] < 0) { EXPECT_FLOAT_EQ(command.pos.x, left) << command.text; continue; }
+      const auto &block = blocks[size_t(owner[line])];
+      EXPECT_FLOAT_EQ(command.pos.x, std::round(edge - block.width)) << command.text << ": one left edge per block";
+      if (f.measurer.width(command.text, style.font) == block.width) {
+        EXPECT_NEAR(command.pos.x + block.width, edge, 1.0f) << command.text << ": the widest line reaches the edge";
+      }
+      ++drawn;
+    }
+    return drawn;
+  }
   /** With long_words: the focused timeline wraps, draws and scrolls with the regular UI font and keeps
    * every role line, hard line break and word. Keys move by the regular font's row height. */
   void expect_proportional_timeline(const std::function<void()> &reopen)
@@ -1444,6 +1525,25 @@ class NativeAgentRunDetailUI : public NativeAgentRuns {
       ++drawn;
     }
     EXPECT_GT(drawn, 0u);
+    EXPECT_GT(expect_role_blocks(), 0u) << "the latest turns are drawn";
+    // Terminal text keeps the split view's lines: the tab expanded, CRLF and ANSI handled, the final newline
+    // kept inside the person's block, and the reply after it on the left.
+    const auto tabs = std::find(lines.begin(), lines.end(), "Tabs    here");
+    ASSERT_NE(tabs, lines.end());
+    ASSERT_LT(tabs + 5, lines.end());
+    EXPECT_EQ(*(tabs - 2), "");
+    EXPECT_EQ(*(tabs - 1), tr("ai.you"));
+    EXPECT_EQ(*(tabs + 1), "ANSI bold 中文🙂 mixed");
+    EXPECT_EQ(*(tabs + 2), "");
+    EXPECT_EQ(*(tabs + 3), tr("ai.agent.says"));
+    EXPECT_EQ(*(tabs + 4), "Reply   with tab");
+    EXPECT_EQ(*(tabs + 5), "green line");
+    const size_t label = size_t(tabs - lines.begin()) - 1;
+    const auto &blocks = *timeline->log_blocks;
+    const auto control = std::find_if(blocks.begin(), blocks.end(), [&](const auto &b) { return b.first_line == label; });
+    ASSERT_NE(control, blocks.end());
+    EXPECT_EQ(control->lines, 4u) << "label, two lines and the final newline";
+    EXPECT_FLOAT_EQ(control->width, f.measurer.width("ANSI bold 中文🙂 mixed", style.font));
 
     // Rows, scroll extent and keys share the regular font's row height; the position is per session.
     const float row = std::round(style.font.size_px * 1.4f);
@@ -1453,6 +1553,15 @@ class NativeAgentRunDetailUI : public NativeAgentRuns {
     ASSERT_NO_FATAL_FAILURE(click("ai_agent_timeline"));
     ASSERT_TRUE(f.drv->key(wm::Key::Home)); frame();
     EXPECT_FLOAT_EQ(scroll(), 0.0f);
+    EXPECT_GT(expect_role_blocks(), 3u) << "the first, long turn is drawn";
+    {
+      // A long turn wraps to fill 85% of the column, less than a word.
+      const auto *top = ui.find("ai_agent_timeline");
+      const float wrap = std::max(style.unit, std::min(top->block->rect().w, 880.0f * style.scale) - 4 * style.unit);
+      ASSERT_FALSE(top->log_blocks->empty());
+      EXPECT_GT(top->log_blocks->front().width, std::floor(0.85f * wrap) - f.measurer.width("Proportional ", style.font));
+      EXPECT_GT(top->log_blocks->front().lines, 3u);
+    }
     ASSERT_TRUE(f.drv->key(wm::Key::DownArrow)); frame();
     ASSERT_TRUE(f.drv->key(wm::Key::DownArrow)); frame();
     EXPECT_FLOAT_EQ(scroll(), 2 * row);
@@ -1473,6 +1582,7 @@ class NativeAgentRunDetailUI : public NativeAgentRuns {
     ASSERT_NE(ui.find("ai_agent_timeline"), nullptr);
     EXPECT_FALSE(ui.find("ai_agent_timeline")->mono);
     EXPECT_FLOAT_EQ(scroll(), reading);
+    EXPECT_GT(expect_role_blocks(), 0u);
     ASSERT_NE(f.screen.ui()->find(input), nullptr);
     EXPECT_EQ(f.screen.ui()->find(input)->string.value(), "Unsent words\nsecond line");
     EXPECT_EQ(count("say"), 0u);
@@ -1665,10 +1775,29 @@ TEST_F(NativeAgentRunDetailUI, ExplicitSendFollowsTheTimelineAndOtherSessionsKee
     frame(); return agent().view().value("chain_sha256", std::string()) == "session-b-late";
   }, 30));
   EXPECT_FLOAT_EQ(scroll(), tail);
+  {
+    // Session B keeps its own position; the reply that arrived meanwhile follows the right-aligned turns.
+    const auto *timeline = f.screen.ui()->find(timeline_key);
+    ASSERT_NE(timeline, nullptr); ASSERT_NE(timeline->log_blocks, nullptr);
+    ASSERT_FALSE(timeline->log_blocks->empty());
+    const auto &last = timeline->log_blocks->back();
+    ASSERT_LT(last.first_line + last.lines + 1, timeline->log->line_count());
+    EXPECT_EQ(timeline->log->line(last.first_line + last.lines + 1), "A late reply in session B");
+  }
+  const auto drawn_x = [&](const std::string &text) {
+    const auto *timeline = f.screen.ui()->find(timeline_key);
+    for (const auto &command : f.screen.ui()->draw_list().cmds) {
+      if (command.type == ui::CmdType::Text && command.text == text && timeline->rect.contains(command.pos)) { return command.pos.x; }
+    }
+    return -1.0f;
+  };
+  EXPECT_GT(expect_role_blocks(false), 0u);
   ASSERT_NO_FATAL_FAILURE(open_session_a());
   EXPECT_FLOAT_EQ(scroll(), reading);
+  EXPECT_GT(expect_role_blocks(false), 0u);
   EXPECT_EQ(count("say"), 0u);
 
+  marker("say_appends");
   const auto input = "ai_agent_text/" + state().project()->handle;
   ASSERT_NO_FATAL_FAILURE(click(input));
   ASSERT_TRUE(f.drv->key(wm::Key::Unknown, wm::ModNone, "Follow the next reply")); frame();
@@ -1677,6 +1806,22 @@ TEST_F(NativeAgentRunDetailUI, ExplicitSendFollowsTheTimelineAndOtherSessionsKee
   ASSERT_TRUE(loop.pump_until([&] { frame(); return !agent().busy() && count("start") == 1u; }, 30));
   EXPECT_EQ(count("say"), 1u);
   EXPECT_EQ(count("run_decide"), 0u);
+  // The saved message arrives as the newest turn: the timeline still follows and draws it right-aligned.
+  ASSERT_TRUE(loop.pump_until([&] {
+    frame(); return agent().view().value("chain_sha256", std::string()) == "session-a-said";
+  }, 30));
+  frame();
+  const auto &style = f.screen.ui()->style();
+  EXPECT_NEAR(scroll(), tail + 3 * std::round(style.font.size_px * 1.4f), 0.5f) << "blank line, label and message";
+  const auto *timeline = f.screen.ui()->find(timeline_key);
+  ASSERT_NE(timeline, nullptr); ASSERT_NE(timeline->log_blocks, nullptr);
+  ASSERT_FALSE(timeline->log_blocks->empty());
+  const auto &newest = timeline->log_blocks->back();
+  EXPECT_EQ(timeline->log->line(newest.first_line + 1), "Follow the next reply");
+  EXPECT_EQ(newest.first_line + newest.lines + 1, timeline->log->line_count()) << "then only the final newline";
+  EXPECT_GT(expect_role_blocks(false), 0u);
+  const float edge = timeline->rect.x1() - style.pixel - (style.scrollbar + 2 * style.pixel) - style.text_margin;
+  EXPECT_FLOAT_EQ(drawn_x("Follow the next reply"), std::round(edge - newest.width));
 }
 
 TEST_F(NativeAgentRunDetailUI, WideFocusedTimelineUsesTheRegularFontWithRolesKeysAndPosition)
@@ -2062,6 +2207,15 @@ TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseTimelineUsesTheRegularFontWith
   ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
   ASSERT_NO_FATAL_FAILURE(expect_proportional_timeline([&] { open_narrow_session_a(); }));
   ASSERT_NO_FATAL_FAILURE(expect_composer_card());
+  const auto words = [](const ui::LogBuffer &log) {
+    std::vector<std::string> out;
+    for (size_t i = 0; i < log.line_count(); ++i) {
+      std::istringstream line{std::string(log.line(i))};
+      for (std::string word; line >> word;) { out.push_back(word); }
+    }
+    return out;
+  };
+  const auto focused_words = words(*f.screen.ui()->find("ai_agent_timeline")->log);
 
   // Ordinary maximization of the same editor is not the focused workbench: at this width both wrap to
   // the same width, so only the font tells the cached lines apart. It returns to monospace lines.
@@ -2076,6 +2230,19 @@ TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseTimelineUsesTheRegularFontWith
   for (size_t i = 0; i < timeline->log->line_count(); ++i) {
     EXPECT_LE(f.measurer.width(timeline->log->line(i), style.mono), timeline->rect.w - 2 * style.text_margin)
         << timeline->log->line(i);
+  }
+  {
+    // The split view keeps one left-aligned text with the same words in the same order.
+    EXPECT_EQ(timeline->log_blocks, nullptr);
+    EXPECT_EQ(words(*timeline->log), focused_words);
+    size_t drawn = 0;
+    for (const auto &command : f.screen.ui()->draw_list().cmds) {
+      if (command.type != ui::CmdType::Text || !timeline->rect.intersect(timeline->clip).contains(command.pos) ||
+          command.text == f.screen.ui()->tr("ui.log.follow")) { continue; }
+      EXPECT_FLOAT_EQ(command.pos.x, timeline->rect.x + style.pixel + style.text_margin) << command.text;
+      ++drawn;
+    }
+    EXPECT_GT(drawn, 0u);
   }
   {
     // The split view's composer stays stacked: no card, and Send as wide as the field.
@@ -2097,6 +2264,16 @@ TEST_F(NativeAgentRunDetailNarrowUI, NarrowChineseTimelineUsesTheRegularFontWith
   EXPECT_FALSE(f.screen.ui()->find("ai_agent_timeline")->mono);
   ASSERT_NO_FATAL_FAILURE(expect_composer_card());
   EXPECT_EQ(agent().selected(), "session-a");
+  EXPECT_GT(expect_role_blocks(), 0u);
+
+  // The labels follow the language on the next frame although the session itself is unchanged.
+  const auto chinese = std::string(f.shell->store().tr("ai.you"));
+  f.shell->set_language("en"); frame();
+  ASSERT_NE(std::string(f.shell->store().tr("ai.you")), chinese);
+  const auto *english = f.screen.ui()->find("ai_agent_timeline");
+  ASSERT_NE(english, nullptr); ASSERT_NE(english->log, nullptr);
+  EXPECT_EQ(english->log->line(1), f.shell->store().tr("ai.you"));
+  EXPECT_GT(expect_role_blocks(), 0u);
   EXPECT_EQ(count("say"), 0u);
 }
 

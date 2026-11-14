@@ -273,6 +273,15 @@ struct LogViewPosition {
   bool follow = true;
 };
 
+/** LogView: lines [first_line, first_line + lines) drawn as one right-aligned block. Every line of the
+ * block starts at the same x, so a line `width` pixels wide (the widest, measured by the caller with the
+ * view's font) ends at the visible text edge. Rows, scrolling and keys do not change. */
+struct LogBlock {
+  size_t first_line = 0;
+  size_t lines = 0;
+  float width = 0.0f;
+};
+
 class Block;
 class Context;
 class Layout;
@@ -330,6 +339,10 @@ struct Widget {
   const LogBuffer *log = nullptr;
   LogViewPosition *log_position = nullptr;
   bool log_can_follow = true;
+  /** LogView: optional right-aligned blocks, sorted by first_line and not overlapping. The edge always
+   * leaves room for the scrollbar, so blocks keep their place when it appears. A block wider than the
+   * text area starts at the left edge; the whole list is ignored once the log has dropped lines. */
+  std::shared_ptr<const std::vector<LogBlock>> log_blocks;
   ImageSpec image;
   std::vector<Vec2> curve; /**< Normalized curve preview points; display only. */
   Binding<float> factor;

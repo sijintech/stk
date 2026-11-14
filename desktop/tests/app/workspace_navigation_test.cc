@@ -1690,6 +1690,7 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
   };
   // The focused transcript wraps and draws with the regular UI font. Roles stay on their own lines, and
   // the reply keeps its words and hard line breaks.
+  size_t question_drawn = 0;
   const auto expect_proportional_transcript = [&](const ui::Widget &transcript, const ui::Context &ui) {
     const auto &style = ui.style();
     const auto &log = *transcript.log;
@@ -1727,6 +1728,51 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
       ++drawn;
     }
     EXPECT_GT(drawn, 0u);
+
+    // The question is one right-aligned block of its label and text, measured with the drawn font; the blank
+    // line and the reply start at the left. The block's edge leaves room for the scrollbar.
+    ASSERT_NE(transcript.log_blocks, nullptr);
+    ASSERT_EQ(transcript.log_blocks->size(), 1u);
+    const auto &block = transcript.log_blocks->front();
+    EXPECT_EQ(block.first_line, 0u);
+    EXPECT_EQ(block.lines, 2u);
+    EXPECT_FLOAT_EQ(block.width, std::max(ui.measurer().width(log.line(0), style.font),
+                                          ui.measurer().width(log.line(1), style.font)));
+    const float wrap = std::max(style.unit, std::min(transcript.block->rect().w, 880.0f * style.scale) - 4 * style.unit);
+    EXPECT_LE(block.width, std::floor(0.85f * wrap));
+    const ui::Rect body = transcript.rect.inset(style.pixel, style.pixel);
+    const float left = body.x + style.text_margin;
+    const float edge = body.x1() - (style.scrollbar + 2 * style.pixel) - style.text_margin;
+    const float row = std::round(style.font.size_px * 1.4f), pad = std::round(0.2f * style.unit);
+    const auto metrics = ui.measurer().metrics(style.font);
+    const float scroll = ui.scroll_of(transcript.id);
+    const ui::Rect visible = transcript.rect.intersect(transcript.clip);
+    question_drawn = 0;
+    for (const auto &command : ui.draw_list().cmds) {
+      if (command.type != ui::CmdType::Text || !visible.contains(command.pos) || command.text == ui.tr("ui.log.follow")) {
+        continue;
+      }
+      const float top = command.pos.y - row * 0.5f - (metrics.ascent - metrics.descent) * 0.5f;
+      const auto line = size_t(std::lround((top - body.y - pad + scroll) / row));
+      ASSERT_LT(line, log.line_count()) << command.text;
+      ASSERT_EQ(log.line(line), command.text);
+      if (line >= block.lines) { EXPECT_FLOAT_EQ(command.pos.x, left) << command.text; continue; }
+      EXPECT_FLOAT_EQ(command.pos.x, std::round(edge - block.width)) << command.text << ": one left edge";
+      if (ui.measurer().width(command.text, style.font) == block.width) {
+        EXPECT_NEAR(command.pos.x + block.width, edge, 1.0f) << command.text << ": the wider line reaches the edge";
+      }
+      ++question_drawn;
+    }
+  };
+  // Scroll the transcript to its start, as a reader would with the wheel, to see the question.
+  const auto wheel_to_question = [&] {
+    const auto [x, y] = f.widget_center("ai_transcript");
+    wm::Event up;
+    up.type = wm::EventType::Wheel;
+    up.x = x; up.y = y; up.wheel_y = 100;
+    ASSERT_TRUE(f.drv->send(up));
+    f.drv->frame();
+    ASSERT_EQ(reading_position(), 0.0f);
   };
   const auto expect_column = [&] {
     const auto *transcript = widget("ai_transcript");
@@ -1880,6 +1926,10 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
   f.drv->frame();
   ASSERT_NO_FATAL_FAILURE(expect_column());
   EXPECT_EQ(widget(draft)->string.value(), "Unsent question ab");
+  // The new size re-measures the block: the question reaches the edge in the larger font.
+  ASSERT_NO_FATAL_FAILURE(wheel_to_question());
+  ASSERT_NO_FATAL_FAILURE(expect_column());
+  EXPECT_EQ(question_drawn, 2u);
 
   // The split view keeps its monospace transcript. Returning wraps for the regular font again.
   ASSERT_NO_FATAL_FAILURE(click("workbench_split"));
@@ -1887,6 +1937,7 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
   const auto *split = widget("ai_transcript");
   ASSERT_NE(split, nullptr);
   EXPECT_TRUE(split->mono);
+  EXPECT_EQ(split->log_blocks, nullptr) << "the split view keeps one left-aligned text";
   size_t mono_drawn = 0;
   for (const auto &command : f.screen.ui()->draw_list().cmds) {
     if (command.type != ui::CmdType::Text || !split->rect.contains(command.pos)) { continue; }
@@ -1910,6 +1961,9 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
   f.drv->frame();
   ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
   ASSERT_NO_FATAL_FAILURE(expect_column());
+  ASSERT_NO_FATAL_FAILURE(wheel_to_question());
+  ASSERT_NO_FATAL_FAILURE(expect_column());
+  EXPECT_EQ(question_drawn, 2u) << "the narrow column right-aligns the question too";
   f.screen.set_maximized(nullptr);
   f.screen.set_maximized(conversation);
   f.drv->frame();
@@ -1918,6 +1972,7 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
   ASSERT_NE(maximized, nullptr);
   ASSERT_NE(maximized->log, nullptr);
   EXPECT_TRUE(maximized->mono);
+  EXPECT_EQ(maximized->log_blocks, nullptr);
   const auto &style = f.screen.ui()->style();
   for (size_t line = 0; line < maximized->log->line_count(); ++line) {
     EXPECT_LE(f.screen.ui()->measurer().width(maximized->log->line(line), style.mono),

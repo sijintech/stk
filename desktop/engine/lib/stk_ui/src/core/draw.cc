@@ -694,12 +694,28 @@ void Context::draw_widget(const Widget &w)
       const int top_row = std::min(anchor_row, active_row), bottom_row = std::max(anchor_row, active_row);
       const int first_column = std::min(selection.anchor.column, selection.active.column);
       const int last_column = std::max(selection.anchor.column, selection.active.column);
+      // Right-aligned blocks end at the visible text edge as if the scrollbar were shown, so they do not
+      // move when it appears. Block widths come measured; finding a visible row's block is a search.
+      const std::vector<LogBlock> *blocks =
+          log && w.log_blocks && w.log->dropped() == 0 ? w.log_blocks.get() : nullptr;
+      const float block_edge = body.x1() - (st.scrollbar + 2 * px) - st.text_margin;
+      const auto log_x = [&](const size_t line) {
+        const float left = body.x + st.text_margin;
+        if (!blocks) { return left; }
+        const auto after = std::upper_bound(blocks->begin(), blocks->end(), line,
+                                            [](const size_t l, const LogBlock &b) { return l < b.first_line; });
+        if (after == blocks->begin()) { return left; }
+        const LogBlock &block = *std::prev(after);
+        if (line - block.first_line >= block.lines) { return left; }
+        const float x = std::round(block_edge - block.width);
+        return x >= left ? x : left;
+      };
       for (int i = first; i < last; i++) {
         const float y = std::round(body.y + lpad + float(i) * row_h - scroll);
         const Rect row{body.x, y, body.w - sbw, row_h};
         if (log) {
           // The widget's font: monospace by default, the regular UI font when the caller cleared mono.
-          draw_.text(std::string(w.log->line(size_t(i))), {row.x + st.text_margin, baseline(row)}, font,
+          draw_.text(std::string(w.log->line(size_t(i))), {log_x(size_t(i)), baseline(row)}, font,
                      th.tooltip.text);
           continue;
         }

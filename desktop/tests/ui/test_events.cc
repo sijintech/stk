@@ -987,6 +987,101 @@ TEST(LogView, ClearingMonoDrawsAndScrollsWithTheRegularFontAndKeepsTheDefaultMon
   }
 }
 
+TEST(LogView, BlocksShareOneLeftEdgeEndAtTheVisibleTextEdgeAndKeepRowsAndScrolling)
+{
+  for (const float scale : {1.0f, 2.0f}) {
+    SCOPED_TRACE(scale);
+    Harness h(scale);
+    h.window = {800 * scale, 600 * scale};
+    LogBuffer text, plain, dropped(3);
+    LogViewPosition position, plain_position;
+    for (const char *line : {"Reply on the left", "You", "Short", "A longer line of mine", "Reply again", "Too wide"}) {
+      text.append(std::string(line) + "\n"); plain.append(std::string(line) + "\n"); dropped.append(std::string(line) + "\n");
+    }
+    const Style &st = h.ctx->style();
+    const float longer = h.measurer.width("A longer line of mine", st.font);
+    const auto blocks = std::make_shared<const std::vector<LogBlock>>(std::vector<LogBlock>{{1, 3, longer}, {5, 1, 1e5f}});
+    h.ui = [&](Context &ctx) {
+      Layout &l = ctx.block("r", {0, 0, h.window.x, h.window.y}).layout();
+      Widget &view = l.log_view("text", text, 12.0f, &position);
+      view.mono = false; view.log_blocks = blocks;
+      l.log_view("plain", plain, 12.0f, &plain_position).mono = false;
+      Widget &kept = l.log_view("dropped", dropped, 4.0f);
+      kept.mono = false; kept.log_blocks = blocks;
+    };
+    h.frame();
+    const auto drawn = [&](std::string_view key, std::string_view line) -> const DrawCmd * {
+      const Rect r = h.w(key).rect;
+      for (const DrawCmd &c : h.ctx->draw_list().cmds) {
+        if (c.type == CmdType::Text && c.text == line && r.contains(c.pos)) { return &c; }
+      }
+      return nullptr;
+    };
+    const Rect body = h.w("text").rect.inset(st.pixel, st.pixel);
+    const float left = body.x + st.text_margin;
+    // The edge leaves room for the scrollbar even before the text overflows.
+    const float edge = body.x1() - (st.scrollbar + 2 * st.pixel) - st.text_margin;
+    const float block_x = std::round(edge - longer);
+    ASSERT_FLOAT_EQ(h.ctx->scroll_of(h.w("text").id), 0.0f) << "starts without a scrollbar";
+    const auto expect_geometry = [&] {
+      for (const char *line : {"Reply on the left", "Reply again", "Too wide", "You", "Short", "A longer line of mine"}) {
+        const DrawCmd *own = drawn("text", line), *base = drawn("plain", line);
+        ASSERT_NE(own, nullptr) << line; ASSERT_NE(base, nullptr) << line;
+        // Rows do not move: the same baseline relative to each view as without blocks.
+        EXPECT_FLOAT_EQ(own->pos.y - h.w("text").rect.y, base->pos.y - h.w("plain").rect.y) << line;
+        EXPECT_FLOAT_EQ(base->pos.x, left) << line;
+      }
+      EXPECT_FLOAT_EQ(drawn("text", "Reply on the left")->pos.x, left);
+      EXPECT_FLOAT_EQ(drawn("text", "Reply again")->pos.x, left);
+      EXPECT_FLOAT_EQ(drawn("text", "Too wide")->pos.x, left) << "a block wider than the text area starts at the left";
+      for (const char *line : {"You", "Short", "A longer line of mine"}) {
+        EXPECT_FLOAT_EQ(drawn("text", line)->pos.x, block_x) << line << ": one left edge for the whole block";
+      }
+      EXPECT_NEAR(drawn("text", "A longer line of mine")->pos.x + longer, edge, 0.5f) << "the widest line reaches the edge";
+      EXPECT_GT(block_x, left + longer);
+    };
+    ASSERT_NO_FATAL_FAILURE(expect_geometry());
+    const Rect dropped_body = h.w("dropped").rect.inset(st.pixel, st.pixel);
+    for (const char *line : {"A longer line of mine", "Reply again", "Too wide"}) {
+      ASSERT_NE(drawn("dropped", line), nullptr) << line;
+      EXPECT_FLOAT_EQ(drawn("dropped", line)->pos.x, dropped_body.x + st.text_margin) << line << ": dropped lines void the blocks";
+    }
+
+    // Overflowing brings the scrollbar; the block keeps its place and rows, extent and keys are unchanged.
+    for (int i = 0; i < 40; ++i) {
+      text.append("Later reply " + std::to_string(i) + "\n"); plain.append("Later reply " + std::to_string(i) + "\n");
+    }
+    h.frame();
+    const float row = std::round(st.font.size_px * 1.4f);
+    const float tail = h.ctx->scroll_of(h.w("plain").id);
+    ASSERT_GT(tail, 0.0f);
+    EXPECT_TRUE(position.follow);
+    EXPECT_FLOAT_EQ(h.ctx->scroll_of(h.w("text").id), tail);
+    ASSERT_TRUE(h.ctx->focus_widget(h.w("text").id));
+    h.key(Key::End);
+    EXPECT_FLOAT_EQ(position.offset, tail);
+    h.key(Key::Home);
+    EXPECT_FLOAT_EQ(position.offset, 0.0f);
+    EXPECT_FALSE(position.follow);
+    h.key(Key::Down);
+    h.key(Key::Down);
+    EXPECT_FLOAT_EQ(position.offset, 2 * row);
+    h.key(Key::Home);
+    ASSERT_TRUE(h.ctx->focus_widget(h.w("plain").id));
+    h.key(Key::Home);
+    h.frame();
+    ASSERT_NO_FATAL_FAILURE(expect_geometry());
+    ASSERT_TRUE(h.ctx->focus_widget(h.w("text").id));
+    h.key(Key::End);
+    EXPECT_TRUE(position.follow);
+    text.append("Newest reply\n");
+    h.frame();
+    EXPECT_NEAR(position.offset, tail + row, 0.5f) << "follows the latest line";
+    ASSERT_NE(drawn("text", "Newest reply"), nullptr);
+    EXPECT_FLOAT_EQ(drawn("text", "Newest reply")->pos.x, left);
+  }
+}
+
 TEST(Modal, TrapsFocusAndInput)
 {
   Harness h;

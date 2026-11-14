@@ -181,6 +181,66 @@ ui::LogBuffer wrapped_text(std::string text, const float width, EditorContext &c
   return result;
 }
 
+/** Conversation text in display order; `user` marks what the person wrote, with its role label. */
+struct RoleText {
+  std::string text;
+  bool user = false;
+};
+
+/** The wrapped conversation and, with roles, its right-aligned user blocks (null without roles). */
+struct RoleLog {
+  ui::LogBuffer log{std::numeric_limits<size_t>::max()};
+  std::shared_ptr<const std::vector<ui::LogBlock>> blocks;
+};
+
+/** Without roles, wrapped_text of the joined parts. With roles, the joined parts are normalized exactly
+ * as wrapped_text does (LogBuffer handles split chunks), so every line keeps its text, order and blank
+ * lines. The person's lines then wrap at 85% of the width and become one block, measured once here. */
+RoleLog wrapped_roles(const std::vector<RoleText> &parts, const float width, EditorContext &ctx, const bool mono,
+                      const bool roles)
+{
+  RoleLog result;
+  if (!roles || !ctx.ui) {
+    std::string text;
+    for (const auto &part : parts) { text += part.text; }
+    result.log = wrapped_text(std::move(text), width, ctx, mono);
+    return result;
+  }
+  ui::LogBuffer normalized(std::numeric_limits<size_t>::max());
+  std::vector<std::pair<size_t, size_t>> user;  // normalized line ranges
+  for (const auto &part : parts) {
+    // A line the previous part left open continues here, so the range starts after it.
+    const size_t begin = normalized.line_count();
+    normalized.append(part.text);
+    if (part.user && normalized.line_count() > begin) { user.emplace_back(begin, normalized.line_count()); }
+  }
+  const auto &style = ctx.ui->style();
+  const auto &font = mono ? style.mono : style.font;
+  const auto &measurer = ctx.ui->measurer();
+  const float user_width = std::floor(0.85f * width);
+  auto blocks = std::make_shared<std::vector<ui::LogBlock>>();
+  size_t next = 0;
+  for (size_t line = 0; line < normalized.line_count();) {
+    const bool own = next < user.size() && user[next].first == line;
+    const size_t end = own ? user[next++].second : next < user.size() ? user[next].first : normalized.line_count();
+    // Hard line breaks reset line breaking, so wrapping a run of lines equals wrapping them in the whole text.
+    std::string run;
+    for (size_t i = line; i < end; ++i) { run += std::string(normalized.line(i)) + (i + 1 < end ? "\n" : ""); }
+    const size_t first = result.log.line_count();
+    float widest = 0.0f;
+    for (const auto &wrapped : ui::break_lines(run, own ? user_width : width, measurer, font)) {
+      const auto text = run.substr(wrapped.begin, wrapped.end - wrapped.begin);
+      if (own) { widest = std::max(widest, measurer.width(text, font)); }
+      result.log.append(text + "\n");
+    }
+    if (own) { blocks->push_back({first, result.log.line_count() - first, widest}); }
+    line = end;
+  }
+  result.log.append("\n");  // wrapped_text ends with the empty line after the final newline
+  result.blocks = std::move(blocks);
+  return result;
+}
+
 /** LogView scrolls vertically only. Wrap on UTF-8 boundaries without dropping even a space inside a JSON value. */
 std::optional<ui::LogBuffer> frozen_plan_text(const std::string &text, const float width, EditorContext &ctx)
 {
@@ -295,7 +355,7 @@ class AIEditor final : public Editor {
     if (opening_ != opening) {
       opening_ = opening;
       opened_history_ = false;
-      shown_exchange_.clear(); transcript_.clear();
+      shown_exchange_.clear(); transcript_.clear(); transcript_blocks_.reset();
       transcript_positions_.clear();
       shown_context_.clear(); captured_.reset();
       proposal_navigation_error_.clear();
@@ -1205,22 +1265,31 @@ class AIEditor final : public Editor {
     const float conversation_width = focused ? std::min(layout.block().rect().w, kConversationWidth * style.scale) :
         width * (wide ? 0.68f : 1.0f);
     const float wrap_width = std::max(unit, conversation_width - 4 * unit);
+    // Block widths are pixels of the drawn font, so its size and the language of the labels are part of the key.
     const std::string content = question.dump() + reply.dump() + progress.dump() + std::to_string(wrap_width) +
-        std::to_string(unit) + (transcript_mono ? "/mono/" : "/regular/") + std::string(ctx.tr("ai.you"));
+        std::to_string(unit) + (transcript_mono ? "/mono/" : "/regular/") + std::string(ctx.tr("ai.you")) + "/" +
+        ctx.store.language() + "/" + std::to_string((transcript_mono ? style.mono : style.font).size_px);
     if (shown_exchange_ != content) {
       shown_exchange_ = content;
-      std::string text;
-      if (!question.empty()) { text += std::string(ctx.tr("ai.you")) + "\n" + io::get_string(question, "text") + "\n\n"; }
+      // The question is the person's block; the blank line after it and the reply stay on the left.
+      std::vector<RoleText> parts;
+      if (!question.empty()) {
+        parts.push_back({std::string(ctx.tr("ai.you")) + "\n" + io::get_string(question, "text") + "\n", true});
+        parts.push_back({"\n"});
+      }
       if (!reply.empty()) {
-        text += std::string(ctx.tr(sweep_request ? "ai.sweep_reply" : parameter_request ? "ai.parameter_reply" : "ai.assistant")) + "\n" +
-            (parameter_request ? parameter_reply(reply, context, ctx) : io::get_string(reply, "text"));
+        parts.push_back({std::string(ctx.tr(sweep_request ? "ai.sweep_reply" : parameter_request ? "ai.parameter_reply" : "ai.assistant")) + "\n" +
+            (parameter_request ? parameter_reply(reply, context, ctx) : io::get_string(reply, "text"))});
       }
       else if (!progress.empty() && !io::get_string(progress, "text").empty()) {
-        text += std::string(ctx.tr("ai.temporary_reply")) + "\n" + io::get_string(progress, "text");
+        parts.push_back({std::string(ctx.tr("ai.temporary_reply")) + "\n" + io::get_string(progress, "text")});
       }
       // Measure what the log actually displays: tabs expand before wrapping,
       // and terminal escape bytes do not count towards visible line width.
-      transcript_ = wrapped_text(std::move(text), wrap_width, ctx, transcript_mono);
+      // The focused workbench right-aligns the question; the split view keeps one left-aligned text.
+      auto wrapped = wrapped_roles(parts, wrap_width, ctx, transcript_mono, focused);
+      transcript_ = std::move(wrapped.log);
+      transcript_blocks_ = std::move(wrapped.blocks);
       raw_reply_ = wrapped_text(io::get_string(reply, "text"), wrap_width, ctx, true);
     }
     if (!request.empty()) {
@@ -1247,8 +1316,9 @@ class AIEditor final : public Editor {
       const float candidate_space = parameter_request && status == "completed" ? 4.0f : 0.0f;
       const float transcript_units = wide ? std::clamp(height / unit - 23.0f - candidate_space, 5.0f, 22.0f) :
           settings_open ? 6.0f : std::clamp(height / unit - 25.0f - candidate_space, 6.0f, 22.0f);
-      layout.log_view("ai_transcript", transcript_, transcript_units, transcript_position(transcript_positions_, id))
-          .mono = transcript_mono;
+      auto &view = layout.log_view("ai_transcript", transcript_, transcript_units, transcript_position(transcript_positions_, id));
+      view.mono = transcript_mono;
+      view.log_blocks = transcript_blocks_;
     }
     if (!compact_empty && (!focused || !id.empty())) {
       const bool archived = ctx.store.archive().archived("request", id);
@@ -1595,16 +1665,20 @@ class AIEditor final : public Editor {
 
   /** One line per step of the session, in words: what the person said, which tool ran at which level and how it
    * ended, the agent's answers, decisions on its cards and why it stopped. */
-  static std::string agent_steps(const Json &view, EditorContext &ctx)
+  static std::vector<RoleText> agent_steps(const Json &view, EditorContext &ctx)
   {
     const auto &catalog = ctx.store.catalog();
-    std::string text;
-    const auto line = [&text](const std::string &value) { text += value + "\n"; };
+    // Each user turn is its own part, with the blank line before it outside; the other lines join up.
+    std::vector<RoleText> parts;
+    const auto line = [&parts](const std::string &value, const bool user = false) {
+      if (user || parts.empty() || parts.back().user) { parts.push_back({"", user}); }
+      parts.back().text += value + "\n";
+    };
     for (const auto &event : view.value("events", Json::array())) {
       const auto kind = io::get_string(event, "kind");
       if (kind == "user_turn") {
         line("");
-        line(std::string(ctx.tr("ai.you")) + "\n" + io::get_string(event, "text"));
+        line(std::string(ctx.tr("ai.you")) + "\n" + io::get_string(event, "text"), true);
       }
       else if (kind == "model_completed" && !io::get_string(event, "text").empty()) {
         line(std::string(ctx.tr("ai.agent.says")) + "\n" + io::get_string(event, "text"));
@@ -1649,7 +1723,7 @@ class AIEditor final : public Editor {
         line(std::string(catalog.tr_or("ai.agent.stopped." + reason, reason)));
       }
     }
-    return text;
+    return parts;
   }
 
   void agent_sessions(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool enabled)
@@ -1681,7 +1755,8 @@ class AIEditor final : public Editor {
     const auto &catalog = ctx.store.catalog();
     const std::string handle = state.project()->handle;
     if (agent_opening_ != handle) {
-      agent_opening_ = handle; shown_agent_.clear(); agent_timeline_.clear(); agent_navigation_error_.clear();
+      agent_opening_ = handle; shown_agent_.clear(); agent_timeline_.clear(); agent_blocks_.reset();
+      agent_navigation_error_.clear();
       agent_transcript_positions_.clear();
       timeline_session_.clear();
       draft.allow_prepare = false;  // reopening a project restores its text, never permission to prepare
@@ -1738,14 +1813,22 @@ class AIEditor final : public Editor {
       const float wrap_width = std::max(unit, width - 4 * unit);
       // As for the question transcript: the regular UI font when focused, monospace in the split view.
       const bool timeline_mono = !focused;
-      const auto shown = io::get_string(view, "chain_sha256") + std::to_string(wrap_width) + (timeline_mono ? "/mono" : "/regular");
+      // The labels' language and the font size change lines and block widths without changing the chain.
+      const auto shown = io::get_string(view, "chain_sha256") + std::to_string(wrap_width) + (timeline_mono ? "/mono" : "/regular") +
+          "/" + std::to_string(unit) + "/" + ctx.store.language() + "/" +
+          std::to_string((timeline_mono ? style.mono : style.font).size_px);
       if (shown_agent_ != shown) {
         shown_agent_ = shown;
-        agent_timeline_ = wrapped_text(agent_steps(view, ctx), wrap_width, ctx, timeline_mono);
+        // The person's turns are right-aligned when focused; the split view keeps one left-aligned text.
+        auto wrapped = wrapped_roles(agent_steps(view, ctx), wrap_width, ctx, timeline_mono, focused);
+        agent_timeline_ = std::move(wrapped.log);
+        agent_blocks_ = std::move(wrapped.blocks);
       }
       const float height = ctx.draw ? float(ctx.draw->rect.height()) : 800.0f;
-      layout.log_view("ai_agent_timeline", agent_timeline_, std::clamp(height / unit - 24.0f, 6.0f, 22.0f),
-                      transcript_position(agent_transcript_positions_, agent.selected())).mono = timeline_mono;
+      auto &timeline = layout.log_view("ai_agent_timeline", agent_timeline_, std::clamp(height / unit - 24.0f, 6.0f, 22.0f),
+                                       transcript_position(agent_transcript_positions_, agent.selected()));
+      timeline.mono = timeline_mono;
+      timeline.log_blocks = agent_blocks_;
       agent_cards(layout, ctx, state, view);
       agent_run_cards(layout, ctx, state);
       const auto show_usage = [&](ui::Layout &where) {
@@ -2321,6 +2404,8 @@ class AIEditor final : public Editor {
   std::shared_ptr<const CapturedProjectTable> captured_;
   ProjectContextPicker picker_;
   ui::LogBuffer transcript_, raw_reply_;
+  // Right-aligned question and user-turn blocks of the focused transcript and timeline (null in the split view).
+  std::shared_ptr<const std::vector<ui::LogBlock>> transcript_blocks_, agent_blocks_;
   TranscriptPositions transcript_positions_, agent_transcript_positions_;
   std::string pending_session_, pending_project_, agent_opening_, shown_agent_, timeline_session_, agent_navigation_error_;
   ui::LogBuffer agent_timeline_;
