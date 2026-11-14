@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-14 UTC · 会话布局发布与结果来源下一步
+
+`65af7fa777c86ede6f1cab156a100e151a040263` 已推至远端 main，包含桌面消息布局、两端文件预览恢复和 macOS 同会话视频帧诊断。前序 Desktop 已到终态，推送前 17 个提交整段 gitleaks 零发现。新头 Secret scan 已通过，Desktop、Runtime 与 Pages 已启动。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43538248513) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43538248558) [Pages](https://github.com/sijintech/stk/actions/runs/43538248402)
+
+Claude 121 在独立 worktree 提交 `0cadc1436adb7f1dcf8ba5b432d86e5d33687a5d`，Root 审阅后以本地 `cfe2cdb8` 收下设计。两端打开结果和返回原任务各为一次点击。Web 结果页直接显示任务名，桌面当前显示文件名或任务与连接 ID。Claude 122 在新 worktree 开发桌面结果来源名称，Root 审核精确任务与运行范围绑定和实窗路径。验收目标是进入结果后零次点击即可辨认实际显示任务，既有草稿与 Viewer 状态回归。桌面当前来源文案的对照来自源码，点击基线来自既有用例，实际新头尚未验证。原七份工作区修改保留。 [设计](docs/design/unified-task-result-entry.md)
+
 ## 2026-11-14 UTC · 前序桌面 CI 终态
 
 远端 `537e971016c540f8e8eb3d7ef8bfa7be6209ad13` 的 Desktop 已于 01:02:49 UTC 完成最后一个作业。Windows 原生 WebView2 与生产 Reports 预览 6/6，含 MP4 和内嵌 HTML 视频各二十轮，Windows CPU 1564/1564。Linux 2280/2280、打包、安装冒烟与 Runtime 13/13 通过。Desktop 整轮失败来自 macOS 的两项原生视频，详情见角色布局记录。前序发布门禁已到终态。日志 `root-delivery-20261114-196/353-{macos,windows-native}-job.log`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43530403353) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/43530403353/artifacts/14090198154) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43530403050)
