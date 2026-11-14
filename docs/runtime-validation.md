@@ -1,5 +1,9 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-14 UTC · 前序桌面 CI 终态
+
+远端 `537e971016c540f8e8eb3d7ef8bfa7be6209ad13` 的 Desktop 已于 01:02:49 UTC 完成最后一个作业。Windows 原生 WebView2 与生产 Reports 预览 6/6，含 MP4 和内嵌 HTML 视频各二十轮，Windows CPU 1564/1564。Linux 2280/2280、打包、安装冒烟与 Runtime 13/13 通过。Desktop 整轮失败来自 macOS 的两项原生视频，详情见角色布局记录。前序发布门禁已到终态。日志 `root-delivery-20261114-196/353-{macos,windows-native}-job.log`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43530403353) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/43530403353/artifacts/14090198154) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43530403050)
+
 ## 2026-11-14 UTC · 保存问答实窗与发布前认知检查
 
 本地 `385aa7f4` 的同一生产桌面二进制另测已有项目问答。Linux X11，缩放 1，1600×1100 和 680×1000 英文。固定起点为聚焦工作台已打开合成项目和最新的未发送保存问题。与输入卡片版本的同窗截图比较，问答角色标签与问题正文等量右移，垂直像素范围保持一致。宽窗一次点击「写问题」，窄窗从「历史」两次，输入草稿并按 Esc。每窗只有注意列表读取，零准备、发送和模型请求，数据库与项目修订一致。完成问答中的助手行由定向控件测试覆盖。证据 `root-delivery-20261114-196/role-main-question-{wide,narrow}-pixels.json`、`root-delivery-20261113-194/native-role-main-question-{wide,narrow}/receipt.json`。
