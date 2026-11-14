@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-11-14 UTC · 长文件清单中的就地恢复
+
+本地 `ce47b467e4f5f48882ec2c1e0db2c82c27db4756` 将 Web 的读取错误和「重新读取」移到原文件行，`4b9e6676` 更新统一验收矩阵。真实隔离 Hub 和受控节点提供 25 项发布清单，Chromium 1440×900、390×844 从第一行预览失败起步，错误与按钮均在视口内。一次点击恢复同一文件，一次点击返回原行，Esc 回到原会话。每窗两次相同路径及摘要的 GET，零写请求、零模型调用，草稿、会话与任务摘要一致。生产构建、定向 4/4 和最终全量 405/405，零跳过。初次全量有两项测试定位器错误，修正后复跑。证据 `root-delivery-20261114-195/{preview-row-build.log,preview-row-focused.xml,preview-row-verified-full.xml,live-preview-row-verified/browser-receipt.json,live-preview-row-verified/hub-receipt.json}`。
+
+保存副本隔离候选 `4c855089008a8a023850c6fe4eb62d20937db42b` 合成最新预览重试，Linux 全新构建及定向 110/110，零跳过。从聚焦合成项目起步，1600×1100 英文宽窗四次点击打开测试选择器，680×1000 中文窄窗五次点击进入路径字段。各窗复验取消、拒绝覆盖及明确保存，冻结内容解析累计 0、0、1 次。在同一二进制另跑预览故障恢复，宽五次、窄六次，其中一次重试，分别两次读取同一文件。原数据库、会话链和源文件保留。macOS ACL 和 Windows 目录绑定仍待目标平台。证据 `root-delivery-20261114-196/save-combined.xml`、`root-delivery-20261113-193/native-save-{chooser,fallback}-current-196/receipt.json`、`root-delivery-20261114-195/native-save-retry-save-combined-{wide-final,narrow}/receipt.json`。
+
+远端 `537e9710` Linux 完整测试 2280/2280，包与安装冒烟、Runtime 13/13 已成功。macOS 已到原生报告验收，Windows 尚运行。Claude 120 仍在独立 worktree 执行消息布局回归和故障对照，待提交交付。PR #53 仍冲突，主线已有等效生命周期修复，#54 仍为旧交接。待前序 Desktop 整轮终态后推送。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43530403353) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43530403050)
+
 ## 2026-11-14 UTC · 同一会话内重试文件预览
 
 本地 main `5b1dfec63f162d8838627803ff617c4022fba984` 将文件内容读取的重试接入两端。桌面在失败的冻结文件预览保留文件和返回入口，重试同一条目。Web 在连接或临时 HTTP 故障后保留发布清单及原预览或下载动作。两端沿用身份与内容校验。桌面摘要不符和非 UTF-8 仍有专门提示，Web 摘要不符不显示新增重试按钮。 [统一工作台](docs/design/unified-workbench.md)
