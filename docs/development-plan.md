@@ -1,5 +1,11 @@
 # STK 开发计划
 
+## 2026-11-14 UTC · 保存问答实窗与发布前认知检查
+
+本地 `385aa7f4` 的同一生产桌面二进制另测已有项目问答。Linux X11，缩放 1，1600×1100 和 680×1000 英文。固定起点为聚焦工作台已打开合成项目和最新的未发送保存问题。与输入卡片版本的同窗截图比较，问答角色标签与问题正文等量右移，垂直像素范围保持一致。宽窗一次点击「写问题」，窄窗从「历史」两次，输入草稿并按 Esc。每窗只有注意列表读取，零准备、发送和模型请求，数据库与项目修订一致。完成问答中的助手行由定向控件测试覆盖。证据 `root-delivery-20261114-196/role-main-question-{wide,narrow}-pixels.json`、`root-delivery-20261113-194/native-role-main-question-{wide,narrow}/receipt.json`。
+
+AOCI 0.1.0-rc21 稳定批次的 Maintain 返回 `stopped/blocked`，195 个目标、零签发候选、无 Recovery 或第三方冲突。Scope 状态是 `observed_evidence_review_required`，372 项观察待复核，其中 9 项标为人工复核。报告含被 Git 忽略的本地 Web 测试输出。Root 保留已有认知工作区修改和正式字节，未确认未审阅条目。证据 `root-delivery-20261114-196/{release-aoci-scope,aoci-scope-status}.json`。
+
 ## 2026-11-14 UTC · 聚焦会话角色布局
 
 Claude 120 在独立 worktree 提交 `236672482ebc007b9890457990c91bd36a34cab1`。Root 审阅后合入本地 main `385aa7f400ec6641c5d2f52944e177daa6aadf25`，共同设计更新于 `ab59f1c6`。桌面聚焦项目问答和智能体正文按语义角色绘制。用户块整体靠右、块内左对齐，宽度最多为可用正文文字区的 85%。助手、工具与审批状态从左侧显示。Claude 的独立 Linux 构建通过项目 1126/1126、定向 34/34、UI 147/148（可选 Weston 画廊跳过一项）。Root 的合入头重编桌面与测试目标，定向 76/76 和完整 UI 148/148，零跳过。桌面与 Web 的用户块采用共同几何，桌面仍沿用原生主题与角色文字。 [角色布局](docs/design/native-conversation-role-layout.md)
