@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-14 UTC · 结果来源实窗基线与 Cocoa 输入诊断
+
+Linux X11 用已发布桌面源码 `385aa7f4` 的生产二进制复验结果来源。缩放 1，1600×1100 英文、680×1000 中文。固定起点为聚焦任务页，已选成功合成任务 `Signed VTI only result`，唯一可视化文件 `scalar-0.vti` 的清单已到，Viewer 为空，新建任务有未提交草稿。打开结果、返回原任务和重访分别一次点击。另一次点击「来源」后按 Esc。两窗来源行只显示文件名，详情显示任务 ID。回到任务页选中原行且草稿可见，重访画布像素一致。每窗一次图求值，任务及发布摘要一致，零任务提交或模型调用。回执 `root-delivery-20261111-162/native-vti-window/window-current-source-baseline-{en,zh}/window-receipt.json`，来源截图 `root-delivery-20261114-197/result-source-baseline-{en,zh}.png`。Claude 122 仍在独立 worktree 实现来源名称。
+
+Root 本地 `0f646b19` 区分 macOS AppKit 命中失败的四种结果，并记录同一导航的 WKWebView 可见、挂载、媒体交互阻止、挂起和待验证释放状态。Linux 带探针报告目标构建及文档宿主和 AX CTest 15/15，零跳过。C++ 调用端 Apple 条件语法通过，实际 Objective-C++ 与 AppKit 路径待下一轮 macOS。该改动补充诊断，原生视频问题仍待复验。证据 `root-delivery-20261114-197/cocoa-surface-linux.xml`。 [取证设计](docs/design/macos-first-toolbar-pause-evidence.md)
+
+PR #53 精确头 `c9f13994` 仍冲突，当前发布契约要求清理超时返回可重试的 `busy`。主线含 `2de183f9`、`3924f39e` 的清理等待和并发合并。复跑传输生命周期与 Bridge 关闭 44/44，零跳过。#54 仍只新增 9 月版 `HANDOFF.md`，当前交接是 `handoff.md`。两个 PR 保持开放。保存副本以最新主线在隔离 worktree 无冲突合成为 `ce197a8233e89bcb766eb48c8b1489b507fdd99a`，新头 Linux 构建运行中，仍待目标平台。当前远端 `65af7fa7` 的 Pages、Secret scan、Linux 打包与安装冒烟通过，Desktop 和 Runtime 仍运行。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43538248513) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43538248558)
+
 ## 2026-11-14 UTC · 会话布局发布与结果来源下一步
 
 `65af7fa777c86ede6f1cab156a100e151a040263` 已推至远端 main，包含桌面消息布局、两端文件预览恢复和 macOS 同会话视频帧诊断。前序 Desktop 已到终态，推送前 17 个提交整段 gitleaks 零发现。新头 Secret scan 已通过，Desktop、Runtime 与 Pages 已启动。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43538248513) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43538248558) [Pages](https://github.com/sijintech/stk/actions/runs/43538248402)
