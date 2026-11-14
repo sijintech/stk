@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-14 UTC · 保存路径别名与 Windows CPU 回执
+
+保存副本隔离候选 `a06cdf496a5af5eefb417d157b5152909713e510` 为 macOS 和 Windows 补充已存在目录的文件身份比较。即使同一受保护目录的大小写或 Unicode 拼写不同，也按原目录限制处理。扩展保存用例覆盖隔离的桥、Runtime 和连接配置目录，并在支持对应别名的卷上断言别名被拒且零文件解析。Linux 新头 CTest 110/110、零跳过。Apple 条件 C++ 语法检查通过，测试翻译单元用 Linux 头与两个空的 GoogleTest 平台头占位；实际 Apple SDK、macOS 别名和 Windows 分支均待目标平台验证。
+
+同一候选的真实 Linux X11 宽窄窗均从已打开项目起步。宽窗四次点击到测试选择器，窄窗五次到路径字段。取消、同名与明确保存依次产生 0、0、1 次冻结文件解析，保存内容摘要一致，原项目和同名文件保留。证据 `root-delivery-20261114-196/save-alias.xml`、`root-delivery-20261113-193/native-save-{chooser,fallback}-alias-196/receipt.json`。
+
+远端 `537e9710` 的 Windows 官方 CPU JUnit 1564/1564、零跳过，Linux 2280/2280 和 Runtime 13/13 已通过。macOS 已到原生暂停对照，Windows WebView2 作业仍运行。Claude 120 的桌面角色布局定向 34/34，全项目用例仍在独立 worktree 运行，待冻结。 [Windows CPU 工件](https://github.com/sijintech/stk/actions/runs/43530403353/artifacts/14089970707) [Desktop CI](https://github.com/sijintech/stk/actions/runs/43530403353)
+
 ## 2026-11-14 UTC · 长文件清单中的就地恢复
 
 本地 `ce47b467e4f5f48882ec2c1e0db2c82c27db4756` 将 Web 的读取错误和「重新读取」移到原文件行，`4b9e6676` 更新统一验收矩阵。真实隔离 Hub 和受控节点提供 25 项发布清单，Chromium 1440×900、390×844 从第一行预览失败起步，错误与按钮均在视口内。一次点击恢复同一文件，一次点击返回原行，Esc 回到原会话。每窗两次相同路径及摘要的 GET，零写请求、零模型调用，草稿、会话与任务摘要一致。生产构建、定向 4/4 和最终全量 405/405，零跳过。初次全量有两项测试定位器错误，修正后复跑。证据 `root-delivery-20261114-195/{preview-row-build.log,preview-row-focused.xml,preview-row-verified-full.xml,live-preview-row-verified/browser-receipt.json,live-preview-row-verified/hub-receipt.json}`。
