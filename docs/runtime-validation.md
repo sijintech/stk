@@ -1,5 +1,15 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-14 UTC · 聚焦桌面结果显示任务名
+
+Claude 122 在独立 worktree 提交 `8ec3c1027ccc6929a87f57b2707b1b811f2a45c8`。Root 审阅后合入本地 main `6abd4b71e6dae4af7668ef05ba3b527b8e009833`，设计同步于 `620c3f9a`。桌面聚焦结果使用实际发起任务的连接或节点、工作区和任务名称。原范围中改选其它任务时沿用当前画面来源。来源范围失效或冷恢复时回退到原标签，完整 ID 仍在「来源」。Root 用长工作区的实窗复现发现任务名被截掉，合入时补上优先显示任务名的窄窗回退，并保留分栏来源标签。
+
+Root 精确代码头重编成功。Jobs、Viewer 范围和真实窗口定向 101/101，完整 Viewer 应用测试 33/33，零跳过。i18n 中英文均 3017 键。控件测试覆盖直连与 Hub、改选和换连接、授权失效、冷恢复、长名称以及文件路径。Claude 独立构建的 Jobs 82 项注册，其中 81 项通过、可选 Weston 跳过一项。Root 的三个 Jobs 窗口用例含 Xvfb、Weston，全部通过。证据 `root-delivery-20261114-197/{source-root-build.log,source-root-tests.xml,source-app-viewer.xml}`。
+
+同一生产二进制 `37b5d981c084764e7b56decf77054359ba00a8683b34e7cfe8a21dd58a857d69` 通过 Linux X11 1600×1100 英文、680×1000 中文，以及长工作区名中文窄窗。从已选成功合成任务、清单已到、冷 Viewer 和任务草稿起步。各一次点击打开结果、返回任务和重访。任务名在结果页零次点击可见。另一次点击「来源」显示完整名称、ID 与 `scalar-0.vti`，Esc 关闭。中键旋转后的画面在重访时像素一致，原任务草稿保留。每窗一次图求值，Runtime 任务与发布清单不变，零任务提交和模型调用。Hub 名称及跨范围回退通过控件测试，实窗为直连 Runtime。证据 `root-delivery-20261111-162/native-vti-window/window-source-camera-main-{en,zh,long-zh}/window-receipt.json`、`root-delivery-20261114-197/native-result-source-final.json`。
+
+Claude 123 在独立 worktree 从 `93a86258` 开发窄窗历史菜单，把已有搜索入口移到撰写入口旁。Root 负责菜单实际点击和焦点验收。远端 `65af7fa7` Linux 2281/2281、打包和安装冒烟、Runtime 13/13 通过。Windows 与 macOS 仍运行，本地变更等待前序 Desktop 完成。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43538248513) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43538248558)
+
 ## 2026-11-14 UTC · 实际视角往返与当前 Web 同源切片
 
 桌面生产源码 `385aa7f4` 在 Linux X11 的 1600×1100 英文和 680×1000 中文窗口，从已选成功合成任务、已到文件清单、空 Viewer 和未提交任务草稿起步。一次点击打开切片后用中键旋转，画布像素确实变化。一次点击查看来源，Esc 收起，再各一次点击返回任务和重访结果。重访画布与旋转后的图像一致，每窗全程仅一次图求值，Runtime 任务和发布清单一致，零提交和模型调用。当前原生基线来源仍显示文件名。证据 `root-delivery-20261111-162/native-vti-window/window-source-camera-baseline-{en,zh}/window-receipt.json`，并核对 Jobs 原生窗口基线三项全部通过。
