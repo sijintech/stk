@@ -108,6 +108,8 @@ struct Options {
 using Media = document_preview::test::MediaSnapshot;
 using NativePause = document_preview::test::NativePauseSnapshot;
 using NativePausePair = std::array<NativePause, 2>;
+constexpr double kHiddenPauseMaximumTime = 2.9;
+constexpr double kHiddenPauseMaximumRewind = 0.05;
 Json media_json(const Media &media)
 {
   return {{"paused", media.paused}, {"ended", media.ended}, {"seeking", media.seeking},
@@ -2082,7 +2084,8 @@ class Exercise {
     auto &phase = *hidden_media_;
     phase.first_paused_native_pause = last_native_pause();
     phase.hidden_checks = std::array<bool, 3>{
-        hidden.current_time < 2.9, hidden.current_time >= playing.current_time - 0.05, !hidden.ended};
+        hidden.current_time < kHiddenPauseMaximumTime,
+        hidden.current_time >= playing.current_time - kHiddenPauseMaximumRewind, !hidden.ended};
     if (!std::all_of(phase.hidden_checks->begin(), phase.hidden_checks->end(), [](bool value) { return value; })) {
       phase.failed = hidden; phase.failure_kind = "hidden-predicate"; phase.failure_detected = Clock::now();
     }
@@ -3318,8 +3321,10 @@ raise SystemExit(main())
             quiet_hidden_pause = pause;
 #endif
           }
-          require(hidden.current_time < 2.9 && hidden.current_time >= playing.current_time - 0.05 && !hidden.ended,
+          require(hidden.current_time < kHiddenPauseMaximumTime && !hidden.ended,
               "Hidden pause must precede the color transition and natural ending");
+          require(hidden.current_time >= playing.current_time - kHiddenPauseMaximumRewind,
+              "Hidden media time moved backwards beyond the pause tolerance");
           if (!options.quiet_hidden_hold) {
             hidden = ui.held_media(cycle, "hidden-tab-pause", session, hidden, 0.75);
           }

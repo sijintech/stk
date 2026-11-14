@@ -104,9 +104,10 @@ but its `current_time` is earlier than before hiding. The run ends in the hidden
 | `video` | `hold` / `hold-predicate` | 0.336 → 0.234 | `hold_checks.abs_time_delta_le_0_10` | 0.071 |
 | `html-video` | `paused-returned` / `hidden-predicate` | 0.216 → 0.102 | `hidden_checks.lower_time_ge_playing_minus_0_05` | 0.075 |
 
-In the `html-video` run, the receipt's `error` reads "Hidden pause must precede the color
-transition and natural ending". `failure_detected_seconds` uses the same clock as
-`checkpoints_seconds`, where `play_return` = 0.
+In this historical `html-video` receipt, `error` reads "Hidden pause must precede the color
+transition and natural ending". Current builds report this lower-bound failure as
+"Hidden media time moved backwards beyond the pause tolerance". `failure_detected_seconds`
+uses the same clock as `checkpoints_seconds`, where `play_return` = 0.
 
 **Reveal autoplay (isolated controls).** All `hidden_checks` pass in the hidden stage.
 The receipts differ from the quiet arm in `scenario` and `control`. They also differ in
