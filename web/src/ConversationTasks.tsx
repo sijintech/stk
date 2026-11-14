@@ -12,7 +12,7 @@ type TaskList={tasks:TaskReference[];more:boolean};
 type PublishedFile={path:string;size:number;sha256:string};
 type FileList={files:PublishedFile[];more:boolean};
 type FilePreview={path:string;text:string};
-type FileReadError={message:string;retry?:{file:PublishedFile;mode:'preview'|'download';launcher:HTMLButtonElement}};
+type FileReadError={path:string;message:string;retry?:{mode:'preview'|'download';launcher:HTMLButtonElement}};
 const DOWNLOAD_LIMIT=64*1024*1024;
 const TEXT_PREVIEW_LIMIT=256*1024;
 const canPreviewText=(file:PublishedFile)=>file.size<=TEXT_PREVIEW_LIMIT&&
@@ -92,8 +92,7 @@ function ConversationFiles({session,task,preview,onPreview,onAccessLost,onRetryF
         (error.status===408||error.status===429||error.status>=500);
       const message=mode==='preview'&&error instanceof ApiError?`预览失败 (${error.status})`:
         error instanceof Error?error.message:'无法读取发布文件。';
-      setFileError({message,
-        retry:canRetry?{file,mode,launcher}:undefined});
+      setFileError({path:file.path,message,retry:canRetry?{mode,launcher}:undefined});
     }finally{
       if(!request.signal.aborted){activeRead.current=null;setReading(null);}
     }
@@ -128,20 +127,22 @@ function ConversationFiles({session,task,preview,onPreview,onAccessLost,onRetryF
           <button type="button" className="quiet" aria-disabled={!!reading}
             aria-label={`下载 ${visiblePath(file.path)}`} onClick={event=>void readFile(file,'download',event.currentTarget)}>
             {reading?.path===file.path&&reading.mode==='download'?'正在下载…':'下载'}
-          </button></div>}</li>)}</ul>}
+          </button></div>}
+        {fileError?.path===file.path&&<div role="alert">{fileError.message} {fileError.retry&&
+          <button type="button" className="quiet" onClick={()=>{
+            const retry=fileError.retry;
+            if(!retry)return;
+            const {mode,launcher}=retry;
+            launcher.focus({preventScroll:true});
+            void readFile(file,mode,launcher);
+          }}>重新读取</button>}</div>}
+      </li>)}</ul>}
     {preview&&<div>
       <h3 ref={previewHeading} tabIndex={-1}><bdi>{visiblePath(preview.path)}</bdi></h3>
       <button type="button" className="quiet" onClick={()=>onPreview(null)}>返回发布文件</button>
       {preview.text?<pre className="conversation-file-preview" tabIndex={0} aria-label="文件内容">{preview.text}</pre>:
         <p className="muted">空文件</p>}
     </div>}
-    {fileError&&<p role="alert">{fileError.message} {fileError.retry&&<button type="button" className="quiet" onClick={()=>{
-      const retry=fileError.retry;
-      if(!retry)return;
-      const {file,mode,launcher}=retry;
-      launcher.focus({preventScroll:true});
-      void readFile(file,mode,launcher);
-    }}>重新读取</button>}</p>}
     {!preview&&list?.more&&<p className="muted">显示前 200 个发布文件。</p>}
   </section>;
 }

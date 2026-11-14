@@ -2046,7 +2046,8 @@ for (const viewport of viewports) {
       const report = Buffer.from('verified result\n');
       const sha256 = createHash('sha256').update(report).digest('hex');
       hub.conversationFiles.set(`${A} ${actionId}`, {id: A, action_id: actionId, task_id: taskId, more: false,
-        files: [{path: 'report.txt', size: report.length, sha256}]});
+        files: [{path: 'report.txt', size: report.length, sha256}, ...Array.from({length: 24}, (_, index) =>
+          ({path: `file-${index}.dat`, size: report.length, sha256}))]});
       await files.getByRole('button', {name: '重新读取'}).click();
       await expect(files.getByText('report.txt')).toBeVisible();
       await expect(files.getByRole('button', {name: '返回关联任务'})).toBeFocused();
@@ -2058,8 +2059,11 @@ for (const viewport of viewports) {
       });
       const preview = files.getByRole('button', {name: '预览 report.txt'});
       await preview.click();
-      await expect(files.getByRole('alert')).toContainText('预览失败 (503)');
-      await files.getByRole('button', {name: '重新读取'}).click();
+      const row = files.getByRole('listitem').filter({has: page.getByRole('button', {name: '预览 report.txt'})});
+      await expect(row.getByRole('alert')).toContainText('预览失败 (503)');
+      const retryPreview = row.getByRole('button', {name: '重新读取'});
+      await expect(retryPreview).toBeInViewport();
+      await retryPreview.click();
       const reading = page.getByRole('dialog', {name: '文件预览'});
       await expect(reading.getByLabel('文件内容')).toHaveText('verified result');
       expect(reads).toEqual(Array(2).fill('?' + new URLSearchParams({path: 'report.txt', sha256})));
