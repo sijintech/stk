@@ -1362,6 +1362,11 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
             .tip(shell_.store_.tr("workbench.history.search"));
         history_key_ = button.key;
       }
+      else {
+        // Search follows Write question as in the rail; its presence shifts every later row index.
+        identity += "/workbench_search_conversations";
+        menu.push_back({std::string(shell_.store_.tr("workbench.history.search")), std::move(open_search)});
+      }
     }
     if (questions_supported) {
       auto browse = shell_.saved_conversation_action(origin, {}, SavedConversationKind::QuestionHistory);
@@ -1405,9 +1410,6 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
       else { menu.push_back({refresh_label, refresh}); }
     }
     if (!rail) {
-      if (open_search) {
-        menu.push_back({std::string(shell_.store_.tr("workbench.history.search")), std::move(open_search)});
-      }
       // A popup dispatches by row index. Close it when a refresh or project switch replaces the rows.
       auto &history = nav.scope(identity).menu_button("workbench_history", shell_.store_.tr("workbench.nav.history"),
                                                      std::move(menu)).tip(info.name);

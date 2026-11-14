@@ -1072,7 +1072,7 @@ TEST_F(SavedConversationNavigationPython, RecentQuestionsOpenFromTasksAndResults
     }
   }
   ASSERT_NE(second, nullptr);
-  EXPECT_EQ(second->menu_index, 2);  // Compose and browse come before the newest question.
+  EXPECT_EQ(second->menu_index, 3);  // Compose, search and browse come before the newest question.
   const auto key = second->key;
   ASSERT_NO_FATAL_FAILURE(click(key));
   ASSERT_NO_FATAL_FAILURE(wait_for_question(kSecond));
@@ -1225,6 +1225,156 @@ TEST_F(SavedConversationNavigationPython, SearchOpensAnOlderQuestionWithoutWriti
   EXPECT_EQ(widget("conversation_search/query"), nullptr);
 }
 
+TEST_F(SavedConversationNavigationPython, NarrowHistoryOffersSearchRightAfterWriteQuestion)
+{
+  // A populated narrow menu: both groups, a full recent list and refresh, as in the wide rail.
+  ASSERT_NO_FATAL_FAILURE(prepare_table());
+  std::ofstream(dir.path() / "seed_agent_history") << "1";
+  const auto id = [](int index) { return "dddddddd-dddd-4ddd-8ddd-ddddddddddd" + std::to_string(index); };
+  for (int index = 0; index < 10; ++index) {
+    ASSERT_NO_FATAL_FAILURE(save_question(id(index).c_str(), ("Recent result " + std::to_string(index)).c_str()));
+  }
+  std::ofstream(dir.path() / "forbid_question_preparation").put('\n');
+  auto &discussion = project().discussion();
+  auto &agent = project().agent();
+  const auto input = "ai_question/" + handle();
+  const auto click = [&](const std::string &key) {
+    ASSERT_NE(widget(key), nullptr) << key;
+    const auto [x, y] = f.widget_center(key);
+    ASSERT_TRUE(f.drv->click(x, y)) << key;
+    f.screen.run_deferred(); f.drv->frame();
+  };
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    return discussion.recent_requests() && !discussion.recent_requests()->empty() && widget(input) &&
+           agent.list_loaded() && agent.sessions().size() == 2 && !discussion.exchange_busy() &&
+           !discussion.busy() && !project().busy();
+  }, 30)) << discussion.recent_requests_error() << agent.error();
+  widget(input)->string.assign("Keep this narrow draft");
+  const auto camera = f.shell->store().viewer().camera_serial();
+  auto *conversation = f.screen.maximized();
+  ASSERT_NO_FATAL_FAILURE(click("workbench_tasks"));
+  auto *tasks = f.screen.maximized();
+  f.drv->ctx.rect.xmax = 680;
+  f.drv->frame();
+
+  const ui::Block *popup = nullptr;
+  const auto rows = [&] {
+    std::vector<const ui::Widget *> out;
+    popup = nullptr;
+    for (const auto &block : f.screen.ui()->blocks()) {
+      if (block->kind() != ui::Block::Kind::Popup) { continue; }
+      popup = block.get();
+      for (const auto &item : block->widgets()) {
+        if (item.type == ui::WidgetType::MenuItem) { out.push_back(&item); }
+      }
+    }
+    std::sort(out.begin(), out.end(), [](auto *a, auto *b) { return a->menu_index < b->menu_index; });
+    return out;
+  };
+  const auto listing = [](const std::vector<const ui::Widget *> &items) {
+    std::string text;
+    for (const auto *item : items) {
+      text += std::to_string(item->menu_index) + ": " + item->text + (item->enabled ? "" : " (off)") + "\n";
+    }
+    return text;
+  };
+  const auto search_row = [](const std::vector<const ui::Widget *> &items) {
+    for (const auto *item : items) { if (item->text == "Search conversations") { return item; } }
+    return static_cast<const ui::Widget *>(nullptr);
+  };
+
+  // Two pointer clicks: History, then the second row.
+  ASSERT_FALSE(discussion.busy() || discussion.exchange_busy() || project().busy());
+  ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+  ASSERT_TRUE(f.screen.ui()->popup_open());
+  auto items = rows();
+  ASSERT_NE(popup, nullptr);
+  RecordProperty("narrow_history_rows", listing(items));
+  ASSERT_GE(items.size(), 8u) << listing(items);
+  EXPECT_EQ(items[0]->text, "Write question") << listing(items);
+  EXPECT_EQ(items[1]->text, "Search conversations") << listing(items);
+  EXPECT_TRUE(items[1]->enabled);
+  EXPECT_EQ(items[2]->text, "Saved questions") << listing(items);
+  EXPECT_EQ(items[3]->text, "Recent questions") << listing(items);
+  EXPECT_FALSE(items[3]->enabled);
+  EXPECT_EQ(items.back()->text, "Refresh list") << listing(items);
+  EXPECT_EQ(std::count_if(items.begin(), items.end(), [](auto *item) { return item->text == "Search conversations"; }), 1)
+      << listing(items);
+  EXPECT_EQ(std::count_if(items.begin(), items.end(),
+                          [](auto *item) { return !item->enabled && item->text == "Agent sessions"; }), 1)
+      << listing(items);
+  const auto *search = search_row(items);
+  ASSERT_NE(search, nullptr) << listing(items);
+  RecordProperty("search_row_index", search->menu_index);
+  RecordProperty("search_row_offset_px", int(search->rect.y - popup->frame().y));
+  EXPECT_GE(search->rect.y, popup->frame().y);
+  EXPECT_LE(search->rect.y1(), popup->frame().y1());
+  const auto launcher = search->key;
+  ASSERT_NO_FATAL_FAILURE(click(launcher));
+  const auto *query = widget("conversation_search/query");
+  ASSERT_NE(query, nullptr);
+  EXPECT_EQ(f.screen.ui()->focused(), query->id);
+  ASSERT_TRUE(f.drv->key(wm::Key::Esc));
+  f.drv->frame();
+  EXPECT_EQ(widget("conversation_search/query"), nullptr);
+  ASSERT_NE(widget("workbench_history"), nullptr);
+  EXPECT_EQ(f.screen.ui()->focused(), widget("workbench_history")->id);
+  EXPECT_EQ(f.screen.maximized(), tasks);
+
+  // A recent row one place lower still opens its own question, then carries the current marker.
+  ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+  items = rows();
+  const ui::Widget *older = nullptr;
+  for (const auto *item : items) { if (item->text.ends_with("Recent result 6")) { older = item; } }
+  ASSERT_NE(older, nullptr) << listing(items);
+  EXPECT_TRUE(older->text.starts_with("   ")) << older->text;
+  ASSERT_NO_FATAL_FAILURE(click(older->key));
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame(); return !discussion.exchange_busy() && widget(input) && discussion.exchange_id() == id(6);
+  }, 30)) << discussion.exchange_error();
+  EXPECT_EQ(io::get_string(discussion.exchange_question(), "text"), "Recent result 6");
+  EXPECT_EQ(f.screen.maximized(), conversation);
+  EXPECT_EQ(widget(input)->string.value(), "Keep this narrow draft");
+  ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+  items = rows();
+  int marked = 0;
+  for (const auto *item : items) {
+    if (item->text.starts_with("\xe2\x80\xa2 ")) {
+      ++marked;
+      EXPECT_TRUE(item->text.ends_with("Recent result 6")) << item->text;
+    }
+  }
+  EXPECT_EQ(marked, 1) << listing(items);
+  ASSERT_TRUE(f.drv->key(wm::Key::Esc));
+  f.drv->frame();
+
+  // A short window caps the popup. Search stays inside the visible rows without scrolling.
+  f.drv->ctx.rect.ymax = 300;
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("workbench_history"));
+  items = rows();
+  search = search_row(items);
+  ASSERT_NE(popup, nullptr);
+  ASSERT_NE(search, nullptr) << listing(items);
+  RecordProperty("short_popup_frame_px", int(popup->frame().h));
+  EXPECT_GE(search->rect.y, popup->frame().y);
+  EXPECT_LE(search->rect.y1(), popup->frame().y1()) << "popup " << popup->frame().y << "+" << popup->frame().h
+                                                     << ", search row at " << search->rect.y << "\n" << listing(items);
+  ASSERT_TRUE(f.drv->key(wm::Key::Esc));
+  f.drv->frame();
+  f.drv->ctx.rect.ymax = 1000;
+  f.drv->frame();
+
+  EXPECT_EQ(f.shell->store().viewer().camera_serial(), camera);
+  EXPECT_EQ(project().project()->revision, 1);
+  EXPECT_FALSE(std::filesystem::exists(dir.path() / "unexpected_write"));
+  std::ifstream trace(dir.path() / "history_reads");
+  for (std::string line; std::getline(trace, line);) { EXPECT_NE(line, "project.conversations.search"); }
+}
+
 class LegacyConversationSearchPython : public SavedConversationNavigationPython {
  protected:
   void configure_bridge(bridge::ClientOptions &options, const std::string &python) override
@@ -1247,6 +1397,29 @@ TEST_F(LegacyConversationSearchPython, OlderBridgeKeepsRecentHistoryWithoutTheSe
   EXPECT_FALSE(client->hello_info()->has_method("project.conversations.search"));
   EXPECT_EQ(widget("workbench_search_conversations"), nullptr);
   EXPECT_NE(widget("workbench_saved_questions"), nullptr);
+
+  // The narrow menu keeps its earlier rows: no search row, and the first question follows browse.
+  f.drv->ctx.rect.xmax = 680;
+  f.drv->frame();
+  ASSERT_NE(widget("workbench_history"), nullptr);
+  const auto [x, y] = f.widget_center("workbench_history");
+  ASSERT_TRUE(f.drv->click(x, y));
+  f.screen.run_deferred(); f.drv->frame();
+  ASSERT_TRUE(f.screen.ui()->popup_open());
+  std::vector<std::pair<int, std::string>> rows;
+  for (const auto &block : f.screen.ui()->blocks()) {
+    for (const auto &item : block->widgets()) {
+      if (item.type == ui::WidgetType::MenuItem) { rows.emplace_back(item.menu_index, item.text); }
+    }
+  }
+  std::sort(rows.begin(), rows.end());
+  ASSERT_GE(rows.size(), 4u);
+  EXPECT_EQ(rows[0].second, "Write question");
+  EXPECT_EQ(rows[1].second, "Saved questions");
+  EXPECT_TRUE(std::any_of(rows.begin() + 2, rows.end(), [](const auto &row) {
+    return row.second.ends_with("Saved on an older bridge");
+  }));
+  for (const auto &row : rows) { EXPECT_NE(row.second, "Search conversations"); }
 }
 
 TEST_F(SavedConversationNavigationPython, BrowseSavedQuestionsBeyondTheRecentRailWithoutSelectingOrWriting)
