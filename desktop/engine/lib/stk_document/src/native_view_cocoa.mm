@@ -1672,6 +1672,24 @@ bool matches_native_view(wm::NativeWindowHandle parent, std::string_view session
          state->result.navigation_generation == navigation_generation;
 }
 
+std::optional<NativeInputSurface> native_input_surface(wm::NativeWindowHandle parent,
+                                                      std::string_view session_id,
+                                                      uint64_t navigation_generation)
+{
+  std::string error;
+  const auto state = find_view(parent, session_id, error);
+  if (!state || !state->view || !navigation_generation || state->result.status != NativeViewStatus::Ready ||
+      state->result.navigation_generation != navigation_generation) {
+    return std::nullopt;
+  }
+  WKWebView *view = state->view;
+  NSWindow *window = state->parent;
+  return NativeInputSurface{state->media_generation, state->visibility_generation, state->visible,
+      cocoa::actually_visible(state), window && view.superview == window.contentView && view.window == window,
+      bool(view.isHiddenOrHasHiddenAncestor), state->media_interaction_blocked,
+      state->suspension.ready(true), bool(state->release_started)};
+}
+
 bool probe_media(wm::NativeWindowHandle parent, std::string_view session_id,
                  MediaProbeCallback callback, std::string &error)
 {

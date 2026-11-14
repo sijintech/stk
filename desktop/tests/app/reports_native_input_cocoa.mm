@@ -55,9 +55,10 @@ bool resolve(wm::NativeWindowHandle handle, document_preview::ViewBounds bounds,
   const NSPoint point = [content convertPointFromBacking:NSMakePoint(
       NSMinX(pixels) + px, content.isFlipped ? NSMinY(pixels) + py : NSMaxY(pixels) - py)];
   NSView *hit = [content hitTest:[content convertPoint:point toView:content.superview]];
-  if (!hit || hit == content || hit.window != parent || hit.hiddenOrHasHiddenAncestor) {
-    return fail("No visible native document view at the input point");
-  }
+  if (!hit) { return fail("Cocoa document input point has no AppKit hit"); }
+  if (hit == content) { return fail("Cocoa document input point hit only the host content view"); }
+  if (hit.window != parent) { return fail("Cocoa document input point hit another window"); }
+  if (hit.hiddenOrHasHiddenAncestor) { return fail("Cocoa document input point hit a hidden view"); }
   WKWebView *web = nil;
   bool reached_content = false;
   for (NSView *view = hit; view; view = view.superview) {

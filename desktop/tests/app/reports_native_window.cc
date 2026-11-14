@@ -2419,6 +2419,13 @@ class Exercise {
       try {
         const auto *view = widget("reports_document_viewport");
         const auto *context = screen_.ui();
+        const auto surface = document_preview::test::native_input_surface(
+            window_.native_window_handle(), session, input.navigation_generation);
+        const Json native = surface ? Json{{"media_generation", surface->media_generation},
+            {"visibility_generation", surface->visibility_generation}, {"requested_visible", surface->requested_visible},
+            {"actually_visible", surface->actually_visible}, {"attached_to_parent", surface->attached_to_parent},
+            {"hidden", surface->hidden}, {"media_interaction_blocked", surface->media_interaction_blocked},
+            {"suspension_ready", surface->suspension_ready}, {"release_pending", surface->release_pending}} : Json(nullptr);
         const auto rectangle = [](ui::Rect r) { return Json::array({r.x, r.y, r.w, r.h}); };
         Json overlays = Json::array();
         if (context) {
@@ -2433,7 +2440,8 @@ class Exercise {
             {"actual_viewport", view ? rectangle(view->rect) : Json(nullptr)},
             {"viewport_clip", view ? rectangle(view->clip) : Json(nullptr)},
             {"viewport_enabled", view && view->enabled}, {"viewport_fully_visible", visible(view)},
-            {"layout_current", layout_epoch_.matches(input.viewport_generation)},
+            {"layout_current", layout_epoch_.matches(input.viewport_generation)}, {"native_surface", native},
+            {"navigation_generation", input.navigation_generation},
             {"session_active", resources->active()}, {"overlays", std::move(overlays)}};
       }
       catch (...) {} // Optional evidence cannot replace the original seek failure.

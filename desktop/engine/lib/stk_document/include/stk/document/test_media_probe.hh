@@ -155,6 +155,22 @@ bool set_visible_playback_suspended(wm::NativeWindowHandle parent, std::string_v
  */
 bool matches_native_view(wm::NativeWindowHandle parent, std::string_view session_id,
                          const void *expected_view, uint64_t navigation_generation);
+
+struct NativeInputSurface {
+  uint64_t media_generation = 0;
+  uint64_t visibility_generation = 0;
+  bool requested_visible = false;
+  bool actually_visible = false;
+  bool attached_to_parent = false;
+  bool hidden = false;
+  bool media_interaction_blocked = false;
+  bool suspension_ready = false;
+  bool release_pending = false;
+};
+/** UI-thread only. Read cached native state on the exact ready navigation after an input failure. */
+std::optional<NativeInputSurface> native_input_surface(wm::NativeWindowHandle parent,
+                                                      std::string_view session_id,
+                                                      uint64_t navigation_generation);
 #endif
 /** Parse one bounded flat DOM snapshot. Failure leaves output unchanged; native generation is preserved. */
 bool parse_media_snapshot(std::string_view json, MediaSnapshot &media, std::string &error);
