@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-14 UTC · 同一原生视频会话切页取证
+
+本地 main `bfff6154a7e161a4064e34c79a841e4993f86189` 为 macOS 增加 MP4 和内嵌 HTML 视频的独立帧标记诊断。用真实标签入口隐藏和重显同一会话。记录切页前非零帧、隐藏期首个和核验后的 DOM 与原生回执、重显后释放状态和两个稳定帧。截图、摘要与同一导航绑定。截图耗时会推迟切页，重显帧只能说明用户再次看到的画面。原六项生产验收、二十轮与阈值沿用。
+
+带探针 Linux 报告目标重新构建，文档宿主及 AX CPU 15/15、零跳过。Linux 用 Apple 条件做同一 C++ 翻译单元的语法核对；用独立 CMake 注册检查确认原 39 条命令一致，新增两条诊断，各绑定本机窗口锁。该核对未链接 Apple SDK。原生截图与帧回执待 macOS 实跑。证据 `root-delivery-20261114-195/{hidden-frame-build.log,hidden-frame-cpu.xml,hidden-frame-apple-syntax.log,hidden-registration.json,hidden-registration-baseline.json}`。 [诊断设计](docs/design/macos-first-toolbar-pause-evidence.md)
+
+远端 `537e9710` Runtime 13/13 已完成。Desktop Linux 包和安装冒烟成功，其余仍运行，本轮代码待整轮结束后推送。Claude 120 已在独立 worktree 写入角色布局与 UI 测试，进程仍运行，交付待冻结。PR #53 仍冲突，等效修复已在主线。#54 仍是旧交接。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43530403353) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43530403050)
+
 ## 2026-11-14 UTC · 隐藏暂停取证与保存副本组合候选
 
 Root 用 `834f7bd4` 官方工件核对四项首次暂停帧标记对照。六张 PNG 摘要及独立解码一致。连续播放臂分别在 176、191 ms 取得帧 1，立即暂停臂随后均稳定在帧 0。由于是独立会话且截图需要时间，尚无法确定隐藏或暂停时画面是否实际回退。该轮必测两项的失败发生在后台，MP4 时钟 0.37287→0.23400 秒，HTML 0.22601→0.10200 秒，媒体均处于暂停且导航未变。`9f25a2d8` 将隐藏阶段的时间回退与晚暂停报错区分，保留原阈值。Linux 带探针原生报告目标构建通过，文档宿主及 AX CPU 15/15、零跳过。后续优先采集同一导航切页前后的帧与原生状态。 [取证设计](docs/design/macos-first-toolbar-pause-evidence.md) [macOS 工件](https://github.com/sijintech/stk/actions/runs/43522208408/artifacts/14085529598)
