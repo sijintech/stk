@@ -1,6 +1,6 @@
 # 桌面聚焦会话的角色布局：实现方案（提案）
 
-2026-11-13 起草，基线 STK `dd3c8a02d92c4be1730601b111c1ddff0be2fa14`（Root 任务 119）。**本文是方案，没有实现。** 上位对照见 [Synthrix 主页面视觉对照](synthrix-primary-page-parity.md) 第 3.3 节「角色区分」和第 5 节，交互规则见 [统一研究工作台](unified-workbench.md)。
+2026-11-13 起草，基线 STK `dd3c8a02d92c4be1730601b111c1ddff0be2fa14`（Root 任务 119）。首期几何布局已于本地 `main` 的 `385aa7f4` 实现。下文保留基线调查及实现取舍。上位对照见 [Synthrix 主页面视觉对照](synthrix-primary-page-parity.md) 第 3.3 节「角色区分」和第 5 节，交互规则见 [统一研究工作台](unified-workbench.md)。
 
 ## Root 审阅结论
 
