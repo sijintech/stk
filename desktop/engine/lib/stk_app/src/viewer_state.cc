@@ -394,6 +394,9 @@ struct ViewerState::Impl {
   /* Source. */
   ViewerSource source;
   std::function<bool()> task_scope_current;
+  /* Display names from the accepted launch; never persisted. */
+  TaskSourceNames task_names;
+  std::function<bool()> task_names_current;
   std::string task_artifact_sha256;
   std::string label, open_error;
   bool waiting_for_metadata = false;
@@ -1762,6 +1765,10 @@ bool ViewerState::open(const OpenResultRequest &request, const bool fit_initial_
     m.source.task_id = request.task_id;
     m.source.field_file = request.task_artifact_path;
     m.task_scope_current = request.still_same_scope;
+    if (request.still_same_scope && request.source_names_current) {
+      m.task_names = request.source_names;
+      m.task_names_current = request.source_names_current;
+    }
     m.task_artifact_sha256 = request.task_artifact_sha256;
     m.label = m.source.label();
     m.camera_serial++;
@@ -1998,6 +2005,8 @@ void ViewerState::close()
   m.probe_future.cancel();
   m.source = ViewerSource{};
   m.task_scope_current = {};
+  m.task_names = {};
+  m.task_names_current = {};
   m.task_artifact_sha256.clear();
   m.label.clear();
   m.open_error.clear();
@@ -2049,6 +2058,19 @@ const Json &ViewerState::opening_status() const
 const std::string &ViewerState::source_label() const
 {
   return impl_->label;
+}
+
+std::optional<TaskSourceNames> ViewerState::task_source_names(const ViewerSource &source) const
+{
+  const Impl &m = *impl_;
+  if (opening_ || m.workspace_suspended || m.frozen_workspace_result || m.source.kind != SourceKind::Task ||
+      source.kind != SourceKind::Task || source.connection != m.source.connection || source.node != m.source.node ||
+      source.workspace_id != m.source.workspace_id || source.task_id != m.source.task_id ||
+      !m.task_scope_current || !m.task_names_current || !m.task_scope_current() || !m.task_names_current())
+  {
+    return std::nullopt;
+  }
+  return m.task_names;
 }
 
 const std::string &ViewerState::open_error() const

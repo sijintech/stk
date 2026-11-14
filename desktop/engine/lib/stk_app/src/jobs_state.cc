@@ -66,6 +66,47 @@ std::string declared_ssh_host(const bridge::ConnectionInfo &info)
   return ssh == info.raw.end() ? std::string() : get_str(*ssh, "host");
 }
 
+/** Bounded so an oversized row cannot grow the Viewer's source text without limit. Runtime names have at most
+ * 200 characters (800 UTF-8 bytes), which stay whole. */
+constexpr size_t kMaxSourceName = 1024;
+
+std::string bounded_source_name(const std::string_view name)
+{
+  if (name.size() <= kMaxSourceName) { return std::string(name); }
+  return std::string(name.substr(0, ui::utf8::floor_boundary(name, kMaxSourceName))) + "\xe2\x80\xa6";
+}
+
+/** The names of a task's rows while the Jobs target is exactly that connection, node and workspace and still
+ * lists the task there. Reads in-memory rows only. */
+std::optional<TaskSourceNames> listed_source_names(const JobsState &jobs, const std::string &connection,
+                                                   const std::string &node, const std::string &workspace,
+                                                   const std::string &task)
+{
+  const auto *active = jobs.active();
+  if (!active || task.empty() || workspace.empty() || jobs.active_id() != connection ||
+      (jobs.hub() ? jobs.node() : std::string()) != node || jobs.workspace() != workspace)
+  {
+    return std::nullopt;
+  }
+  const auto &tasks = jobs.tasks();
+  const auto row = std::find_if(tasks.begin(), tasks.end(), [&](const TaskRow &t) {
+    return t.id == task && (t.workspace_id.empty() || t.workspace_id == workspace);
+  });
+  if (row == tasks.end()) { return std::nullopt; }
+  TaskSourceNames names;
+  names.connection = bounded_source_name(active->info.name);
+  if (!node.empty()) {
+    for (const NodeRow &n : jobs.nodes()) {
+      if (n.id == node) { names.node = bounded_source_name(n.name); }
+    }
+  }
+  for (const WorkspaceRow &w : jobs.workspaces()) {
+    if (w.id == workspace) { names.workspace = bounded_source_name(w.name); }
+  }
+  names.task = bounded_source_name(row->name);
+  return names;
+}
+
 int compare_task_facts(const TaskRow &candidate, const TaskRow &known)
 {
   // On one Runtime a terminal state and an observed cancellation request do not roll back.
@@ -2817,6 +2858,18 @@ std::optional<OpenResultRequest> JobsState::selected_result_request() const
              jobs.ready() && jobs.epoch_ == scope && jobs.ready_epoch_ == ready && jobs.store_.bridge_epoch() == bridge &&
              current->info.url == url && current->info.device_id == device && declared_ssh_host(current->info) == ssh_host;
     };
+    // Names follow the launched task's own row, never the later selection; a changed scope falls back to IDs.
+    if (auto names = listed_source_names(*this, req.connection, req.node, req.workspace_id, req.task_id)) {
+      req.source_names = *names;
+      req.source_names_current = [weak, scope = req.still_same_scope, names = std::move(*names),
+                                  connection = req.connection, node = req.node, workspace = req.workspace_id,
+                                  task = req.task_id] {
+        const auto owner = weak.lock();
+        if (!owner || !scope()) { return false; }
+        const auto listed = listed_source_names(*owner->self, connection, node, workspace, task);
+        return listed && *listed == names;
+      };
+    }
   }
   return req;
 }

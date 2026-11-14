@@ -3,6 +3,7 @@
  * Jobs area with demo content (en / zh), drops, and the dialogs driven with synthesized events
  * against the fake bridge (Add Runtime, the path-field fallback of the file dialog, cancel). */
 
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -169,6 +170,55 @@ struct UiOnFake {
     f.drv->frame();
   }
 };
+
+/** The Viewer's result source line: the key-less backdrop label right of the focused 来源 button. */
+const ui::Widget *source_line(UiOnFake &u)
+{
+  const auto *button = u.find("result_source");
+  if (!button || !button->block) { return nullptr; }
+  for (const auto &w : button->block->widgets()) {
+    if (w.type == ui::WidgetType::Label && w.label_backdrop && w.rect.x >= button->rect.x1() - 1 &&
+        std::abs(w.rect.cy() - button->rect.cy()) < 2.0f)
+    {
+      return &w;
+    }
+  }
+  return nullptr;
+}
+
+std::string source_line_text(UiOnFake &u)
+{
+  const auto *line = source_line(u);
+  return line ? line->text : std::string("<no source line>");
+}
+
+/** Opens 来源, returns its rows (one per line) and closes it with Esc. */
+std::string source_detail_rows(UiOnFake &u, const bool joined = false)
+{
+  u.click("result_source");
+  const auto *fields = u.find("viewer_source_details/fields");
+  std::string rows;
+  if (fields && fields->list) {
+    for (int row = 0; row < fields->list->count; ++row) {
+      rows += fields->list->text(row) + (joined ? "" : "\n");
+    }
+  }
+  u.f.drv->key(wm::Key::Esc);
+  u.f.drv->frame();
+  return rows;
+}
+
+/** The whole source line is inside its label and the window: nothing of it is clipped. */
+void expect_source_line_fits(UiOnFake &u)
+{
+  const auto *line = source_line(u);
+  ASSERT_NE(line, nullptr);
+  const auto &ui = *u.f.screen.ui();
+  const float text = ui.measurer().width(line->text, ui.style().font);
+  EXPECT_LE(text, line->rect.w + 0.5f) << line->text;
+  EXPECT_LE(line->rect.x1(), line->clip.x1() + 0.5f) << line->text;
+  EXPECT_LE(line->rect.x1(), float(u.f.screen.rect().width()) + 0.5f) << line->text;
+}
 
 TEST(JobsLayout, OpenCancelDialogDisablesDispatchAfterItsTaskOrScopeChanges)
 {
@@ -534,6 +584,15 @@ TEST(JobsLayout, OpeningATaskResultKeepsTheFocusedWorkbench)
   EXPECT_EQ(store.viewer().source().workspace_id, workspace);
   EXPECT_EQ(store.viewer().source().connection, "runtime:lab");
   EXPECT_TRUE(store.viewer().fit_initial_view());
+  // The source line names the launched task's location, workspace and task; the exact IDs stay in its tooltip.
+  const auto *line = source_line(u);
+  ASSERT_NE(line, nullptr);
+  EXPECT_EQ(line->text, "lab \xc2\xb7 \xe9\xbb\x98\xe8\xae\xa4\xe5\xb7\xa5\xe4\xbd\x9c\xe5\x8c\xba \xc2\xb7 Result task");
+  EXPECT_EQ(line->text.find(task), std::string::npos);
+  EXPECT_NE(line->tooltip.find("runtime:lab"), std::string::npos);
+  EXPECT_NE(line->tooltip.find(workspace), std::string::npos);
+  EXPECT_NE(line->tooltip.find(task), std::string::npos);
+  EXPECT_EQ(store.viewer().source_label(), task + " @ runtime:lab");
   const auto source_camera = store.viewer().camera_serial();
   const auto source_payload = store.viewer().payload_serial();
   const auto evaluations = store.viewer().evaluations_started();
@@ -548,6 +607,10 @@ TEST(JobsLayout, OpeningATaskResultKeepsTheFocusedWorkbench)
   EXPECT_NE(details.find("runtime:lab"), std::string::npos);
   EXPECT_NE(details.find(workspace), std::string::npos);
   EXPECT_NE(details.find(task), std::string::npos);
+  EXPECT_NE(details.find("Connection  \xc2\xb7  lab\nConnection ID  \xc2\xb7  runtime:lab\n"), std::string::npos) << details;
+  EXPECT_NE(details.find("Runtime workspace  \xc2\xb7  \xe9\xbb\x98\xe8\xae\xa4\xe5\xb7\xa5\xe4\xbd\x9c\xe5\x8c\xba\n"),
+            std::string::npos) << details;
+  EXPECT_NE(details.find("Task  \xc2\xb7  Result task\nTask ID  \xc2\xb7  " + task + "\n"), std::string::npos) << details;
   u.f.drv->key(wm::Key::Space, wm::ModCtrl);
   EXPECT_EQ(u.f.screen.maximized(), &u.f.area("a2"));
   u.f.drv->key(wm::Key::Numpad1);
@@ -905,6 +968,253 @@ TEST(JobsLayout, FocusedResultSourceWrapsAndScrollsLongLocalLabels)
   ASSERT_NE(ui->find("result_source"), nullptr);
   EXPECT_EQ(ui->focused(), ui->find("result_source")->id);
   EXPECT_EQ(viewer.base_payload(), payload);
+}
+
+TEST(JobsLayout, NamedTaskSourceFollowsTheDisplayedTaskAndFallsBackToIdsOutsideItsScope)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  UiOnFake u(false, true, 680);
+  auto &jobs = u.jobs();
+  auto &viewer = u.f.shell->store().viewer();
+  viewer.prefetch_neighbours = false;
+  ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+  jobs.select_connection("runtime:lab");
+  ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty(); }));
+  const std::string task(32, 'c'), other_task(32, 'd');
+  const auto workspace = jobs.workspace();
+  const io::Json vti{{"path", "scalar-0.vti"}, {"size", 3}, {"sha256", std::string(64, 'b')}};
+  const io::Json plan{{task, io::Json::array({{{"artifacts", io::Json::array({vti})}}})}};
+  ASSERT_TRUE(wmtest::write_text(u.dir.str() + "/model/artifacts-plan.json", plan.dump()));
+  double snapshot = 100.0;
+  const auto apply_tasks = [&](const bool with_original = true) {
+    io::Json rows = io::Json::array();
+    if (with_original) {
+      rows.push_back({{"id", task}, {"workspace_id", workspace}, {"name", "Result task"}, {"state", "succeeded"}});
+    }
+    rows.push_back({{"id", other_task}, {"workspace_id", workspace}, {"name", "Other task"}, {"state", "succeeded"}});
+    jobs.apply_snapshot(rows, snapshot += 1.0);
+  };
+  const std::string named = "lab \xc2\xb7 \xe9\xbb\x98\xe8\xae\xa4\xe5\xb7\xa5\xe4\xbd\x9c\xe5\x8c\xba \xc2\xb7 Result task";
+  const std::string shown = named + "  \xc2\xb7  showing scalar-0.vti";
+  const std::string ids = "Task: scalar-0.vti";
+  const std::string base = "a1/main/focused_jobs/";
+  const auto open_from_jobs = [&] {
+    u.click("workbench_tasks");
+    jobs.select_task(task);
+    ASSERT_NE(u.find(base + "tasks/open_viewer"), nullptr);
+    u.click(base + "tasks/open_viewer");
+    ASSERT_TRUE(u.pump([&] { return viewer.source().task_id == task && source_line_text(u).rfind("lab", 0) == 0; }))
+        << source_line_text(u);
+  };
+  apply_tasks();
+  jobs.select_task(task);
+  u.f.shell->open_workbench(u.f.screen);
+  u.f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(open_from_jobs());
+  ASSERT_TRUE(u.pump([&] { return !viewer.evaluating(); }));
+  EXPECT_EQ(viewer.source().field_file, "scalar-0.vti");
+  EXPECT_EQ(viewer.source_label(), "scalar-0.vti");
+  EXPECT_EQ(source_line_text(u), shown);
+  ASSERT_NO_FATAL_FAILURE(expect_source_line_fits(u));  // Readable in full at 680 px.
+
+  // Drawing the named line and its details dispatches nothing and changes no Viewer state.
+  const auto methods = [&] { return wmtest::read_text(u.dir.str() + "/model/methods.log"); };
+  const auto sent = methods();
+  const auto version = viewer.version();
+  const auto camera = viewer.camera_serial();
+  const auto payload = viewer.payload_serial();
+  const auto evaluations = viewer.evaluations_started();
+  for (int i = 0; i < 3; ++i) { u.f.drv->frame(); }
+  const auto details = source_detail_rows(u);
+  EXPECT_NE(details.find("Task  \xc2\xb7  Result task\nTask ID  \xc2\xb7  " + task + "\n"), std::string::npos) << details;
+  EXPECT_NE(details.find("Runtime workspace ID  \xc2\xb7  " + workspace), std::string::npos) << details;
+  EXPECT_EQ(methods(), sent);
+  EXPECT_EQ(viewer.version(), version);
+  EXPECT_EQ(viewer.camera_serial(), camera);
+  EXPECT_EQ(viewer.payload_serial(), payload);
+  EXPECT_EQ(viewer.evaluations_started(), evaluations);
+
+  // Another selection in the same queue never relabels the displayed source.
+  u.click("workbench_tasks");
+  jobs.select_task(other_task);
+  u.click("workbench_results");
+  EXPECT_EQ(viewer.source().task_id, task);
+  EXPECT_EQ(source_line_text(u), shown);
+  const auto reselected = source_detail_rows(u);
+  EXPECT_NE(reselected.find("Result task"), std::string::npos) << reselected;
+  EXPECT_EQ(reselected.find("Other task"), std::string::npos) << reselected;
+  EXPECT_EQ(jobs.selected(), other_task);
+
+  // The name stays only while the original row is listed in that scope.
+  apply_tasks(false);
+  EXPECT_EQ(source_line_text(u), ids);
+  EXPECT_EQ(source_detail_rows(u).find("Result task"), std::string::npos);
+  apply_tasks();
+  EXPECT_EQ(source_line_text(u), shown);
+
+  // A workspace change (and return) ends the launch scope.
+  ASSERT_NO_FATAL_FAILURE(open_from_jobs());
+  EXPECT_EQ(source_line_text(u), shown);
+  jobs.select_workspace("");
+  jobs.select_workspace(workspace);
+  ASSERT_TRUE(u.pump([&] { return jobs.workspace() == workspace && jobs.ready(); }));
+  apply_tasks();
+  u.click("workbench_results");
+  EXPECT_EQ(viewer.source().task_id, task);
+  EXPECT_EQ(source_line_text(u), ids);
+
+  // So does a connection change A -> B -> A, even with the same rows listed again.
+  ASSERT_NO_FATAL_FAILURE(open_from_jobs());
+  EXPECT_EQ(source_line_text(u), shown);
+  jobs.select_connection("local");
+  jobs.select_connection("runtime:lab");
+  ASSERT_TRUE(u.pump([&] { return jobs.workspace() == workspace && jobs.ready(); }));
+  apply_tasks();
+  u.click("workbench_results");
+  EXPECT_EQ(source_line_text(u), ids);
+
+  // And a changed connection identity: a failed credential check, even after a later successful one.
+  ASSERT_NO_FATAL_FAILURE(open_from_jobs());
+  EXPECT_EQ(source_line_text(u), shown);
+  bridge::ConnectionCheck check;
+  check.id = "runtime:lab";
+  check.error = bridge::Error::make(bridge::ErrorCode::Unauthorized, "Credential check denied");
+  jobs.apply_check(check);
+  EXPECT_EQ(source_line_text(u), ids);
+  check.ok = true;
+  check.error.reset();
+  jobs.apply_check(check);
+  EXPECT_EQ(source_line_text(u), ids);
+  EXPECT_EQ(viewer.source_label(), "scalar-0.vti");
+  EXPECT_EQ(methods().find("task.submit\n"), std::string::npos);
+}
+
+TEST(JobsLayout, LongTaskSourceNamesStayBoundedOnTheLineAndCompleteInSourceDetails)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  // The longest Runtime name (200 characters) is kept whole; an oversized row is bounded with an ellipsis.
+  std::string longest = "Long-";
+  while (longest.size() < 200) { longest += "ferroelectric-domain-relaxation-"; }
+  longest.resize(200);
+  const std::string oversized = std::string(1100, 'n');
+  const std::string short_task = "Short task in a long workspace";
+  for (const std::string &name : {longest, oversized, std::string("Two\nlines"), short_task}) {
+    SCOPED_TRACE(name.size());
+    UiOnFake u(false, false, 680);
+    auto &jobs = u.jobs();
+    ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+    jobs.select_connection("runtime:lab");
+    ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty(); }));
+    const std::string task(32, 'c');
+    const std::string workspace_name = std::string(150, 'w');
+    if (name == short_task) {
+      jobs.apply_workspaces(io::Json::array({{{"id", jobs.workspace()}, {"name", workspace_name}}}));
+    }
+    jobs.apply_snapshot(io::Json::array({{{"id", task}, {"workspace_id", jobs.workspace()},
+                                          {"name", name}, {"state", "succeeded"}}}), 100.0);
+    jobs.select_task(task);
+    u.f.shell->open_workbench(u.f.screen);
+    u.f.drv->frame();
+    u.click("workbench_tasks");
+    u.click("a1/main/focused_jobs/tasks/open_viewer");
+    ASSERT_TRUE(u.pump([&] { return u.f.shell->store().viewer().source().task_id == task && source_line(u); }));
+    const auto *line = source_line(u);
+    ASSERT_NE(line, nullptr);
+    EXPECT_LE(line->text.size(), 1100u);
+    EXPECT_EQ(line->text.find('\n'), std::string::npos);
+    if (name == short_task) {
+      EXPECT_EQ(line->text, "Task: " + short_task);
+      ASSERT_NO_FATAL_FAILURE(expect_source_line_fits(u));
+      EXPECT_NE(source_detail_rows(u, true).find(workspace_name), std::string::npos);
+      continue;
+    }
+    if (name.size() < 20) {
+      EXPECT_EQ(line->text.rfind("lab \xc2\xb7 ", 0), 0u) << line->text;
+      EXPECT_NE(line->text.find("Two lines"), std::string::npos) << line->text;
+      EXPECT_NE(source_detail_rows(u).find("Task  \xc2\xb7  Two\\x0Alines\n"), std::string::npos);
+      continue;
+    }
+    EXPECT_EQ(line->text.rfind("Task: ", 0), 0u) << line->text;
+    EXPECT_LE(line->rect.x1(), float(u.f.screen.rect().width()) + 0.5f);
+    // Source details wrap the whole (bounded) name and keep the exact task ID on its own row.
+    const auto rows = source_detail_rows(u, true);
+    const std::string kept = name.size() > 1024 ? name.substr(0, 1024) + "\xe2\x80\xa6" : name;
+    const auto name_row = rows.find("Task  \xc2\xb7");
+    ASSERT_NE(name_row, std::string::npos) << rows;
+    EXPECT_NE(rows.find(kept + "Task ID  \xc2\xb7  " + task, name_row), std::string::npos) << rows;
+    // The line itself ends in an ellipsis inside its label; the full text stays in its tooltip and details.
+    line = source_line(u);
+    ASSERT_NE(line, nullptr);
+    const auto &ui = *u.f.screen.ui();
+    EXPECT_GT(ui.measurer().width(line->text, ui.style().font), line->rect.w);
+    EXPECT_NE(line->tooltip.find(task), std::string::npos);
+  }
+}
+
+TEST(JobsLayout, RestoredTaskResultShowsIdsWithoutPersistingNames)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  UiOnFake u(false, true, 680);
+  auto &jobs = u.jobs();
+  auto &viewer = u.f.shell->store().viewer();
+  viewer.prefetch_neighbours = false;
+  ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+  jobs.select_connection("runtime:lab");
+  ASSERT_TRUE(u.pump([&] { return !jobs.workspace().empty(); }));
+  const std::string task(32, 'c');
+  jobs.apply_snapshot(io::Json::array({{{"id", task}, {"workspace_id", jobs.workspace()},
+                                        {"name", "Result task"}, {"state", "succeeded"}}}), 100.0);
+  jobs.select_task(task);
+  u.f.shell->open_workbench(u.f.screen);
+  u.f.drv->frame();
+  u.click("workbench_tasks");
+  u.click("a1/main/focused_jobs/tasks/open_viewer");
+  ASSERT_TRUE(u.pump([&] { return viewer.payload() && !viewer.evaluating(); })) << viewer.eval_error();
+  EXPECT_EQ(source_line_text(u).rfind("lab \xc2\xb7 ", 0), 0u) << source_line_text(u);
+  EXPECT_NE(source_line_text(u).find("Result task"), std::string::npos) << source_line_text(u);
+  const auto label = viewer.source_label();
+  EXPECT_EQ(label, task + " @ runtime:lab");
+  const auto saved = viewer.save_workspace_state();
+  EXPECT_EQ(saved.dump().find("Result task"), std::string::npos);
+  EXPECT_EQ(saved.at("source_label"), label);
+  ASSERT_TRUE(viewer.load_workspace_state(saved, viewer.base_payload()));
+  EXPECT_EQ(viewer.source().task_id, task);
+  EXPECT_EQ(viewer.source_label(), label);
+  // The same task is still listed in the same Jobs scope, but the restored view has no proven launch scope.
+  EXPECT_EQ(source_line_text(u).rfind("Task: " + task + " @ runtime:lab", 0), 0u) << source_line_text(u);
+  EXPECT_EQ(source_detail_rows(u).find("Result task"), std::string::npos);
+}
+
+TEST(JobsLayout, HubTaskSourceNamesTheNodeOfTheLaunchingScope)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  UiOnFake u(true);
+  app::JobsState &jobs = u.jobs();
+  ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+  jobs.select_connection("hub:mesh");
+  ASSERT_TRUE(u.pump([&] { return !jobs.tasks().empty(); }));
+  jobs.select_task(fake_jobs::kF03Task);
+  ASSERT_TRUE(u.pump([&] { return jobs.selected_task_observation() == app::TaskObservation::Verified; }));
+  const auto request = jobs.selected_result_request();
+  ASSERT_TRUE(request);
+  ASSERT_TRUE(request->source_names_current);
+  EXPECT_EQ(request->source_names.connection, "mesh");
+  EXPECT_EQ(request->source_names.node, "gpu-node");
+  EXPECT_EQ(request->source_names.workspace, "hub-ws");
+  EXPECT_EQ(request->source_names.task, "Original Hub task");
+  EXPECT_TRUE(request->source_names_current());
+  jobs.select_task("");
+  EXPECT_TRUE(request->source_names_current());  // The selection does not own the name.
+  jobs.select_connection("runtime:lab");
+  EXPECT_FALSE(request->source_names_current());
 }
 
 TEST(JobsLayout, AddRuntimeDialogAndThePathFieldFallback)

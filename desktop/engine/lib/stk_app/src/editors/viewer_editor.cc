@@ -227,7 +227,14 @@ class ViewerEditor final : public Editor {
     if (!vs.source_label().empty()) {
       auto *screen = ctx.area.screen();
       const bool focused = screen && screen->maximized() == &ctx.area && ctx.area.shell().workbench_is_focused(*screen);
-      std::string src = ctx.store.catalog().format(
+      const auto names = focused ? vs.task_source_names(vs.source()) : std::nullopt;
+      const auto details_label = ctx.tr("viewer.source.open_details");
+      /* Units left for a named line beside the details button; long names end in an ellipsis inside it. */
+      const float room = ctx.ui && ctx.draw ? float(ctx.draw->rect.width()) / std::max(1.0f, ctx.ui->style().unit) -
+                                                  (focused ? fit_units(ctx, details_label) : 0.0f) - 2.0f :
+                                              0.0f;
+      std::string src = names ? named_task_source(ctx, vs.source(), *names, room) :
+                                ctx.store.catalog().format(
           "viewer.source", {{"name", vs.source_label()}, {"kind", std::string(ctx.tr(std::string("viewer.source.") +
                                                                                      source_kind_name(vs.source().kind)))}});
       if (!focused && !vs.preset_id().empty()) {
@@ -241,7 +248,7 @@ class ViewerEditor final : public Editor {
       ui::Layout &row = l.row(false);
       row.alignment(ui::LayoutAlign::Left);
       if (screen && (focused || (!screen->maximized() && vs.muferro_hdf5_source()))) {
-        const auto label = ctx.tr("viewer.source.open_details");
+        const auto label = details_label;
         const auto scope = std::pair{screen->visibility_epoch(), ctx.area.activity_epoch()};
         auto &button = row.button("result_source", label, [this, scope]() {
           source_details_scope_ = scope;
@@ -258,7 +265,8 @@ class ViewerEditor final : public Editor {
       else {
         source_details_scope_.reset();
       }
-      row.label(src).backdrop().width(fit_units(ctx, src)).tip(vs.source().path.empty() ? vs.source_label() : vs.source().path);
+      row.label(src).backdrop().width(names && room > 2.0f ? std::min(fit_units(ctx, src), room) : fit_units(ctx, src))
+          .tip(names ? task_source_ids(ctx, vs.source()) : vs.source().path.empty() ? vs.source_label() : vs.source().path);
     }
     else {
       source_details_scope_.reset();
@@ -308,6 +316,46 @@ class ViewerEditor final : public Editor {
     }
   }
 
+  /** "location · workspace · task", then "showing <file>" if it still fits in `room_units`. Unnamed
+   * rows show their IDs (the task as Jobs lists it). Pure presentation of in-memory names. */
+  static std::string named_task_source(const EditorContext &ctx, const ViewerSource &source,
+                                       const TaskSourceNames &names, const float room_units)
+  {
+    /* One line: control bytes of a name become spaces (details show them escaped). */
+    const auto pick = [](const std::string &name, const std::string &id) {
+      std::string text = name.empty() ? id : name;
+      std::replace_if(text.begin(), text.end(), [](const unsigned char c) { return c < 0x20 || c == 0x7f; }, ' ');
+      return text;
+    };
+    const bool hub = source.hub() && !source.node.empty();
+    const std::string task = pick(names.task, source.task_id.substr(0, 12));
+    const std::string text = ctx.store.catalog().format(
+        "viewer.source.task_named", {{"location", hub ? pick(names.node, source.node) : pick(names.connection, source.connection)},
+                                     {"workspace", pick(names.workspace, source.workspace_id)}, {"task", task}});
+    if (room_units > 0.0f && fit_units(ctx, text) > room_units) {
+      return ctx.store.catalog().format("viewer.source", {{"kind", std::string(ctx.tr("viewer.source.task"))}, {"name", task}});
+    }
+    if (source.field_file.empty()) { return text; }
+    std::string shown = text + "  \xc2\xb7  " + ctx.store.catalog().format("viewer.source.task_shown", {{"file", source.field_file}});
+    return room_units > 0.0f && fit_units(ctx, shown) > room_units ? text : shown;
+  }
+
+  /** The exact IDs behind a named task source line (its tooltip). */
+  static std::string task_source_ids(const EditorContext &ctx, const ViewerSource &source)
+  {
+    std::string tip;
+    const auto add = [&](std::string_view key, const std::string &value) {
+      if (value.empty()) { return; }
+      tip += (tip.empty() ? "" : "\n") + std::string(ctx.tr(key)) + "  \xc2\xb7  " + value;
+    };
+    add("viewer.source.connection", source.connection);
+    add("conn.node", source.node);
+    add("viewer.source.workspace", source.workspace_id);
+    add("viewer.source.task", source.task_id);
+    add("viewer.source.input", source.field_file);
+    return tip;
+  }
+
   std::string displayed_source_step(const ViewerSource &source) const
   {
     const auto step = vs_->shown_step();
@@ -328,9 +376,8 @@ class ViewerEditor final : public Editor {
     const float text_width = std::max(1.0f, style.u(options.width_units) - 2 * style.panel_margin -
                                             2 * style.text_margin - style.scrollbar - 4 * style.pixel);
     std::vector<std::string> lines;
-    const auto add = [&](std::string_view label, std::string_view value) {
+    const auto add_text = [&](std::string text, std::string_view value) {
       if (value.empty()) { return; }
-      std::string text(ctx.tr(label));
       text += "  \xc2\xb7  ";
       for (const unsigned char byte : value) {
         if (byte < 0x20 || byte == 0x7f) {
@@ -347,11 +394,22 @@ class ViewerEditor final : public Editor {
         lines.push_back(text.substr(line.begin, line.end - line.begin));
       }
     };
+    const auto add = [&](std::string_view label, std::string_view value) { add_text(std::string(ctx.tr(label)), value); };
     if (source.kind == SourceKind::Task) {
-      add("viewer.source.connection", source.connection);
-      add("conn.node", source.node);
-      add("viewer.source.workspace", source.workspace_id);
-      add("viewer.source.task", source.task_id);
+      /* A name verified for this exact source gets its own row; the exact ID follows on a separate row. */
+      const auto names = vs_->task_source_names(source);
+      const auto named = [&](std::string_view label, const std::string &name, const std::string &id) {
+        if (!names || name.empty() || id.empty()) {
+          add(label, id);
+          return;
+        }
+        add(label, name);
+        add_text(ctx.store.catalog().format("viewer.source.named_id", {{"label", std::string(ctx.tr(label))}}), id);
+      };
+      named("viewer.source.connection", names ? names->connection : std::string(), source.connection);
+      named("conn.node", names ? names->node : std::string(), source.node);
+      named("viewer.source.workspace", names ? names->workspace : std::string(), source.workspace_id);
+      named("viewer.source.task", names ? names->task : std::string(), source.task_id);
     }
     else {
       const bool label_only = source.kind == SourceKind::Payload && source.path == vs_->source_label();

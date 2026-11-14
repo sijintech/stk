@@ -41,6 +41,12 @@ class FederationState;
 class PeerState;
 class LiteratureState;
 
+/** Display names of a task source's Jobs rows, bounded in size. Empty names fall back to the IDs. */
+struct TaskSourceNames {
+  std::string connection, node, workspace, task;
+  bool operator==(const TaskSourceNames &) const = default;
+};
+
 /**
  * A request to show a result in the Viewer (raised by the Jobs editor, "Open in viewer"; consumed
  * by the application shell, which also brings a Viewer area to the front). Either a task on a
@@ -60,6 +66,10 @@ struct OpenResultRequest {
   std::function<bool()> still_same_scope;
   /** A single published task field selected by the focused Jobs shortcut. */
   std::string task_artifact_path, task_artifact_sha256;
+  /** Names of the launching Jobs rows (display only; the IDs above stay authoritative). */
+  TaskSourceNames source_names;
+  /** In-memory, side-effect free: the launching scope still lists this task under these names. */
+  std::function<bool()> source_names_current;
 };
 
 /** State of the Python bridge child process (driven by stk_bridge from WP8 on). */

@@ -262,6 +262,13 @@ class ViewerState {
   /** Identifies changes that supersede a pending open. Passive metadata replies leave it unchanged. */
   uint64_t opening_revision() const { return opening_revision_; }
   const std::string &source_label() const;
+  /**
+   * Display names of a task source opened from Jobs, only while `source` is the opened task (same connection,
+   * node, workspace and task IDs), its launching scope is unchanged and that scope still lists the task under
+   * the launch names. Restored, frozen or suspended views and any other source give nothing (use the IDs).
+   * In-memory and side-effect free: never reads, writes or notifies.
+   */
+  std::optional<TaskSourceNames> task_source_names(const ViewerSource &source) const;
   const std::string &open_error() const;
 
   /* ---- Preset and parameters ---- */
