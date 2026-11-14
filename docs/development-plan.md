@@ -1,5 +1,13 @@
 # STK 开发计划
 
+## 2026-11-14 UTC · 聚焦会话角色布局
+
+Claude 120 在独立 worktree 提交 `236672482ebc007b9890457990c91bd36a34cab1`。Root 审阅后合入本地 main `385aa7f400ec6641c5d2f52944e177daa6aadf25`，共同设计更新于 `ab59f1c6`。桌面聚焦项目问答和智能体正文按语义角色绘制。用户块整体靠右、块内左对齐，宽度最多为可用正文文字区的 85%。助手、工具与审批状态从左侧显示。Claude 的独立 Linux 构建通过项目 1126/1126、定向 34/34、UI 147/148（可选 Weston 画廊跳过一项）。Root 的合入头重编桌面与测试目标，定向 76/76 和完整 UI 148/148，零跳过。桌面与 Web 的用户块采用共同几何，桌面仍沿用原生主题与角色文字。 [角色布局](docs/design/native-conversation-role-layout.md)
+
+Root 用同一合入头的生产桌面二进制在 Linux X11 实测，缩放 1，1600×1100 英文和 680×1000 中文。固定起点为聚焦工作台已打开合成会话 Alpha。滚到正文中段并编辑草稿，宽窗来回切换 Beta 共两次点击，窄窗各经过「历史」共四次。对照图像确认用户标签及正文一起移向右侧，助手文字的起点一致。返回后阅读区域像素一致，草稿字形重合 95.9%。每窗恰两次 `project.agent.get`，零写请求、零模型调用，项目数据库与两条会话链一致。实窗覆盖智能体会话，项目问答由定向控件测试覆盖。证据 `root-delivery-20261114-196/{role-main.xml,role-main-ui.xml,role-main-wide-pixels.json,role-main-narrow-pixels.json}` 与 `root-delivery-20261113-192/typography-role-main-{wide,narrow}/receipt.json`。
+
+远端 `537e9710` 的 macOS CPU 1624/1624 与 Metal 254/254 通过，原生预览必测组 4/6。独立 MP4 在后台保持阶段回退约 0.101 秒，超过 0.10 秒阈值。内嵌视频第二轮在重显后的后续定位阶段报告输入点没有可见原生视图。当前本地 `bfff6154` 的同会话帧标记诊断尚未上远端。Linux、Windows CPU、Runtime 已通过，Windows 原生预览仍运行，本地推送等待整轮终态。Claude 121 从 `385aa7f4` 在独立 worktree 核对两端从任务打开结果并回到原任务的入口与视觉层级，当前只交付设计与验证路径。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43530403353) [macOS 工件](https://github.com/sijintech/stk/actions/runs/43530403353/artifacts/14089651948)
+
 ## 2026-11-14 UTC · 保存路径别名与 Windows CPU 回执
 
 保存副本隔离候选 `a06cdf496a5af5eefb417d157b5152909713e510` 为 macOS 和 Windows 补充已存在目录的文件身份比较。即使同一受保护目录的大小写或 Unicode 拼写不同，也按原目录限制处理。扩展保存用例覆盖隔离的桥、Runtime 和连接配置目录，并在支持对应别名的卷上断言别名被拒且零文件解析。Linux 新头 CTest 110/110、零跳过。Apple 条件 C++ 语法检查通过，测试翻译单元用 Linux 头与两个空的 GoogleTest 平台头占位；实际 Apple SDK、macOS 别名和 Windows 分支均待目标平台验证。
