@@ -1,5 +1,13 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-14 UTC · 隐藏暂停取证与保存副本组合候选
+
+Root 用 `834f7bd4` 官方工件核对四项首次暂停帧标记对照。六张 PNG 摘要及独立解码一致。连续播放臂分别在 176、191 ms 取得帧 1，立即暂停臂随后均稳定在帧 0。由于是独立会话且截图需要时间，尚无法确定隐藏或暂停时画面是否实际回退。该轮必测两项的失败发生在后台，MP4 时钟 0.37287→0.23400 秒，HTML 0.22601→0.10200 秒，媒体均处于暂停且导航未变。`9f25a2d8` 将隐藏阶段的时间回退与晚暂停报错区分，保留原阈值。Linux 带探针原生报告目标构建通过，文档宿主及 AX CPU 15/15、零跳过。后续优先采集同一导航切页前后的帧与原生状态。 [取证设计](docs/design/macos-first-toolbar-pause-evidence.md) [macOS 工件](https://github.com/sijintech/stk/actions/runs/43522208408/artifacts/14085529598)
+
+隔离候选 `c07e5e9e267ebf37f2a49a419318b87c961e55ae` 将 Claude 的原生保存副本与主线输入卡片、任务和文件清单重试组合。Linux 全新构建和定向 CTest 110/110、零跳过。X11 从已打开合成项目工作台起步。1600×1100 英文四次点击打开测试选择器，680×1000 中文五次点击进入路径表单。各窗验证取消、已有名称和新名称，文件解析累计 0、0、1 次。副本与冻结摘要一致，原项目、会话和源文件一致。故障注入回放中分别五次、六次点击，两窗各重试两类清单一次，零文件解析和模型调用。回执见 `root-delivery-20261113-193/native-save-{chooser,fallback}-current-195/receipt.json`、`root-delivery-20261113-194/native-save-retry-save-integration-{wide,narrow}/receipt.json` 与 `root-delivery-20261114-195/save-all-exact.xml`。保存副本候选仍在隔离工作树，macOS ACL、Windows 目录绑定待目标平台实测。
+
+远端 `537e9710` 的 Desktop Linux 打包与安装冒烟通过，三个平台的主要作业仍运行。Runtime 已通过 8/13，余项运行。PR #53 精确头仍有合并冲突，其生命周期修复已由主线覆盖，#54 仍为旧交接。Claude 120 在独立 worktree 的实现进程仍运行。原七份工作区修改保留。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43530403353) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43530403050)
+
 ## 2026-11-13 主线发布、问答卡片实窗与桌面消息布局方案
 
 `537e971016c540f8e8eb3d7ef8bfa7be6209ad13` 已推送到远端 main，整段 gitleaks 零发现。新头 Pages 和 Secret scan 通过，Desktop、Runtime 已启动。原七份工作区修改保留。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43530403353) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43530403050)
