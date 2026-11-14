@@ -63,6 +63,7 @@
 | 原生打开 | 从任务页侧栏近期问答宽 1 次，窄窗「历史」后条目共 2 次 | 回到同一聚焦实例，草稿与数据范围不变，结果页相机序号不变 | 现有。`SavedConversationNavigationPython.RecentQuestionsOpenFromTasksAndResultsAtBothWidths` |
 | 原生写问题 | 「写问题」1 次。返回已选问答 1 次 | 复用当前草稿并聚焦输入框，返回后保留阅读位置，焦点回到正文。首次访问不读历史 | 现有。`SavedConversationNavigationPython.WriteQuestionFocusesTheExistingDraftFromTasksAndResults`，`SavedConversationNavigationPython.WriteQuestionDoesNotOpenSavedHistoryOnFirstVisit` |
 | 原生历史 | 「已保存问答」1 次打开完整列表，归档筛选 1 次 | 浏览时不选中、不写入。窄窗历史菜单打开时 Viewer 不接收输入 | 现有。`SavedConversationNavigationPython.BrowseSavedQuestionsBeyondTheRecentRailWithoutSelectingOrWriting`，`SavedConversationNavigationPython.RecentQuestionsRestoreTheScrolledTranscript`，`SavedConversationNavigationPython.OpenCompactHistoryIsolatesViewerInputUntilDismissed`，`SavedConversationNavigationPython.AgentHistorySeparatesIdentitiesAndKeepsBothDrafts` |
+| 原生短窗搜索 | 在 680×300、当前项目有两组历史时，从「历史」点「搜索对话」共 2 次点击，零滚动。输入标题后按两次 Enter | 打开近期列表之外的唯一匹配。按 Esc 关闭搜索时，焦点回到「历史」。旧 Bridge 沿用原菜单 | `SavedConversationNavigationPython.NarrowHistoryOffersSearchRightAfterWriteQuestion`，`LegacyConversationSearchPython.OlderBridgeKeepsRecentHistoryWithoutTheSearchAction` |
 | 实窗 | 两端四种窗口按上列次数重放 | 同上 | 计划，待实测 |
 
 ### H4 从任务或结果打开情境详情再返回（S3）
