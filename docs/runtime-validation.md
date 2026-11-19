@@ -1,5 +1,21 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-18 · Synthrix 样式的原生默认工作台
+
+以 Synthrix 企业版主线 `caec2b9` 和所有者确认的交互样稿实施原生工作台。宽窗采用 60 px 应用导航和 240 px 项目历史栏，窄窗保留顶部一级入口和历史菜单。新增集中配色的浅色主题、13 px 控件文字、18 px 标题、主次按钮、左对齐历史与浅蓝用户消息。工作台页头显示当前会话名。无项目时在欢迎页明确展开目录、名称及打开／新建操作。用途选择与准备操作位于输入卡工具行。
+
+界面仍使用原生 C++、GHOST、GPU 与 BLF。工作台和专业分栏切换复用编辑器实例；新增主题切换验证覆盖活动输入、选择、阅读位置与草稿。项目表单回调及延迟目录选择绑定编辑器寿命、项目和桥范围、活动区域及呈现代次，切换项目后拒绝旧操作。新建智能体会话的标题独立于原保存问答。
+
+固定起点为已打开合成项目的聚焦工作台，事件驱动验收覆盖 1600×720／1100 英文、680×800／1000 中文以及 1.25 倍缩放。任务、结果与分栏各一次点击，历史宽窗一次、窄窗经历史两次；返回后核对同一编辑器、草稿、阅读位置、项目修订和 Viewer 状态。欢迎页另从未打开项目起步，展开表单、拒绝不存在目录、明确打开已有项目，再调用已失效的旧打开／创建回调，验证已采用的项目与数据库字节保持一致。所有测试将 `STK_TOKEN_PLAN_API_KEY` 置空并取消 `STK_TOKEN_PLAN_MODEL`，导航不发起模型或运行提交。
+
+Cocoa 实窗采用 1440×900 中文、原生 DPI 2。已看到浅色欢迎页并用键盘切至任务及返回。CUA 的原生文本粘贴未可靠完成，因此实窗部分未冒充已完成带项目对话的完整鼠标验收。带已保存问答的宽窄、中英四张图由真实 Python 桥、生产 AppShell、Metal 和 BLF 渲染，分别为 1600×900 和 680×900。项目、消息和结果均为合成夹具。
+
+代码提交为 `6dcb6df1`。macOS arm64 的 UI 141/141、导航 39/39、布局和工作台 43/43 通过；Jobs 74 项通过，1 项因 Runtime 仅支持 Linux 而跳过。生产 Metal 的中英、宽窄四张图通过。证据 `desktop/build-dev-macos-arm64/workbench-20261118/` 中的 `frozen-ui.xml`、`final-navigation.xml`、`frozen-workbench.xml`、`frozen-jobs.xml` 及 `conversation-*.png`。一次 Jobs 异步订阅计数波动在单项三次复验和最终整组复验中通过。新字号暴露的准备按钮小数宽度与展开历史的窄窗可达性问题已修复。代码暂存范围 gitleaks 零发现。
+
+前序代码头 `65af7fa7` 的 Desktop CI 已到终态，macOS 原生报告预览失败，其余五个作业通过。Runtime、Pages 与 Secret scan 成功。本轮新 CI 尚待终态，发布后以本轮提交的检查结果为准。[前序 Desktop CI](https://github.com/sijintech/stk/actions/runs/43538248513)
+
+本机 macOS arm64 完成原生构建、安装与启动。应用位于 `desktop/build-dev-macos-arm64/preview/STK.app`，验证证据保存在 `desktop/build-dev-macos-arm64/workbench-20261118/`。完整线性图标、专业页逐项组件统一和常驻非模态详情栏仍待后续实施。跨平台新头 CI 尚待终态。本会话未提供 AOCI 实时工具，未执行或宣称索引维护。
+
 ## 2026-11-14 UTC · 前序桌面 CI 终态
 
 远端 `537e971016c540f8e8eb3d7ef8bfa7be6209ad13` 的 Desktop 已于 01:02:49 UTC 完成最后一个作业。Windows 原生 WebView2 与生产 Reports 预览 6/6，含 MP4 和内嵌 HTML 视频各二十轮，Windows CPU 1564/1564。Linux 2280/2280、打包、安装冒烟与 Runtime 13/13 通过。Desktop 整轮失败来自 macOS 的两项原生视频，详情见角色布局记录。前序发布门禁已到终态。日志 `root-delivery-20261114-196/353-{macos,windows-native}-job.log`。 [Desktop CI](https://github.com/sijintech/stk/actions/runs/43530403353) [Windows 原生工件](https://github.com/sijintech/stk/actions/runs/43530403353/artifacts/14090198154) [Runtime CI](https://github.com/sijintech/stk/actions/runs/43530403050)
