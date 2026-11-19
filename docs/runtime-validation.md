@@ -2866,6 +2866,32 @@ HTML 可直接打开投屏或通过打印保存 PDF，不依赖外部脚本/字�
 
 ## 2026-11-03：持续目标恢复与整合起点（当前）
 
+14:10 UTC源码交付候选：产品提交`535b0d63d15521ea7d4294ddfce2ac68a3555667`已在本地main，25路径/3923+/33-、约160.72KiB暂存gitleaks零发现；记录/索引提交与最终push结果以真实Git及`OWNER_NEW/stk-cpu-windows-source-delivery-20261103-01/`交付closure为准。
+
+| 收口检查 | 实际结果与限制 |
+|---|---|
+| Linux整合03 | `RESUME_EVIDENCE/integration-03/native/summary.json`：build477.992s；CTest2099/2099、零fail/error/skip、489.631s，1300输入前后一致，KEY空/MODEL unset。本机真实已安装helper，不代Mac/Win/科研质量。 |
+| 文献CPU跨平台门 | `OWNER_NEW/literature-cpu-ci-gate-20261103-01/closure.json`：实际24例通过四组required checker；逐组缺失/skip/failure共12反例非零拒绝。两个目标平台CPU选择含literature，三平台均强制；`windows-desktop-discovery-fix-20261103-01/integrated-label-proof.json`另核24文献/17peer/2installed-helper的完整标签、超时、KEY空/MODEL unset。未称目标OS已运行。 |
+| Mac350实物核对 | `OWNER_NEW/desktop-ci-350534d-20261103-01/closure.json`：341,975,423B artifact核GitHub摘要，605张引用PNG SHA/尺寸匹配；CPU1464/1464、Metal254/254零skip，原生4pass/2fail。原型20轮161图、父关闭/20旧session410、after-static引擎分配0块0字节；Markdown/HTML各20轮140图、PDF20轮160图。两个媒体各0完整轮/2图，首seek-early四次各2节点/0slider/0candidate，无timeline输入，未执行旧rewind-after-show。 |
+| 后置Mac诊断 | `OWNER_NEW/desktop-ci-350534d-20261103-01/next-diagnostic-03/root-apply-closure.json`：3候选SHA精确应用、Linux报告目标重建exit0；2099轮早于这次增量。2个.cc/.hh属于原1300源的后改；.mm原本不在Linux来源扩展/编译中，以350 Git字节及独立preimage绑定。只在完整失败lookup后读最多32当前节点的固定类别/角色/children nil/type/count，getter单独2s预算、不供候选/遍历，不读标签/正文/URL或改AX权限。额外getter可能触发lazy初始化，单个同步getter无法保证抢占；实际Apple编译/行为待新CI。 |
+| 当前源包与记录重绑 | `OWNER_NEW/package-sdist-20261103-02/closure.json`已passed：1048选中源、1049成员、四文档前后稳定，704产品成员与wheel03同字节；02只含14:10时记录。最终当前记录重绑入口`OWNER_NEW/package-sdist-20261103-03/closure.json`；未安装/未重测，wheel03的325pass/1 Windows-only skip/4推理deselected不重复计数。治理、最终扫描及push/同头CI另绑定`OWNER_NEW/stk-cpu-windows-source-delivery-20261103-01/`最终closure。 |
+
+13:45 UTC当前增量（下方13:16及旧表为较早快照）：
+
+| 检查 | 当前事实与范围 |
+|---|---|
+| 文献原生CPU | `OWNER_NEW/literature-native-cpu-20261103-01/closure.json`：24/24零非通过、14.518s、100输入稳定，既有PNG2/2；保留18/20、23/24失败，后者发现270° unsigned取负下溢并修复。未落新editor、未做新点击或OS验收。整合03全目标构建/CTest正在`RESUME_EVIDENCE/integration-03/`运行，业务源冻结。 |
+| Windows peer修复候选 | `OWNER_NEW/windows-peer-fix-20261103-01/closure.json`：新增反例13fail/3pass→16pass；相关145pass已包含16，3skip/11deselected、28来源稳定。17项真实Windows失败对应目录句柄权限/原生无覆盖发布与跨API mode比较；原Win32 lastError未采，不伪称精确根因。等待新Windows CI。 |
+| Desktop350534d终态 | 整个41639295121 completed/failure，Linux三job成功。Windows125928399204在GoogleTest POST_BUILD多标签引号失败，未执行CPU测试，Windowsnative依赖skip；Mac125928399252原生4/6通过、video及html-video因时间匹配滑条定位失败。`OWNER_NEW/desktop-ci-350534d-20261103-01/`保留日志/目标OS证据，不能称平台通过或内存泄漏实测失败。 |
+| Windows发现命令补修 | Root改`peer.cmake`两组为发现后设置LABELS，沿既有Materials/Federation模式；`OWNER_NEW/windows-desktop-discovery-fix-20261103-01/local-discovery-proof.json`：独立Linux CMake4.2.3枚举17例，旧标签/环境错位→修后双标签/timeout/KEY空/MODEL unset精确，不代MSVC执行。新literature组同步模式。 |
+| Runtime350534d终态 | `OWNER_NEW/runtime-ci-350534d-20261103-01/terminal.json`：11/13成功，Windows3.11/3.12各23fail/4799pass/252skip/346deselected；其余Linux、92×3文献、Darwin及Flower按下方实际范围成功。Docs/Secret成功，未重跑原CI掩盖失败。 |
+| 新wheel安装 | `OWNER_NEW/package-wheel-20261103-03/closure.json`：SHA dc60411043a9af617094021d1a646724fddce076f3ac8f1bde3947a4cec1f639，48,266,628B、709成员；715源输入稳定、704安装产品成员匹配，47已核依赖离线新环境、48包pip check过。325pass/1实际Windows junction skip/4模型PDF deselected，84.13s；189父模块均来自site-packages、34子启动无源码cwd/PYTHONPATH。1个缺KEY守卫与2个故意非空KEY/有MODEL的低熵负例单列，不虚称所有子环境相同；旧sdist不含这两生产模块新字节。 |
+| Synthrix源码交付 | main90d7c4a4491c7ec32e41d43f220a6adef6b58820已push，35精确路径、工作树干净、暂存gitleaks零发现。`OWNER_NEW/synthrix-hub-slice-20261103-01/{acceptance,root-delivery}.json`：独立审查修2真问题；审查后5文件32pass含真实Hub/Node/Runtime+PG及旧xTB+PG；较广95文件1674pass/3skip明确排除慢Docker单文件（此前两轮该文件均过，整体4fail/1fail保留），前端3959pass、教育20pass、两live build、typecheck和lint通过。门禁41646882003 queued，不称部署成功。仅可选执行接缝，不迁移项目主账，不造科学/计量结论。 |
+| 当前索引读取 | 压缩恢复后普通全量25块、1181 Entry、172292 estimated tokens、host确认/Challenge10/10；工作区新变更令governance_aligned=false，不能沿旧aligned声称当前全貌可靠，最终稳定后维护。 |
+
+13:16 UTC新CI：Windows客户端3.11/3.12各23fail/4799pass/252skip/346deselected，红日志/精确nodeid见 `OWNER_NEW/runtime-ci-350534d-20261103-01/windows-client-failures-01/`。Linux Runtime3.11/3.14各5411pass/152skip/4deselected，3.12为5428pass/135skip/4deselected，后续PET7/doctor/包均成功；文献三版本各92执行零skip，Darwin peer505pass/2明确Windows-only skip/4native deselected，Flower433pass/零skip且真实聚合/训练/网络强制门均过。分组证据不等于整个Runtime通过。
+Desktop41639295121仍运行；Linux包和全新Ubuntu24.04 OpenGL/llvmpipe、Vulkan/lavapipe两次INSTALL PASS已实读，smoke job125931313191、artifact13231898207绑定350534d。Docs41639295109与Secret41639295115已success；其他桌面平台待终态。Root局部夹具修正89pass/1资产skip/1真实推理deselected、44.23s，`OWNER_NEW/windows-root-fixtures-20261103-01/local-observation-01.json`只有事后两测试来源SHA，不伪造前后稳定或Windows重验。peer修复、文献CPU与另一仓Synthrix Hub切片仍开发中，后改不由350旧全量/包覆盖，尚无新UI点击或下一提交。
+
 所有者恢复开发，并确定 [STK 主体的分布式科研工作台](design/distributed-research-workbench.md) 方向。
 本节记录新批次实际结果，下面各历史全量和包证据保留其原来源范围。
 
@@ -2878,7 +2904,7 @@ HTML 可直接打开投屏或通过打印保存 PDF，不依赖外部脚本/字�
 | 新方向 | 已更新设计与计划，尚不等于跨平台节点、Computer Use、Synthrix集成或完整插件系统已实现 |
 | profile当前真实联合 | `OWNER_NEW/encoder-profiles-review-20261103-01/closure.json`：69/69、零fail/error/skip，501.730s，14输入稳定；真实E5/Qwen/PDFium，不代科学质量/其他OS |
 | 服务当前三父矩阵 | `OWNER_NEW/literature-service-review-20261103T110738Z/matrix-01/closure.json`：3.11/3.12/3.14各26/26、零fail/error/skip，80.504/79.296/82.287s，20输入稳定；解析/编码子进程均固定3.12 |
-| 当前交付状态 | 文献Bridge、S4、wheel及整合02原生/Python均已终态，范围见下表；最终sdist、治理、提交/新头CI仍待完成 |
+| 当前交付状态 | 源码350534d已commit/push main；文献Bridge、S4、wheel/sdist及整合02结果见下表。源提交前治理已对齐；本次记录增量待维护，Desktop/Runtime/Docs CI pending、Secret success |
 
 | 后续真实结果 | 证据和边界 |
 |---|---|
@@ -2892,16 +2918,21 @@ HTML 可直接打开投屏或通过打印保存 PDF，不依赖外部脚本/字�
 | 整合01 Python失败保留 | `RESUME_EVIDENCE/integration-01/python/summary.json`：5411pass/148skip/2fail，960.894s；973来源中file_store.py及其测试漂移。失败为hello人工buffer过窄与生成节点文档过期；测试buffer8→16KiB且保oversized/EOF断言，重新生成suan/skills/stk-visualize/reference/nodes.md补reproduction，定向2/2通过。 |
 | 整合02原生 | `RESUME_EVIDENCE/integration-02/native/summary.json`：2075/2075、零fail/error/skip，build19.251s、ctest490.527s、1291来源稳定，实际已安装Linux helper；目标OS/科学质量另证。 |
 | 整合02 Python | `RESUME_EVIDENCE/integration-02/python/summary.json`及stdout.log：5489pass/74skip/4deselected/1warning，5563案例、973来源稳定、changed_sources=[]，KEY空/MODEL unset；pytest1207.90s、wrapper1211.584s、exit0。28个显式encoder资产/解释器依赖、13 Flower、15旧离屏SIG11、9 Windows、3 MuPRO、2可选MCP、2可选adversarial native peer、2 perf跳过；4个按选择排除。69项真实E5/Qwen/PDFium是上方独立证明，不宣称在此全量内执行。 |
-| 当前wheel隔离安装 | `OWNER_NEW/package-wheel-20261103-02/closure.json`：Linux Python3.12新隔离环境299/299、零skip、94.198s；四个真实模型/PDF案例明确deselected，715输入稳定、704产品成员逐字节匹配，31次被launcher拦截的子进程cwd/PYTHONPATH均无源码树路径。wheel SHA fbd6625a71e287a5ae83657b80ea583230841a8abc7a078e347e1db7b440c8a2；最终sdist未完成，不代目标OS/干净机/原生UI/真实科学。 |
+| 当前wheel隔离安装 | `OWNER_NEW/package-wheel-20261103-02/closure.json`：Linux Python3.12新隔离环境299/299、零skip、94.198s；四个真实模型/PDF案例明确deselected，715输入稳定、704产品成员逐字节匹配，31次被launcher拦截的子进程cwd/PYTHONPATH均无源码树路径。wheel SHA fbd6625a71e287a5ae83657b80ea583230841a8abc7a078e347e1db7b440c8a2；不代目标OS/干净机/原生UI/真实科学。 |
 | 当前Schema原生探针 | Root另编译运行C++64个文献参数/实际DTO正反例，embedded document与当前源Schema相等、exit0；`RESUME_EVIDENCE/integration-01/literature-native-probe-observation.json`保留工具观察和事后哈希，未伪造前后来源快照、未重复运行，不代原生文献UI。 |
+| 源码提交与扫描 | main已commit/push `350534d34681e740d8d3c92a856d8bfd98299251`，107文件、36494+/10135-；gitleaks8.30.1按.gitleaks.toml扫描约1.70MB暂存内容、零发现，报告RESUME_EVIDENCE/gitleaks-staged-01.json。 |
+| 最终sdist | `OWNER_NEW/package-sdist-20261103-01/closure.json`：passed，49,499,902B，SHA7d4294f25db4cb72bcec097cf0b8a0c0cb91f1e67a829192920d94e1010e7cf8；1048来源前后一致、1049成员含生成metadata，704产品成员同wheel。只核源/成员，未安装或重测，原wheel299项保持。 |
+| sdist记录绑定 | head_at_build=旧基线3ef；实际核对字节绑定源码提交350534d，其中runtime-validation为该提交时旧记录。本次四文档是后续记录更新，不是重构建/重测试；不能声称sdist含本次新记录。 |
+| 新CI快照 | Desktop41639295121、Runtime41639295206、Docs41639295109均in_progress/pending；Secret41639295115 completed/success。下次push等待整个Desktop终态，当前不称全CI通过。 |
 
 以上 `RESUME_EVIDENCE=/home/mnemora/.local/state/stk-validation/resume-platform-20261103T110725Z`；`OWNER_NEW`根见handoff。
 本批没有新增原生文献UI/点击验收；原40QA科学PDF全局heldout12/18、cross0/6失败保持，不能以一般XQuAD或软件测试通过替代。
 
-AOCI最新Root完整24/24交付confirmed、Challenge9/10 pass，1144条、estimated165707 tokens。
-此前11-03压缩链21/24后在第22块snapshot_unavailable中止、未确认/未Attest，保留失败历史，不再代表最新完整交付状态。
-Root逐条审查29条Observed事实并核当前SHA/精确pending set，`OWNER_NEW/observed-review-20261103-01/acknowledge-29.json` status applied、txn40bc59963d92d5d733245239；
-这是Observed基线确认，不是Entry语义维护。治理仍Dirty/Stale，不声称全量aligned或当前完整系统认知可靠；最终维护待四文档冻结后执行。
+Root最新完整读取25块、1167 Entry、169546 estimated tokens，交付confirmed、Challenge10/10；此读取发生在最后19项Apply之前，不代表当前1181 Entry已全部重读。
+此前21/24 snapshot_unavailable与后续24/24/1144条/Challenge9/10保留为同日早期历史。
+29条Observed已按当前SHA确认，acknowledge-29.json status applied、txn40bc59963d92d5d733245239；与后续Entry维护分别计数。
+源提交前AOCI五批共76项Apply成功、29条Observed已确认，末次Apply aligned；1181 Entry，Verify/Check/Guide漂移为0、complete=true、next_action=none，证据 `RESUME_EVIDENCE/aoci-final-01/{verify,check,guide}.json`，保留3条非阻塞E规模提醒。
+本次四文档追记改变了受管来源，先前aligned不覆盖这些新字节；Root将在新最终稳定态重新维护。
 
 ## 2026-11-02 21:38 UTC：当前转交核验（历史）
 

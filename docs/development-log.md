@@ -2288,6 +2288,14 @@ headless Chrome 导出最终 PDF 10 页，PDFium 逐页文字/页码核对，实
 
 ## 2026-11-03：恢复持续目标并落实 STK 主体方向（当前）
 
+14:10 UTC源码收口：STK main本地源码535b0d63d15521ea7d4294ddfce2ac68a3555667，25文件/3923+/33-，约160.72KiB暂存扫描零发现。Linux整合03全目标构建477.992s、CTest2099/2099零非通过/零skip、489.631s、1300源前后稳定。随后3文件Mac失败查找诊断候选已原样应用，Linux报告目标重建过；其中.mm不在Linux来源扩展集，原始Git字节和独立preimage另绑，不冒称Apple编译或2099覆盖该增量。额外AX getter仅完整失败后启用、局部最多32节点、独立2s诊断预算，不改原查找/重试/判据；单次同步getter仍可能阻塞。新文献24例纳入全部三平台强制门，12缺失/跳过/失败反例拒绝。Mac350真实605图摘要/尺寸均匹配，原型20轮161图和最终零引擎分配通过，三报告各20轮，两个视频各0完整轮/2图，失败保留。Synthrix90d7c4a为可选执行口源码交付，正常启动装配/桌面入口仍为下一片；没有扩称整产品融合。记录/认知及最终源包收口另列本批closure，不改已完成测试范围。
+源包02实际核验通过：1048来源前后/最终稳定、1049成员含metadata，704产品成员与新wheel03一致；它包含14:10记录快照。当前最终记录重绑入口`OWNER_NEW/package-sdist-20261103-03/closure.json`，源包未安装或重测，wheel03的325pass/1 Windows-only skip/4推理deselected仍是独立安装证明。最终治理、暂存扫描、记录提交及push/CI由`OWNER_NEW/stk-cpu-windows-source-delivery-20261103-01/`最终closure逐项绑定。
+
+13:45 UTC增量：文献共享controller、View来源/恢复fence、精确Resolve→Render及独立PNG/几何CPU已完成，24/24+既有PNG2/2、100来源稳定；保留18/20及23/24失败，独立270°反例修正unsigned取负下溢。Root审查源码后启动整合03全目标构建/CTest，业务源冻结，UI在外部准备。新Python wheel含Windows peer/helper修复，隔离325pass/1实际Windows-only skip/4推理deselected、715输入及704安装成员稳定，SHA dc60411043a9af617094021d1a646724fddce076f3ac8f1bde3947a4cec1f639；不是新Windows实机证明，旧sdist待重绑。
+350534d Desktop整个run已failure，Linux三job过；Windows POST_BUILD的GoogleTest多标签引号破坏命令，Root按既有Materials模式延后peer标签，独立Linux17例验证标签/超时/空KEY与unset MODEL恢复。Mac原生4/6，两个视频控件定位失败；Runtime11/13成功、Windows两失败保持。另一仓Synthrix35文件完成双人审查，修cancel审拒及HTTP域名误作loopback两个问题，main源码90d7c4a已push；审查后真实Hub/Node/Runtime+PG和旧xTB+PG32pass，前端全量3959/教育20与两构建过，95文件1674pass另记慢Docker排除及原完整轮失败。门禁41646882003 queued；保留默认xTB/科学未知，不称部署或完整主账合并。证据均见`OWNER_NEW`对应closure与`synthrix-hub-slice-20261103-01/root-delivery.json`。Root本次压缩重载1181条/25块/Challenge10/10已确认，WIP仍待最终治理。
+
+13:16 UTC：350534d的Runtime Windows客户端两版本各23fail/4799pass/252skip/346deselected；Linux三版本、文献92项三版本、Darwin peer及Flower强制组已过。Desktop尚未终态，Linux包及全新Ubuntu24.04双后端安装冒烟已过，Docs/Secret成功。红日志见 `OWNER_NEW/runtime-ci-350534d-20261103-01/windows-client-failures-01/`；runner处理peer发布/helper，Root修跨平台路径/私有home夹具、空key继承时的socket守卫及实际打开文件替换actor。局部Linux89pass/1资产skip/1推理deselected、44.23s；`windows-root-fixtures-20261103-01/local-observation-01.json`仅事后观察，非Windows或前后稳定证明。文献controller/page CPU和Synthrix可选Hub适配器进入实现，尚无下一commit/push或新UI点击交付；旧包/全量不覆盖后改，稳定后再维护AOCI。
+
 所有者恢复完整计划的持续开发。新增[分布式科研工作台](design/distributed-research-workbench.md)，
 将 STK 主体、Synthrix 对话/科研管理、本地完整/Web 轻量、授权节点、跨位置 CLI、Computer Use 与插件分发记录为产品方向，
 同步工作台设计和主计划；旧八项完成条件与三待决保持，不以新方向缩减原范围。
@@ -2303,11 +2311,15 @@ S6最终Schema三Python各430/430、334输入稳定，绑定后续file_store修�
 整合01保留真实失败：原生2074pass/1fail为过期editor数量断言；Root仅将19→20并补Peers存在断言。
 Python01为5411pass/148skip/2fail，960.894s，973来源中file_store及其测试发生漂移；修hello测试人工上限8→16KiB并保oversized/EOF断言，重新生成技能nodes.md补reproduction节点，定向2/2通过。
 整合02原生2075/2075、零fail/error/skip，build19.251s/ctest490.527s、1291输入稳定；Python02为5489pass/74skip/4deselected/1warning，pytest1207.90s、wrapper1211.584s，5563案例、973输入稳定。跳过含显式encoder资产、Flower、离屏SIG11、Windows、MuPRO和可选依赖，不将独立69项真实推理重复算作全量已执行。
-当前wheel SHA `fbd6625a71e287a5ae83657b80ea583230841a8abc7a078e347e1db7b440c8a2`；新Linux隔离环境299/299、零skip，四个真实模型/PDF案例明确deselected，715输入稳定、704产品成员逐字节一致。完整证据见运行验收；最终sdist未完成。
+当前wheel SHA `fbd6625a71e287a5ae83657b80ea583230841a8abc7a078e347e1db7b440c8a2`；新Linux隔离环境299/299、零skip，四个真实模型/PDF案例明确deselected，715输入稳定、704产品成员逐字节一致。完整证据见运行验收。sdist已完成：`OWNER_NEW/package-sdist-20261103-01/closure.json`只读核对1048选中来源前后一致，49,499,902B，SHA `7d4294f25db4cb72bcec097cf0b8a0c0cb91f1e67a829192920d94e1010e7cf8`；704个产品成员与原wheel一致。sdist仅核源/成员，未安装或重测；原wheel299项证明保持。
+sdist在提交前构建，closure的head_at_build为旧基线3ef，核对的源字节绑定本次源码提交350534d；其中runtime-validation是该提交时旧记录。本次四文档为后续交付追记，不代表重构建或重测试。
 
 11-03此前AOCI压缩链21/24后因snapshot_unavailable中止，未确认/未Attest，该失败保留。
-最新Root完整24/24交付confirmed、Challenge9/10 pass，1144条/estimated165707 tokens；29条Observed逐当前SHA核对后acknowledge applied、txn40bc59963d92d5d733245239。这不是Entry语义维护或全量aligned，Dirty/Stale仍待最终稳定后维护。
-本地HEAD仍 `3ef4b2716d42304d708062f9715edae0afb5874f`，本批无新commit/push/新头CI；通用完整计划、八路线、三待决和PET后置保持，原生文献UI/目标平台/真实科学复现仍待完成。
+此前24/24、1144条、Challenge9/10是同日早期状态。Root最新完整读取25块、1167 Entry、169546 estimated tokens，交付confirmed、Challenge10/10；此读取发生在最后19项Apply之前，不代表当前1181 Entry已全部重读。
+29条Observed acknowledge applied、txn40bc59963d92d5d733245239；源提交前AOCI五批共76项Apply成功、29条Observed已确认，末次Apply aligned；1181 Entry，Verify/Check/Guide漂移为0、complete=true、next_action=none，证据 `RESUME_EVIDENCE/aoci-final-01/{verify,check,guide}.json`，保留3条非阻塞E规模提醒。
+源码实现提交并push main：`350534d34681e740d8d3c92a856d8bfd98299251`，107文件、36494+/10135-。Root用gitleaks8.30.1按`.gitleaks.toml`扫描约1.70MB暂存内容，零发现，报告 `RESUME_EVIDENCE/gitleaks-staged-01.json`。
+新CI快照：[Desktop41639295121](https://github.com/sijintech/stk/actions/runs/41639295121)、[Runtime41639295206](https://github.com/sijintech/stk/actions/runs/41639295206)、[Docs41639295109](https://github.com/sijintech/stk/actions/runs/41639295109)均in_progress/pending；[Secret41639295115](https://github.com/sijintech/stk/actions/runs/41639295115) completed/success。下次push须等整个Desktop终态，不能把Secret成功称为全CI通过。
+本次四文档追记改变了受管来源，先前aligned不覆盖这些新字节；Root将在新最终稳定态重新维护。通用完整计划、八路线、三待决和PET后置保持；原生文献UI仍是计划，目标平台/真实科学复现未完成。
 
 ## 2026-11-02 21:38 UTC：按所有者要求保存待办并转交（历史）
 

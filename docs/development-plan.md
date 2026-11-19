@@ -2161,6 +2161,13 @@ D1–D5 均待实现及验收；旧八项范围、三待决和 PET 后置不变�
 
 ## 2026-11-03：恢复持续开发，STK 主体的分布式科研工作台（当前）
 
+14:10 UTC：本批STK源码已本地提交535b0d63d15521ea7d4294ddfce2ac68a3555667，25路径、暂存密钥扫描零发现。Linux整合03完整2099/2099、零skip、1300输入稳定；其后Mac-only诊断单列为新CI待验，不借Linux作Apple证明。文献24例进入三平台必跑门，12门禁反例均正确拒绝；原生文献editor/实际2点击仍待下一片。Synthrix已交付可选执行接缝90d7c4a，但实际index/buildServer装配与桌面入口未接，下一片需使正常启动可达，复用现有人工确认/任务/回执，保持权限与凭据边界。Desktop350整轮失败已结束，Mac原型20轮161图和最终零引擎分配过、两视频0完整轮失败，Windows仍待修后实机；不宣布跨平台或完整产品合并完成。最终源包、治理与记录提交看本批closure及实际Git。
+本批Python发行：wheel03已离线新环境325pass/1 Windows-only skip/4推理deselected；sdist02的1048来源/1049成员与704产品字节已核，最终文档字节重绑为`OWNER_NEW/package-sdist-20261103-03/closure.json`。源包未安装、不复跑上述测试；原生界面/平台/完整产品仍按独立门验收。交付治理与push/CI事实绑定`OWNER_NEW/stk-cpu-windows-source-delivery-20261103-01/`最终closure，不沿旧aligned或旧包数字替后改来源。
+
+13:45 UTC：Synthrix可选Hub执行接缝已提交/push其main `90d7c4a4491c7ec32e41d43f220a6adef6b58820`，独立审查修复取消审拒误报及HTTP loopback域名误判；审查后真实Hub/Node/Runtime+PG与旧xTB+PG32项通过，门禁41646882003 queued，未称部署成功。默认xTB保留；当前只接执行，不镜像STK项目主账或另建调度器。STK文献共享controller/精确page CPU24/24+PNG2/2、100输入稳定，UI尚未落仓；整合03正全目标构建/CTest，冻结业务源。新wheel隔离325pass/1Windows-only skip/4推理deselected，715来源稳定；旧sdist待重绑。350534d Desktop整体failure（Linux三job过，Windows发现命令失败，Mac视频2例失败），Runtime11/13成功；peer.cmake延后标签修复已本地验证，目标OS仍待新CI。当前1181条AOCI已完整读25块/Challenge10/10，但WIP治理待收口。详见handoff及运行验收，不据CPU或制造任务宣布科学/平台完成。
+
+13:16 UTC：350534d新CI的Windows客户端两版本各23fail；Linux三Python、文献92×3、Darwin peer和Flower强制组已过，Desktop仍运行（Linux包及全新24.04双后端安装冒烟已过），Docs/Secret成功。正在修跨平台文件发布/helper与测试夹具；Root局部Linux89pass/1资产skip/1推理deselected不代Windows重验。原生文献controller/page CPU及Synthrix可选Hub任务切片进入实现，尚未交付新UI、完整合并或后续提交。失败/证据范围见运行验收，稳定后继续AOCI/main/新CI。
+
 所有者恢复持续目标“继续工作完成我们所有的开发计划”，11-02 冻结转交点转为历史。
 最新产品方向以 STK 为主体，融合 Synthrix AI 对话/科研管理；本地完整、Web 托管资源受成本限制，
 通过授权节点共用电脑/自有云能力。轻量 CLI 可跨位置提交并持续追踪任务；对话、文件、任务与能力目录形成稳定壳，
@@ -2179,9 +2186,13 @@ Hub CLI新增精确 `task.get` 与提交/观察/日志/产物/取消入口，9�
 独立冻结heldout一次评价Qwen同语120/120、跨语119/120通过原门，E5 reference跨语24/120；一般段落诊断不替代原科学PDF失败。
 S4撤权后旧Accept复活的最小CAS补修2红→绿；联合460pass/2个Windows-only skip，独立三Python各10/10、220输入稳定。
 Linux原生整合2075/2075、零skip，1291输入稳定；Python整合02为5489pass/74skip/4deselected/1warning，5563案例、973输入稳定，pytest1207.90s。74skip包含encoder资产、Flower、离屏SIG11、Windows、MuPRO及可选依赖；真实推理69项独立证明不计入全量通过数。首轮旧editor计数/Python两失败及两文件漂移保留，修正与本轮证据见运行验收。
-当前wheel新Linux隔离安装299/299、零skip，四个真实模型/PDF案例明确deselected，715输入稳定、704产品成员逐字节匹配；最终sdist未完成。
-AOCI最新Root24/24交付confirmed、Challenge9/10 pass（1144条、estimated165707 tokens），29条Observed已按当前SHA确认；Entry语义维护/Dirty-Stale治理仍待最终收口。
-本地HEAD仍3ef，本批无新commit/push/新头CI。原生文献UI、原科学PDF12/18/cross0/6质量失败、真实MuPRO、跨平台/网络与完整发行仍是待办。
+当前wheel新Linux隔离安装299/299、零skip，四个真实模型/PDF案例明确deselected，715输入稳定、704产品成员逐字节匹配。sdist已完成：`OWNER_NEW/package-sdist-20261103-01/closure.json`只读核对1048选中来源前后一致，49,499,902B，SHA `7d4294f25db4cb72bcec097cf0b8a0c0cb91f1e67a829192920d94e1010e7cf8`；704个产品成员与原wheel一致。sdist仅核源/成员，未安装或重测；原wheel299项证明保持。
+源码已提交并push main：`350534d34681e740d8d3c92a856d8bfd98299251`（107文件，36494+/10135-）。sdist在提交前构建，closure的head_at_build为旧基线3ef，核对的源字节绑定本次源码提交350534d；其中runtime-validation是该提交时旧记录。本次四文档为后续交付追记，不代表重构建或重测试。
+Root最新完整读取25块、1167 Entry、169546 estimated tokens，交付confirmed、Challenge10/10；此读取发生在最后19项Apply之前，不代表当前1181 Entry已全部重读。
+源提交前AOCI五批共76项Apply成功、29条Observed已确认，末次Apply aligned；1181 Entry，Verify/Check/Guide漂移为0、complete=true、next_action=none，证据 `RESUME_EVIDENCE/aoci-final-01/{verify,check,guide}.json`，保留3条非阻塞E规模提醒。 本次四文档追记改变了受管来源，先前aligned不覆盖这些新字节；Root将在新最终稳定态重新维护。
+Root用gitleaks8.30.1按`.gitleaks.toml`扫描约1.70MB暂存内容，零发现，报告 `RESUME_EVIDENCE/gitleaks-staged-01.json`。
+新CI快照：[Desktop41639295121](https://github.com/sijintech/stk/actions/runs/41639295121)、[Runtime41639295206](https://github.com/sijintech/stk/actions/runs/41639295206)、[Docs41639295109](https://github.com/sijintech/stk/actions/runs/41639295109)均in_progress/pending；[Secret41639295115](https://github.com/sijintech/stk/actions/runs/41639295115) completed/success。下次push须等整个Desktop终态，不能把Secret成功称为全CI通过。
+原生文献UI已开始controller/page CPU增量，编辑器与点击验收尚未交付；原科学PDF12/18/cross0/6质量失败、真实MuPRO、跨平台/网络与完整发行继续待办。
 
 ## 2026-11-02 21:38 UTC：冻结并转交当前待办（历史）
 
