@@ -1,5 +1,11 @@
 # STK 0.1.0a1 验收记录
 
+## 2026-11-19 · 本地与远端 main 合并验证
+
+合并提交 `b3d6085a` 在 Linux 完成桌面全目标构建，中英语言包各 3021 键，校验通过。首次定向 CTest 63/67。新工作台的按钮高于同排来源标签，旧测试按垂直中心查找，四项未找到标签。`727b6873` 改用同排控件的公共顶边后，四项均通过。六路并行复测时另有一次已接收任务的结果重访超时。最终双路并行验证任务布局、工作台导航、历史搜索和主题 67/67，零跳过；该重访用例另行连续五次通过。JUnit 证据位于本机 `main-sync-20261119-FtwV1avG/{integration,reviewed,final}.xml`，重复结果见同目录 `repeat.log`。
+
+远端前序头 `493f9adc` 的 Desktop CI 已结束。Linux 综合测试、macOS 和 Windows CPU 作业失败，Linux 打包、安装冒烟与 Windows 原生预览成功。同期 Runtime、Pages 和密钥扫描通过。[Desktop CI](https://github.com/sijintech/stk/actions/runs/44441308878) [Runtime CI](https://github.com/sijintech/stk/actions/runs/44441308719) [Pages](https://github.com/sijintech/stk/actions/runs/44441308671) [密钥扫描](https://github.com/sijintech/stk/actions/runs/44441308729)
+
 ## 2026-11-18 · Synthrix 样式的原生默认工作台
 
 以 Synthrix 企业版主线 `caec2b9` 和所有者确认的交互样稿实施原生工作台。宽窗采用 60 px 应用导航和 240 px 项目历史栏，窄窗保留顶部一级入口和历史菜单。新增集中配色的浅色主题、13 px 控件文字、18 px 标题、主次按钮、左对齐历史与浅蓝用户消息。工作台页头显示当前会话名。无项目时在欢迎页明确展开目录、名称及打开／新建操作。用途选择与准备操作位于输入卡工具行。
