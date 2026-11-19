@@ -1,5 +1,18 @@
 # STK 开发计划
 
+## 2026-11-19 · worktree／分支盘点与可合入项
+
+本地 main 现为 `c5b0d048`（相对 `origin/main` 超前含 124 取证）。盘点结论：
+
+- 约 135 个 worktree，多数为 `stk-validation`／`stk-root-*` 的 detached 验收树，不是待合并功能分支。
+- 约 25 个 Claude 分支的 tip 已与 main 内容等价（含 120／123／117／111 等），无需再合并。
+- 真正无冲突且有新内容、可立即合入的只有 Claude 124 文档；已拣选。
+- `claude/native-conversation-file-save-113` 对 main 无冲突（+6 提交），但交接明确要求目标平台 ACL／目录身份完成后再入主线。
+- 开放 PR #53／#54 仍为旧冲突或旧 `HANDOFF.md`，保持不合并。
+- 其余约 60 个「有独特提交但合并冲突」的分支，功能多已由 Root 改写合入；勿整支 merge。
+
+清理已等价 Claude worktree 与大量 validation detached 树可在所有者确认后批量 `worktree remove`。
+
 ## 2026-11-19 · 工作台集成基线
 
 后续工作从合并提交 `b3d6085a` 续接。原生默认工作台已包括窄窗历史搜索及桌面结果来源名称。前序跨平台测试仍有失败，详见[运行验收](runtime-validation.md)。

@@ -1,5 +1,9 @@
 # STK 当前交接
 
+## 2026-11-19 · 合入 Claude 124 帧标记取证
+
+将 `claude/macos-hidden-frame-evidence-124` 的 `a463c3cf` 拣选为本地 main `c5b0d048`。仅更新 `docs/design/macos-first-toolbar-pause-evidence.md`：写入 `65af7fa7` 官方 macOS 工件的首次隐藏／重显帧标记读数，并对照必测失败与 `537e9710`。未改产品代码。同日 worktree／分支盘点见开发计划；保存副本与旧 PR 仍不自动合入。
+
 ## 2026-11-19 · 本地与远端 main 同步
 
 合并提交 `b3d6085a` 保留了本地 `64b2df89` 及远端 `493f9adc` 的历史。此前工作区的七份 AOCI 和历史记录文件已提交为 `70416f36`。11 月 18 日的原生工作台与 11 月 14 日的历史搜索、结果来源和 Cocoa 诊断已在同一版本中。合并验证及前序桌面 CI 结果见[运行验收](docs/runtime-validation.md)。
