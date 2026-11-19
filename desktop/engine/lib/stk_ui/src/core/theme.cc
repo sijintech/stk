@@ -85,6 +85,69 @@ Theme Theme::blender_dark()
   t.space_text_hi = Color::hex(0xffffffff);
   t.space_title = Color::hex(0xe6e6e6ff);
   t.modal_dim = Color::hex(0x00000059);
+  t.primary_action = t.regular;
+  t.primary_action.inner = t.regular.inner_sel;
+  t.primary_action.inner_sel = t.primary_action.inner.blend(Color::hex(0x164097ff), 0.35f);
+  t.primary_action.text = Color::hex(0xffffffff);
+  t.selection_outline = Color::hex(0xdbe7faff);
+  t.text_muted = t.space_text;
+  t.disabled_back = t.regular.inner.scaled_alpha(0.5f);
+  t.disabled_text = t.regular.text.scaled_alpha(0.5f);
+  t.conversation_user_back = Color::hex(0xeef4ffff);
+  return t;
+}
+
+Theme Theme::synthrix_light()
+{
+  Theme t;
+  // Shared Synthrix industrial tokens, app/src/styles/synthrix/tokens/colors.css.
+  const auto control = wcol(0xcfd8e0ff, 0x2e6bdaff, 0xffffffff, 0xeff4feff,
+                            0x2e6bdaff, 0x16222cff, 0x164097ff, 0.3f);
+  t.regular = t.tool = t.option = t.toggle = t.num = t.numslider = control;
+  t.text = wcol(0xe5eaefff, 0x2e6bdaff, 0xffffffff, 0xffffffff,
+                0xdbe7fcff, 0x16222cff, 0x16222cff, 0.3f);
+  t.tab = wcol(0xe5eaefff, 0x2e6bdaff, 0xf7f9fbff, 0xeff4feff,
+               0x2e6bdaff, 0x47596bff, 0x164097ff, 0.3f);
+  t.menu = control;
+  t.pulldown = wcol(0x00000000, 0x2e6bdaff, 0x00000000, 0xe5eaefff,
+                    0x61758aff, 0x47596bff, 0x164097ff, 0.3f);
+  t.menu_back = wcol(0xe5eaefff, 0x2e6bdaff, 0xffffffff, 0xeff4feff,
+                     0x2e6bdaff, 0x16222cff, 0x164097ff, 0.3f);
+  t.menu_item = wcol(0x00000000, 0x00000000, 0x00000000, 0xeff4feff,
+                     0x2e6bdaff, 0x16222cff, 0x164097ff, 0.3f);
+  t.tooltip = wcol(0xcfd8e0ff, 0xcfd8e0ff, 0xf7f9fbff, 0xf7f9fbff,
+                   0x61758aff, 0x16222cff, 0x16222cff, 0.3f);
+  t.box = wcol(0xcfd8e0ff, 0x2e6bdaff, 0xffffffff, 0xeff4feff,
+               0x2e6bdaff, 0x16222cff, 0x164097ff, 0.5f);
+  t.scroll = wcol(0x00000000, 0x00000000, 0x00000000, 0x00000000,
+                  0xaebcc8ff, 0x47596bff, 0x16222cff, 0.5f);
+  t.progress = wcol(0xe5eaefff, 0x2e6bdaff, 0xf1f5f8ff, 0x2e6bdaff,
+                    0x2e6bdaff, 0x16222cff, 0xffffffff, 0.3f);
+  t.list_item = t.menu_item;
+  t.state = {Color::hex(0xb3261eff), Color::hex(0x9c6106ff),
+             Color::hex(0x2e6bdaff), Color::hex(0x1e7150ff)};
+  t.widget_emboss = {0, 0, 0, 0};
+  t.menu_shadow_fac = 0.08f;
+  t.menu_shadow_width = 8.0f;
+  t.editor_border = Color::hex(0xe5eaefff);
+  t.text_cursor = t.link = Color::hex(0x2e6bdaff);
+  t.panel_roundness = 0.3f;
+  t.panel_header = t.panel_back = Color::hex(0xf7f9fbff);
+  t.panel_sub_back = Color::hex(0xf7f9fbff);
+  t.panel_outline = Color::hex(0xe5eaefff);
+  t.panel_title = t.panel_text = Color::hex(0x16222cff);
+  t.region_back = Color::hex(0xffffffff);
+  t.header_back = Color::hex(0xf1f5f8ff);
+  t.space_text = t.space_text_hi = t.space_title = Color::hex(0x16222cff);
+  t.modal_dim = Color::hex(0x16222c59);
+  t.primary_action = control;
+  t.primary_action.inner = Color::hex(0x1b51bcff);
+  t.primary_action.inner_sel = t.primary_action.inner.blend(Color::hex(0x164097ff), 0.35f);
+  t.primary_action.text = Color::hex(0xffffffff);
+  t.selection_outline = Color::hex(0xdbe7faff);
+  t.text_muted = t.disabled_text = Color::hex(0x61758aff);
+  t.disabled_back = Color::hex(0xf1f5f8ff);
+  t.conversation_user_back = Color::hex(0xeef4ffff);
   return t;
 }
 

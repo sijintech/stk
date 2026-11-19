@@ -42,8 +42,13 @@ struct Theme {
   Color region_back, header_back, space_text, space_text_hi, space_title;
   /** Dimming behind modal dialogs (toolkit addition, not in Blender). */
   Color modal_dim;
+  /** Presentation tokens for opt-in action and conversation widgets. */
+  WidgetColors primary_action;
+  Color selection_outline, text_muted, disabled_back, disabled_text, conversation_user_back;
 
   static Theme blender_dark();
+  /** Synthrix industrial palette for the focused research workbench. */
+  static Theme synthrix_light();
 };
 
 /**

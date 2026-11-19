@@ -58,15 +58,17 @@ int main(int argc, char **argv)
   const bool skills = editor == "skills" || editor == "skills_narrow" || saved_skills;
   const bool ai_proposal = editor == "ai_proposal" || editor == "ai_proposal_narrow";
   const bool ai_focus = editor == "ai_focus";
+  const bool ai_workbench = editor == "ai_workbench" || editor == "ai_workbench_narrow";
   const bool ai_scope = editor == "ai_scope" || editor == "ai_scope_narrow";
-  const bool ai = editor == "ai" || editor == "ai_narrow" || ai_stream || ai_proposal || ai_scope || ai_focus;
+  const bool ai = editor == "ai" || editor == "ai_narrow" || ai_stream || ai_proposal || ai_scope || ai_focus || ai_workbench;
   const bool lammps = editor == "simulation_lammps" || editor == "simulation_lammps_narrow" ||
                       editor == "batches_lammps" || editor == "batches_lammps_narrow" ||
                       editor == "pet_study" || editor == "pet_study_narrow";
   const bool pet_study = editor == "pet_study" || editor == "pet_study_narrow";
   const bool batch_page = editor == "batches" || editor == "batches_lammps" || editor == "batches_lammps_narrow";
   const bool simulation_page = editor == "simulation" || batch_page || lammps;
-  const int canvas_width = portable_ui ? (portable_narrow ? 900 : 1440) : editor == "workspace_narrow" || (skills && editor.ends_with("_narrow")) ? 560 :
+  const int canvas_width = ai_workbench ? (editor.ends_with("_narrow") ? 680 : 1600) :
+      portable_ui ? (portable_narrow ? 900 : 1440) : editor == "workspace_narrow" || (skills && editor.ends_with("_narrow")) ? 560 :
       editor == "ai_narrow" || editor == "ai_proposal_narrow" || editor == "ai_scope_narrow" || ai_focus ||
       editor == "simulation_lammps_narrow" || editor == "batches_lammps_narrow" || editor == "pet_study_narrow" ? 760 : 1280;
   bridge::test::TempDir dir{"project-render"};
@@ -79,7 +81,7 @@ int main(int argc, char **argv)
   bo.env["STK_PROFILES_FILE"] = dir.str() + "/profiles.json";
   bo.env["STK_STATE_DIR"] = dir.str() + "/runtime";
   bo.env["STK_TOKEN_PLAN_API_KEY"] = "";
-  if (portable_ui || skills) { bo.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt; }
+  if (portable_ui || skills || ai_workbench) { bo.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt; }
   else if (!lammps) { bo.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model"; }
   bo.executor = loop.executor();
   bo.strict = bo.validate = true;
@@ -425,6 +427,10 @@ int main(int argc, char **argv)
         shell.store().jobs().file_dialog = &portable_dialog;
       }
       if (editor != "offline" && !portable_ui) { screen.set_maximized(area); }
+      if (ai_workbench) {
+        shell.open_workbench(screen);
+        screen.run_deferred();
+      }
       wm::DrawContext ctx;
       ctx.ui_scale = 1;
       ctx.fonts = &gpu->fonts();
@@ -792,6 +798,18 @@ int main(int argc, char **argv)
           return !state.discussion().usage_loaded() || state.discussion().usage().contains("completed");
         }, 30);
         ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+      }
+      if (ai_workbench) {
+        ok = ok && loop.pump_until([&] { return state.discussion().recent_requests() != nullptr; }, 30);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        // Read the saved exchange from its first message through the normal LogView keyboard path.
+        const auto *transcript = screen.ui()->find("ai_transcript");
+        ok = ok && transcript && screen.ui()->focus_widget(transcript->id);
+        if (ok) { screen.ui()->handle_event(ui::Event::key_down(ui::Key::Home)); }
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && shell.workbench_is_focused(screen) && screen.ui()->workbench_style() &&
+            screen.ui()->find("ai_transcript") && screen.ui()->find("ai_prepare") &&
+            client->stats().schema_violations == 0;
       }
       if (ai_scope) {
         // Enter the real picker and inspect the next scope without capturing or replacing history.

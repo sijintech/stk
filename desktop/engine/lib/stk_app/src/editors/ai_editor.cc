@@ -17,6 +17,7 @@
 #include "project_context_picker.hh"
 #include "project_navigation.hh"
 #include "project_labels.hh"
+#include "path_picker.hh"
 #include "editor_text.hh"
 #include "saved_conversation.hh"
 #include "simulation_target.hh"
@@ -309,16 +310,37 @@ class AIEditor final : public Editor {
     const bool focused = screen && screen->maximized() == &ctx.area && ctx.area.shell().workbench_is_focused(*screen);
     auto &state = ctx.store.project();
     state.sync();
-    workspace_link(row, ctx, focused);
     if (focused) {
-      auto showing_question = [this, weak = lifetime(), &state] { return !weak.expired() && shows_question_page(state); };
-      if (auto literature = ctx.area.shell().focused_literature_action(ctx.area, std::move(showing_question))) {
-        const auto label = ctx.tr("workbench.open_literature");
-        const auto &style = row.ctx().style();
-        row.button("ai_open_literature", label, std::move(literature))
-            .width((row.ctx().measurer().width(label, style.font) + 2 * style.text_margin) / style.unit);
+      std::string title(ctx.tr("workbench.nav.home"));
+      if (state.project()) {
+        const auto draft = drafts_.find(state.project()->directory + "\n" + state.project()->id);
+        if (draft != drafts_.end() && draft->second.intent == kAgentIntent) {
+          if (selected_agent_loaded(state.agent())) {
+            const auto &agent = state.agent();
+            const auto selected = std::find_if(agent.sessions().begin(), agent.sessions().end(), [&agent](const Json &item) {
+              return io::get_string(item, "id") == agent.selected();
+            });
+            title = agent_session_label(selected != agent.sessions().end() ? *selected : agent.view().at("session"));
+          }
+        }
+        else if (compose_handle_ != state.project()->handle && !state.discussion().exchange_request().empty()) {
+          title = conversation_title(io::get_string(state.discussion().exchange_question(), "text"));
+        }
       }
+      row.label(title).tip(title).label_appearance = ui::LabelAppearance::Title;
+      if (state.project()) {
+        workspace_link(row, ctx, true);
+        auto showing_question = [this, weak = lifetime(), &state] { return !weak.expired() && shows_question_page(state); };
+        if (auto literature = ctx.area.shell().focused_literature_action(ctx.area, std::move(showing_question))) {
+          const auto label = ctx.tr("workbench.open_literature");
+          row.button("ai_open_literature", label, std::move(literature))
+              .width((row.ctx().measurer().width(label, row.ctx().style().font) + 2 * row.ctx().style().text_margin) /
+                     row.ctx().style().unit).button_appearance = ui::ButtonAppearance::Navigation;
+        }
+      }
+      return;
     }
+    workspace_link(row, ctx);
     row.button("ai_tables", ctx.tr("editor.project.title"), [ctx] { show_tables(ctx); }).width(7);
     if (state.project()) { row.label(state.project()->name); }
   }
@@ -336,6 +358,60 @@ class AIEditor final : public Editor {
       ~DetailFrame() { if (!self.run_detail_drawn_) { self.close_run_detail(state, false); } }
     } detail_frame{*this, state};
     run_detail_drawn_ = false;
+    if (focused && !state.project()) {
+      auto *store = &ctx.store;
+      auto *area = &ctx.area;
+      auto *shell = &ctx.area.shell();
+      const auto current = [weak = lifetime(), shell_weak = shell->lifetime(), store, area, shell, screen,
+                            scope = store->project_scope_epoch(), bridge = store->bridge_epoch(),
+                            activity = area->activity_epoch(), visibility = screen->visibility_epoch()] {
+        return !weak.expired() && !shell_weak.expired() && shell->has_area(area) &&
+            store->project_scope_epoch() == scope && store->bridge_epoch() == bridge && !store->project().project() &&
+            area->activity_epoch() == activity && area->screen() == screen && screen->maximized() == area &&
+            screen->visibility_epoch() == visibility && shell->workbench_is_focused(*screen);
+      };
+      auto &welcome = focused_conversation_column(layout);
+      const auto &style = welcome.ctx().style();
+      const float height = ctx.draw ? float(ctx.draw->rect.height()) : 700.0f;
+      welcome.separator(std::clamp(height / style.unit * 0.12f, 2.0f, 6.0f));
+      welcome.label(ctx.tr("workbench.question_start"), ui::Align::Center).label_appearance = ui::LabelAppearance::Title;
+      welcome.label(ctx.tr("ai.workbench.project_hint"), ui::Align::Center);
+      welcome.separator(1.2f);
+      auto &actions = welcome.row().alignment(ui::LayoutAlign::Center);
+      actions.button("ai_open_project", ctx.tr("project.location"), [this, store, current] {
+        if (!current()) { return; }
+        project_location_open_ = !project_location_open_;
+        store->changed();
+      }).button_appearance = ui::ButtonAppearance::Secondary;
+      if (project_location_open_) {
+        welcome.separator();
+        auto &form = welcome.box();
+        auto &folder = form.prop(ctx.tr("project.directory")).row(true);
+        folder.text_field("ai_project_directory", ui::bind(project_directory_));
+        project_directory_picker_.button(folder, ctx, "ai_project_browse", &project_directory_,
+            {.mode = platform::FileDialogMode::OpenFolder, .title_key = "project.directory_dialog",
+             .still_current = [this, current] { return current() && project_location_open_; }});
+        project_directory_picker_.draw_error(form);
+        form.prop(ctx.tr("project.name")).text_field("ai_project_name", ui::bind(project_name_));
+        auto &buttons = form.row().alignment(ui::LayoutAlign::Right);
+        buttons.button("ai_project_open", ctx.tr("project.open"), [this, &state, current] {
+          if (!current() || !project_location_open_) { return; }
+          const auto paths = platform::split_path_list(project_directory_);
+          if (paths.size() == 1) { state.open(paths.front()); }
+        }).disable(!state.ready() || state.busy() || project_directory_.empty())
+            .button_appearance = ui::ButtonAppearance::Secondary;
+        buttons.button("ai_project_create", ctx.tr("project.create"), [this, &state, current] {
+          if (!current() || !project_location_open_) { return; }
+          const auto paths = platform::split_path_list(project_directory_);
+          if (paths.size() == 1) { state.create(paths.front(), project_name_); }
+        }).disable(!state.ready() || state.busy() || project_directory_.empty() || project_name_.empty())
+            .button_appearance = ui::ButtonAppearance::Primary;
+      }
+      if (!state.ready()) { welcome.paragraph(ctx.tr("project.bridge_required")); }
+      if (!state.error().empty()) { welcome.paragraph(state.error()); }
+      if (state.busy()) { welcome.label(ctx.tr("project.busy")); }
+      return;
+    }
     if (!state.ready()) { layout.paragraph(ctx.tr("project.bridge_required")); return; }
     if (!state.project()) {
       layout.paragraph(ctx.tr("ai.open_project"));
@@ -414,15 +490,11 @@ class AIEditor final : public Editor {
     poll(ctx, discussion);
     auto &body = focused ? focused_conversation_column(layout) : layout;
     const bool compose_first = focused && compose_handle_ == opening;
-    if (focused && !compose_first && !discussion.exchange_request().empty()) {
-      auto title = conversation_title(io::get_string(discussion.exchange_question(), "text"));
-      if (title.empty()) { title = ctx.tr("ai.history"); }
-      body.label(title).tip(title);
-    }
     if (compose_first) {
       const auto visibility = std::exchange(compose_focus_visibility_, std::nullopt);
       const bool focus = visibility && *visibility == screen->visibility_epoch();
       body.block().set_scroll_scope("ai_question_composer", focus);
+      body.label(ctx.tr("workbench.question_start"), ui::Align::Center).label_appearance = ui::LabelAppearance::Title;
       const auto &input = question_composer(body, ctx, state, draft, key, true);
       if (focus && ctx.ui) { ctx.ui->restore_focus_next_frame(input.key); }
       draw_return_to_question(body, ctx, state);
@@ -1308,17 +1380,30 @@ class AIEditor final : public Editor {
       archived_notice(layout, ctx, "request", id);
     }
     else if (!compose_first) {
-      if (compact_empty) { layout.label(ctx.tr("workbench.question_start"), ui::Align::Center); }
+      if (compact_empty) {
+        layout.separator(2);
+        layout.label(ctx.tr("workbench.question_start"), ui::Align::Center).label_appearance = ui::LabelAppearance::Title;
+      }
       else { layout.paragraph(ctx.tr(discussion.exchange_busy() ? "ai.loading" : "ai.empty")); }
     }
+    ui::Widget *focused_transcript = nullptr;
     if (!compact_empty) {
       const float height = ctx.draw ? float(ctx.draw->rect.height()) : 800.0f;
       const float candidate_space = parameter_request && status == "completed" ? 4.0f : 0.0f;
-      const float transcript_units = wide ? std::clamp(height / unit - 23.0f - candidate_space, 5.0f, 22.0f) :
+      float transcript_units = wide ? std::clamp(height / unit - 23.0f - candidate_space, 5.0f, 22.0f) :
           settings_open ? 6.0f : std::clamp(height / unit - 25.0f - candidate_space, 6.0f, 22.0f);
+      if (focused && !settings_open) {
+        const auto composer_hint = ctx.tr(discussion.context().empty() ? "ai.no_context" : "ai.prepare_hint");
+        const float hint_width = std::max(unit, conversation_width -
+            2 * (style.panel_margin + style.box_space + style.text_margin));
+        const auto hint_lines = ui::break_lines(composer_hint, hint_width, layout.ctx().measurer(), style.font).size();
+        const float extra_hint = float(hint_lines > 1 ? hint_lines - 1 : 0) * style.line_height / unit;
+        transcript_units = std::clamp(height / unit - 21.0f - extra_hint - candidate_space, 6.0f, 100.0f);
+      }
       auto &view = layout.log_view("ai_transcript", transcript_, transcript_units, transcript_position(transcript_positions_, id));
       view.mono = transcript_mono;
       view.log_blocks = transcript_blocks_;
+      if (focused && !settings_open) { focused_transcript = &view; }
     }
     if (!compact_empty && (!focused || !id.empty())) {
       const bool archived = ctx.store.archive().archived("request", id);
@@ -1397,6 +1482,9 @@ class AIEditor final : public Editor {
     }
     if (history_on_rail && !compose_first) {
       if (auto *history = layout.panel("ai_all_saved_questions", ctx.tr("ai.history"), false)) {
+        if (focused_transcript) {
+          focused_transcript->height = std::max(6.0f * unit, focused_transcript->height - 4.0f * unit);
+        }
         if (!page.loaded && enabled) { discussion.load_page("requests", page.offset, true); }
         draw_saved_questions(*history, ctx, state);
       }
@@ -1416,8 +1504,10 @@ class AIEditor final : public Editor {
     auto &discussion = state.discussion();
     const bool enabled = !state.busy() && !discussion.busy();
     const std::string handle = state.project()->handle;
-    layout.label(ctx.tr("ai.compose"));
-    intent_dropdown(layout, ctx, state, draft);
+    if (!focused) {
+      layout.label(ctx.tr("ai.compose"));
+      intent_dropdown(layout, ctx, state, draft);
+    }
     if (draft.intent >= 1 && !discussion.edit_proposals_supported()) { layout.paragraph(ctx.tr("ai.edits_unavailable")); }
     if (draft.intent == 2) { hint(layout, ctx, "ai.intent_sweep.hint"); }
     const auto context_id = io::get_string(discussion.context(), "id");
@@ -1477,9 +1567,19 @@ class AIEditor final : public Editor {
         !ctx.ui->edit_state()->text().empty() : !draft.text.empty();
     composer.paragraph(ctx.tr(focused && discussion.context().empty() ? "ai.no_context" : "ai.prepare_hint"));
     if (picker_.active()) { composer.paragraph(ctx.tr("ai.scope.finish_first")); }
-    auto &actions = focused ? composer.row().alignment(ui::LayoutAlign::Right) : layout;
-    actions.button("ai_prepare", ctx.tr("ai.prepare"), prepare).disable(!can_prepare || !has_question)
-        .tip(ctx.tr("ai.prepare.shortcut"));
+    if (focused) {
+      auto &tools = composer.row();
+      intent_dropdown(tools, ctx, state, draft);
+      const auto label = ctx.tr("ai.prepare");
+      const auto &style = tools.ctx().style();
+      tools.button("ai_prepare", label, prepare).disable(!can_prepare || !has_question)
+          .width(std::ceil(tools.ctx().measurer().width(label, style.font) + 2 * style.text_margin) / style.unit)
+          .tip(ctx.tr("ai.prepare.shortcut")).button_appearance = ui::ButtonAppearance::Primary;
+    }
+    else {
+      layout.button("ai_prepare", ctx.tr("ai.prepare"), prepare).disable(!can_prepare || !has_question)
+          .tip(ctx.tr("ai.prepare.shortcut"));
+    }
     return input;
   }
 
@@ -1771,13 +1871,6 @@ class AIEditor final : public Editor {
     const bool enabled = !state.busy() && !agent.busy();
     const auto &view = agent.view();
     const bool session_loaded = selected_agent_loaded(agent);
-    if (focused && session_loaded) {
-      const auto selected = std::find_if(agent.sessions().begin(), agent.sessions().end(), [&agent](const Json &item) {
-        return io::get_string(item, "id") == agent.selected();
-      });
-      const auto title = agent_session_label(selected != agent.sessions().end() ? *selected : view.at("session"));
-      layout.label(title).tip(title);
-    }
     intent_dropdown(layout, ctx, state, draft);
     const auto intro = agent.runs_supported() ? "ai.agent.intro_runs" : "ai.agent.intro";
     if (!focused) { hint(layout, ctx, intro); }
@@ -1930,8 +2023,9 @@ class AIEditor final : public Editor {
     const bool has_text = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
         !ctx.ui->edit_state()->text().empty() : !draft.agent_text.empty();
     auto &actions = focused ? composer.row().alignment(ui::LayoutAlign::Right) : layout;
-    actions.button("ai_agent_send", ctx.tr(new_session ? "ai.agent.start" : "ai.agent.say"), send)
+    auto &send_button = actions.button("ai_agent_send", ctx.tr(new_session ? "ai.agent.start" : "ai.agent.say"), send)
         .disable(!can_send || !has_text).tip(ctx.tr("ai.agent.send.shortcut"));
+    if (focused) { send_button.button_appearance = ui::ButtonAppearance::Primary; }
   }
 
   void agent_run_cards(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
@@ -2388,6 +2482,9 @@ class AIEditor final : public Editor {
   }
 
   std::unordered_map<std::string, Draft> drafts_, workspace_drafts_;
+  bool project_location_open_ = false;
+  std::string project_directory_, project_name_;
+  PathPicker project_directory_picker_;
   std::string active_draft_, opening_, shown_context_, shown_exchange_;
   bool opened_history_ = false;
   std::string saved_questions_handle_, compose_handle_;

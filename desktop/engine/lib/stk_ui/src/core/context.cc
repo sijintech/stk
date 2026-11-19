@@ -25,7 +25,7 @@ void Block::set_scroll_scope(std::string_view scope, const bool reset_position)
   if (reset_position) { ctx_->scroll_.erase(scroll_id()); }
 }
 
-Context::Context(ContextConfig config) : config_(std::move(config))
+Context::Context(ContextConfig config) : config_(std::move(config)), configured_theme_(config_.theme)
 {
   style_ = Style::from_scale(1.0f);
 }
@@ -142,8 +142,26 @@ void Context::set_scale(float dpi_scale, float user_scale)
   const float s = std::max(0.25f, dpi_scale * user_scale);
   if (s != style_.scale) {
     style_ = Style::from_scale(s);
+    if (workbench_style_) {
+      style_.font.size_px = std::round(13.0f * s * 4.0f) / 4.0f;
+      style_.line_height = std::round(20.0f * s);
+      style_.panel_header = std::round(28.0f * s);
+      style_.space_y = std::round(4.0f * s);
+      style_.box_space = std::round(8.0f * s);
+    }
     redraw_ = true;
   }
+}
+
+void Context::set_workbench_style(const bool enabled)
+{
+  if (workbench_style_ == enabled) { return; }
+  const float current_scale = style_.scale;
+  workbench_style_ = enabled;
+  config_.theme = enabled ? Theme::synthrix_light() : configured_theme_;
+  // Reuse the normal scale update so DPI changes and presentation changes use the same metrics.
+  style_.scale = 0.0f;
+  set_scale(current_scale);
 }
 
 std::string_view Context::tr(std::string_view key) const
@@ -1205,6 +1223,7 @@ float Context::list_row_height(const Widget &w) const
 {
   if (w.type == WidgetType::LogView) {
     // Rows follow the font the log draws with, so scrolling, keys and the extent stay aligned.
+    if (workbench_style_ && !w.mono) { return style_.line_height; }
     return std::round((w.mono ? style_.mono : style_.font).size_px * 1.4f);
   }
   if (w.table) {

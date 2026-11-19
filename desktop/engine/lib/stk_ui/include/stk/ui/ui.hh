@@ -127,7 +127,8 @@ struct NativeViewportState {
 enum class Align : uint8_t { Left, Center, Right };
 enum class LayoutAlign : uint8_t { Expand, Left, Center, Right };
 enum class ToastKind : uint8_t { Info, Success, Warning, Error };
-enum class ButtonAppearance : uint8_t { Standard, Navigation, CurrentPage };
+enum class ButtonAppearance : uint8_t { Standard, Navigation, CurrentPage, Sidebar, SidebarCurrent, Primary, Secondary };
+enum class LabelAppearance : uint8_t { Standard, Title, Meta };
 
 struct ColormapItem {
   std::string name;
@@ -311,6 +312,7 @@ struct Widget {
   std::string tooltip;
   Align align = Align::Left;
   ButtonAppearance button_appearance = ButtonAppearance::Standard;
+  LabelAppearance label_appearance = LabelAppearance::Standard;
   bool enabled = true;
   bool label_backdrop = false; /**< Label only: opaque tooltip-theme background, paired text. */
   bool layout_region = false; /**< Invisible container geometry; never obscures child controls. */
@@ -350,6 +352,8 @@ struct Widget {
   int menu_index = -1;         /**< MenuItem: index in the popup. */
 
   bool focusable() const;
+  /** Font used for both label measurement and drawing. Other widgets keep their existing font. */
+  FontStyle font_style(const Style &style) const;
 
   /* Chainable modifiers. */
   Widget &tip(std::string_view text);
@@ -571,6 +575,10 @@ class Context {
   /* Configuration. */
   /** UI scale = DPI scale (GHOST native pixel size / DPI hint) x user scale. */
   void set_scale(float dpi_scale, float user_scale = 1.0f);
+  /** Change presentation inside this context without replacing its editing or navigation state.
+   * Call before creating the frame's blocks. The original configured theme is restored when disabled. */
+  void set_workbench_style(bool enabled);
+  bool workbench_style() const { return workbench_style_; }
   float scale() const { return style_.scale; }
   const Style &style() const { return style_; }
   const Theme &theme() const { return config_.theme; }
@@ -796,6 +804,8 @@ class Context {
   void draw_shadow(const Rect &r, float radius);
 
   ContextConfig config_;
+  Theme configured_theme_;
+  bool workbench_style_ = false;
   Style style_;
   Vec2 window_;
   double now_ = 0.0;
