@@ -1333,3 +1333,163 @@ TEST(Scale, UnitsFollowDpiTimesUserScale)
     EXPECT_FLOAT_EQ(h.w("v").rect.h, unit);
   }
 }
+
+TEST(WorkbenchStyle, ToggleAndDpiPreserveTheActiveDraftAndSelection)
+{
+  Harness h;
+  bool focused = false;
+  std::string draft;
+  h.ui = [&](Context &ctx) {
+    ctx.set_workbench_style(focused);
+    ctx.block("workbench", {0, 0, 400, 600}).layout().text_area("draft", bind(draft),
+        {.visible_lines = 3, .preserve_on_escape = true});
+  };
+  h.frame();
+  const Color original_background = h.ctx->theme().region_back;
+  const WidgetId identity = h.w("draft").id;
+  h.click("draft");
+  h.type("retained draft");
+  h.key(Key::Left, MOD_SHIFT);
+  const auto selection = h.ctx->edit_state()->selection();
+  focused = true;
+  h.frame();
+  EXPECT_EQ(h.ctx->editing(), identity);
+  EXPECT_EQ(h.ctx->edit_state()->text(), "retained draft");
+  EXPECT_EQ(h.ctx->edit_state()->selection(), selection);
+  EXPECT_EQ(h.ctx->theme().region_back, Color::hex(0xffffffff));
+  EXPECT_FLOAT_EQ(h.ctx->style().font.size_px, 13.0f);
+  EXPECT_FLOAT_EQ(h.ctx->style().unit, 20.0f);
+  h.ctx->set_scale(2.0f);
+  h.frame();
+  EXPECT_EQ(h.ctx->editing(), identity);
+  EXPECT_EQ(h.ctx->edit_state()->selection(), selection);
+  EXPECT_FLOAT_EQ(h.ctx->style().font.size_px, 26.0f);
+  EXPECT_FLOAT_EQ(h.ctx->style().unit, 40.0f);
+  focused = false;
+  h.frame();
+  EXPECT_EQ(h.ctx->editing(), identity);
+  EXPECT_EQ(h.ctx->theme().region_back, original_background);
+  EXPECT_FLOAT_EQ(h.ctx->style().font.size_px, 22.0f);
+  h.key(Key::Escape);
+  EXPECT_EQ(draft, "retained draft");
+}
+
+TEST(WorkbenchStyle, SidebarAlignmentTitleMetricsAndDisabledTextAreLegible)
+{
+  Harness h;
+  h.ui = [&](Context &ctx) {
+    ctx.set_workbench_style(true);
+    auto &layout = ctx.block("workbench", {0, 0, 400, 600}).layout();
+    layout.label("Research title").label_appearance = LabelAppearance::Title;
+    auto &row = layout.button("history", "Saved conversation", {});
+    row.button_appearance = ButtonAppearance::SidebarCurrent;
+    row.align = Align::Left;
+    auto &send = layout.button("send", "Prepare", {}).disable();
+    send.button_appearance = ButtonAppearance::Primary;
+  };
+  h.frame();
+  const auto &history = h.w("history");
+  const auto &send = h.w("send");
+  const auto &theme = h.ctx->theme();
+  EXPECT_FLOAT_EQ(history.height, 26.0f);
+  bool title_seen = false, history_seen = false, disabled_seen = false;
+  for (const auto &cmd : h.ctx->draw_list().cmds) {
+    if (cmd.type == CmdType::Text && cmd.text == "Research title") {
+      title_seen = true;
+      EXPECT_FLOAT_EQ(cmd.font.size_px, 18.0f);
+    }
+    if (cmd.type == CmdType::Text && cmd.text == history.text) {
+      history_seen = true;
+      EXPECT_FLOAT_EQ(cmd.pos.x, history.rect.x + h.ctx->style().text_margin);
+      EXPECT_EQ(cmd.color, theme.menu_item.text_sel);
+    }
+    if (cmd.type == CmdType::Text && cmd.text == send.text) {
+      disabled_seen = true;
+      EXPECT_EQ(cmd.color, Color::hex(0x61758aff));
+    }
+    if (cmd.type == CmdType::RoundBox) { EXPECT_EQ(cmd.emboss.a, 0); }
+  }
+  EXPECT_TRUE(title_seen);
+  EXPECT_TRUE(history_seen);
+  EXPECT_TRUE(disabled_seen);
+}
+
+TEST(WorkbenchStyle, ConversationHasUserBackdropWithoutAFramedLogSurface)
+{
+  Harness h;
+  bool focused = true;
+  LogBuffer log;
+  log.append("Person\nQuestion\nAssistant\nResponse");
+  auto blocks = std::make_shared<const std::vector<LogBlock>>(std::vector<LogBlock>{{0, 2, 90}});
+  h.ui = [&](Context &ctx) {
+    ctx.set_workbench_style(focused);
+    auto &view = ctx.block("workbench", {0, 0, 400, 600}).layout().log_view("conversation", log, 8);
+    view.mono = !focused;
+    view.log_blocks = blocks;
+  };
+  h.frame();
+  const auto boxes = [&] {
+    std::vector<DrawCmd> result;
+    for (const auto &cmd : h.ctx->draw_list().cmds) {
+      if (cmd.type == CmdType::RoundBox) { result.push_back(cmd); }
+    }
+    return result;
+  };
+  const auto conversation_boxes = boxes();
+  ASSERT_EQ(conversation_boxes.size(), 1u);
+  EXPECT_EQ(conversation_boxes[0].color, Color::hex(0xeef4ffff));
+  EXPECT_EQ(conversation_boxes[0].outline.a, 0);
+  EXPECT_FLOAT_EQ(conversation_boxes[0].rect.h, 2 * h.ctx->style().line_height);
+  const WidgetId identity = h.w("conversation").id;
+  focused = false;
+  h.frame();
+  EXPECT_EQ(h.w("conversation").id, identity);
+  const auto legacy_boxes = boxes();
+  ASSERT_EQ(legacy_boxes.size(), 1u);
+  EXPECT_EQ(legacy_boxes[0].color, h.ctx->theme().text.inner);
+  EXPECT_EQ(legacy_boxes[0].outline, h.ctx->theme().text.outline);
+}
+
+TEST(WorkbenchStyle, ActionAndMetaRenderingUseTheConfiguredThemeTokens)
+{
+  FakeTextMeasurer measurer;
+  ContextConfig config;
+  config.measurer = &measurer;
+  config.theme = Theme::synthrix_light();
+  config.theme.primary_action.inner = {34, 68, 102, 255};
+  config.theme.primary_action.text = {238, 240, 242, 255};
+  config.theme.selection_outline = {115, 129, 143, 255};
+  config.theme.text_muted = {51, 68, 85, 255};
+  Context ctx(config);
+  ctx.begin_frame({400, 300}, 1);
+  auto &layout = ctx.block("themed", {0, 0, 400, 300}).layout();
+  auto &primary = layout.button("primary", "Send", {});
+  primary.button_appearance = ButtonAppearance::Primary;
+  auto &sidebar = layout.button("sidebar", "Current", {});
+  sidebar.button_appearance = ButtonAppearance::SidebarCurrent;
+  layout.label("Metadata").label_appearance = LabelAppearance::Meta;
+  ctx.end_frame();
+  bool primary_surface = false, current_outline = false, primary_text = false, meta_text = false;
+  for (const auto &cmd : ctx.draw_list().cmds) {
+    if (cmd.type == CmdType::RoundBox && cmd.rect.y == primary.rect.y) {
+      primary_surface = true;
+      EXPECT_EQ(cmd.color, config.theme.primary_action.inner);
+    }
+    if (cmd.type == CmdType::RoundBox && cmd.rect.y == sidebar.rect.y) {
+      current_outline = true;
+      EXPECT_EQ(cmd.outline, config.theme.selection_outline);
+    }
+    if (cmd.type == CmdType::Text && cmd.text == "Send") {
+      primary_text = true;
+      EXPECT_EQ(cmd.color, config.theme.primary_action.text);
+    }
+    if (cmd.type == CmdType::Text && cmd.text == "Metadata") {
+      meta_text = true;
+      EXPECT_EQ(cmd.color, config.theme.text_muted);
+    }
+  }
+  EXPECT_TRUE(primary_surface);
+  EXPECT_TRUE(current_outline);
+  EXPECT_TRUE(primary_text);
+  EXPECT_TRUE(meta_text);
+}

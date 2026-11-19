@@ -218,7 +218,7 @@ void Context::draw_widget(const Widget &w)
   const Rect &r = w.rect;
   const float px = st.pixel;
   const Color none{0, 0, 0, 0};
-  const FontStyle &font = w.mono ? st.mono : st.font;
+  const FontStyle font = w.font_style(st);
   const FontMetrics fm = tm.metrics(font);
   auto baseline = [&](const Rect &rr) { return std::round(rr.cy() + (fm.ascent - fm.descent) * 0.5f); };
   auto text_in = [&](const Rect &rr, std::string_view s, Align a, Color c) {
@@ -299,7 +299,8 @@ void Context::draw_widget(const Widget &w)
         draw_.round_box(r, clamp_radius(th.tooltip.roundness * st.unit, r), w.corners,
                          th.tooltip.inner.with_alpha(255), none);
       }
-      const Color c = (w.label_backdrop ? th.tooltip.text.with_alpha(255) : th.space_text)
+      const Color c = (w.label_backdrop ? th.tooltip.text.with_alpha(255) :
+          w.label_appearance == LabelAppearance::Meta ? th.text_muted : th.space_text)
                           .scaled_alpha(disabled ? 0.5f : 1.0f);
       text_in(r.inset(st.text_margin, 0), w.text, w.align, c);
       break;
@@ -318,7 +319,45 @@ void Context::draw_widget(const Widget &w)
       break;
     }
     case WidgetType::Button: {
-      if (w.button_appearance != ButtonAppearance::Standard) {
+      if (w.button_appearance == ButtonAppearance::Sidebar ||
+          w.button_appearance == ButtonAppearance::SidebarCurrent ||
+          w.button_appearance == ButtonAppearance::Primary ||
+          w.button_appearance == ButtonAppearance::Secondary) {
+        const bool sidebar = w.button_appearance == ButtonAppearance::Sidebar ||
+                             w.button_appearance == ButtonAppearance::SidebarCurrent;
+        const bool current = w.button_appearance == ButtonAppearance::SidebarCurrent;
+        const bool primary = w.button_appearance == ButtonAppearance::Primary;
+        WidgetColors c = sidebar ? th.pulldown : primary ? th.primary_action : th.regular;
+        if (current) {
+          c.inner = th.menu_item.inner_sel;
+          c.text = th.menu_item.text_sel;
+          c.outline = th.selection_outline;
+        }
+        else if (sidebar) {
+          c.inner = hover || pressed ? th.pulldown.inner_sel : none;
+          c.outline = none;
+        }
+        else if (primary) {
+          if (hover || pressed) { c.inner = c.inner_sel; }
+          c.outline = c.inner;
+        }
+        else {
+          c.inner = hover || pressed ? th.panel_back : th.regular.inner;
+          c.text = th.link;
+        }
+        if (focused) { c.outline = th.link; }
+        if (disabled && !current) {
+          c.inner = workbench_style_ ? th.disabled_back : c.inner.scaled_alpha(0.5f);
+          c.text = workbench_style_ ? th.disabled_text : c.text.scaled_alpha(0.5f);
+          c.outline = sidebar ? none : th.editor_border;
+        }
+        c.roundness = 0.3f;
+        box(r, c, w.corners, false);
+        text_in(r.inset(st.text_margin, 0), w.text, w.align, c.text);
+        break;
+      }
+      if (w.button_appearance == ButtonAppearance::Navigation ||
+          w.button_appearance == ButtonAppearance::CurrentPage) {
         const bool current = w.button_appearance == ButtonAppearance::CurrentPage;
         WidgetColors c = current ? state_colors(th.menu_item, true, false, false) : th.pulldown;
         if (current) { c.inner = c.inner.blend(th.header_back, 0.6f); }
@@ -326,12 +365,12 @@ void Context::draw_widget(const Widget &w)
         if (current || focused) { c.outline = th.link; }
         c = state_colors(c, false, false, disabled && !current);
         box(r, c, w.corners, false);
-        text_in(r.inset(st.text_margin, 0), w.text, Align::Center, c.text);
+        text_in(r.inset(st.text_margin, 0), w.text, w.align, c.text);
         break;
       }
       const WidgetColors c = state_colors(th.regular, pressed, hover || focused, disabled);
       box(r, c, w.corners);
-      text_in(r.inset(st.text_margin, 0), w.text, Align::Center, c.text);
+      text_in(r.inset(st.text_margin, 0), w.text, w.align, c.text);
       break;
     }
     case WidgetType::MenuButton: {
@@ -630,7 +669,10 @@ void Context::draw_widget(const Widget &w)
       const bool log = w.type == WidgetType::LogView;
       const bool table = w.type == WidgetType::Table;
       const WidgetColors &bc = log ? th.text : th.box;
-      draw_.round_box(r, clamp_radius(bc.roundness * st.unit, r), CORNER_ALL, bc.inner, bc.outline);
+      const bool conversation = log && workbench_style_ && !w.mono;
+      if (!conversation) {
+        draw_.round_box(r, clamp_radius(bc.roundness * st.unit, r), CORNER_ALL, bc.inner, bc.outline);
+      }
       const float row_h = list_row_height(w);
       const float horizontal = table ? table_scroll_x(w) : 0.0f;
       const Rect body = list_body(w);
@@ -710,13 +752,24 @@ void Context::draw_widget(const Widget &w)
         const float x = std::round(block_edge - block.width);
         return x >= left ? x : left;
       };
+      if (conversation && blocks) {
+        for (const LogBlock &block : *blocks) {
+          const float y = body.y + lpad + float(block.first_line) * row_h - scroll;
+          const float height = float(block.lines) * row_h;
+          if (height <= 0 || y > body.y1() || y + height < body.y) { continue; }
+          const float x = log_x(block.first_line) - st.text_margin;
+          const float width = std::min(block.width + 2 * st.text_margin, block_edge - x + st.text_margin);
+          draw_.round_box({x, y, width, height}, std::round(6.0f * st.scale), CORNER_ALL,
+                          th.conversation_user_back, none);
+        }
+      }
       for (int i = first; i < last; i++) {
         const float y = std::round(body.y + lpad + float(i) * row_h - scroll);
         const Rect row{body.x, y, body.w - sbw, row_h};
         if (log) {
           // The widget's font: monospace by default, the regular UI font when the caller cleared mono.
           draw_.text(std::string(w.log->line(size_t(i))), {log_x(size_t(i)), baseline(row)}, font,
-                     th.tooltip.text);
+                     conversation ? th.space_text : th.tooltip.text);
           continue;
         }
         const int model = perm ? (*perm)[size_t(i)] : i;

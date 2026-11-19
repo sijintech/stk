@@ -148,6 +148,10 @@ Widget &Layout::add_widget(WidgetType type, std::string_view key)
   w.id = utf8::hash_combine(scope_, utf8::fnv1a(k));
   w.key = path_ + "/" + k;
   w.height = std::round(block_->ctx().style().unit * scale_y_);
+  if (ctx().workbench_style() && (type == WidgetType::Button || type == WidgetType::TextField ||
+      type == WidgetType::Dropdown || type == WidgetType::MenuButton || type == WidgetType::Checkbox)) {
+    w.height = std::round(26.0f * ctx().scale() * scale_y_);
+  }
   items_.push_back({nullptr, &w, 0.0f});
   return w;
 }
@@ -439,6 +443,16 @@ Widget &Layout::curve_preview(std::string_view key, std::vector<Vec2> points)
 /* -------------------------------------------------------------------- */
 /* Resolution */
 
+FontStyle Widget::font_style(const Style &style) const
+{
+  FontStyle font = mono ? style.mono : style.font;
+  if (type == WidgetType::Label && label_appearance != LabelAppearance::Standard) {
+    const float size = label_appearance == LabelAppearance::Title ? 18.0f : 11.0f;
+    font.size_px = std::round(size * style.scale * 4.0f) / 4.0f;
+  }
+  return font;
+}
+
 float LayoutEngine::text_w(const Context &ctx, std::string_view s, bool mono)
 {
   return ctx.measurer().width(s, mono ? ctx.style().mono : ctx.style().font);
@@ -453,7 +467,7 @@ float LayoutEngine::pref_width(const Context &ctx, const Widget &w)
   const float m = st.text_margin;
   switch (w.type) {
     case WidgetType::Label:
-      return text_w(ctx, w.text) + 2 * m;
+      return ctx.measurer().width(w.text, w.font_style(st)) + 2 * m;
     case WidgetType::Paragraph:
       return std::min(text_w(ctx, w.text) + 2 * m, 20.0f * st.unit);
     case WidgetType::Button:
@@ -707,6 +721,9 @@ void LayoutEngine::place_x(Context &ctx, Layout &l, float x, float w)
 
 float LayoutEngine::widget_height(Context &ctx, Widget &w)
 {
+  if (w.type == WidgetType::Label && w.label_appearance == LabelAppearance::Title) {
+    w.height = std::max(w.height, std::round(30.0f * ctx.scale()));
+  }
   if (w.table) {
     // Layout can resolve the same widget twice (e.g. an outer scrolling block). Always start
     // from the requested row height so the scrollbar strip is added exactly once.

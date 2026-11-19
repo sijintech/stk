@@ -3,6 +3,7 @@
 #include "stk/app/editor_area.hh"
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 
 #include "stk/app/app_store.hh"
@@ -55,8 +56,8 @@ class EditorRegion final : public wm::Region {
   int size_px(const float ui_scale) const override
   {
     if (kind_ != Kind::Header) { return Region::size_px(ui_scale); }
-    const bool compact_split_header = !shows_workbench_header(owner_) &&
-                                      owner_.rect().width() < 700 * ui_scale;
+    if (shows_workbench_header(owner_)) { return int(std::round(56.0f * ui_scale)); }
+    const bool compact_split_header = owner_.rect().width() < 700 * ui_scale;
     return wm::ui_bar_height_px(ui_scale) * (compact_split_header ? 2 : 1);
   }
 
@@ -67,7 +68,7 @@ class EditorRegion final : public wm::Region {
     ui::Block &b = ui.block(block_name(), ui_rect());
     switch (kind_) {
       case Kind::Header:
-        b.set_background(theme::kHeaderBack);
+        b.set_background(shows_workbench_header(owner_) ? theme::kWorkbenchBack : theme::kHeaderBack);
         owner_.build_header(b.layout(), ec);
         break;
       case Kind::Toolbar:
@@ -85,7 +86,8 @@ class EditorRegion final : public wm::Region {
         }
         ed.draw_main(b.layout(), ec);
         // The Viewer updates its payload state while building the main region.
-        b.set_background(ed.main_background(ui.theme()));
+        b.set_background(shows_workbench_header(owner_) && !ed.draws_gpu() ?
+                             theme::kWorkbenchBack : ed.main_background(ui.theme()));
         break;
     }
   }
@@ -445,7 +447,6 @@ void EditorArea::build_header(ui::Layout &layout, EditorContext &ctx)
   auto &row = layout.row(false);
   if (shows_workbench_header(*this)) {
     editor().draw_header(row, ctx);
-    row.label(""); /* Flexible space. */
     return;
   }
   ui::Context &ui = *ctx.ui;

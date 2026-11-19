@@ -67,7 +67,7 @@ set_target_properties(stk-project-open-window-benchmark PROPERTIES RUNTIME_OUTPU
 # Reuse the software-GPU environment and supported backends established in jobs.cmake.
 foreach(_lang en zh)
   foreach(_be ${_jobs_backends})
-    foreach(_review review review_errors drafts discussion requests filter simulation batches simulation_lammps simulation_lammps_narrow batches_lammps batches_lammps_narrow pet_study pet_study_narrow ai ai_narrow ai_stream ai_proposal ai_proposal_narrow ai_scope ai_scope_narrow ai_focus workspace workspace_narrow skills skills_narrow skills_saved skills_saved_narrow)
+    foreach(_review review review_errors drafts discussion requests filter simulation batches simulation_lammps simulation_lammps_narrow batches_lammps batches_lammps_narrow pet_study pet_study_narrow ai ai_narrow ai_stream ai_proposal ai_proposal_narrow ai_scope ai_scope_narrow ai_focus ai_workbench ai_workbench_narrow workspace workspace_narrow skills skills_narrow skills_saved skills_saved_narrow)
       add_test(NAME project_${_review}_render_${_be}_${_lang} COMMAND stk-project-render --editor ${_review}
         --gpu-backend ${_be} --lang ${_lang} --export "${_jobs_out}/project_${_review}_${_be}_${_lang}.png")
       set_tests_properties(project_${_review}_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120

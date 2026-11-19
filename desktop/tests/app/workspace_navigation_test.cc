@@ -141,8 +141,9 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
     });
     ASSERT_NE(box, commands.end());
     const auto &theme = ctx.theme();
-    EXPECT_EQ(box->color, current ? theme.menu_item.inner_sel.blend(theme.header_back, 0.6f) : theme.pulldown.inner);
-    EXPECT_EQ(box->outline, current ? theme.link : theme.pulldown.outline);
+    EXPECT_EQ(box->color, current ? theme.menu_item.inner_sel : theme.pulldown.inner);
+    EXPECT_EQ(box->outline, ctx.focused() == button->id ? theme.link :
+                               current ? ui::Color::hex(0xdbe7faff) : theme.pulldown.outline);
     if (current) {
       const auto label = std::find_if(commands.begin(), commands.end(), [&](const ui::DrawCmd &cmd) {
         return cmd.type == ui::CmdType::Text && cmd.text == button->text;
@@ -152,6 +153,9 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
     }
   };
   f.drv->frame();
+  ASSERT_FALSE(f.screen.ui()->workbench_style());
+  const auto split_background = f.screen.ui()->theme().region_back;
+  const auto split_font_size = f.screen.ui()->style().font.size_px;
   const auto shown = state.payload();
   const auto camera = state.camera_serial();
   ASSERT_NE(f.screen.ui()->find("tool_workbench"), nullptr);
@@ -164,10 +168,17 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
   EXPECT_EQ(f.screen.ui()->find("editor_type"), nullptr);
   EXPECT_EQ(f.screen.ui()->find("tabs"), nullptr);
   EXPECT_EQ(f.screen.ui()->find("area_menu"), nullptr);
-  EXPECT_NE(f.screen.ui()->find("ai_tables"), nullptr);
+  EXPECT_NE(f.screen.ui()->find("ai_open_project"), nullptr);
+  ASSERT_TRUE(f.screen.ui()->workbench_style());
+  EXPECT_EQ(f.screen.ui()->theme().region_back, ui::Theme::synthrix_light().region_back);
+  EXPECT_GT(f.screen.ui()->style().font.size_px, split_font_size);
+  const auto *app_rail = home->find_region("workbench_app_rail");
   const auto *rail = home->find_region("workbench_rail");
+  ASSERT_NE(app_rail, nullptr);
   ASSERT_NE(rail, nullptr);
-  EXPECT_FALSE(rail->rect().empty());
+  EXPECT_EQ(app_rail->rect().width(), 60);
+  EXPECT_EQ(rail->rect().width(), 240);
+  EXPECT_EQ(rail->rect().xmin, app_rail->rect().xmax);
   EXPECT_EQ(home->find_region("main")->rect().xmin, rail->rect().xmax);
   const auto *home_button = f.screen.ui()->find("workbench_home");
   ASSERT_NE(home_button, nullptr);
@@ -183,6 +194,7 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
   f.drv->ctx.rect.xmax = 650;
   f.drv->frame();
   EXPECT_EQ(f.screen.maximized(), tasks);
+  EXPECT_TRUE(tasks->find_region("workbench_app_rail")->rect().empty());
   EXPECT_TRUE(tasks->find_region("workbench_rail")->rect().empty());
   EXPECT_FALSE(tasks->find_region("workbench_strip")->rect().empty());
   expect_nav_paint("workbench_tasks", true);
@@ -212,6 +224,14 @@ TEST(WorkspaceNavigation, FocusedSectionsReuseEditorsAndRestoreTheSplitView)
   EXPECT_NE(f.screen.ui()->find("tool_files"), nullptr);
   EXPECT_NE(f.screen.ui()->find("editor_type"), nullptr);
   EXPECT_NE(f.screen.ui()->find("area_menu"), nullptr);
+  EXPECT_FALSE(f.screen.ui()->workbench_style());
+  EXPECT_EQ(f.screen.ui()->theme().region_back, split_background);
+  EXPECT_EQ(f.screen.ui()->style().font.size_px, split_font_size);
+  click("tool_workbench");
+  EXPECT_TRUE(f.screen.ui()->workbench_style());
+  EXPECT_EQ(f.screen.ui()->theme().region_back, ui::Theme::synthrix_light().region_back);
+  EXPECT_EQ(f.screen.maximized(), home);
+  EXPECT_EQ(&home->editor(), conversation);
 }
 
 TEST(WorkspaceNavigation, SavedFocusedWorkbenchAndOrdinaryMaximizationRestoreSeparately)
@@ -893,6 +913,64 @@ main()
   }
 };
 
+TEST_F(SavedConversationNavigationPython, WelcomeOpensAnExistingProjectInPlaceAndRecoversFromAnInvalidPath)
+{
+  const auto project_id = project().project()->id;
+  const auto directory = dir.str() + "/project";
+  std::ofstream(dir.path() / "forbid_question_preparation") << "1";
+  ASSERT_TRUE(project().close());
+  ASSERT_NO_FATAL_FAILURE(idle());
+  const auto original_database = wmtest::read_text(directory + "/project.sqlite3");
+  ASSERT_FALSE(original_database.empty());
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  f.drv->frame();
+  ASSERT_TRUE(f.shell->workbench_is_focused(f.screen));
+  const auto click = [&](const char *key) {
+    ASSERT_NE(widget(key), nullptr) << key;
+    ASSERT_TRUE(widget(key)->enabled) << key;
+    const auto [x, y] = f.widget_center(key);
+    ASSERT_TRUE(f.drv->click(x, y)) << key;
+    f.screen.run_deferred();
+    f.drv->frame();
+  };
+  ASSERT_EQ(widget("ai_project_directory"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("ai_open_project"));
+  ASSERT_NE(widget("ai_project_directory"), nullptr);
+  ASSERT_FALSE(widget("ai_project_open")->enabled);
+  ASSERT_FALSE(widget("ai_project_create")->enabled);
+
+  widget("ai_project_directory")->string.assign(dir.str() + "/missing-project");
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("ai_project_open"));
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return !project().busy() && !project().error().empty(); }, 30));
+  EXPECT_FALSE(project().loaded());
+  EXPECT_FALSE(std::filesystem::exists(dir.path() / "missing-project"));
+  EXPECT_TRUE(f.shell->workbench_is_focused(f.screen));
+  ASSERT_NE(widget("ai_project_directory"), nullptr);
+  widget("ai_project_directory")->string.assign(directory);
+  f.drv->frame();
+  auto retained_open = widget("ai_project_open")->on_click;
+  auto retained_create = widget("ai_project_create")->on_click;
+  ASSERT_NO_FATAL_FAILURE(click("ai_project_open"));
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return !project().busy() && project().loaded(); }, 30));
+  const auto adopted_handle = handle();
+  retained_open();
+  retained_create();
+  f.screen.run_deferred();
+  ASSERT_NO_FATAL_FAILURE(idle());
+  EXPECT_EQ(handle(), adopted_handle);
+  EXPECT_TRUE(f.shell->workbench_is_focused(f.screen));
+  EXPECT_TRUE(f.screen.ui()->workbench_style());
+  EXPECT_EQ(project().project()->id, project_id);
+  EXPECT_EQ(project().project()->revision, 0);
+  EXPECT_TRUE(project().error().empty());
+  EXPECT_EQ(widget("ai_project_directory"), nullptr);
+  EXPECT_NE(widget("ai_question/" + handle()), nullptr);
+  EXPECT_EQ(wmtest::read_text(directory + "/project.sqlite3"), original_database);
+  EXPECT_FALSE(std::filesystem::exists(dir.path() / "unexpected_write"));
+}
+
 TEST_F(SavedConversationNavigationPython, AttentionReopensEachSavedQuestionAndKeepsBothDrafts)
 {
   ASSERT_NO_FATAL_FAILURE(prepare_table());
@@ -1019,8 +1097,11 @@ TEST_F(SavedConversationNavigationPython, RecentQuestionsOpenFromTasksAndResults
   const auto question = "ai_question/" + handle();
   const auto click = [&](const std::string &key) {
     ASSERT_NE(widget(key), nullptr) << key;
+    const auto rect = widget(key)->rect;
+    const auto clip = widget(key)->clip;
     const auto [x, y] = f.widget_center(key);
-    ASSERT_TRUE(f.drv->click(x, y)) << key;
+    ASSERT_TRUE(f.drv->click(x, y)) << key << " y=" << rect.y << " height=" << rect.h
+        << " clip_y=" << clip.y << " clip_height=" << clip.h;
     f.screen.run_deferred();
     f.drv->frame();
   };
@@ -1799,6 +1880,25 @@ TEST_F(SavedConversationNavigationPython, RecentQuestionsRestoreTheScrolledTrans
   ASSERT_NE(widget(draft_key), nullptr);
   EXPECT_EQ(widget(draft_key)->string.value(), "Unsent navigation draft");
 
+  // Moving between light conversation and the professional split restores the same draft and
+  // the focused reading position after the split uses its own font and wrapping metrics.
+  auto *conversation = &dynamic_cast<EditorArea &>(*f.screen.maximized()).editor();
+  const auto [sx, sy] = f.widget_center("workbench_split");
+  ASSERT_TRUE(f.drv->click(sx, sy));
+  f.screen.run_deferred();
+  f.drv->frame();
+  ASSERT_FALSE(f.shell->workbench_is_focused(f.screen));
+  EXPECT_FALSE(f.screen.ui()->workbench_style());
+  f.shell->open_workbench(f.screen);
+  f.screen.run_deferred();
+  ASSERT_NO_FATAL_FAILURE(wait_for(kFirst));
+  EXPECT_TRUE(f.screen.ui()->workbench_style());
+  EXPECT_EQ(&dynamic_cast<EditorArea &>(*f.screen.maximized()).editor(), conversation);
+  EXPECT_EQ(position(), reading);
+  ASSERT_NE(widget(draft_key), nullptr);
+  EXPECT_EQ(widget(draft_key)->string.value(), "Unsent navigation draft");
+  EXPECT_FALSE(std::filesystem::exists(dir.path() / "unexpected_write"));
+
   // A second AI instance in the same area uses the same layout key and its own reading position.
   auto &area = dynamic_cast<EditorArea &>(*f.screen.maximized());
   const int original = area.active_tab();
@@ -1868,16 +1968,17 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
     const auto &style = ui.style();
     const auto &log = *transcript.log;
     EXPECT_FALSE(transcript.mono);
-    // A line wrapped for the monospace font never exceeds this bound (the wrap width, plus the
-    // panel margins and scrollbar the column reserves). Wrapped for the regular font, some lines do.
+    // Compare the fonts at the same size, so the larger conversation type does not hide a cached
+    // monospace wrap. A proportional line may exceed this bound when measured as monospace.
     const float mono_bound = transcript.rect.w + 2 * style.panel_margin + style.scrollbar - 4 * style.unit;
+    const ui::FontStyle same_size_mono{ui::FontKind::Mono, style.font.size_px};
     float widest_mono = 0.0f;
     std::string paragraph;
     size_t assistant = 0, rows = 0;
     for (size_t line = 0; line < log.line_count(); ++line) {
       const auto text = log.line(line);
       EXPECT_LE(ui.measurer().width(text, style.font), transcript.rect.w - 2 * style.text_margin) << text;
-      widest_mono = std::max(widest_mono, ui.measurer().width(text, style.mono));
+      widest_mono = std::max(widest_mono, ui.measurer().width(text, same_size_mono));
       if (text == f.shell->store().tr("ai.assistant")) { assistant = line; }
       else if (text.starts_with("Saved reply row ")) {
         EXPECT_EQ(text, "Saved reply row " + std::to_string(rows)); ++rows;
@@ -1916,7 +2017,7 @@ TEST_F(SavedConversationNavigationPython, WriteQuestionFocusesTheExistingDraftFr
     const ui::Rect body = transcript.rect.inset(style.pixel, style.pixel);
     const float left = body.x + style.text_margin;
     const float edge = body.x1() - (style.scrollbar + 2 * style.pixel) - style.text_margin;
-    const float row = std::round(style.font.size_px * 1.4f), pad = std::round(0.2f * style.unit);
+    const float row = style.line_height, pad = std::round(0.2f * style.unit);
     const auto metrics = ui.measurer().metrics(style.font);
     const float scroll = ui.scroll_of(transcript.id);
     const ui::Rect visible = transcript.rect.intersect(transcript.clip);

@@ -157,7 +157,7 @@ struct UiOnFake {
   void type(const std::string &key, const std::string &text)
   {
     click(key);
-    f.drv->key(wm::Key::A, wm::ModCtrl);
+    f.drv->key(wm::Key::A, wm::ModCtrl | wm::ModOS);
     for (size_t i = 0; i < text.size();) {
       size_t n = 1;
       while (i + n < text.size() && (uint8_t(text[i + n]) & 0xC0) == 0x80) {
@@ -419,9 +419,16 @@ TEST(JobsLayout, FocusedTaskEnvironmentGuidesSetupAndHonorsDisclosure)
 
   const std::string panel = "a1/main/focused_jobs/environment";
   const std::string picker = panel + "/workspace/workspace";
+  // Move away from the navigation tooltip before requesting keyboard focus on setup.
+  const auto [x, y] = u.f.widget_center(picker);
+  u.f.drv->move(x, y);
   const auto *control = u.find(picker);
   ASSERT_NE(control, nullptr);  // Setup is already open before a workspace is selected.
-  ASSERT_TRUE(u.f.screen.ui()->focus_widget(control->id));
+  ASSERT_TRUE(u.f.screen.ui()->focus_widget(control->id))
+      << "workspace control x=" << control->rect.x << " y=" << control->rect.y
+      << " width=" << control->rect.w << " height=" << control->rect.h
+      << " clip_x=" << control->clip.x << " clip_y=" << control->clip.y
+      << " clip_width=" << control->clip.w << " clip_height=" << control->clip.h;
   ASSERT_TRUE(u.f.drv->key(wm::Key::Enter));
   ASSERT_TRUE(u.f.drv->key(wm::Key::End));
   ASSERT_TRUE(u.f.drv->key(wm::Key::Enter));
@@ -1252,8 +1259,13 @@ TEST(JobsLayout, AddRuntimeDialogAndThePathFieldFallback)
   u.click("jobs_dialog_a1/ok");
   ASSERT_NE(u.find("jobs_dialog_a1/paths"), nullptr); /* refused: not absolute */
   u.type("jobs_dialog_a1/paths", "file://" + file);
+  const auto *updated_paths = u.find("jobs_dialog_a1/paths");
+  ASSERT_NE(updated_paths, nullptr);
+  ASSERT_EQ(updated_paths->string.value(), "file://" + file);
   u.click("jobs_dialog_a1/ok");
-  ASSERT_TRUE(u.pump([&] { return jobs.workspace_files().size() == 1; }));
+  ASSERT_TRUE(u.pump([&] { return jobs.workspace_files().size() == 1; }))
+      << "upload source=" << file << " dialog_open=" << bool(u.find("jobs_dialog_a1/paths"))
+      << " pending=" << jobs.pending_uploads().size() << " transfers=" << jobs.transfers().size();
   EXPECT_EQ(jobs.workspace_files()[0].path, "数据.bin");
 }
 

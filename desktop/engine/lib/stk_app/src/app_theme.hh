@@ -6,6 +6,10 @@
 
 namespace stk::app::theme {
 
+/** Synthrix workbench surfaces, matching the Web enterprise theme. */
+inline constexpr ui::Color kWorkbenchBack = ui::Color::rgb(0xffffff);
+inline constexpr ui::Color kWorkbenchSidebar = ui::Color::rgb(0xf1f5f8);
+
 /** Top bar and status bar (Blender: topbar / statusbar header). */
 inline constexpr ui::Color kBarBack = ui::Color::rgb(0x181818);
 /** Area headers. */

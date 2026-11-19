@@ -1080,6 +1080,8 @@ std::function<void()> AppShell::workbench_navigation_action(wm::Screen &screen, 
 }
 
 class AppShell::WorkbenchNavigation final : public wm::Region {
+  enum class Presentation { AppRail, ContextRail, Strip };
+
   struct ConversationSearch {
     std::string query, requested;
     io::Json items = io::Json::array(), next = nullptr;
@@ -1096,14 +1098,18 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
   static void attach(AppShell &shell, EditorArea &area)
   {
     auto history = std::make_shared<HistoryState>();
-    area.emplace_region<WorkbenchNavigation>(shell, true, history);
-    area.emplace_region<WorkbenchNavigation>(shell, false, history);
+    area.emplace_region<WorkbenchNavigation>(shell, Presentation::AppRail, history);
+    area.emplace_region<WorkbenchNavigation>(shell, Presentation::ContextRail, history);
+    area.emplace_region<WorkbenchNavigation>(shell, Presentation::Strip, history);
   }
 
-  WorkbenchNavigation(AppShell &shell, bool rail, std::shared_ptr<HistoryState> history)
-      : Region(rail ? "workbench_rail" : "workbench_strip",
-               rail ? wm::RegionAlign::Left : wm::RegionAlign::Top, 144.0f),
-        shell_(shell), rail_(rail), history_(std::move(history))
+  WorkbenchNavigation(AppShell &shell, Presentation presentation, std::shared_ptr<HistoryState> history)
+      : Region(presentation == Presentation::AppRail ? "workbench_app_rail" :
+                   presentation == Presentation::ContextRail ? "workbench_rail" : "workbench_strip",
+               presentation == Presentation::Strip ? wm::RegionAlign::Top : wm::RegionAlign::Left,
+               presentation == Presentation::AppRail ? 60.0f : 240.0f),
+        shell_(shell), presentation_(presentation), rail_(presentation == Presentation::ContextRail),
+        history_(std::move(history))
   {
     persistent = false;
   }
@@ -1113,8 +1119,9 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
     const auto *s = screen();
     if (!s || s->maximized() != area() || shell_.focused_workbench_section(*s) < 0) { return 0; }
     const bool wide = s->rect().width() > kWorkbenchRailBreakpoint * scale;
-    if (wide != rail_) { return 0; }
-    return rail_ ? Region::size_px(scale) : wm::ui_bar_height_px(scale);
+    const bool strip = presentation_ == Presentation::Strip;
+    if (wide == strip) { return 0; }
+    return strip ? wm::ui_bar_height_px(scale) : Region::size_px(scale);
   }
 
   void build_ui(ui::Context &ui, const wm::DrawContext &) override
@@ -1122,28 +1129,54 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
     auto &s = *screen();
     const int current = shell_.focused_workbench_section(s);
     if (current < 0) { return; }
-    // Only one navigation region is laid out on a screen at a time.
-    auto &block = ui.block("workbench_navigation", ui_rect());
-    block.set_background(theme::kBarBack);
-    auto &nav = rail_ ? block.layout().column() : block.layout().row();
-    for (int i = 0; i < int(std::size(workbench_sections)); ++i) {
-      const auto &section = workbench_sections[i];
-      const bool active = i == current;
-      auto &button = nav.button(section.key, mark(active, shell_.store_.tr(section.label)),
-                                shell_.workbench_navigation_action(s, section.editor)).disable(active);
-      button.button_appearance = active ? ui::ButtonAppearance::CurrentPage : ui::ButtonAppearance::Navigation;
+    const bool app_rail = presentation_ == Presentation::AppRail;
+    auto bounds = ui_rect();
+    if (app_rail) {
+      // Keep the full sixty-pixel column available to compact navigation labels.
+      bounds.x -= ui.style().panel_margin;
+      bounds.w += 2.0f * ui.style().panel_margin;
     }
-    if (rail_) { nav.separator(); }
-    nav.button("workbench_split", shell_.store_.tr("workbench.nav.split"),
-               shell_.workbench_navigation_action(s, nullptr)).button_appearance = ui::ButtonAppearance::Navigation;
+    auto &block = ui.block(app_rail ? "workbench_app_navigation" : "workbench_navigation", bounds);
+    block.set_background(rail_ || app_rail ? theme::kWorkbenchSidebar : theme::kWorkbenchBack);
+    auto &nav = presentation_ == Presentation::Strip ? block.layout().row() : block.layout().column();
+    if (!rail_) {
+      if (app_rail) { nav.separator(0.6f); }
+      for (int i = 0; i < int(std::size(workbench_sections)); ++i) {
+        const auto &section = workbench_sections[i];
+        const bool active = i == current;
+        const auto label = app_rail && i == 0 ? "workbench.nav.home.short" :
+            app_rail && i == 2 ? "workbench.nav.results.short" : section.label;
+        auto &button = nav.button(section.key, shell_.store_.tr(label),
+                                  shell_.workbench_navigation_action(s, section.editor)).disable(active);
+        button.button_appearance = active ? ui::ButtonAppearance::SidebarCurrent : ui::ButtonAppearance::Sidebar;
+        button.tip(shell_.store_.tr(section.label));
+        button.height = app_rail ? 32.0f * ui.scale() : ui.style().unit;
+      }
+      if (app_rail) { nav.separator(); }
+      auto &split = nav.button("workbench_split", shell_.store_.tr(app_rail ? "workbench.nav.split.short" : "workbench.nav.split"),
+                               shell_.workbench_navigation_action(s, nullptr));
+      split.button_appearance = ui::ButtonAppearance::Sidebar;
+      split.tip(shell_.store_.tr("workbench.nav.split"));
+      split.height = app_rail ? 32.0f * ui.scale() : ui.style().unit;
+    }
+    if (app_rail) { return; }
     auto &project = shell_.store_.project();
+    auto &origin = static_cast<EditorArea &>(*area());
     if (rail_) {
-      nav.separator();
+      nav.separator(0.5f);
+      nav.label(shell_.store_.tr("workbench.nav.home")).label_appearance = ui::LabelAppearance::Title;
+      nav.separator(0.5f);
       const std::string_view name = project.project() ? std::string_view(project.project()->name) :
                                                         shell_.store_.tr("script.no_project");
-      nav.label(name).tip(name);
+      auto &choose_project = nav.button("workbench_project", name,
+          [shell = &shell_, weak = shell_.lifetime(), screen = &s] {
+        if (!weak.expired()) { shell->activate_editor_later(screen, kEditorProject, false); }
+      }).tip(shell_.store_.tr("project.location"));
+      choose_project.button_appearance = ui::ButtonAppearance::Secondary;
+      choose_project.align = ui::Align::Left;
+      choose_project.height = 30.0f * ui.scale();
+      nav.separator(0.5f);
     }
-    auto &origin = static_cast<EditorArea &>(*area());
     build_history(nav, project, origin);
     draw_conversation_search(ui, origin, project);
   }
@@ -1323,24 +1356,35 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
       if (rail) { rail->separator(); }
       if (rail || (questions_supported && show_agents)) { status(key); }
     };
+    const auto sidebar_button = [](ui::Widget &button, const bool selected = false) {
+      button.button_appearance = selected ? ui::ButtonAppearance::SidebarCurrent : ui::ButtonAppearance::Sidebar;
+      button.align = ui::Align::Left;
+      button.height = 30.0f * button.block->ctx().scale();
+    };
     const auto item = [&](const char *prefix, const std::string &id, const std::string &label,
                           const SavedConversationKind kind, const bool selected, const bool can_open) {
       if (id.empty()) { return; }
-      const auto text = mark(selected, label);
       auto open = shell_.saved_conversation_action(origin, id, kind);
       const bool enabled = can_open && bool(open);
       const auto key = std::string(prefix) + "/" + id;
-      if (rail) { rail->button(key, text, std::move(open)).disable(!enabled).tip(label); }
+      if (rail) {
+        auto &button = rail->button(key, label, std::move(open)).disable(!enabled).tip(label);
+        sidebar_button(button, selected);
+      }
       else {
         identity += "/" + key;
-        menu.push_back({ui::clip_text(text, menu_text_width, nav.ctx().measurer(), style.font),
+        menu.push_back({ui::clip_text(mark(selected, label), menu_text_width, nav.ctx().measurer(), style.font),
                         std::move(open), enabled});
       }
     };
     auto compose = shell_.saved_conversation_action(origin, {}, SavedConversationKind::QuestionComposer);
     const auto compose_label = shell_.store_.tr("ai.write_question");
     const bool can_compose = !project.busy() && !discussion.busy() && !discussion.exchange_busy() && bool(compose);
-    if (rail) { rail->button("workbench_write_question", compose_label, std::move(compose)).disable(!can_compose); }
+    if (rail) {
+      auto &button = rail->button("workbench_write_question", compose_label, std::move(compose)).disable(!can_compose);
+      sidebar_button(button);
+      button.button_appearance = ui::ButtonAppearance::Secondary;
+    }
     else { menu.push_back({std::string(compose_label), std::move(compose), can_compose}); }
     std::function<void()> open_search;
     if (can_search_conversations(project)) {
@@ -1360,6 +1404,7 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
       if (rail) {
         auto &button = rail->button("workbench_search_conversations", label, open_search)
             .tip(shell_.store_.tr("workbench.history.search"));
+        sidebar_button(button);
         history_key_ = button.key;
       }
       else {
@@ -1372,7 +1417,7 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
       auto browse = shell_.saved_conversation_action(origin, {}, SavedConversationKind::QuestionHistory);
       const auto label = shell_.store_.tr("ai.history");
       const bool enabled = !project.busy() && !discussion.busy() && !discussion.exchange_busy() && bool(browse);
-      if (rail) { rail->button("workbench_saved_questions", label, std::move(browse)).disable(!enabled); }
+      if (rail) { sidebar_button(rail->button("workbench_saved_questions", label, std::move(browse)).disable(!enabled)); }
       else { menu.push_back({std::string(label), std::move(browse), enabled}); }
       heading("workbench.history.recent");
       const auto *questions = discussion.recent_requests();
@@ -1406,18 +1451,20 @@ class AppShell::WorkbenchNavigation final : public wm::Region {
       }
     }
     if (questions_supported || agents_supported) {
-      if (rail) { rail->button("workbench_refresh_history", refresh_label, refresh); }
+      if (rail) { sidebar_button(rail->button("workbench_refresh_history", refresh_label, refresh)); }
       else { menu.push_back({refresh_label, refresh}); }
     }
     if (!rail) {
       // A popup dispatches by row index. Close it when a refresh or project switch replaces the rows.
       auto &history = nav.scope(identity).menu_button("workbench_history", shell_.store_.tr("workbench.nav.history"),
                                                      std::move(menu)).tip(info.name);
+      history.height = nav.ctx().style().unit;
       history_key_ = history.key;
     }
   }
 
   AppShell &shell_;
+  Presentation presentation_;
   bool rail_;
   std::string history_key_;
   // The rail and strip present the same search while the area crosses the responsive breakpoint.
@@ -1439,6 +1486,12 @@ class AppShell::TopBar final : public wm::Region {
 
   void build_ui(ui::Context &ui, const wm::DrawContext &ctx) override
   {
+    const bool focused = shell_.workbench_is_focused(screen_);
+    ui.set_workbench_style(focused);
+    const auto frame_color = focused ? ui.theme().editor_border : ui::Color::rgb(0x161616);
+    screen_.background[0] = frame_color.r / 255.0f;
+    screen_.background[1] = frame_color.g / 255.0f;
+    screen_.background[2] = frame_color.b / 255.0f;
     if (shell_.store_.has_open_result()) {
       AppShell *shell = &shell_;
       wm::Screen *screen = &screen_;
@@ -1461,23 +1514,40 @@ class AppShell::TopBar final : public wm::Region {
     }
     const float left = float(csd.left_reserve), right = float(csd.right_reserve);
     ui::Block &b = ui.block(block_name(), {r.x + left, r.y, std::max(0.0f, r.w - left - right), r.h});
-    b.set_background(theme::kBarBack);
+    b.set_background(focused ? theme::kWorkbenchBack : theme::kBarBack);
     ui::Layout &row = b.layout().row(false);
     auto menu = [&](const char *key, const char *label_key, std::vector<ui::MenuEntry> entries) {
       const std::string_view label = shell_.store_.tr(label_key);
       row.menu_button(key, label, std::move(entries)).width(fit_units(ui, label, 2.0f));
     };
-    menu("file", "app.menu.file", shell_.file_menu(screen_));
-    menu("view", "app.menu.view", shell_.view_menu(screen_));
-    menu("language", "app.menu.language", shell_.language_menu());
-    menu("scale", "app.menu.scale", shell_.scale_menu());
+    if (focused) {
+      row.alignment(ui::LayoutAlign::Left);
+      std::vector<ui::MenuEntry> application;
+      const auto append = [&](const char *label_key, std::vector<ui::MenuEntry> entries) {
+        application.push_back({std::string(shell_.store_.tr(label_key)), {}, false});
+        for (auto &entry : entries) { application.push_back(std::move(entry)); }
+      };
+      append("app.menu.file", shell_.file_menu(screen_));
+      append("app.menu.view", shell_.view_menu(screen_));
+      append("app.menu.language", shell_.language_menu());
+      append("app.menu.scale", shell_.scale_menu());
+      auto &application_menu = row.menu_button("file", "STK", std::move(application)).width(3.0f)
+          .tip(shell_.store_.tr("app.title"));
+      application_menu.height = st.unit;
+    }
+    else {
+      menu("file", "app.menu.file", shell_.file_menu(screen_));
+      menu("view", "app.menu.view", shell_.view_menu(screen_));
+      menu("language", "app.menu.language", shell_.language_menu());
+      menu("scale", "app.menu.scale", shell_.scale_menu());
+    }
     auto *shell = &shell_;
     auto *screen = &screen_;
     const auto weak = shell_.lifetime();
     const auto show = [shell, screen, weak](const char *id) {
       if (!weak.expired()) { shell->activate_editor_later(screen, id, false); }
     };
-    if (shell_.focused_workbench_section(screen_) < 0) {
+    if (!focused) {
       const auto workbench = shell_.store_.tr("workbench.nav.home");
       row.button("tool_workbench", workbench, shell_.workbench_navigation_action(screen_, kEditorAI))
           .width(fit_units(ui, workbench, 2.0f));
@@ -1497,7 +1567,7 @@ class AppShell::TopBar final : public wm::Region {
         });
       }).width(fit_units(ui, swap_label, 2.0f)).disable(screen_.maximized() != nullptr);
     }
-    row.label(shell_.store_.tr("app.title"), ui::Align::Center);
+    if (!focused) { row.label(shell_.store_.tr("app.title"), ui::Align::Center); }
 
     if (has_csd && !csd.buttons.empty()) {
       /* The window buttons sit exactly where GHOST expects them: one aligned block per side,
@@ -1518,12 +1588,14 @@ class AppShell::TopBar final : public wm::Region {
         const float x0 = float(btns.front()->rect.xmin), x1 = float(btns.back()->rect.xmax);
         const float m = st.panel_margin;
         ui::Block &cb = ui.block(block_name() + (side == 0 ? "/csd_l" : "/csd_r"), {x0 - m, r.y, x1 - x0 + 2 * m, r.h});
-        cb.set_background(theme::kBarBack);
+        cb.set_background(focused ? theme::kWorkbenchBack : theme::kBarBack);
         ui::Layout &brow = cb.layout().row(true);
         for (const wm::CsdButton *btn : btns) {
           /* GHOST performs the action (it sees the same events); the button only shows it. */
-          brow.button(std::string("csd") + std::to_string(int(btn->kind)), csd_glyph(btn->kind, maximized), []() {})
+          auto &button = brow.button(std::string("csd") + std::to_string(int(btn->kind)),
+                                     csd_glyph(btn->kind, maximized), []() {})
               .width(units_of(ui, float(btn->rect.width())));
+          if (focused) { button.height = st.unit; }
         }
       }
     }
@@ -1544,8 +1616,9 @@ class AppShell::StatusBar final : public wm::Region {
   void build_ui(ui::Context &ui, const wm::DrawContext & /*ctx*/) override
   {
     AppStore &store = shell_.store_;
+    const bool focused = shell_.workbench_is_focused(screen_);
     ui::Block &b = ui.block(block_name(), ui_rect());
-    b.set_background(theme::kBarBack);
+    b.set_background(focused ? theme::kWorkbenchBack : theme::kBarBack);
     ui::Layout &row = b.layout().row(false);
     const std::string bridge = store.catalog().format(
         "app.status.bridge", {{"state", std::string(store.tr(bridge_state_key(store.bridge_state())))}});
@@ -1553,11 +1626,13 @@ class AppShell::StatusBar final : public wm::Region {
     if (!store.bridge_error().empty()) {
       tip += "\n" + store.bridge_error();
     }
-    row.label(bridge).width(fit_units(ui, bridge)).tip(tip);
+    auto &bridge_label = row.label(bridge).width(fit_units(ui, bridge)).tip(tip);
+    if (focused) { bridge_label.label_appearance = ui::LabelAppearance::Meta; }
     const std::string conn = store.connection().empty() ?
                                  std::string(store.tr("app.status.connection.none")) :
                                  store.catalog().format("app.status.connection", {{"name", store.connection()}});
-    row.label(conn).width(fit_units(ui, conn));
+    auto &connection_label = row.label(conn).width(fit_units(ui, conn));
+    if (focused) { connection_label.label_appearance = ui::LabelAppearance::Meta; }
     // Unviewed items that need a person (Home lists them); a click opens Home.
     auto &attention = store.attention();
     attention.sync();
@@ -1572,16 +1647,18 @@ class AppShell::StatusBar final : public wm::Region {
       const auto text = store.catalog().format("app.status.attention", {{"count", std::to_string(count)}});
       auto *shell = &shell_;
       auto *screen = &screen_;
-      row.button("status_attention", text, [shell, screen] { shell->activate_editor_later(screen, kEditorWorkspace, false); })
+      auto &button = row.button("status_attention", text,
+                               [shell, screen] { shell->activate_editor_later(screen, kEditorWorkspace, false); })
           .width(fit_units(ui, text) + 1).tip(store.tr("app.status.attention.tip"));
+      if (focused) { button.height = ui.style().unit; }
     }
-    std::string hint(store.tr("app.status.hint"));
-    if (screen_.maximized()) {
-      hint = std::string(store.tr("app.status.maximized"));
+    if (!focused) {
+      const auto hint = store.tr(screen_.maximized() ? "app.status.maximized" : "app.status.hint");
+      row.label(hint);
     }
-    row.label(hint);
     const std::string version = std::string("STK ") + STK_APP_VERSION;
-    row.label(version, ui::Align::Right).width(fit_units(ui, version));
+    auto &version_label = row.label(version, ui::Align::Right).width(fit_units(ui, version));
+    if (focused) { version_label.label_appearance = ui::LabelAppearance::Meta; }
   }
 
  private:
