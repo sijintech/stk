@@ -3,7 +3,6 @@
  * Jobs area with demo content (en / zh), drops, and the dialogs driven with synthesized events
  * against the fake bridge (Add Runtime, the path-field fallback of the file dialog, cancel). */
 
-#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -171,14 +170,14 @@ struct UiOnFake {
   }
 };
 
-/** The Viewer's result source line: the key-less backdrop label right of the focused 来源 button. */
+/** The source label sits to the right of 来源. Row widgets share a top edge even at different heights. */
 const ui::Widget *source_line(UiOnFake &u)
 {
   const auto *button = u.find("result_source");
   if (!button || !button->block) { return nullptr; }
   for (const auto &w : button->block->widgets()) {
     if (w.type == ui::WidgetType::Label && w.label_backdrop && w.rect.x >= button->rect.x1() - 1 &&
-        std::abs(w.rect.cy() - button->rect.cy()) < 2.0f)
+        w.rect.y == button->rect.y)
     {
       return &w;
     }
